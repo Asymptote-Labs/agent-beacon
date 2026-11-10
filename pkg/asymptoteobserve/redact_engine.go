@@ -245,7 +245,7 @@ type redactGate struct {
 	// replaced AWS secret's `/`, where a URL's password stopped.
 	hidden bool
 	// copies are the assigned values whose copies are removed after every rule has run.
-	copies *redactCopies
+	copies map[string]struct{}
 }
 
 func (g *redactGate) set(value string) {

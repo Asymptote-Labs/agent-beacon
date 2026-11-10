@@ -100,6 +100,7 @@ type literalFinder struct {
 	sibling []int32    // per state, its parent's next child; 0 for none
 	fail    []int32    // per state, the longest proper suffix of its string that is a state
 	longest []int32    // per state, the length of the longest literal its string ends with
+	maxLen  int        // the longest literal's length
 	work    int        // edges and links followed
 }
 
@@ -126,6 +127,7 @@ func newLiteralFinder(values []string) *literalFinder {
 			s = next
 		}
 		f.longest[s] = int32(len(v))
+		f.maxLen = max(f.maxLen, len(v))
 	}
 	// Failure links, breadth first, so a state's link and its link's longest are known before
 	// its children's.
@@ -175,33 +177,44 @@ func (f *literalFinder) step(s int32, c byte) int32 {
 	}
 }
 
-// replace replaces the literals in t with place, as replaceLiterals does, and returns the work
-// done.
-func (f *literalFinder) replace(t string, place string) (string, int) {
-	// From the end: the longest literal that starts at each byte, latest first.
-	type literalAt struct{ start, n int }
-	var starts []literalAt
+// longestAt returns, for every byte of t, the length of the longest literal that starts there (0
+// for none), and the work done: one pass over t from its end.
+func (f *literalFinder) longestAt(t string) ([]int32, int) {
+	at := make([]int32, len(t))
+	before := f.work
 	s := int32(0)
 	for i := len(t) - 1; i >= 0; i-- {
 		s = f.step(s, t[i])
-		if n := f.longest[s]; n > 0 {
-			starts = append(starts, literalAt{i, int(n)})
-		}
+		at[i] = f.longest[s]
 	}
+	return at, len(t) + f.work - before
+}
+
+// replace replaces the literals in t with place, as replaceLiterals does, and returns the work
+// done.
+func (f *literalFinder) replace(t string, place string) (string, int) {
+	at, _ := f.longestAt(t)
+	// The states built, the text, and the edges and links followed building and reading.
 	work := len(f.label) + len(t) + f.work
-	if len(starts) == 0 {
+	var b strings.Builder
+	last := 0
+	for i := 0; i < len(t); {
+		n := int(at[i])
+		if n == 0 {
+			i++
+			continue
+		}
+		if last == 0 {
+			b.Grow(len(t))
+		}
+		b.WriteString(t[last:i])
+		b.WriteString(place)
+		i += n
+		last = i
+	}
+	if last == 0 {
 		return t, work
 	}
-	var b strings.Builder
-	b.Grow(len(t))
-	end := 0
-	for k := len(starts) - 1; k >= 0; k-- {
-		if c := starts[k]; c.start >= end {
-			b.WriteString(t[end:c.start])
-			b.WriteString(place)
-			end = c.start + c.n
-		}
-	}
-	b.WriteString(t[end:])
+	b.WriteString(t[last:])
 	return b.String(), work
 }

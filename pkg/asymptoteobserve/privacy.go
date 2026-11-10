@@ -908,7 +908,7 @@ func redactPass(value string, gated bool) (string, bool) {
 	var kept bool
 	if text.holds(redactLabelNeedles) {
 		assigned, kept = captureAssigned(&text, engine, assigned)
-		text.copies = byFirstBytes(assigned)
+		text.copies = assigned
 	}
 	original := text.value
 	for i, rule := range redactionRules {
@@ -1107,26 +1107,6 @@ func replaceAssigned(value string, assigned map[string]struct{}) (string, bool) 
 
 // redactCopyMin is the least length of an assigned value whose copies are removed.
 const redactCopyMin = 8
-
-// redactCopies are the assigned values by their first redactCopyMin bytes, so a place in the text
-// is looked up once to tell whether a copy may start there, and the length of the longest
-// (redactChain.overCopy).
-type redactCopies struct {
-	byFirst map[string][]string
-	longest int
-}
-
-func byFirstBytes(assigned map[string]struct{}) *redactCopies {
-	if len(assigned) == 0 {
-		return nil
-	}
-	copies := &redactCopies{byFirst: map[string][]string{}}
-	for s := range assigned {
-		copies.byFirst[s[:redactCopyMin]] = append(copies.byFirst[s[:redactCopyMin]], s)
-		copies.longest = max(copies.longest, len(s))
-	}
-	return copies
-}
 
 // IsSecretKeyName reports whether a structured field's name has a word naming a credential, for
 // callers that judge a field by its name alone. IsSecretField judges a value held under it.

@@ -348,14 +348,16 @@ type redactChain struct {
 	// last place followerAt was asked about and its answer.
 	runFrom, runTo int
 	asked          []redactAsked
-	// The assigned values whose copies are removed after every rule has run (overCopy), what
-	// running on over them may still read (copyBudget), and whether running on over one, or
-	// over an AWS secret that holds a `/`, may hide a match from this pass, as replacing a copy
-	// may (copyHidesMatch); matches reports it to the gate.
-	copies     *redactCopies
-	copyBudget int
-	hid        bool
-	slashed    bool
+	// The assigned values whose copies are removed after every rule has run (overCopy), the
+	// length of the longest copy starting at each byte of t and of the longest value, read the
+	// first time an item asks, and whether running on over a copy, or over an AWS secret that
+	// holds a `/`, may hide a match from this pass, as replacing a copy may (copyHidesMatch);
+	// matches reports it to the gate.
+	copies      map[string]struct{}
+	copyAt      []int32
+	copyLongest int
+	hid         bool
+	slashed     bool
 }
 
 // redactAsked is followerAt's answer for one follower at a place.
@@ -366,16 +368,8 @@ type redactAsked struct {
 
 func newRedactChain(engine *redactEngine, t string, hits []redactHit) *redactChain {
 	return &redactChain{engine: engine, adj: engine.adjacency(), t: t, hits: hits, segFrom: -1, restAt: -1,
-		schemeFrom: -1, schemeTo: -1, schemeAt: -1, lineFrom: -1, lineTo: -1, lineFirst: -1, runFrom: -1, runTo: -1,
-		copyBudget: redactCopyWorkPerByte*len(t) + redactCopyWorkBase}
+		schemeFrom: -1, schemeTo: -1, schemeAt: -1, lineFrom: -1, lineTo: -1, lineFirst: -1, runFrom: -1, runTo: -1}
 }
-
-// overCopy may read redactCopyWorkPerByte bytes and copies per byte of the text, and
-// redactCopyWorkBase more; past that it leaves items as they are, as main does.
-const (
-	redactCopyWorkPerByte = 8
-	redactCopyWorkBase    = 1 << 16
-)
 
 func redactWorked(n int) {
 	if redactWork != nil {
@@ -671,31 +665,38 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 // ends past it, the item having taken the copy's first bytes; or item. The copy is removed after
 // every rule has run, which finds it only whole: of `hf_…opaque-flag-value` with `opaque-flag-value`
 // assigned, the token's pattern takes `opaque`, and `-flag-value` was left. Such a copy starts
-// less than the longest copy's length before the item's end. What it reads, places, copies looked
-// at and bytes compared, comes out of the chain's copyBudget, linear in the text; once that is
-// spent, items are left as they are.
+// less than the longest copy's length before the item's end, and once the item runs on, a copy
+// that starts before its new end and ends past it takes it further.
+//
+// The first call on a chain finds the longest copy starting at every byte of the text in one pass
+// (literalFinder.longestAt); each item then reads its own bytes, which no other item of the chain
+// holds: what overCopy reads stays linear in the text.
 func (c *redactChain) overCopy(item []int) []int {
-	if c.copies == nil || c.copyBudget <= 0 {
+	if len(c.copies) == 0 {
 		return item
 	}
-	t, work := c.t, 0
-	for x := max(item[0]+1, item[1]-c.copies.longest+1); x < item[1] && x+redactCopyMin <= len(t) && work < c.copyBudget; x++ {
-		work++
-		for _, v := range c.copies.byFirst[t[x:x+redactCopyMin]] {
-			work++
-			if x+len(v) <= item[1] {
-				continue
-			}
-			work += len(v)
-			if strings.HasPrefix(t[x:], v) {
-				item = slices.Clone(item)
-				item[1] = x + len(v)
-				c.hid = true
-			}
+	if c.copyAt == nil {
+		values := make([]string, 0, len(c.copies))
+		for v := range c.copies {
+			values = append(values, v)
+		}
+		f := newLiteralFinder(values)
+		at, work := f.longestAt(c.t)
+		c.copyAt, c.copyLongest = at, f.maxLen
+		redactWorked(len(f.label) + work)
+	}
+	from, end := max(item[0]+1, item[1]-c.copyLongest+1), item[1]
+	for x := from; x < end; x++ {
+		if e := x + int(c.copyAt[x]); e > end {
+			end, c.hid = e, true
 		}
 	}
-	c.copyBudget -= work
-	redactWorked(work)
+	redactWorked(max(0, end-from))
+	if end == item[1] {
+		return item
+	}
+	item = slices.Clone(item)
+	item[1] = end
 	return item
 }
 
