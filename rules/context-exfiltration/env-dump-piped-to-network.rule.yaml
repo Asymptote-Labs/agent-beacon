@@ -1,6 +1,6 @@
 id: env-dump-piped-to-network
-spec: threat-rules/v1.2  # needed for e.command.parsed_commands
-version: 4
+spec: threat-rules/v1.3  # needed for predicates
+version: 5
 title: Environment dump piped to an outbound network command
 description: >
   A single command sends the full process environment (env / printenv / `set` /
@@ -21,20 +21,14 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
-# The sender check (s) and the /dev/tcp check are the egress rules' shared definition;
-# TestPackSharedEgressSender keeps every copy identical. A sender reads the pipe unless it
-# is curl or wget without a stdin body (@-, -T -, --post-file=-). `export -p` is not a
+# Who sends, and whether a sender reads what is piped into it, are the egress rules' shared
+# predicates (rules/concepts/egress.predicates.yaml): a sender reads the pipe unless it is
+# curl or wget without a stdin body (@-, -T -, --post-file=-). `export -p` is not a
 # parsed command (bash reads it as a declaration), so its dump is found in the text.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(s,
-      ((s.name.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$") ||
-          s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") &&
-          s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"))) &&
-        (!s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget)$")) ||
-          s.argv.exists(a, a.matches("^.*[=@<](-|/dev/stdin)$")) ||
-          s.argv.exists(a, a.matches("^(-[a-zA-Z]*T|--upload-file|--post-file|--body-file)$")) &&
-          s.argv.exists(a, a in ["-", "/dev/stdin"])) ||
+      (egress_sender(s) && egress_reads_stdin(s) ||
         s.name == "gh" && s.argv.exists(a, a == "gist") && s.argv.exists(a, a == "create") && s.argv.exists(a, a == "-") ||
         s.name.matches("(?i)^(python[0-9.]*|node)$") && s.argv.exists(a, a in ["-c", "-e"]) &&
           s.argv.exists(a, a.matches("(?i)(requests\\.(post|put)\\(|urllib\\.request|urlopen\\(|fetch\\(|https?\\.request\\()"))) && (
@@ -43,18 +37,14 @@ match: >
           d.name == "" && d.argv.exists(a, a.matches("(?i)(^|/)env$")) ||
           d.name == "set" && size(d.argv) == 1)) ||
         s.stage > 0 && e.command.command.matches("(?i)(^|[;&|`(\\n]|\\$\\()\\s*export\\s+-p\\b")) ||
-      (s.name.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$") ||
-        s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") &&
-        s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"))) &&
+      egress_sender(s) &&
       s.argv_raw.exists(a, a.matches("(?i)(\\$\\(|`)\\s*(env|printenv|export\\s+-p)\\b"))) ||
     (e.command.parsed_commands.exists(d,
         d.name == "printenv" ||
         d.name == "" && d.argv.exists(a, a.matches("(?i)(^|/)env$")) ||
         d.name == "set" && size(d.argv) == 1) ||
       e.command.command.matches("(?i)(^|[;&|`(\\n]|\\$\\()\\s*export\\s+-p\\b")) &&
-      (e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/") &&
-        !e.command.parsed_commands.exists(w, !w.name.matches("(?i)^(ba|z|da|k)?sh$") &&
-          w.argv_raw.exists(a, a.matches("/dev/(tcp|udp)/")))) ||
+      egress_dev_tcp(e) ||
     (size(e.command.parsed_commands) == 0 && (
       e.command.command.matches("(?i)(^|[;&|`(]|\\$\\()\\s*(env|printenv|set|export\\s+-p)\\b[^;&\\n]*\\|\\s*(sudo\\s+)?((curl|wget)\\b[^;&|\\n]*([@<](-|/dev/stdin)(['\"\\s]|$)|\\s(-[a-zA-Z]*T|--upload-file)(\\s+|=)?['\"]?(-|/dev/stdin)(['\"\\s]|$)|--post-file(\\s+|=)['\"]?(-|/dev/stdin))|(nc|ncat|socat)\\b|gh\\s+gist\\s+create\\b|(python[0-9.]*|node)\\s+-[ce]\\b[\\s\\S]*(requests\\.(post|put)\\(|urllib\\.request|urlopen\\(|fetch\\(|https?\\.request\\()|[^;&|\\n]*>\\s*/dev/(tcp|udp)/)") ||
       e.command.command.matches("(?i)(^|[;&|`(]|\\$\\()\\s*(env|printenv|set|export\\s+-p)\\b[^;&|\\n]*>\\s*/dev/(tcp|udp)/") ||

@@ -1,6 +1,6 @@
 id: git-bundle-then-egress
-spec: threat-rules/v1.2  # needed for e.command.parsed_commands
-version: 2
+spec: threat-rules/v1.3  # needed for predicates
+version: 3
 title: Git history bundled then sent off-host
 description: >
   A session packs repository history into a single git bundle (git bundle create)
@@ -28,23 +28,18 @@ correlation:
       match: >
         e.event.action == "command.executed" &&
         e.command.command.matches("(?i)\\bgit\\b.*\\bbundle\\b\\s+create\\b")
-    # The sender check (s), the /dev/tcp check and the remote-copy check are the egress
-    # rules' shared definition; TestPackSharedEgressSender keeps every copy identical.
-    # curl and wget count only with a request body or upload; the other senders send
-    # what they read.
+    # Who sends, a remote copy and a /dev/tcp redirect are the egress rules' shared
+    # predicates (rules/concepts/egress.predicates.yaml). curl and wget count only with a
+    # request body or upload; the other senders send what they read.
     - id: egress
       match: >
         e.event.action == "command.executed" && (
           e.command.parsed_commands.exists(s,
-            (s.name.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$") ||
-              s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") &&
-              s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"))) &&
+            egress_sender(s) &&
             (!s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget)$")) ||
               s.argv.exists(a, a.matches("^(-[a-zA-Z]*[dFT].*|--(data|form|upload-file|json|post-file|post-data|body-file|body-data)\\b.*)$"))) ||
-            (s.name.matches("(?i)^(scp|sftp|rsync)$") && s.argv_raw.exists(a, a.matches("^[\\x27\"]?[\\w.@-]+:")))) ||
-          (e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/") &&
-            !e.command.parsed_commands.exists(w, !w.name.matches("(?i)^(ba|z|da|k)?sh$") &&
-              w.argv_raw.exists(a, a.matches("/dev/(tcp|udp)/")))) ||
+            egress_remote_copy(s)) ||
+          egress_dev_tcp(e) ||
           (size(e.command.parsed_commands) == 0 && (
             e.command.command.matches("(?i)\\b(curl|wget)\\b.*(-d|--data|--data-binary|-F|--form|--upload-file|-T)\\b") ||
             e.command.command.matches("(?i)\\bscp\\b\\s+.*\\s[^ ]+@[^ ]+:") ||

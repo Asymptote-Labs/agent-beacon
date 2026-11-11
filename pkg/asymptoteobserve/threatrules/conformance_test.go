@@ -141,88 +141,22 @@ func TestPackCopiesNoCatalog(t *testing.T) {
 	}
 }
 
-// The egress rules' shared definition of "this command sends data over the network", in the
-// normalized form TestPackSharedEgressSender compares. These are still copied into each rule:
-// they predate predicates (see rules/concepts), which is how a rule pack now says a thing once.
-const (
-	// egressSender: a parsed command (s) that is a network client by base name, or runs one
-	// under a wrapper the parser does not unwrap.
-	egressSenderNames = `"(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"`
-	egressSender      = `(s.name.matches(` + egressSenderNames + `) || s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") && s.argv.exists(a, a.matches(` + egressSenderNames + `)))`
-	// egressReadsStdin: the sender (s) reads what is piped or redirected into it; curl and
-	// wget only with a stdin body.
-	egressReadsStdin = `(!s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget)$")) || s.argv.exists(a, a.matches("^.*[=@<](-|/dev/stdin)$")) || s.argv.exists(a, a.matches("^(-[a-zA-Z]*T|--upload-file|--post-file|--body-file)$")) && s.argv.exists(a, a in ["-", "/dev/stdin"]))`
-	// egressDevTCP: a bash /dev/tcp or /dev/udp redirect, not a word of a non-shell command
-	// (a commit message or an echo argument).
-	egressDevTCP = `(e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/") && !e.command.parsed_commands.exists(w, !w.name.matches("(?i)^(ba|z|da|k)?sh$") && w.argv_raw.exists(a, a.matches("/dev/(tcp|udp)/"))))`
-	// egressRemoteCopy: scp/sftp/rsync with a host: operand.
-	egressRemoteCopy = `(s.name.matches("(?i)^(scp|sftp|rsync)$") && s.argv_raw.exists(a, a.matches("^[\\x27\"]?[\\w.@-]+:")))`
-)
-
-// TestPackSharedEgressSender pins every egress rule to the one shared sender definition, so
-// adding a sender (or a wrapper) to one rule and not the others fails here. It also fails when
-// any rule's parsed-command check names a netcat with a list other than the shared one, or
-// carries the shared list without being in this table.
-func TestPackSharedEgressSender(t *testing.T) {
-	rules, err := LoadDir(rulesDir(t))
-	if err != nil {
-		t.Fatalf("load rule pack: %v", err)
-	}
-	const sender, stdin, devTCP, remoteCopy = 1, 2, 4, 8
-	uses := map[string]int{
-		"upload-to-paste-transfer-site":    sender | devTCP,
-		"secret-read-then-egress":          sender | devTCP | remoteCopy,
-		"browser-session-read-then-egress": sender | devTCP | remoteCopy,
-		"git-bundle-then-egress":           sender | devTCP | remoteCopy,
-		"env-dump-piped-to-network":        sender | stdin | devTCP,
-		"secret-read-and-egress":           sender | stdin | devTCP,
-		"archive-then-upload":              sender | stdin | devTCP,
-		"credentials-in-curl-data":         sender,
-	}
-	snippets := []struct {
-		bit  int
-		name string
-		expr string
-	}{
-		{sender, "sender", egressSender},
-		{stdin, "reads-stdin", egressReadsStdin},
-		{devTCP, "/dev/tcp", egressDevTCP},
-		{remoteCopy, "remote-copy", egressRemoteCopy},
-	}
+// TestPackListsNoSenderOfItsOwn keeps "this command sends data over the network" in one place:
+// the egress predicates of rules/concepts/egress.predicates.yaml. A rule that tests a parsed
+// command against a list that names netcat has a sender list of its own, and eight such copies
+// are what those predicates replaced. A text fallback for a command line that does not parse
+// matches e.command.command and is the rule's own.
+func TestPackListsNoSenderOfItsOwn(t *testing.T) {
 	literal := regexp.MustCompile(`([\w.]+)\.matches\(("(?:[^"\\]|\\.)*")\)`)
-	seen := map[string]bool{}
-	for _, r := range rules {
-		expr := normalizeCEL(strings.Join(ruleExpressions(r), " "))
-		want, listed := uses[r.ID]
-		if listed {
-			seen[r.ID] = true
-			for _, s := range snippets {
-				if want&s.bit != 0 && !strings.Contains(expr, s.expr) {
-					t.Errorf("%s: the shared %s check is missing or drifted; want it verbatim:\n  %s", r.ID, s.name, s.expr)
-				}
+	for _, r := range corpusRules(t) {
+		for _, m := range literal.FindAllStringSubmatch(strings.Join(ruleExpressions(r), " "), -1) {
+			receiver, list := m[1], m[2]
+			if receiver != "e.command.command" && (strings.Contains(list, "ncat") || strings.Contains(list, "netcat")) {
+				t.Errorf("%s: %s.matches(%s) lists network senders; call egress_sender instead, so that every egress rule means the same senders", r.ID, receiver, list)
 			}
-		}
-		for _, m := range literal.FindAllStringSubmatch(expr, -1) {
-			receiver, lit := m[1], m[2]
-			if receiver == "e.command.command" || !strings.Contains(lit, "ncat") && !strings.Contains(lit, "netcat") {
-				continue // a text fallback, or not a sender list
-			}
-			if lit != egressSenderNames {
-				t.Errorf("%s: %s.matches(%s) is a sender list other than the shared one %s", r.ID, receiver, lit, egressSenderNames)
-			} else if !listed {
-				t.Errorf("%s: uses the shared sender list; add it to TestPackSharedEgressSender so its copy is checked", r.ID)
-			}
-		}
-	}
-	for id := range uses {
-		if !seen[id] {
-			t.Errorf("egress rule %s missing from the pack", id)
 		}
 	}
 }
-
-// normalizeCEL collapses whitespace so YAML indentation differences do not count.
-func normalizeCEL(expr string) string { return strings.Join(strings.Fields(expr), " ") }
 
 // TestPackCategoriesMatchDirectories pins taxonomy.beacon_category to the directory each rule
 // lives in. The rule store keeps rules flat, so the category travels inside the rule: it is what

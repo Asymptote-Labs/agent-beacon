@@ -180,8 +180,12 @@ The rule corpus defines these:
 | `credential_file(path)` | A credential file of the kinds `credential-file-read` covers: cloud, SSH, environment files, source control, package registries, `.netrc` and `.pgpass`, infrastructure state, and files named for what they hold. A store with a rule of its own (a kubeconfig, a keyring, a browser profile) is left to that rule. |
 | `command_reads_credential_file(c)` | A parsed command that takes in a `credential_file`: by opening it, on its standard input, or written into its words. |
 | `credential_file_read(e)` | An event that reads a credential file: a `file.read` of one, or a command one of whose commands takes one in. `credential-file-read` and the read step of four correlation rules are this. |
+| `egress_sender(s)` | A parsed command that is a network client: curl, wget, HTTPie, xh, nc, ncat, netcat or socat, by any path. The eight egress rules share it. |
+| `egress_reads_stdin(s)` | A sender that sends what is piped or redirected into it: curl and wget only with a body that is standard input (`@-`, `-T -`). |
+| `egress_remote_copy(s)` | An `scp`, `sftp` or `rsync` with an operand on another host. |
+| `egress_dev_tcp(e)` | A command line that redirects to or from bash's `/dev/tcp` or `/dev/udp`. |
 
-The first four come from a catalog, `rules/concepts/credential-stores.catalog.yaml`: a reviewed list of stores, each with path patterns or commands, a tier, a kind, and examples that are checked. [`rules/concepts/credential-stores.md`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/rules/concepts/credential-stores.md) lists them. The others are written over the catalog in `rules/concepts/credentials.predicates.yaml`:
+The first four come from a catalog, `rules/concepts/credential-stores.catalog.yaml`: a reviewed list of stores, each with path patterns or commands, a tier, a kind, and examples that are checked. [`rules/concepts/credential-stores.md`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/rules/concepts/credential-stores.md) lists them. The others are predicate definitions: the credential ones are written over the catalog in `rules/concepts/credentials.predicates.yaml`, the egress ones in `rules/concepts/egress.predicates.yaml`.
 
 ```yaml title="A predicate definition"
 library: credentials
