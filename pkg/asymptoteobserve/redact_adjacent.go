@@ -58,8 +58,8 @@ const (
 // redactShape is what the adjacency checks know of one shape rule's pattern.
 type redactShape struct {
 	rule    int
-	needles uint64 // scanner needle bits
-	offset  int    // the rule's offset: how many bytes before its needle a match starts
+	needles idSet // scanner needle ids
+	offset  int   // the rule's offset: how many bytes before its needle a match starts
 	// tail, when set, is the class of the open-ended repeat the pattern ends in, at least tailMin
 	// long, after at most head bytes. Without it the pattern matches at most bound-1 bytes.
 	tail    *[256]bool
@@ -83,7 +83,7 @@ type redactShape struct {
 // start of a word that a replacement made.
 type redactFollower struct {
 	rule    int
-	needles uint64
+	needles idSet
 	kind    redactFollowerKind
 	// charset is every byte the pattern can match, for followRun.
 	charset [256]bool
@@ -176,7 +176,7 @@ func leadPattern(rule redactionRule) *regexp.Regexp {
 
 // shapeOf reads a shape rule's pattern: a concatenation that ends, before any trailing assertion,
 // either in an open-ended repeat of one class or in something of bounded length.
-func shapeOf(index int, rule redactionRule, parsed *syntax.Regexp, needles uint64) redactShape {
+func shapeOf(index int, rule redactionRule, parsed *syntax.Regexp, needles idSet) redactShape {
 	s := redactShape{rule: index, needles: needles, offset: rule.offset, jwt: rule.shape == shapeJWT}
 	parts := []*syntax.Regexp{parsed}
 	if parsed.Op == syntax.OpConcat {
@@ -416,9 +416,9 @@ func hitsFrom(hits []redactHit, pos int) int {
 }
 
 // hasNeedleAt reports whether one of needles occurs at pos.
-func (c *redactChain) hasNeedleAt(needles uint64, pos int) bool {
+func (c *redactChain) hasNeedleAt(needles *idSet, pos int) bool {
 	for i := hitsFrom(c.hits, pos); i < len(c.hits) && c.hits[i].start == pos; i++ {
-		if needles&(1<<c.hits[i].id) != 0 {
+		if needles.has(c.hits[i].id) {
 			return true
 		}
 	}
@@ -469,7 +469,7 @@ func (c *redactChain) rescue(si, q int) []int {
 		h := c.hits[i]
 		for sj := range c.adj.shapes {
 			x := h.start - c.adj.shapes[sj].offset
-			if c.adj.shapes[sj].needles&(1<<h.id) == 0 || x <= q || x >= q+s.bound {
+			if !c.adj.shapes[sj].needles.has(h.id) || x <= q || x >= q+s.bound {
 				continue
 			}
 			if m := c.find(s.rule, q, x); m != nil && m[1] == x {
@@ -494,7 +494,7 @@ func (c *redactChain) rescue(si, q int) []int {
 func (c *redactChain) redactedAt(x int) bool {
 	for si := range c.adj.shapes {
 		s := &c.adj.shapes[si]
-		if !c.hasNeedleAt(s.needles, x+s.offset) {
+		if !c.hasNeedleAt(&s.needles, x+s.offset) {
 			continue
 		}
 		end := min(len(c.t), x+s.prefix+len(redactedValue))
@@ -515,7 +515,7 @@ func (c *redactChain) rescueBefore(si, pos, limit int) []int {
 	}
 	for i := hitsFrom(c.hits, pos+s.offset); i < len(c.hits) && c.hits[i].start-s.offset < limit; i++ {
 		q := c.hits[i].start - s.offset
-		if s.needles&(1<<c.hits[i].id) == 0 || !wordBoundary(c.t, q) {
+		if !s.needles.has(c.hits[i].id) || !wordBoundary(c.t, q) {
 			continue
 		}
 		if m := c.rescue(si, q); m != nil {
@@ -536,7 +536,7 @@ func (c *redactChain) secretAt(p int) (int, []int) {
 	shape, match := -1, []int(nil)
 	for si := range c.adj.shapes {
 		s := &c.adj.shapes[si]
-		if !c.hasNeedleAt(s.needles, p+s.offset) {
+		if !c.hasNeedleAt(&s.needles, p+s.offset) {
 			continue
 		}
 		if m, open := c.shapeAt(si, p); m != nil {
@@ -804,7 +804,7 @@ func (c *redactChain) crossing(si int, m []int) (int, int, []int) {
 			if q >= best {
 				break
 			}
-			if s.needles&(1<<h.id) == 0 || q < lo {
+			if !s.needles.has(h.id) || q < lo {
 				continue
 			}
 			if s.jwt {
@@ -908,7 +908,8 @@ func (e *redactEngine) redactAfterMarkers(t string) (string, bool) {
 	if p < 0 {
 		return t, false
 	}
-	hits, _ := e.scanner.scan(t, nil)
+	var found idSet
+	hits := e.scanner.scan(t, nil, &found)
 	c := newRedactChain(e, t, hits)
 	var out []byte
 	last := 0
@@ -1071,7 +1072,7 @@ func (c *redactChain) followerCrossing(m []int) (int, int) {
 		}
 		for _, needle := range redactionRules[f.rule].needles.needles {
 			q := e - len(needle)
-			if q <= start || !c.hasNeedleAt(f.needles, q) {
+			if q <= start || !c.hasNeedleAt(&f.needles, q) {
 				continue
 			}
 			if f.kind == followLine {
@@ -1133,7 +1134,7 @@ func (c *redactChain) lineFollowerAt(q int) []int {
 		}
 	}
 	for k, f := range c.adj.followers {
-		if f.kind != followLine || !c.hasNeedleAt(f.needles, q) {
+		if f.kind != followLine || !c.hasNeedleAt(&f.needles, q) {
 			continue
 		}
 		// The pattern opens with the needle and \b: where a word byte follows the needle it finds
@@ -1206,7 +1207,7 @@ func (c *redactChain) followerAt(p int) ([]int, redactUse) {
 			m = c.schemeFollowerAt(f, p)
 			c.asked[k] = redactAsked{p, m}
 		default:
-			if !c.hasNeedleAt(f.needles, p) {
+			if !c.hasNeedleAt(&f.needles, p) {
 				continue
 			}
 			// The word, the blanks after it, and a run of the charset without blanks. A run

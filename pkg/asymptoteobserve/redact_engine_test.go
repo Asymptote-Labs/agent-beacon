@@ -44,7 +44,8 @@ func TestNeedleScannerFindsEveryOccurrence(t *testing.T) {
 			b.WriteString(pieces[r.IntN(len(pieces))])
 		}
 		text := b.String()
-		got, found := sc.scan(text, nil)
+		var found idSet
+		got := sc.scan(text, nil, &found)
 		expected := want(text)
 		key := func(a, b redactHit) int {
 			if a.start != b.start {
@@ -57,12 +58,46 @@ func TestNeedleScannerFindsEveryOccurrence(t *testing.T) {
 		if !slices.Equal(got, expected) {
 			t.Fatalf("scan(%q)\n = %v\nwant %v", text, got, expected)
 		}
-		var mask uint64
+		var mask idSet
 		for _, h := range expected {
-			mask |= 1 << h.id
+			mask.add(h.id)
 		}
 		if found != mask {
-			t.Fatalf("scan(%q) found %b, want %b", text, found, mask)
+			t.Fatalf("scan(%q) found %x, want %x", text, found, mask)
+		}
+	}
+}
+
+// The rules use fewer needles and sets than one word of an idSet holds, so nothing else reaches
+// the ids past 63. A scanner over idSetCap needles must report each one, in either word, and the
+// set of those found must hold exactly them.
+func TestNeedleScannerReportsIDsInEveryWord(t *testing.T) {
+	var sc needleScanner
+	needles := make([]redactNeedle, idSetCap)
+	for id := range needles {
+		needles[id] = redactNeedle{text: fmt.Sprintf("<n%d>", id)}
+	}
+	sc.build(needles)
+	for _, ids := range [][]int{{0}, {63}, {64}, {idSetCap - 1}, {1, 63, 64, 65, idSetCap - 1}} {
+		var text strings.Builder
+		var want idSet
+		for _, id := range ids {
+			text.WriteString("x " + needles[id].text)
+			want.add(id)
+		}
+		var found idSet
+		hits := sc.scan(text.String(), nil, &found)
+		var got []int
+		for _, h := range hits {
+			got = append(got, h.id)
+		}
+		if !slices.Equal(got, ids) || found != want {
+			t.Errorf("scan(%q): ids %v, found %x; want ids %v, found %x", text.String(), got, found, ids, want)
+		}
+		for id := range idSetCap {
+			if found.has(id) != slices.Contains(ids, id) {
+				t.Errorf("found.has(%d) = %t for ids %v", id, found.has(id), ids)
+			}
 		}
 	}
 }

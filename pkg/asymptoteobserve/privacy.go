@@ -175,7 +175,7 @@ func (rule redactionRule) pattern() *regexp.Regexp {
 // text before it; both read the text as it is, so they must not depend on the case of its letters.
 // within, when set, is a broader set the text must also hold.
 type redactNeedles struct {
-	id         uint
+	id         int // its index in redactEngine.setMasks and the gate's sets
 	folded     bool
 	needles    []string
 	followedBy func(rest string) bool
@@ -183,14 +183,14 @@ type redactNeedles struct {
 	within     *redactNeedles
 }
 
-var redactNeedleSets uint
+var redactNeedleSets int
 
 func newRedactNeedles(folded bool, needles ...string) *redactNeedles {
 	if len(needles) == 0 {
 		panic("asymptoteobserve: a redaction rule needs at least one needle")
 	}
-	if redactNeedleSets >= 64 {
-		panic("asymptoteobserve: redactGate tracks at most 64 needle sets")
+	if redactNeedleSets >= idSetCap {
+		panic("asymptoteobserve: more redaction needle sets than an idSet holds; lengthen idSet")
 	}
 	set := &redactNeedles{id: redactNeedleSets, folded: folded, needles: needles}
 	redactNeedleSets++
@@ -495,7 +495,7 @@ var redactionRules = concatRules([]redactionRule{
 	// Model providers and developer platforms whose keys agents handle all day. Each length and
 	// alphabet is gitleaks' rule of the same name, or trufflehog's detector where gitleaks has none.
 	// Where prefixes differ in a letter or two, the rules share one needle (shp, lsv2_, _v1_): the
-	// engine tracks at most 64 distinct needles, and each new one spends a slot.
+	// engine tracks at most idSetCap distinct needles, and each new one spends a slot.
 	shapeRule(`\b(hv[sbr]\.)[A-Za-z0-9_-]{24,}`, "${1}"+redactedValue, "hvs.", "hvb.", "hvr."),            // HashiCorp Vault
 	shapeRule(`\b(gsk_)[A-Za-z0-9]{52}\b`, "${1}"+redactedValue, "gsk_"),                                  // Groq
 	shapeRule(`\b(pplx-)[A-Za-z0-9]{48}\b`, "${1}"+redactedValue, "pplx-"),                                // Perplexity
