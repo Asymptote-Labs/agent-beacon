@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"sync"
 	"testing"
@@ -424,6 +425,36 @@ func TestModelFromBody(t *testing.T) {
 		if got := rec.turns[i].Call.Model; got != want {
 			t.Errorf("call %d: model %q, want %q", i, got, want)
 		}
+	}
+}
+
+// failingSink fails every write, dropping the whole batch or, with partial set, that many records.
+type failingSink struct{ partial int }
+
+func (s failingSink) Write(_ context.Context, b []Record) error {
+	if s.partial > 0 {
+		return &WriteError{Dropped: s.partial, Err: errors.New("disk full")}
+	}
+	return errors.New("disk full")
+}
+func (failingSink) Close() error { return nil }
+
+// Records a sink fails to write are counted as dropped for its route, in /stats, alongside those
+// a full queue refused: a whole batch for a plain error, the count a WriteError gives otherwise.
+func TestFailedWritesCountAsDropped(t *testing.T) {
+	rec := &recorder{}
+	p := New(Config{Analyzers: []Analyzer{rec}, Routes: []Route{
+		{Name: "whole", Sink: failingSink{}},
+		{Name: "part", Sink: failingSink{partial: 1}},
+		{Name: "fine", Sink: &memSink{}},
+	}, Log: slog.New(slog.DiscardHandler)})
+	for _, id := range []string{"c1", "c2"} {
+		p.Handle(context.Background(), call(id, &llm.Request{Messages: []llm.Message{text(llm.RoleUser, "hi")}}))
+	}
+	p.Close()
+	// Each call emits one record (the recorder's), and the queue writes them as batches.
+	if d := p.Stats().Dropped; d["whole"] != 2 || d["part"] == 0 || d["part"] > 2 || d["fine"] != 0 {
+		t.Errorf("dropped = %v, want whole 2, part 1 per batch, fine 0", d)
 	}
 }
 

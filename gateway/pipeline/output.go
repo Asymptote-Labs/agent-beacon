@@ -2,9 +2,12 @@ package pipeline
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"math/bits"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/gateway/internal/batchq"
@@ -20,12 +23,34 @@ type Record struct {
 const KindFinding = "finding"
 
 // Sink delivers records somewhere. Write is called from one goroutine per sink, with batches in
-// emission order, and must not keep batch after returning; an error is logged and the batch
-// dropped, so a sink that must not lose records retries inside Write. Close is called once,
-// after the last Write.
+// emission order, and must not keep batch after returning. An error means the batch was dropped,
+// unless it is a *WriteError, which says how many of its records were; either way the error is
+// logged and the dropped records are counted in the route's Stats.Dropped. A sink that must not
+// lose records retries inside Write, and a sink whose writes can fail must recover by the next
+// one. Close is called once, after the last Write.
 type Sink interface {
 	Write(ctx context.Context, batch []Record) error
 	Close() error
+}
+
+// WriteError is a Write error for a batch only part of which was dropped.
+type WriteError struct {
+	Dropped int
+	Err     error
+}
+
+func (e *WriteError) Error() string {
+	return fmt.Sprintf("%d records dropped: %v", e.Dropped, e.Err)
+}
+
+func (e *WriteError) Unwrap() error { return e.Err }
+
+// droppedBy is how many records of batch a Write error says were dropped.
+func droppedBy(err error, batch int) int {
+	if we, ok := errors.AsType[*WriteError](err); ok {
+		return min(max(we.Dropped, 0), batch)
+	}
+	return batch
 }
 
 // Route sends the records of the listed kinds to a sink; no kinds means every kind.
@@ -52,6 +77,8 @@ type output struct {
 type route struct {
 	Route
 	q *batchq.Queue[Record]
+	// failed counts the records the sink reported dropped.
+	failed atomic.Uint64
 }
 
 func newOutput(routes []Route, log *slog.Logger) *output {
@@ -60,7 +87,9 @@ func newOutput(routes []Route, log *slog.Logger) *output {
 		rt := &route{Route: r}
 		rt.q = batchq.New(routeQueue, routeBatch, routeFlush, func(batch []Record) {
 			if err := rt.Sink.Write(context.Background(), batch); err != nil {
-				log.Error("sink write", "sink", rt.Name, "records", len(batch), "err", err)
+				n := droppedBy(err, len(batch))
+				rt.failed.Add(uint64(n))
+				log.Error("sink write", "sink", rt.Name, "records", len(batch), "dropped", n, "err", err)
 			}
 		})
 		o.routes = append(o.routes, rt)
@@ -105,11 +134,12 @@ func (o *output) close() {
 	}
 }
 
-// stats reports the records dropped per route.
+// stats reports the records dropped per route: refused by a full queue, or reported dropped by
+// the sink.
 func (o *output) stats() map[string]uint64 {
 	out := make(map[string]uint64, len(o.routes))
 	for _, r := range o.routes {
-		out[r.Name] = r.q.Dropped()
+		out[r.Name] = r.q.Dropped() + r.failed.Load()
 	}
 	return out
 }
