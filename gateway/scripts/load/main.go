@@ -53,9 +53,21 @@ func main() {
 	}
 }
 
+// Bounds on the replay's size: a replayed body grows with every turn by about -result-bytes.
+const (
+	maxAgents      = 100_000
+	maxTurns       = 100_000
+	maxResultBytes = 16 << 20
+	// maxBody bounds a replayed request body; a session that would grow past it ends early.
+	maxBody = 512 << 20
+)
+
 func run(cfg config) error {
 	if cfg.agents < 1 || cfg.turns < 1 || cfg.resultBytes < 1 {
 		return fmt.Errorf("-agents, -turns and -result-bytes must be positive")
+	}
+	if cfg.agents > maxAgents || cfg.turns > maxTurns || cfg.resultBytes > maxResultBytes {
+		return fmt.Errorf("-agents, -turns and -result-bytes are limited to %d, %d and %d", maxAgents, maxTurns, maxResultBytes)
 	}
 	if cfg.cpus > 0 {
 		runtime.GOMAXPROCS(cfg.cpus)
@@ -160,6 +172,10 @@ func runAgent(cfg config, p *pipeline.Pipeline, prefix []byte, pl plan) agentRes
 
 	for k := 1; k <= cfg.turns; k++ {
 		t0 = time.Now()
+		if len(msgs) > maxBody-len(prefix)-2 {
+			fmt.Fprintf(os.Stderr, "load: session %s ends at turn %d: its body would exceed %d bytes\n", pl.session, k, maxBody)
+			break
+		}
 		body := make([]byte, 0, len(prefix)+len(msgs)+2)
 		body = append(append(append(body, prefix...), msgs...), "]}"...)
 		tu := synth.RandomTool(r, synth.ToolID(r))
