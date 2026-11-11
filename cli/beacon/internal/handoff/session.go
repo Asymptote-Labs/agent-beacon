@@ -1,9 +1,10 @@
 // Package handoff finds agent sessions on this machine so they can be picked up again, in the same
 // runtime or a different one.
 //
-// A handoff reads the runtime's own session store, never Beacon's runtime log alone: the store is
-// what the runtime itself resumes from, and it keeps content that the runtime log truncates. Every
-// read is local and read-only.
+// A handoff prefers the runtime's own session store, supplementing it with Beacon's runtime log
+// when a session is no longer in its store or its runtime has no store reader. The store is what
+// the runtime itself resumes from, and it keeps content that the log truncates. Every read is local
+// and read-only.
 package handoff
 
 import (
