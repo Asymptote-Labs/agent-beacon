@@ -25,11 +25,13 @@
 // every collector skips it the way it skips a store that is not there, and the refusal is counted so
 // the backfill can say what it left out.
 //
-// OpenOutside is for paths the console user may choose, in or out of the home (a launcher config an
-// .npmrc names). While confined it admits only a regular file the console user could read without
-// root, wherever its symlinks lead. A file it declines is reported as ErrRefused rather than as
-// absent, so a caller can tell "not there" from "there, but not vouched for" and refuse to vouch for
-// what it could not read.
+// OpenOutside and ResolveFileOutside are for paths the console user may choose, in or out of the
+// home (a launcher config an .npmrc names, the node a server's PATH runs). Confined, they decide
+// only from what any local user could see: inside the home, what the confinement admits; outside
+// it, a walk that enters only directories others may enter, follows no symlink but root's own
+// links at the top of the filesystem, and admits only a regular file others may read. A file they
+// turn down is reported as ErrRefused rather than as absent, so a caller can refuse to vouch for
+// what it could not read; nothing they report depends on what only root can see.
 package sessionfs
 
 import (
@@ -38,10 +40,8 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/user"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,9 +59,6 @@ type Confinement struct {
 	root     *os.Root
 	// uid is the owner every file read must have; negative skips the check (Windows).
 	uid int
-	// groups are the console user's groups, nil when they could not be looked up; see memberOf.
-	groupsOnce sync.Once
-	groups     map[int]bool
 
 	mu       sync.Mutex
 	refused  int
@@ -171,11 +168,11 @@ func (c *Confinement) refuse(op, path, reason string) error {
 	return &fs.PathError{Op: op, Path: path, Err: fs.ErrNotExist}
 }
 
-// decline records a file OpenOutside found but will not read and returns an ErrRefused error, which
-// does not read as absent.
-func (c *Confinement) decline(path, reason string) error {
+// decline records a file a reader of user-chosen paths found but will not read, and returns an
+// ErrRefused error, which does not read as absent.
+func (c *Confinement) decline(op, path, reason string) error {
 	c.record(path, reason)
-	return &fs.PathError{Op: "open", Path: path, Err: ErrRefused}
+	return &fs.PathError{Op: op, Path: path, Err: ErrRefused}
 }
 
 // rel turns an absolute path into one relative to the home, or reports that it is outside. A
@@ -211,33 +208,39 @@ func under(home, path string) (string, bool) {
 // failed turns an error from the root into what the caller sees. A path that is simply absent stays
 // absent and is not a refusal; anything else (a link out of the home, a loop) is refused.
 func (c *Confinement) failed(op, path string, err error) error {
+	return c.reject(c.refuse, op, path, err)
+}
+
+// reject is failed with the refusal reported through refuse.
+func (c *Confinement) reject(refuse func(op, path, reason string) error, op, path string, err error) error {
 	if errors.Is(err, fs.ErrNotExist) {
 		return &fs.PathError{Op: op, Path: path, Err: fs.ErrNotExist}
 	}
-	return c.refuse(op, path, err.Error())
+	return refuse(op, path, err.Error())
 }
 
-// ownedByUser reports a file's owner and whether it counts as the console user's: it does when the
-// confinement checks no ownership (a negative uid), when the owner cannot be told, or when the
-// console user owns it.
-func (c *Confinement) ownedByUser(info fs.FileInfo) (owner int, owned bool) {
-	if c.uid < 0 {
-		return 0, true
+// refusal is why the confinement turns a file down, "" when it admits it: it admits a directory,
+// or a regular file the console user owns (any regular file when its uid is negative, or when the
+// owner cannot be told).
+func (c *Confinement) refusal(info fs.FileInfo) string {
+	switch {
+	case info.IsDir():
+		return ""
+	case !info.Mode().IsRegular():
+		return "not a regular file (" + info.Mode().Type().String() + ")"
+	case c.uid < 0:
+		return ""
 	}
-	owner, ok := ownerUID(info)
-	return owner, !ok || owner == c.uid
+	if owner, ok := ownerUID(info); ok && owner != c.uid {
+		return fmt.Sprintf("owned by uid %d, not the console user (uid %d)", owner, c.uid)
+	}
+	return ""
 }
 
-// check admits a directory, or a regular file the console user owns.
+// check admits what refusal does, and refuses the rest as absent.
 func (c *Confinement) check(op, path string, info fs.FileInfo) error {
-	if info.IsDir() {
-		return nil
-	}
-	if !info.Mode().IsRegular() {
-		return c.refuse(op, path, "not a regular file ("+info.Mode().Type().String()+")")
-	}
-	if owner, owned := c.ownedByUser(info); !owned {
-		return c.refuse(op, path, fmt.Sprintf("owned by uid %d, not the console user (uid %d)", owner, c.uid))
+	if reason := c.refusal(info); reason != "" {
+		return c.refuse(op, path, reason)
 	}
 	return nil
 }
@@ -256,203 +259,109 @@ func Confined(path string) bool {
 
 // OpenOutside opens a file for a reader that follows paths the console user may have chosen, in or
 // out of the home, such as the launcher config a home's .npmrc or an agent's project list names.
-// Unconfined it is os.Open. While a confinement is active, any path, inside the home or not, is
-// first resolved the way the console user's own lookup would resolve it (see resolve), then
-// opened only if it is
+// Unconfined it is os.Open. Confined:
 //
-//   - a regular file, checked before it is opened (opening a device can act on it) and reached
-//     through no symlink once resolved, then opened non-blocking;
-//   - a file the console user could read without root, by the permission bits the kernel would
-//     apply to them (/etc/npmrc, a root-installed node's npmrc, a Nix store file a home-manager
-//     .npmrc links to, their own files).
+//   - inside the home, it opens what Open would (no link out of the home, a regular file the
+//     console user owns), and declines what Open would refuse;
+//   - outside it, it opens a regular file others may read, reached through directories others may
+//     enter and through no symlink but root's own links at the top of the filesystem (/etc,
+//     /tmp and /var on macOS, /bin and /lib on a merged-/usr Linux). The walk goes one directory
+//     at a time by descriptor, so nothing can be swapped in behind a check, and the last entry is
+//     checked before it is opened (opening a device can act on it), then opened non-blocking.
 //
-// Where the path leads through symlinks does not matter: it is the file reached that must be one
-// the console user could read, so root reading it discloses nothing. A file found but declined
-// (anything else, or a path that is not absolute) is an *fs.PathError wrapping ErrRefused, which
-// does not read as absent, and is counted as a refusal. A path that cannot be looked up (missing,
-// a symlink loop) reads as absent, as with Open.
-//
-// What lies past a directory the console user may not enter must tell them nothing, not even
-// whether it is there (/root/.ssh, another user's 0700 home): such a path reads as absent whatever
-// it names. One past a directory only a group may enter, when Beacon cannot tell whether they are
-// in it, is declined whatever it names, so the caller can neither trust it nor learn from it.
+// Anything else that is there is declined: an *fs.PathError wrapping ErrRefused, counted as a
+// refusal. A missing path reads as absent, as with Open. Past a directory others may not enter, or
+// through a link, nothing is looked up at all, so what OpenOutside reports never depends on what
+// only root can see: a path through /root/.ssh is declined whether or not it is there, and so is a
+// /proc link. A file only its owner or group may read outside the home, or one reached through a
+// user's own symlink (a Nix home-manager .npmrc), is declined too; a caller holding back what it
+// cannot read errs on the side of private.
 func OpenOutside(path string) (*os.File, error) {
 	c := active.Load()
 	if c == nil {
 		return os.Open(path)
 	}
 	if !filepath.IsAbs(path) {
-		return nil, c.decline(path, "not an absolute path")
+		return nil, c.decline("open", path, "not an absolute path")
 	}
-	real, entry, err := c.resolve(path)
-	switch {
-	case entry == denied:
-		return nil, c.refuse("open", path, "past a directory the console user cannot enter")
-	case entry == unsure:
-		return nil, c.decline(path, "past a directory only a group may enter, and the console user's groups are not known")
-	case err != nil:
-		return nil, c.failed("open", path, err)
+	path = filepath.Clean(path)
+	if _, inside := c.rel(path); inside {
+		return c.openReporting("open", path, c.decline)
 	}
-	f, err := openRegular(real)
-	if errors.Is(err, errNotRegular) {
-		return nil, c.decline(path, "not a regular file")
-	}
+	f, err := openPublic(path)
 	if err != nil {
-		return nil, c.failed("open", path, err)
-	}
-	info, err := f.Stat()
-	if err != nil {
-		_ = f.Close()
-		return nil, c.failed("open", path, err)
-	}
-	if c.uid >= 0 && c.permits(info, 0o4) != allowed {
-		_ = f.Close()
-		return nil, c.decline(path, fmt.Sprintf("not readable by the console user (uid %d) without root", c.uid))
+		return nil, c.outsideFailed("open", path, err)
 	}
 	return f, nil
 }
 
-// errNotRegular is a path that names something other than a regular file.
-var errNotRegular = errors.New("not a regular file")
-
-// access is whether the console user may enter a directory, as far as Beacon can tell.
-type access int
-
-const (
-	denied access = iota
-	// unsure: only a group may enter, and Beacon cannot tell whether the console user is in it.
-	unsure
-	allowed
-)
-
-// maxSymlinkHops bounds the links one resolve follows, as the kernel bounds a lookup's.
-const maxSymlinkHops = 40
-
-var errSymlinkLoop = errors.New("too many levels of symbolic links")
-
-// resolve follows path the way the console user's own lookup would: one name and one symlink at a
-// time, a link target's names and ".." included, from /. It reports the least access the console
-// user has to a directory a lookup happened in, and stops at one they may not enter, since root
-// looking past it would learn what they could not (filepath.EvalSymlinks would look up
-// /root/.ssh to apply the ".." in a target /root/.ssh/../../home/u/x). A negative uid checks no
-// access.
-func (c *Confinement) resolve(path string) (string, access, error) {
-	if c.uid < 0 {
-		real, err := filepath.EvalSymlinks(filepath.Clean(path))
-		return real, allowed, err
-	}
-	pending := strings.Split(path, "/")
-	cur, worst, hops := "/", allowed, 0
-	entered := map[string]access{}
-	for len(pending) > 0 {
-		name := pending[0]
-		pending = pending[1:]
-		if name == "" || name == "." {
-			continue
-		}
-		a, ok := entered[cur]
-		if !ok {
-			a = c.enter(cur)
-			entered[cur] = a
-		}
-		worst = min(worst, a)
-		if worst == denied {
-			return "", denied, nil
-		}
-		if name == ".." {
-			cur = filepath.Dir(cur)
-			continue
-		}
-		next := filepath.Join(cur, name)
-		info, err := os.Lstat(next)
+// ResolveFileOutside is the path of a regular file at path, a path the console user may have
+// chosen, with symlinks resolved. Unconfined it is filepath.EvalSymlinks of a regular file.
+// Confined it follows OpenOutside's rules and reports as OpenOutside does: inside the home, path
+// itself for a file the confinement admits; outside it, path with only root's top-level links
+// resolved, for a regular file others may read.
+func ResolveFileOutside(path string) (string, error) {
+	c := active.Load()
+	if c == nil {
+		real, err := filepath.EvalSymlinks(path)
 		if err != nil {
-			return "", worst, err
+			return "", err
 		}
-		if info.Mode()&fs.ModeSymlink == 0 {
-			cur = next
-			continue
-		}
-		if hops++; hops > maxSymlinkHops {
-			return "", worst, &fs.PathError{Op: "open", Path: path, Err: errSymlinkLoop}
-		}
-		target, err := os.Readlink(next)
+		info, err := os.Stat(real)
 		if err != nil {
-			return "", worst, err
+			return "", err
 		}
-		if strings.HasPrefix(target, "/") {
-			cur = "/"
+		if !info.Mode().IsRegular() {
+			return "", &fs.PathError{Op: "stat", Path: path, Err: errNotRegular}
 		}
-		pending = append(strings.Split(target, "/"), pending...)
+		return real, nil
 	}
-	return cur, worst, nil
+	if !filepath.IsAbs(path) {
+		return "", c.decline("stat", path, "not an absolute path")
+	}
+	path = filepath.Clean(path)
+	if _, inside := c.rel(path); inside {
+		f, err := c.openReporting("stat", path, c.decline)
+		if err != nil {
+			return "", err
+		}
+		info, err := f.Stat()
+		_ = f.Close()
+		if err != nil || !info.Mode().IsRegular() {
+			return "", c.decline("stat", path, "not a regular file")
+		}
+		return path, nil
+	}
+	real, err := resolvePublic(path)
+	if err != nil {
+		return "", c.outsideFailed("stat", path, err)
+	}
+	return real, nil
 }
 
-// enter is whether the console user may enter dir, a path with no symlinks in it.
-func (c *Confinement) enter(dir string) access {
-	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() {
-		return denied
-	}
-	return c.permits(info, 0o1)
-}
-
-// permits is whether the console user has permission perm (0o4 read, 0o1 execute or enter) on a
-// file, by its owner bits if they own it, else its group bits if they are in its group, else its
-// others bits, as the kernel decides.
-func (c *Confinement) permits(info fs.FileInfo, perm fs.FileMode) access {
-	owner, ok := ownerUID(info)
-	group, gok := ownerGID(info)
-	if !ok || !gok {
-		return denied
-	}
-	mode := info.Mode().Perm()
-	allowedIf := func(x bool) access {
-		if x {
-			return allowed
-		}
-		return denied
-	}
-	if owner == c.uid {
-		return allowedIf(mode&(perm<<6) != 0)
-	}
-	byGroup, byOthers := mode&(perm<<3) != 0, mode&perm != 0
-	member, known := c.memberOf(group)
+// outsideFailed turns an error from a walk outside the home into what the caller sees: absent for
+// a path that is not there, declined for one the walk would not judge, and otherwise refused as
+// absent, as Open refuses.
+func (c *Confinement) outsideFailed(op, path string, err error) error {
 	switch {
-	case known && member:
-		return allowedIf(byGroup)
-	case known || byGroup == byOthers:
-		return allowedIf(byOthers)
-	default:
-		return unsure
+	case errors.Is(err, errNotPublic) || errors.Is(err, errNotRegular):
+		return c.decline(op, path, err.Error())
+	case errors.Is(err, fs.ErrNotExist) || errors.Is(err, errNotADirectory):
+		return &fs.PathError{Op: op, Path: path, Err: fs.ErrNotExist}
 	}
+	return c.refuse(op, path, err.Error())
 }
 
-// memberOf reports whether the console user is in group gid, and whether Beacon could tell. Their
-// groups are looked up once per confinement; a lookup that fails (a directory-service account
-// this build cannot query) leaves every group unknown.
-func (c *Confinement) memberOf(gid int) (member, known bool) {
-	c.groupsOnce.Do(func() {
-		u, err := user.LookupId(strconv.Itoa(c.uid))
-		if err != nil {
-			return
-		}
-		ids, err := u.GroupIds()
-		if err != nil {
-			return
-		}
-		groups := map[int]bool{}
-		for _, id := range append(ids, u.Gid) {
-			if n, err := strconv.Atoi(id); err == nil {
-				groups[n] = true
-			}
-		}
-		c.groups = groups
-	})
-	if c.groups == nil {
-		return false, false
-	}
-	return c.groups[gid], true
-}
+var (
+	// errNotPublic is a path not every local user could look up or read: past a directory
+	// others may not enter, through a symlink other than root's at the top of the filesystem,
+	// or a file others may not read.
+	errNotPublic = errors.New("not readable by every local user")
+	// errNotRegular is a path that names something other than a regular file.
+	errNotRegular = errors.New("not a regular file")
+	// errNotADirectory is a path that runs through a file, which no one can look up.
+	errNotADirectory = errors.New("not a directory")
+)
 
 // Open opens a file or directory for reading.
 func Open(path string) (*os.File, error) {
@@ -464,23 +373,29 @@ func Open(path string) (*os.File, error) {
 }
 
 func (c *Confinement) open(op, path string) (*os.File, error) {
+	return c.openReporting(op, path, c.refuse)
+}
+
+// openReporting is open with refusals reported through refuse: as absent for Open, declined for
+// OpenOutside.
+func (c *Confinement) openReporting(op, path string, refuse func(op, path, reason string) error) (*os.File, error) {
 	rel, ok := c.rel(path)
 	if !ok {
-		return nil, c.refuse(op, path, "outside the console user's home")
+		return nil, refuse(op, path, "outside the console user's home")
 	}
 	// Non-blocking, so a FIFO is opened and refused rather than waited on for a writer.
 	f, err := c.root.OpenFile(rel, os.O_RDONLY|openNonblock, 0)
 	if err != nil {
-		return nil, c.failed(op, path, err)
+		return nil, c.reject(refuse, op, path, err)
 	}
 	info, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
-		return nil, c.failed(op, path, err)
+		return nil, c.reject(refuse, op, path, err)
 	}
-	if err := c.check(op, path, info); err != nil {
+	if reason := c.refusal(info); reason != "" {
 		_ = f.Close()
-		return nil, err
+		return nil, refuse(op, path, reason)
 	}
 	return f, nil
 }

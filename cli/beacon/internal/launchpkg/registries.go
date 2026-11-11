@@ -134,7 +134,11 @@ func LocalRegistries(env RegistryEnv) Registries {
 	// ships; npm derives both from the node it runs on (nvm, fnm, Volta and system installs each
 	// have their own).
 	npmrcs = append(npmrcs, join(envPath("npm_config_prefix", &reg.NPM), "etc", "npmrc"))
-	npmrcs = append(npmrcs, nodeNpmrcs(filepath.SplitList(getenv("PATH")))...)
+	nodePaths, nodeUnsure := nodeNpmrcs(filepath.SplitList(getenv("PATH")))
+	npmrcs = append(npmrcs, nodePaths...)
+	if nodeUnsure {
+		reg.NPM = true
+	}
 	for _, path := range append(npmrcs, system("/etc/npmrc"),
 		// pnpm's global config (pnpm config set --location=global), npmrc format.
 		join(xdg, "pnpm", "rc"), join(home, "Library", "Preferences", "pnpm", "rc"), join(getenv("LOCALAPPDATA"), "pnpm", "config", "rc"),
@@ -181,30 +185,35 @@ func LocalRegistries(env RegistryEnv) Registries {
 
 // nodeNpmrcs are the global and builtin npmrc files of the first node in dirs: its install
 // prefix is its directory's parent on Unix and its own directory on Windows, both as found and
-// with symlinks resolved.
-func nodeNpmrcs(dirs []string) []string {
+// with symlinks resolved. The dirs are the user's to choose (a server's command or env PATH), so
+// the node is looked up as sessionfs.ResolveFileOutside looks; unsure reports one it would not
+// judge, whose npm config Beacon then cannot vouch for.
+func nodeNpmrcs(dirs []string) (paths []string, unsure bool) {
 	for _, dir := range dirs {
 		if dir == "" {
 			continue
 		}
 		for _, name := range []string{"node", "node.exe"} {
 			node := filepath.Join(dir, name)
-			if info, err := os.Stat(node); err != nil || info.IsDir() {
+			real, err := sessionfs.ResolveFileOutside(node)
+			if errors.Is(err, sessionfs.ErrRefused) {
+				return nil, true
+			}
+			if err != nil {
 				continue
 			}
 			prefixes := []string{filepath.Dir(dir), dir}
-			if real, err := filepath.EvalSymlinks(node); err == nil && real != node {
+			if real != node {
 				prefixes = append(prefixes, filepath.Dir(filepath.Dir(real)), filepath.Dir(real))
 			}
-			var paths []string
 			for _, prefix := range prefixes {
 				paths = append(paths, filepath.Join(prefix, "etc", "npmrc"), filepath.Join(prefix, "lib", "node_modules", "npm", "npmrc"),
 					filepath.Join(prefix, "node_modules", "npm", "npmrc"))
 			}
-			return paths
+			return paths, false
 		}
 	}
-	return nil
+	return nil, false
 }
 
 // readProject reads the project config npm, yarn, bun and uv find by walking up from dir.
@@ -274,11 +283,11 @@ func (r Registries) forServer(command string, args []string, def map[string]inte
 			unresolved = true
 		}
 	}
-	npmrcs := nodeNpmrcs(nodeDirs)
-	if len(npmrcs) == 0 && len(projects) == 0 && !unresolved {
+	npmrcs, nodeUnsure := nodeNpmrcs(nodeDirs)
+	if len(npmrcs) == 0 && len(projects) == 0 && !unresolved && !nodeUnsure {
 		return r
 	}
-	out := Registries{NPM: r.NPM || unresolved, PyPI: r.PyPI || unresolved, NPMScopes: map[string]bool{}, home: r.home,
+	out := Registries{NPM: r.NPM || unresolved || nodeUnsure, PyPI: r.PyPI || unresolved, NPMScopes: map[string]bool{}, home: r.home,
 		yarnrc: r.yarnrc, vars: r.vars, read: map[string]bool{}}
 	for scope := range r.NPMScopes {
 		out.NPMScopes[scope] = true

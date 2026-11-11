@@ -5,16 +5,26 @@ package sessionfs
 import (
 	"io/fs"
 	"os"
+	"path/filepath"
 )
 
-// openRegular opens a path only if it names a regular file, checked before it is opened.
-func openRegular(path string) (*os.File, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
+// openPublic opens a path only if it names a regular file, checked before it is opened. Windows
+// confinements check no ownership (their uid is negative), so nothing more is asked of it.
+func openPublic(path string) (*os.File, error) {
+	if _, err := resolvePublic(path); err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, &fs.PathError{Op: "open", Path: path, Err: errNotRegular}
-	}
 	return os.Open(path)
+}
+
+// resolvePublic is path with symlinks resolved, when it names a regular file.
+func resolvePublic(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", &fs.PathError{Op: "open", Path: path, Err: errNotRegular}
+	}
+	return filepath.EvalSymlinks(path)
 }

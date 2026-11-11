@@ -12,19 +12,41 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 )
 
-// The system inventory job reads the console user's launcher config as root, and an npmrc can
-// send it anywhere. Under its confinement, a planted FIFO must neither hang it nor read as an
-// absent file: what Beacon cannot read, it cannot vouch for.
+// The system inventory job reads the console user's launcher config as root, and an npmrc or a
+// server's command can send it anywhere. Under its confinement it reads outside the home only what
+// every local user could, and holds back what it will not read: a planted FIFO neither hangs it nor
+// reads as absent, and whatever lies past a directory others may not enter makes the ecosystem
+// private whether or not it is there, so the snapshot never tells the console user what is.
 func TestConfinedRegistriesHoldBackWhatTheyCannotRead(t *testing.T) {
-	home, outside := t.TempDir(), t.TempDir()
-	fifo := filepath.Join(outside, "npmrc")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+	base, err := os.MkdirTemp("/tmp", "launchpkg-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	home, outside := filepath.Join(base, "home"), filepath.Join(base, "outside")
+	for _, dir := range []string{base, home, outside} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fifo := filepath.Join(outside, "fifo")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
 		t.Skipf("mkfifo: %v", err)
 	}
 	public := filepath.Join(outside, "public-npmrc")
-	if err := os.WriteFile(public, []byte("registry=https://registry.npmjs.org/\n"), 0o600); err != nil {
+	if err := os.WriteFile(public, []byte("registry=https://registry.npmjs.org/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	own := filepath.Join(outside, "own-npmrc")
+	if err := os.WriteFile(own, []byte("registry=https://registry.npmjs.org/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(outside, "private")
+	writeConfig(t, filepath.Join(private, "npmrc"), "registry=https://registry.npmjs.org/\n")
+	writeConfig(t, filepath.Join(private, "bin", "node"), "")
 	c, err := sessionfs.Confine(home, os.Getuid(), sessionfs.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -46,26 +68,25 @@ func TestConfinedRegistriesHoldBackWhatTheyCannotRead(t *testing.T) {
 			return Registries{}
 		}
 	}
+	for path, private := range map[string]bool{
+		fifo:                              true,
+		public:                            false,
+		filepath.Join(outside, "missing"): false,
+		own:                               true,
+		filepath.Join(private, "npmrc"):   true,
+		filepath.Join(private, "missing"): true,
+	} {
+		if reg := read("userconfig=" + path + "\n"); reg.NPM != private {
+			t.Errorf("userconfig=%s: npm private = %v, want %v", path, reg.NPM, private)
+		}
+	}
 
-	if reg := read("userconfig=" + fifo + "\n"); !reg.NPM {
-		t.Errorf("a FIFO the npmrc names did not hold npm packages back")
-	}
-	if reg := read("userconfig=" + public + "\n"); reg.NPM {
-		t.Errorf("a readable npmrc of the user's naming the public registry held npm packages back")
-	}
-	if reg := read("userconfig=" + filepath.Join(outside, "missing") + "\n"); reg.NPM {
-		t.Errorf("a missing npmrc held npm packages back")
-	}
-	// A path root cannot even look up (macOS privacy protection, a root-squashed network home;
-	// here a directory no one may enter) is absent, as it is unconfined.
-	locked := filepath.Join(outside, "locked")
-	if err := os.Mkdir(locked, 0o000); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(locked, 0o700)
-	if os.Geteuid() != 0 {
-		if reg := read("userconfig=" + filepath.Join(locked, "npmrc") + "\n"); reg.NPM {
-			t.Errorf("an npmrc root could not look up held npm packages back")
+	// A server's own node is looked up the same way: one past a directory others may not enter
+	// holds npm back whether or not it is there.
+	reg := read("")
+	for _, dir := range []string{filepath.Join(private, "bin"), filepath.Join(private, "nothing")} {
+		if !reg.forServer(filepath.Join(dir, "npx"), nil, map[string]interface{}{}, nil).NPM {
+			t.Errorf("a server run from %s left npm public", dir)
 		}
 	}
 }
