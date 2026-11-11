@@ -69,8 +69,13 @@ func (p *parsedCommands) add(cmds []shellcmd.Command, nested bool, depth int) {
 	for _, c := range cmds {
 		p.pipelines = max(p.pipelines, base+c.Pipeline)
 	}
-	for _, c := range cmds {
-		p.out = append(p.out, parsedCommand(c, base, nested))
+	reads := shellcmd.FileReads(cmds)
+	for i, c := range cmds {
+		var taken []shellcmd.FileRead
+		if reads != nil {
+			taken = reads[i]
+		}
+		p.out = append(p.out, parsedCommand(c, taken, base, nested))
 		if depth >= maxShellDepth {
 			continue
 		}
@@ -82,7 +87,7 @@ func (p *parsedCommands) add(cmds []shellcmd.Command, nested bool, depth int) {
 	}
 }
 
-func parsedCommand(c shellcmd.Command, pipelineBase int, nested bool) asymptoteobserve.ParsedCommand {
+func parsedCommand(c shellcmd.Command, reads []shellcmd.FileRead, pipelineBase int, nested bool) asymptoteobserve.ParsedCommand {
 	pc := asymptoteobserve.ParsedCommand{
 		Name:     c.Name(),
 		Argv:     make([]string, len(c.Argv)),
@@ -107,7 +112,12 @@ func parsedCommand(c shellcmd.Command, pipelineBase int, nested bool) asymptoteo
 			pc.FileEffects[i] = asymptoteobserve.ParsedFileEffect{Path: e.Path, Op: string(e.Op)}
 		}
 	}
-	pc.FileReads = c.FileReads()
+	if len(reads) > 0 {
+		pc.FileReads = make([]asymptoteobserve.ParsedFileRead, len(reads))
+		for i, r := range reads {
+			pc.FileReads[i] = asymptoteobserve.ParsedFileRead{Path: r.Path, Via: string(r.Via)}
+		}
+	}
 	return pc
 }
 

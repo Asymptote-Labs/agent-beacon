@@ -5,50 +5,15 @@ import (
 	"strings"
 )
 
-// FileReads returns the files every command reads, in order.
-func FileReads(commands []Command) []string {
-	var reads []string
-	for _, c := range commands {
-		reads = append(reads, c.FileReads()...)
-	}
-	return reads
+// dataWords says which words of a command carry data it takes in: every word, or, for a command
+// whose words are read by what they are for, only the ones listed by their index in Argv.
+type dataWords struct {
+	listed bool
+	index  []int
 }
 
-// FileReads returns the files the command evidently takes as input: the targets of its input
-// redirections, then the files its own words name -- what cat, head, base64 and the other printers
-// print, what grep, rg, awk, sed and jq search or filter, the sources of cp, install, scp and
-// rsync, what tar and zip put into an archive, and what curl, wget, `gh gist create` and socat
-// send. A command it does not know contributes only its redirections, and so does a wrapper that
-// moves the command (sudo -i).
-//
-// A path is as written (Word.Unquoted), also where it depends on something this package does not
-// evaluate: ~/.aws/credentials, $HOME/.netrc and .env* are reported as those words. That differs
-// from FileEffects, which leaves such a path out. An effect is taken as the exact file a command
-// wrote; a read is asked what it names, and ~/.ssh/id_rsa names a private key whatever the home
-// directory is. Like an effect, a relative path is relative to the directory the command runs in,
-// which after a cd (AfterCD) is not the one the command line started in.
-//
-// Standard input (-), a device (/dev/stdin), a file on another host (scp host:path), a file a
-// command edits in place (sed -i, which FileEffects reports) and a file a command names without
-// taking it as input (a search pattern, an archive's exclusions, an identity file) are not reads.
-func (c Command) FileReads() []string {
-	var reads []string
-	for _, r := range c.Redirects {
-		if r.Op == "<" || r.Op == "<>" {
-			reads = append(reads, r.Target.Unquoted)
-		}
-	}
-	reads = append(reads, c.inputFiles()...)
-	kept := reads[:0]
-	for _, path := range reads {
-		if path != "" && path != "-" && !strings.HasPrefix(path, "/dev/") {
-			kept = append(kept, path)
-		}
-	}
-	if len(kept) == 0 {
-		return nil
-	}
-	return kept
+func (d dataWords) holds(index int) bool {
+	return !d.listed || slices.Contains(d.index, index)
 }
 
 // reader is how a command that reads its operands is read.
@@ -174,78 +139,73 @@ var (
 	}
 
 	ghGistCreateOptions = optionTable{values: optionSpec{short: "df", long: []string{"--desc", "--filename"}}}
-
-	wgetOptions = optionTable{values: optionSpec{long: []string{"--post-file", "--body-file"}}}
 )
 
-// inputFiles returns the files the command's own words name as its input.
-func (c Command) inputFiles() []string {
-	name := c.Name()
+// inputs returns the files the command's own words name as its input, and which of its words
+// carry data. name and args are what the command runs (Command.run).
+func (c *Command) inputs(name string, args []Word) (files []string, data dataWords) {
 	if name == "" {
-		return nil
+		return nil, data
 	}
-	words, _ := c.Unwrapped()
-	args := words[1:]
+	// base is the index in Argv of the first of args.
+	base := len(c.Argv) - len(args)
 	switch name {
 	case "sed", "gsed":
 		// In place, sed writes the files it reads back, which is an edit, not a read.
 		if files, inPlace := scriptFiles(name, args); !inPlace {
-			return unquoted(files)
+			return unquoted(files), data
 		}
 	case "jq":
-		return unquoted(jqFiles(args))
+		return unquoted(jqFiles(args)), data
 	case "cp", "install":
-		return unquoted(copySources(name, args))
+		return unquoted(copySources(name, args)), data
 	case "scp", "rsync":
 		operands := readers[name].files(args)
 		if len(operands) < 2 {
-			return nil
+			return nil, data
 		}
-		var local []string
 		for _, source := range operands[:len(operands)-1] {
 			if !remotePath(source.Unquoted) {
-				local = append(local, source.Unquoted)
+				files = append(files, source.Unquoted)
 			}
 		}
-		return local
+		return files, data
 	case "tar":
-		return unquoted(tarFiles(args))
+		return unquoted(tarFiles(args)), data
 	case "zip":
-		return unquoted(zipFiles(args))
+		return unquoted(zipFiles(args)), data
 	case "curl":
-		return curlFiles(args)
+		return curlInputs(args, base)
 	case "wget":
-		opts := wgetOptions.parse(args, true)
-		var files []string
-		for _, option := range wgetOptions.values.long {
-			if file, ok := opts.values[option]; ok {
-				files = append(files, file.Unquoted)
-			}
-		}
-		return files
+		return wgetInputs(args, base)
+	case "http", "https", "httpie", "xh", "xhs":
+		return httpieInputs(args, base)
 	case "gh":
-		if c.Is("gh", "gist", "create") {
-			return unquoted(ghGistCreateOptions.parse(args[2:], true).operands)
+		if len(args) >= 2 && args[0].Known && args[0].Text == "gist" && args[1].Known && args[1].Text == "create" {
+			return unquoted(ghGistCreateOptions.parse(args[2:], true).operands), data
 		}
 	case "socat":
-		return socatFiles(args)
+		return socatFiles(args), data
 	default:
+		if language, ok := scriptLanguage(name); ok {
+			return scriptReads(language, inlineScript(language, c, args)), data
+		}
 		r, ok := readers[name]
 		if !ok {
-			return nil
+			return nil, data
 		}
-		files := r.files(args)
+		operands := r.files(args)
 		switch {
-		case name == "xxd" && len(files) > 1:
-			files = files[:1]
+		case name == "xxd" && len(operands) > 1:
+			operands = operands[:1]
 		case name == "awk":
-			files = withoutAssignments(files)
+			operands = withoutAssignments(operands)
 		case name == "less" || name == "more" || name == "tail":
-			files = withoutPlusWords(files)
+			operands = withoutPlusWords(operands)
 		}
-		return unquoted(files)
+		return unquoted(operands), data
 	}
-	return nil
+	return nil, data
 }
 
 // unquoted are words as written.
@@ -440,19 +400,22 @@ scan:
 // curlValueOptions are curl's short options that take a value.
 const curlValueOptions = "AbcCdDeEFHKmoPQrtTuUwxXyYz"
 
-// The ways a curl option's value names a file it sends.
+// What the value of a curl option is to the request body.
 const (
-	curlData      = iota + 1 // @file
-	curlURLEncode            // @file, name@file
-	curlForm                 // name=@file, name=<file
-	curlUpload               // file
+	curlData      = iota + 1 // the body, or @file
+	curlURLEncode            // content, name=content, @file or name@file
+	curlForm                 // name=content, name=@file or name=<file
+	curlRaw                  // the body as written
+	curlUpload               // a file
 )
 
-// curlFiles returns the files curl sends: the @file of -d, --data, --data-binary, --data-ascii,
-// --data-urlencode and --json, the @file or <file of a -F field, and the file of -T. The value of
-// --data-raw and --form-string is sent as it is, and a header, a URL or an output file is no read.
-func curlFiles(args []Word) []string {
-	var files []string
+// curlInputs returns the files curl sends and the words whose value it sends as the request body.
+// The files are the @file of -d, --data, --data-binary, --data-ascii, --data-urlencode and --json,
+// the @file or <file of a -F field, and the file of -T. The words are the values of those options
+// where they are content rather than a file, and of --data-raw and --form-string. A header, a
+// URL, a credential and an output file are neither.
+func curlInputs(args []Word, base int) (files []string, data dataWords) {
+	data.listed = true
 	for i := 0; i < len(args); i++ {
 		t := args[i].Unquoted
 		if len(t) < 2 || t[0] != '-' {
@@ -468,6 +431,8 @@ func curlFiles(args []Word) []string {
 				sends = curlData
 			case "--data-urlencode":
 				sends = curlURLEncode
+			case "--data-raw", "--form-string":
+				sends = curlRaw
 			case "--form":
 				sends = curlForm
 			case "--upload-file":
@@ -500,25 +465,109 @@ func curlFiles(args []Word) []string {
 			i++
 			value = args[i].Unquoted
 		}
+		file := ""
 		switch sends {
+		case 0:
+			continue
 		case curlData:
 			if strings.HasPrefix(value, "@") {
-				files = append(files, value[1:])
+				file = value[1:]
 			}
 		case curlURLEncode:
 			// name@file and @file read a file; content, =content and name=content do not.
 			if at := strings.IndexAny(value, "=@"); at >= 0 && value[at] == '@' {
-				files = append(files, value[at+1:])
+				file = value[at+1:]
 			}
 		case curlForm:
-			files = append(files, formFile(value))
+			file = formFile(value)
 		case curlUpload:
-			if value != "." {
-				files = append(files, value)
+			if file = value; file == "." {
+				continue
 			}
 		}
+		// Content, or a file that is the output of a process substitution, is the word's own value.
+		if file == "" || strings.HasPrefix(file, "<(") {
+			data.index = append(data.index, base+i)
+			continue
+		}
+		files = append(files, file)
 	}
-	return files
+	return files, data
+}
+
+// wgetInputs returns the files wget sends (--post-file, --body-file) and the words whose value it
+// sends as the request body (--post-data, --body-data).
+func wgetInputs(args []Word, base int) (files []string, data dataWords) {
+	data.listed = true
+	for i := 0; i < len(args); i++ {
+		name, value, attached := strings.Cut(args[i].Unquoted, "=")
+		file := name == "--post-file" || name == "--body-file"
+		if !file && name != "--post-data" && name != "--body-data" {
+			continue
+		}
+		if !attached {
+			if i+1 == len(args) {
+				break
+			}
+			i++
+			value = args[i].Unquoted
+		}
+		if file {
+			files = append(files, value)
+		} else {
+			data.index = append(data.index, base+i)
+		}
+	}
+	return files, data
+}
+
+// httpieInputs returns the files an HTTPie or xh request sends and the words whose value it sends
+// as request data. A request item is read by the first separator in it: name@file uploads a file,
+// name=@file and name:=@file take a field from one, and @file is the body; name=value and
+// name:=json are data. Name:value is a header and name==value a URL parameter: neither is data,
+// and nor is the method or the URL.
+func httpieInputs(args []Word, base int) (files []string, data dataWords) {
+	data.listed = true
+	url := false
+	for i, w := range args {
+		t := w.Unquoted
+		if isOption(w) {
+			continue
+		}
+		// The first operand is the URL, or the method before it; the request items follow.
+		if !url {
+			url = !isLetters(t)
+			continue
+		}
+		at := strings.IndexAny(t, ":=@;")
+		if at < 0 {
+			continue
+		}
+		rest := t[at+1:]
+		switch t[at] {
+		case ':':
+			if !strings.HasPrefix(rest, "=") {
+				continue // a header, or a URL
+			}
+			rest = rest[1:]
+		case '=':
+			if strings.HasPrefix(rest, "=") {
+				continue // a URL parameter
+			}
+		case '@':
+			file, _, _ := strings.Cut(rest, ";")
+			files = append(files, file)
+			continue
+		default:
+			continue // `Header;` sends an empty header
+		}
+		if strings.HasPrefix(rest, "@") {
+			files = append(files, rest[1:])
+		} else {
+			data.index = append(data.index, base+i)
+		}
+	}
+	return files, data
 }
 
 // formFile returns the file a curl -F field reads (name=@file, name=<file), without the

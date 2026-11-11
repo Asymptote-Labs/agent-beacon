@@ -252,6 +252,7 @@ func TestParse(t *testing.T) {
 			Argv:      []Word{plain("sudo"), plain("-u"), plain("deploy"), plain("/opt/bin/beacon"), plain("share")},
 			Redirects: []Redirect{{Op: ">&", Fd: "2", Target: plain("1")}},
 			Pipeline:  1,
+			refs:      []wordRef{{place: refEnv, index: 1, name: "X"}},
 		},
 		{
 			Argv:     []Word{plain("tee"), plain("-a"), plain("out.log")},
@@ -276,6 +277,7 @@ func TestParse(t *testing.T) {
 			Offset:    87,
 			Pipeline:  3,
 			AfterCD:   true,
+			refs:      []wordRef{{place: refArg, index: 1, subst: 1}},
 		},
 		{
 			Argv:     []Word{plain("rm"), plain("x")},
@@ -283,6 +285,7 @@ func TestParse(t *testing.T) {
 			Pipeline: 4,
 			Nested:   true,
 			AfterCD:  true,
+			within:   1,
 		},
 	}
 	if !reflect.DeepEqual(commands, want) {

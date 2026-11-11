@@ -169,7 +169,7 @@ func parseOptions(command string, words []Word) parsedOptions {
 // parse splits words by the table. An unknown word is an operand, unless written is set: then a
 // word is read as it is written (Word.Unquoted), so `-n"$N"` and `--file=$F` are still options.
 func (t optionTable) parse(words []Word, written bool) parsedOptions {
-	p := parsedOptions{values: map[string]Word{}, flags: map[string]bool{}}
+	var p parsedOptions
 	for i := 0; i < len(words); i++ {
 		w := words[i]
 		text, known := w.Text, w.Known
@@ -189,19 +189,19 @@ func (t optionTable) parse(words []Word, written bool) parsedOptions {
 				return parsedOptions{}
 			}
 			if slices.Contains(t.flags.long, name) {
-				p.flags[name] = true
+				p.flag(name)
 			}
 			if !slices.Contains(t.values.long, name) {
 				continue
 			}
 			switch {
 			case attached:
-				p.values[name] = attachedValue(w, value)
+				p.value(name, attachedValue(w, value))
 			case i+1 < len(words):
 				i++
-				p.values[name] = words[i]
+				p.value(name, words[i])
 			default:
-				p.values[name] = Word{}
+				p.value(name, Word{})
 			}
 		default:
 			for j := 1; j < len(text); j++ {
@@ -210,25 +210,41 @@ func (t optionTable) parse(words []Word, written bool) parsedOptions {
 					break // what follows in an unknown word is not option letters
 				}
 				if strings.IndexByte(t.flags.short, c) >= 0 {
-					p.flags[string(c)] = true
+					p.flag(string(c))
 				}
 				if strings.IndexByte(t.values.short, c) < 0 {
 					continue
 				}
 				switch {
 				case j+1 < len(text):
-					p.values[string(c)] = attachedValue(w, text[j+1:])
+					p.value(string(c), attachedValue(w, text[j+1:]))
 				case i+1 < len(words):
 					i++
-					p.values[string(c)] = words[i]
+					p.value(string(c), words[i])
 				default:
-					p.values[string(c)] = Word{}
+					p.value(string(c), Word{})
 				}
 				break
 			}
 		}
 	}
 	return p
+}
+
+// flag and value record an option. Most commands are given none the table asks about, so the maps
+// are made when the first one is.
+func (p *parsedOptions) flag(name string) {
+	if p.flags == nil {
+		p.flags = map[string]bool{}
+	}
+	p.flags[name] = true
+}
+
+func (p *parsedOptions) value(name string, value Word) {
+	if p.values == nil {
+		p.values = map[string]Word{}
+	}
+	p.values[name] = value
 }
 
 // attachedValue is the value an option carries in its own word w (--suffix=.bak, -S.bak).

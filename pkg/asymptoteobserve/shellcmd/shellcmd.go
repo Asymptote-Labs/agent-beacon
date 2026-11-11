@@ -52,8 +52,10 @@ type Redirect struct {
 	// Fd is the descriptor written before the operator (the 2 of 2>), or "".
 	Fd string
 	// Target is the word after the operator: a file, a descriptor for >& and <&, the delimiter
-	// of a here-document, or the string of a here-string. A here-document's body is not read.
+	// of a here-document, or the string of a here-string.
 	Target Word
+	// Body is a here-document's text as written, expansions included. It is not read as commands.
+	Body string
 }
 
 // Command is one statement of a command line: a simple command with its words, or a compound
@@ -78,7 +80,35 @@ type Command struct {
 	// AfterCD is true when a cd, pushd or popd comes earlier in the command line, so a relative
 	// path no longer names the file it would at the start. The directory itself is not tracked.
 	AfterCD bool
+	// within identifies the command or process substitution the statement is directly inside, or
+	// is 0. refs are what its words take their value from, and the variables that export,
+	// declare, local, readonly or typeset assigned since the statement before it: those are no
+	// statements of their own here. FileReads follows both.
+	within int32
+	refs   []wordRef
 }
+
+// wordRef is one thing a word of a command takes its value from: a command substitution or an
+// input process substitution ($(..), `..`, <(..)), by the id its statements carry in within, or
+// else a variable, by name. With the place refDeclares it is instead a variable a declaration
+// assigned, and the refs of its value follow with the place refDeclared and the same index.
+type wordRef struct {
+	place refPlace
+	index int // of the word in Argv, Redirects or Env, or of the declaration
+	subst int
+	name  string
+}
+
+// refPlace is where the word of a wordRef is.
+type refPlace uint8
+
+const (
+	refArg refPlace = iota
+	refRedirect
+	refEnv
+	refDeclares
+	refDeclared
+)
 
 // Parse parses command as bash and returns its statements in walk order: each statement, then the
 // statements inside it (an if's body, a command substitution in its words). A statement that
@@ -129,6 +159,12 @@ type compound struct {
 	stage      stage
 }
 
+// substitution is the byte range of a command or process substitution, and its id.
+type substitution struct {
+	start, end uint
+	id         int
+}
+
 type parser struct {
 	source     string
 	commands   []Command
@@ -136,20 +172,44 @@ type parser struct {
 	containers map[*syntax.Stmt]bool // statements that only join pipeline stages
 	compounds  []compound            // compound statements that are pipeline stages
 	pipelines  int
-	nested     [][2]uint // byte ranges of command and process substitutions
+	nested     []substitution
+	substIDs   map[syntax.Node]int
+	declared   []declaration // not yet carried by a statement
 	moved      bool
+}
+
+// declaration is an assignment by export, declare, local, readonly or typeset, and where its
+// statement ends.
+type declaration struct {
+	end   uint
+	name  string
+	value []syntax.WordPart
 }
 
 func (p *parser) visit(node syntax.Node) bool {
 	switch n := node.(type) {
 	case *syntax.CmdSubst:
-		p.nested = append(p.nested, [2]uint{n.Left.Offset(), n.Right.Offset()})
+		p.nested = append(p.nested, substitution{n.Left.Offset(), n.Right.Offset(), p.substID(n)})
 	case *syntax.ProcSubst:
-		p.nested = append(p.nested, [2]uint{n.OpPos.Offset(), n.Rparen.Offset()})
+		p.nested = append(p.nested, substitution{n.OpPos.Offset(), n.Rparen.Offset(), p.substID(n)})
 	case *syntax.Stmt:
 		p.stmt(n)
 	}
 	return true
+}
+
+// substID is the id of a substitution: the same for the word that holds it and the statements
+// inside it, whichever is reached first.
+func (p *parser) substID(node syntax.Node) int {
+	id, ok := p.substIDs[node]
+	if !ok {
+		if p.substIDs == nil {
+			p.substIDs = map[syntax.Node]int{}
+		}
+		id = len(p.substIDs) + 1
+		p.substIDs[node] = id
+	}
+	return id
 }
 
 func (p *parser) stmt(stmt *syntax.Stmt) {
@@ -168,6 +228,13 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 	if ok && call == nil && stmt.Cmd != nil {
 		p.compounds = append(p.compounds, compound{start: stmt.Pos().Offset(), end: stmt.End().Offset(), stage: st})
 	}
+	if decl, ok := stmt.Cmd.(*syntax.DeclClause); ok {
+		for _, as := range decl.Args {
+			if as.Name != nil && as.Value != nil {
+				p.declared = append(p.declared, declaration{end: stmt.End().Offset(), name: as.Name.Value, value: as.Value.Parts})
+			}
+		}
+	}
 	if call == nil && len(stmt.Redirs) == 0 {
 		return
 	}
@@ -184,20 +251,42 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 		Stage:    st.index,
 		AfterCD:  p.moved,
 	}
-	for _, r := range p.nested {
-		if offset > r[0] && offset < r[1] {
+	// The innermost substitution around the statement is the one that starts last.
+	var innermost uint
+	for _, s := range p.nested {
+		if offset > s.start && offset < s.end {
 			c.Nested = true
-			break
+			if s.start >= innermost {
+				innermost, c.within = s.start, int32(s.id)
+			}
 		}
 	}
+	// The statement carries the declarations that ended before it: not one it is inside.
+	pending, carried := p.declared[:0], 0
+	for _, d := range p.declared {
+		if d.end > offset {
+			pending = append(pending, d)
+			continue
+		}
+		c.refs = append(c.refs, wordRef{place: refDeclares, index: carried, name: d.name})
+		c.refs = p.refs(c.refs, d.value, refDeclared, carried)
+		carried++
+	}
+	p.declared = pending
 	if call != nil {
-		for _, as := range call.Assigns {
+		for i, as := range call.Assigns {
 			c.Env = append(c.Env, p.assign(as))
+			if as.Value != nil {
+				c.refs = p.refs(c.refs, as.Value.Parts, refEnv, i)
+			}
 		}
-		c.Argv = p.callArgs(call)
+		c.Argv, c.refs = p.callArgs(call, c.refs)
 	}
-	for _, r := range stmt.Redirs {
+	for i, r := range stmt.Redirs {
 		c.Redirects = append(c.Redirects, p.redirect(r))
+		if r.Word != nil {
+			c.refs = p.refs(c.refs, r.Word.Parts, refRedirect, i)
+		}
 	}
 	p.commands = append(p.commands, c)
 	// After a cd, a relative path is relative to somewhere this parser does not track.
@@ -222,8 +311,8 @@ func (p *parser) enclosingStage(offset uint) (stage, bool) {
 	if !found {
 		return stage{}, false
 	}
-	for _, r := range p.nested {
-		if offset > r[0] && offset < r[1] && r[0] > best.start {
+	for _, s := range p.nested {
+		if offset > s.start && offset < s.end && s.start > best.start {
 			return stage{}, false
 		}
 	}
@@ -276,23 +365,53 @@ func (p *parser) redirect(r *syntax.Redirect) Redirect {
 	if r.Word != nil {
 		out.Target = p.word(r.Word, r.Word)
 	}
+	if r.Hdoc != nil {
+		out.Body = p.raw(r.Hdoc)
+	}
 	return out
 }
 
-func (p *parser) callArgs(call *syntax.CallExpr) []Word {
+// callArgs returns the call's words after brace expansion, and refs with what they take their
+// value from.
+func (p *parser) callArgs(call *syntax.CallExpr, refs []wordRef) ([]Word, []wordRef) {
 	var words []Word
 	for _, word := range call.Args {
 		// SplitBraces rewrites the word's parts, so it works on a copy: the tree is still being walked.
 		split := &syntax.Word{Parts: slices.Clone(word.Parts)}
 		if !syntax.SplitBraces(split) {
+			refs = p.refs(refs, word.Parts, refArg, len(words))
 			words = append(words, p.word(word, word))
 			continue
 		}
+		// Every word a brace expansion produces may hold what the unexpanded word does.
 		for _, expanded := range expand.Braces(split) {
+			refs = p.refs(refs, word.Parts, refArg, len(words))
 			words = append(words, p.word(expanded, word))
 		}
 	}
-	return words
+	return words, refs
+}
+
+// refs appends what a word, given by its parts, takes its value from: the substitutions and the
+// variables in it, inside double quotes too.
+func (p *parser) refs(refs []wordRef, parts []syntax.WordPart, place refPlace, index int) []wordRef {
+	for _, part := range parts {
+		switch part := part.(type) {
+		case *syntax.DblQuoted:
+			refs = p.refs(refs, part.Parts, place, index)
+		case *syntax.CmdSubst:
+			refs = append(refs, wordRef{place: place, index: index, subst: p.substID(part)})
+		case *syntax.ProcSubst:
+			if part.Op == syntax.CmdIn {
+				refs = append(refs, wordRef{place: place, index: index, subst: p.substID(part)})
+			}
+		case *syntax.ParamExp:
+			if part.Param != nil {
+				refs = append(refs, wordRef{place: place, index: index, name: part.Param.Value})
+			}
+		}
+	}
+	return refs
 }
 
 // word reads word's value; source is the word as written, for Raw.

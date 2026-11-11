@@ -205,34 +205,75 @@ the steps in both orders still fires once. A single event never satisfies two st
   reference derivation is `threatrules.ParsedCommands` over `shellcmd.Parse`, and the file
   effects are `shellcmd.FileEffects`.
 - `file_reads` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
-  later) is a field of each `parsed_commands` entry: the files the command evidently takes as
-  input, a list of strings. Each is the word as written with its quotes and escaping
-  backslashes removed and everything the parse does not evaluate left as written, so
-  `"$HOME/.netrc"` is `$HOME/.netrc` and `~/.ssh/id_*` is itself. That differs from
+  later) is a field of each `parsed_commands` entry: the files whose content the command
+  evidently takes in, a list of `{path, via}`. `path` is the word as written with its quotes
+  and escaping backslashes removed and everything the parse does not evaluate left as written,
+  so `"$HOME/.netrc"` is `$HOME/.netrc` and `~/.ssh/id_*` is itself. That differs from
   `file_effects`, which leaves out a path it cannot evaluate: a rule asks what a read names,
-  and `~/.ssh/id_rsa` names a private key whatever the home directory is. The list holds the
-  targets of the command's `<` and `<>` redirections, then, by the command's `name`:
-  - `cat`, `tac`, `head`, `tail`, `less`, `more`, `bat`, `nl`, `strings`, `od`, `hexdump`,
-    `base64`: every operand; `xxd`: the first. A word that begins with `+` is not an operand
-    of `less`, `more` or `tail`.
-  - `grep`, `egrep`, `fgrep`, `rg`, `awk`, `jq`, and `sed` or `gsed` unless it edits in place
-    (`-i`, which is a `file_effects` edit): the operands after the pattern, program or filter,
-    or every operand when an option supplies it (`-e`, `-f`, `rg --files`). awk's `var=value`
-    operands and the values after jq's `--args` and `--jsonargs` are not files.
-  - `cp`, `install`: every operand but the last, or every operand with `-t`. `scp`, `rsync`:
-    every operand but the last that is not on another host (`host:path`).
-  - `tar`: its operands when it creates, appends or updates (`c`, `r`, `u`), none when it
-    extracts or lists. `zip`: the operands after the archive's name and the names after `-i`,
-    not the names after `-x`.
-  - `curl`: the `@file` of `-d`, `--data`, `--data-binary`, `--data-ascii` and `--json`, the
-    `@file` or `name@file` of `--data-urlencode`, the `name=@file` or `name=<file` of `-F`,
-    and the file of `-T`. `wget`: `--post-file` and `--body-file`. `gh gist create`: its
-    operands. `socat`: the path of an `OPEN:`, `FILE:` or `GOPEN:` address.
+  and `~/.ssh/id_rsa` names a private key whatever the home directory is. `via` is how the
+  content reaches the command:
+  - `direct`: the command opens the file itself. The command is the one the entry runs, found
+    behind the wrappers `name` skips and behind `timeout`, `nice`, `ionice`, `stdbuf`, `doas`,
+    `torsocks`, `proxychains` and `proxychains4` as well (`name` still stops at those). By
+    that command:
+    - `cat`, `tac`, `head`, `tail`, `less`, `more`, `bat`, `nl`, `strings`, `od`, `hexdump`,
+      `base64`: every operand; `xxd`: the first. A word that begins with `+` is not an operand
+      of `less`, `more` or `tail`.
+    - `grep`, `egrep`, `fgrep`, `rg`, `awk`, `jq`, and `sed` or `gsed` unless it edits in
+      place (`-i`, which is a `file_effects` edit): the operands after the pattern, program or
+      filter, or every operand when an option supplies it (`-e`, `-f`, `rg --files`). awk's
+      `var=value` operands and the values after jq's `--args` and `--jsonargs` are not files.
+    - `cp`, `install`: every operand but the last, or every operand with `-t`. `scp`, `rsync`:
+      every operand but the last that is not on another host (`host:path`).
+    - `tar`: its operands when it creates, appends or updates (`c`, `r`, `u`), none when it
+      extracts or lists. `zip`: the operands after the archive's name and the names after
+      `-i`, not the names after `-x`.
+    - `curl`: the `@file` of `-d`, `--data`, `--data-binary`, `--data-ascii` and `--json`, the
+      `@file` or `name@file` of `--data-urlencode`, the `name=@file` or `name=<file` of `-F`,
+      and the file of `-T`. `wget`: `--post-file` and `--body-file`. `http`, `https`,
+      `httpie`, `xh`, `xhs`: the file of a `name@file`, `name=@file`, `name:=@file` or `@file`
+      request item. `gh gist create`: its operands. `socat`: the path of an `OPEN:`, `FILE:`
+      or `GOPEN:` address.
+    - `python*`, `pypy*`, `node`, `nodejs`, `bun`, `deno eval`, `ruby`, `php`: the paths the
+      script given as text opens for reading, where the path is a string literal outside
+      strings and comments. The script is the value of `-c`, `-e`, `-p`, `-r`, `--eval` or
+      `--print`, or, when no script file is named, the here-document or here-string on
+      standard input. The calls are `open` and `Path(..).read_text|read_bytes|open` (python),
+      `readFileSync`, `readFile`, `createReadStream`, `readTextFile`, `readTextFileSync` and
+      `Bun.file` (JavaScript), `File.read|readlines|binread|foreach|open` and
+      `IO.read|readlines|binread|foreach` (ruby), and `file_get_contents`, `fopen`, `readfile`
+      and `file` (php). A call whose mode argument holds `w`, `a` or `x` is not a read.
 
-  The value of an option is never an operand (`head -n 5`, `scp -i key`, `tar --exclude x`,
-  `gh gist create -d text`). Standard input (`-`) and paths under `/dev/` are left out. A
-  command not listed contributes only its redirections, and so does one whose `name` is `""`.
-  The reference derivation is `shellcmd.FileReads`.
+    The value of an option is never an operand (`head -n 5`, `scp -i key`, `tar --exclude x`,
+    `gh gist create -d text`).
+  - `stdin`: the content arrives on the command's standard input: the target of its `<` or
+    `<>` redirection, what a substitution in its here-string wrote, or what the stage before
+    it in its pipeline writes to the pipe.
+  - `argument`: the content is written into one of the command's words by a command
+    substitution, an input process substitution (`<(..)`), or a variable assigned from one
+    earlier in the command line. For `curl`, `wget`, `http`, `https`, `httpie`, `xh` and `xhs`
+    only a word they send as the request body counts (the content of `-d`, `--data*`, `--json`,
+    `-F`, `--form-string`, `--post-data`, `--body-data`, a `name=value` or `name:=json` item):
+    a header, a URL or a credential option is not data. For any other command every word
+    counts.
+
+  What a command takes in follows the data. A stage writes to its pipe every file it takes in,
+  by any `via`, unless its standard output is redirected, or it only reports a count or a
+  digest (`wc`, `md5sum`, `md5`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`,
+  `shasum`, `b2sum`, `cksum`, `sum`). A stage does not read the pipe when its own redirection
+  supplies its standard input. A substitution writes what the last stage of each pipeline
+  directly inside it writes. A variable holds what the substitutions and variables in its
+  value hold, when it is assigned by a statement of assignments only or by `export`, `declare`,
+  `local`, `readonly` or `typeset`; an assignment before a command is that command's
+  environment and is not followed. A file written earlier in the command line holds what the
+  command that wrote it took in (the target of `>` and `>>`, the destination of `cp` and
+  `install`, the files of `tee`) or what the file moved onto it held (`mv`), until it is
+  written with something else, truncated or deleted; reading it takes that in too, by the
+  same `via`. Paths are compared as written.
+
+  Standard input (`-`) and paths under `/dev/` are left out. Here-document bodies are not
+  followed, nor what a script does with a file after opening it, nor data that crosses a
+  `-c` script's boundary. The reference derivation is `shellcmd.FileReads`.
 - `e.system_context` is on the wire, not derived: on `session.context` it names what the
   runtime gave the model. `kind` is `skill_listing` for a skill index, `source` is where
   Beacon read it (`system_prompt`, `transcript`), and `skills` names each listed skill as

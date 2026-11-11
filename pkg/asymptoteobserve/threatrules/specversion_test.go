@@ -121,7 +121,7 @@ func TestParsedCommandsRequiresSpecV1_2(t *testing.T) {
 }
 
 func TestFileReadsRequiresSpecV1_3(t *testing.T) {
-	const uses = "match: 'e.command.parsed_commands.exists(c, c.file_reads.exists(f, f == \".env\"))'\n"
+	const uses = "match: 'e.command.parsed_commands.exists(c, c.file_reads.exists(f, f.path == \".env\"))'\n"
 	withSpec := func(spec string) *Rule {
 		t.Helper()
 		rule, err := DecodeRule([]byte(strings.Replace(specRule("r", spec, ""), "match: 'e.event.action == \"file.read\"'\n", uses, 1)))
