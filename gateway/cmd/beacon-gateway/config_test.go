@@ -48,20 +48,37 @@ func TestOpenBuild(t *testing.T) {
 	if obs, err := cfg.observers(env); obs != nil || err != nil {
 		t.Errorf("observers %v, %v", obs, err)
 	}
+	// The jsonl output, written as its path alone or with its type, is the open build's only one.
+	dir := t.TempDir()
+	cfg = parse(t, "gateways: [{type: litellm}]\noutputs:\n  - jsonl: "+filepath.Join(dir, "a.jsonl")+"\n    kinds: [finding]\n  - {type: jsonl, jsonl: "+filepath.Join(dir, "b.jsonl")+", name: second}\n")
+	routes, err := cfg.routes(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 2 || routes[0].Name != filepath.Join(dir, "a.jsonl") || len(routes[0].Kinds) != 1 || routes[1].Name != "second" {
+		t.Errorf("routes %+v", routes)
+	}
+	for _, r := range routes {
+		r.Sink.Close()
+	}
 	for text, want := range map[string]string{
 		"analyzers: {rules: {path: x}}": "analyzers.rules: no such analyzer",
 		"policy: {anything: 1}":         "policy: this build has no configurable policy",
 		"store: {type: shared}":         `unknown store "shared"`,
 		"observers: {calls: {}}":        "observers.calls: no such observer",
 		"content: {retention: some}":    "content.retention",
+		"outputs: [{type: ingest}]":     `outputs[0]: no such output "ingest"`,
+		"outputs: [{kinds: [finding]}]": "outputs[0]: no type",
+		"outputs: [{type: jsonl}]":      "a jsonl output needs a path",
 	} {
 		cfg := parse(t, "gateways: [{type: litellm}]\n"+text+"\n")
 		_, aerr := cfg.analyzers(env)
 		_, perr := cfg.policy(env)
 		_, serr := cfg.store(env)
 		_, oerr := cfg.observers(env)
+		_, rerr := cfg.routes(env)
 		var msgs []string
-		for _, err := range []error{aerr, perr, serr, oerr} {
+		for _, err := range []error{aerr, perr, serr, oerr, rerr} {
 			if err != nil {
 				msgs = append(msgs, err.Error())
 			}
@@ -96,6 +113,11 @@ type nodeStore struct {
 	node map[string]any
 }
 
+type nodeSink struct{ node map[string]any }
+
+func (nodeSink) Write(context.Context, []pipeline.Record) error { return nil }
+func (nodeSink) Close() error                                   { return nil }
+
 func decode(t *testing.T, n *yaml.Node) map[string]any {
 	t.Helper()
 	m := map[string]any{}
@@ -109,12 +131,13 @@ func decode(t *testing.T, n *yaml.Node) map[string]any {
 // configuration, which the open parser passes through whole, and analyzers run after the events
 // analyzer in name order.
 func TestExtensionPoints(t *testing.T) {
-	saved := [4]any{analyzerFactories, policyFactory, storeFactories, observerFactories}
+	saved := [5]any{analyzerFactories, policyFactory, storeFactories, observerFactories, sinkFactories}
 	t.Cleanup(func() {
 		analyzerFactories = saved[0].(map[string]AnalyzerFactory)
 		policyFactory, _ = saved[1].(PolicyFactory)
 		storeFactories = saved[2].(map[string]StoreFactory)
 		observerFactories = saved[3].(map[string]ObserverFactory)
+		sinkFactories = saved[4].(map[string]SinkFactory)
 	})
 	analyzer := func(name string) AnalyzerFactory {
 		return func(n *yaml.Node, _ Env) (pipeline.Analyzer, error) {
@@ -129,6 +152,9 @@ func TestExtensionPoints(t *testing.T) {
 	observerFactories = map[string]ObserverFactory{"calls": func(n *yaml.Node, _ Env) (pipeline.Observer, error) {
 		return nodeObserver{node: decode(t, n)}, nil
 	}}
+	sinkFactories = map[string]SinkFactory{"jsonl": jsonlSink, "ingest": func(n *yaml.Node, _ Env) (pipeline.Sink, error) {
+		return nodeSink{node: decode(t, n)}, nil
+	}}
 
 	cfg := parse(t, `
 gateways: [{type: litellm}]
@@ -139,6 +165,8 @@ policy: {mode: strict}
 store: {type: shared, addr: "host:1"}
 observers:
   calls: {keep: true}
+outputs:
+  - {type: ingest, url: "https://ingest.example", kinds: [beacon.event]}
 `)
 	as, err := cfg.analyzers(env)
 	if err != nil {
@@ -156,6 +184,10 @@ observers:
 	}
 	if o, err := cfg.observers(env); err != nil || len(o) != 1 || o[0].(nodeObserver).node["keep"] != true {
 		t.Errorf("observers %+v, %v", o, err)
+	}
+	if r, err := cfg.routes(env); err != nil || len(r) != 1 || r[0].Name != "ingest[0]" ||
+		r[0].Sink.(nodeSink).node["url"] != "https://ingest.example" || len(r[0].Kinds) != 1 || r[0].Kinds[0] != "beacon.event" {
+		t.Errorf("routes %+v, %v", r, err)
 	}
 	// A registered policy applies without a node of its own, and the pipeline then waits for
 	// analysis before answering.

@@ -57,7 +57,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	routes, err := cfg.routes()
+	routes, err := cfg.routes(env)
 	if err != nil {
 		return err
 	}

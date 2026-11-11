@@ -19,7 +19,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/gateway/litellm"
 	"github.com/asymptote-labs/agent-beacon/gateway/pipeline"
 	"github.com/asymptote-labs/agent-beacon/gateway/portkey"
-	"github.com/asymptote-labs/agent-beacon/gateway/sink"
 	"github.com/asymptote-labs/agent-beacon/gateway/store"
 )
 
@@ -65,14 +64,12 @@ type config struct {
 	// Store holds every piece of cross-call state; its type picks the implementation, "memory"
 	// by default.
 	Store yaml.Node `yaml:"store"`
-	// Analyzers, Policy and Observers configure extensions a build registers (extend.go).
+	// Analyzers, Policy, Observers and Outputs configure extensions a build registers (extend.go);
+	// outputs also take the built-in jsonl type.
 	Analyzers map[string]yaml.Node `yaml:"analyzers"`
 	Policy    yaml.Node            `yaml:"policy"`
 	Observers map[string]yaml.Node `yaml:"observers"`
-	Outputs   []struct {
-		JSONL string   `yaml:"jsonl"`
-		Kinds []string `yaml:"kinds"`
-	} `yaml:"outputs"`
+	Outputs   []yaml.Node          `yaml:"outputs"`
 	// Gateways each have a type naming the adapter; the rest of the entry is that adapter's
 	// Config.
 	Gateways []yaml.Node `yaml:"gateways"`
@@ -211,20 +208,52 @@ func sortedNames(m map[string]yaml.Node) []string {
 	return names
 }
 
-func (cfg *config) routes() ([]pipeline.Route, error) {
+// routes builds every output: a sink of the type its entry names, fed the record kinds it lists
+// (every kind when it lists none). An entry with only a jsonl path is a jsonl output. A route is
+// named by the entry's name, a jsonl output by its path, and anything else by type and position,
+// which is how /stats reports what each one dropped.
+func (cfg *config) routes(env Env) ([]pipeline.Route, error) {
 	var out []pipeline.Route
-	for _, o := range cfg.Outputs {
-		if o.JSONL == "" {
-			return nil, fmt.Errorf("outputs: only jsonl outputs exist")
+	fail := func(err error) ([]pipeline.Route, error) {
+		for _, r := range out {
+			r.Sink.Close()
 		}
-		s, err := sink.OpenJSONL(expandHome(o.JSONL))
+		return nil, err
+	}
+	for i := range cfg.Outputs {
+		n := &cfg.Outputs[i]
+		var head struct {
+			Type  string   `yaml:"type"`
+			Name  string   `yaml:"name"`
+			JSONL string   `yaml:"jsonl"`
+			Kinds []string `yaml:"kinds"`
+		}
+		if err := n.Decode(&head); err != nil {
+			return fail(fmt.Errorf("outputs[%d]: %w", i, err))
+		}
+		if head.Type == "" && head.JSONL != "" {
+			head.Type = "jsonl"
+		}
+		if head.Type == "" {
+			return fail(fmt.Errorf("outputs[%d]: no type (or jsonl path)", i))
+		}
+		build, ok := sinkFactories[head.Type]
+		if !ok {
+			return fail(fmt.Errorf("outputs[%d]: no such output %q in this build", i, head.Type))
+		}
+		s, err := build(n, env)
 		if err != nil {
-			for _, r := range out {
-				r.Sink.Close()
-			}
-			return nil, err
+			return fail(fmt.Errorf("outputs[%d] (%s): %w", i, head.Type, err))
 		}
-		out = append(out, pipeline.Route{Name: o.JSONL, Sink: s, Kinds: o.Kinds})
+		name := head.Name
+		switch {
+		case name != "":
+		case head.Type == "jsonl":
+			name = head.JSONL
+		default:
+			name = fmt.Sprintf("%s[%d]", head.Type, i)
+		}
+		out = append(out, pipeline.Route{Name: name, Sink: s, Kinds: head.Kinds})
 	}
 	return out, nil
 }

@@ -69,11 +69,25 @@ provider's own name for it. The gateway's call id is in `raw["gateway.call_id"]`
 ## Extension points
 
 The pipeline has generic seams (`pipeline.Analyzer`, `pipeline.Policy`, `pipeline.Observer`,
-`store.Store`). A separately distributed build can compile in files of its own that register
-analyzers, a policy, stores and per-call observers in `cmd/beacon-gateway/extend.go`; each reads its
-own node of the configuration file. The open build registers none: every call is allowed, and with
+`pipeline.Sink`, `store.Store`). A separately distributed build can compile in files of its own that
+register analyzers, a policy, stores, per-call observers and outputs in
+`cmd/beacon-gateway/extend.go`; each reads its own node of the configuration file. The open build
+registers none beyond the in-memory store and the `jsonl` output: every call is allowed, and with
 nothing that could change a verdict the pipeline answers each call as soon as it is admitted and
 records it afterwards.
+
+An output is an entry of `outputs`, naming its type and the record kinds it receives:
+
+```yaml
+outputs:
+  - jsonl: /var/log/beacon/gateway-events.jsonl   # shorthand for type: jsonl
+    kinds: [beacon.event]
+  - type: <a registered output>                     # its own keys alongside
+    kinds: [beacon.event, finding]
+```
+
+A sink receives its kinds in batches, off the call path; when it falls behind, records are dropped
+and counted in `/stats`.
 
 ## Testing
 
