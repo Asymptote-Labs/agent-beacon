@@ -74,6 +74,15 @@ id>`, which its reply shares. Every event of the call names the response it cont
 new turn is recorded every time: the same short input twice ("yes", "go on") is two turns, never
 a retry.
 
+The cost of a turn being its own session: the Responses API does not carry `instructions` or
+`tools` across responses, so the client resends them every turn, and each turn records them again
+(`session.context`, `mcp.tool_listed`) and has its own `session.id`. This is deliberate. Naming
+such a turn's session from content (the caller and its instructions) would merge every
+conversation one caller has with the same instructions, and naming it from the response it
+continues would need state shared across calls and replicas. A client that chains responses this
+way and wants one session per conversation, with its context recorded once, sends a session
+header.
+
 ## Events
 
 | What the call carries | Event |
