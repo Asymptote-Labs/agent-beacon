@@ -15,11 +15,14 @@ func TestGroupIDs(t *testing.T) {
 	for _, tc := range []struct {
 		out    string
 		err    error
-		want   []int
+		want   []uint32
 		failed bool
 	}{
-		{out: "20 12 61 701\n", want: []int{20, 12, 61, 701}},
-		{out: "1000\n", want: []int{1000}},
+		{out: "20 12 61 701\n", want: []uint32{20, 12, 61, 701}},
+		{out: "1000\n", want: []uint32{1000}},
+		{out: "4294967294\n", want: []uint32{4294967294}},
+		{out: "4294967296\n", failed: true},
+		{out: "-2\n", failed: true},
 		{out: "", failed: true},
 		{out: "20 staff\n", failed: true},
 		{err: errors.New("no such user"), failed: true},

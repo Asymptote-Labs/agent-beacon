@@ -141,21 +141,22 @@ func parseAccountRecord(out, want string) (Info, error) {
 
 // GroupIDs are the groups of the account with uid, its primary group first, as the system's id(1)
 // reports them: id consults NSS and macOS's directory service, which the CGO-free os/user never
-// does. They are the groups a process run as that account should carry.
-func GroupIDs(uid int) ([]int, error) {
+// does. They are the groups a process run as that account should carry, as the kernel's 32-bit
+// ids.
+func GroupIDs(uid int) ([]uint32, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
 	defer cancel()
 	out, err := runID(ctx, uid)
 	if err != nil {
 		return nil, fmt.Errorf("id -G %d: %w", uid, err)
 	}
-	var gids []int
+	var gids []uint32
 	for _, field := range strings.Fields(out) {
-		gid, err := strconv.Atoi(field)
+		gid, err := strconv.ParseUint(field, 10, 32)
 		if err != nil {
 			return nil, fmt.Errorf("id -G %d printed %q", uid, strings.TrimSpace(out))
 		}
-		gids = append(gids, gid)
+		gids = append(gids, uint32(gid))
 	}
 	if len(gids) == 0 {
 		return nil, fmt.Errorf("id -G %d printed no groups", uid)

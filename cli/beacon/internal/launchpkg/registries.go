@@ -73,7 +73,8 @@ func projectDirs(wd string) []string {
 const maxRegistryConfigBytes = 1 << 20
 
 // LocalRegistries reads the registry and index settings npm, yarn, bun, pip and uv would read.
-// A file it cannot read counts as absent. Settings that name the public registry do not count.
+// A file that is not there counts as absent; one that is there but cannot be read holds its
+// ecosystem back (see unreadable). Settings that name the public registry do not count.
 func LocalRegistries(env RegistryEnv) Registries {
 	vars, lower := map[string]string{}, map[string]string{}
 	reg := Registries{NPMScopes: map[string]bool{}, home: env.Home, vars: lower, read: map[string]bool{}}

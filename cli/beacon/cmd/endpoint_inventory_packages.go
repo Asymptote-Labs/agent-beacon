@@ -30,6 +30,11 @@ const (
 	// packageResolveTimeout bounds the console user's resolver. A FIFO is opened non-blocking, but
 	// a hung network home is not, and the job holds the inventory lock while it waits.
 	packageResolveTimeout = 30 * time.Second
+	// packageResolveWaitDelay is how long the job waits, once the timeout has killed the child, for
+	// its pipes to close. The child is the console user's own process, so they can hold its stdout
+	// open from another process (/proc/<pid>/fd/1, or a child it started); without a bound the job
+	// would wait for them forever while holding the inventory lock, and no heartbeat would go out.
+	packageResolveWaitDelay = 2 * time.Second
 )
 
 // endpointInventoryResolvePackagesCmd names the package each MCP server runs, reading the launcher
@@ -73,6 +78,7 @@ func resolvePackagesWith(c *exec.Cmd, env launchpkg.RegistryEnv, queries []launc
 	c.Stdin = bytes.NewReader(in)
 	c.Stdout = &cappedBuffer{buf: &out, limit: maxPackageExchangeBytes}
 	c.Stderr = &cappedBuffer{buf: &stderr, limit: 4 << 10}
+	c.WaitDelay = packageResolveWaitDelay
 	if err := c.Run(); err != nil {
 		return nil, fmt.Errorf("resolve MCP server packages as the console user: %w: %s", err, bytes.TrimSpace(stderr.Bytes()))
 	}

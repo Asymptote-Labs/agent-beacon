@@ -14,6 +14,24 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
+// macOS's setgroups takes at most 16 groups, and admin and directory-bound accounts often have
+// more: the child must still start, carrying the primary group. Elsewhere every group is kept.
+func TestCredentialGroupsFitSetgroups(t *testing.T) {
+	gids := make([]uint32, 20)
+	for i := range gids {
+		gids[i] = uint32(100 + i)
+	}
+	if got := credentialGroups(gids, "darwin"); len(got) != darwinMaxGroups || got[0] != 100 {
+		t.Errorf("darwin, 20 groups: %v, want the first %d, primary first", got, darwinMaxGroups)
+	}
+	if got := credentialGroups(gids[:darwinMaxGroups], "darwin"); len(got) != darwinMaxGroups {
+		t.Errorf("darwin, %d groups: %v, want all of them", darwinMaxGroups, got)
+	}
+	if got := credentialGroups(gids, "linux"); len(got) != len(gids) {
+		t.Errorf("linux, 20 groups: %v, want all of them", got)
+	}
+}
+
 // The system job resolves packages as the console user, so the kernel decides what of the config
 // they point at is read: a root-only npmrc that root would read as public is, for them, config
 // Beacon cannot vouch for. Needs root and an unprivileged account, named by

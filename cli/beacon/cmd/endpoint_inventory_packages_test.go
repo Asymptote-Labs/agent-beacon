@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/launchpkg"
 )
@@ -36,6 +37,16 @@ func TestPackageResolverHelperProcess(t *testing.T) {
 	case "fail":
 		fmt.Fprint(os.Stderr, "boom")
 		os.Exit(3)
+	case "hold-stdout":
+		// A process the console user controls keeps the child's stdout open after it dies.
+		holder := helperResolver(context.Background(), "sleep")
+		holder.Stdout = os.Stdout
+		if err := holder.Start(); err != nil {
+			os.Exit(1)
+		}
+		time.Sleep(time.Minute)
+	case "sleep":
+		time.Sleep(30 * time.Second)
 	}
 	os.Exit(0)
 }
@@ -103,5 +114,19 @@ func TestResolvePackagesCommand(t *testing.T) {
 	}
 	if !slices.Equal(answers, want) {
 		t.Fatalf("answers = %+v, want %+v", answers, want)
+	}
+}
+
+// The child is the console user's own process, so they can hold its stdout open after the timeout
+// kills it. The job must still give up, or it would wait forever holding the inventory lock.
+func TestResolvePackagesGivesUpOnAHeldPipe(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if got, err := resolvePackagesWith(helperResolver(ctx, "hold-stdout"), launchpkg.RegistryEnv{}, testQueries); err == nil {
+		t.Fatalf("answers = %+v, want an error", got)
+	}
+	if elapsed := time.Since(start); elapsed > packageResolveWaitDelay+10*time.Second {
+		t.Fatalf("resolvePackagesWith took %v; a process holding the pipe kept it waiting", elapsed)
 	}
 }
