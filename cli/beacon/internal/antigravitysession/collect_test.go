@@ -14,6 +14,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync/sessionsynctest"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -486,35 +487,36 @@ func TestABudgetStopsTheSweepWithTheCursorPastOnlyWhatWasWritten(t *testing.T) {
 	}
 }
 
-// Hook coverage that starts mid-conversation suppresses what the hooks recorded from then on --
-// prompts and tool events -- and keeps what they cannot carry: agent messages, reasoning and token
-// usage, before and after. The cursor moves past the suppressed events, so they are not retried.
-func TestLiveCoverageSuppressesWhatTheHooksRecordedAfterTheCutover(t *testing.T) {
+// A conversation the hooks covered from its start, whose hooks recorded only its first prompt --
+// what Beacon v1.3.60's hooks do, having no PreInvocation handler. The sweep suppresses the session
+// start, the recorded prompt and the tool events, keeps what hooks cannot carry (agent messages,
+// reasoning, token usage), and backfills the second prompt the hooks never saw. The cursor moves
+// past the suppressed events, so they are not retried.
+func TestLiveCoverageBackfillsThePromptsTheHooksDidNotRecord(t *testing.T) {
 	f := newFixture(t)
 	f.writeConversation(t, fixtureConversation, fullTranscriptName, fixtureSteps)
 	opts := f.options()
-	// The first hook event lands as the command's result does; with the two-second skew
-	// allowance, steps from 10:00:02 on are covered.
-	opts.LiveCoverage = map[string]time.Time{fixtureConversation: time.Date(2026, 5, 1, 10, 0, 4, 0, time.UTC)}
+	opts.LiveCoverage = sessionsync.LiveCoverage{
+		From:    map[string]time.Time{fixtureConversation: time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)},
+		Prompts: map[string]map[string]bool{fixtureConversation: {asymptoteobserve.RetainedContent("Run: cat notes.txt", 0).Hash: true}},
+	}
 
 	summary, err := CollectOnce(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
-		"session.started",
-		"prompt.submitted",
-		"agent.reasoning", "tool.invoked", "token.usage",
-		// command.executed (10:00:03) is the hooks'.
+		// session.started, the first prompt, tool.invoked and command.executed are the hooks'.
+		"agent.reasoning", "token.usage",
 		"agent.message", "token.usage",
-		// The second prompt (10:05:00) is the hooks'.
+		"prompt.submitted",
 		"agent.message", "token.usage",
 	}
 	if got := logActions(t, f.logPath); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("log holds %v\nwant      %v", got, want)
 	}
-	if summary.EventsEmitted != len(want) || summary.EventsSuppressedLive != 2 {
-		t.Fatalf("summary = %+v, want %d emitted and 2 suppressed", summary, len(want))
+	if summary.EventsEmitted != len(want) || summary.EventsSuppressedLive != 4 {
+		t.Fatalf("summary = %+v, want %d emitted and 4 suppressed", summary, len(want))
 	}
 
 	touchNewer(t, f.transcript(fixtureConversation, fullTranscriptName))
@@ -527,7 +529,7 @@ func TestLiveCoverageSuppressesWhatTheHooksRecordedAfterTheCutover(t *testing.T)
 	other := newFixture(t)
 	other.writeConversation(t, fixtureConversation, fullTranscriptName, fixtureSteps)
 	otherOpts := other.options()
-	otherOpts.LiveCoverage = map[string]time.Time{"another-conversation": time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)}
+	otherOpts.LiveCoverage = sessionsync.LiveCoverage{From: map[string]time.Time{"another-conversation": time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)}}
 	if s, err := CollectOnce(otherOpts); err != nil || s.EventsEmitted != len(fixtureEvents) || s.EventsSuppressedLive != 0 {
 		t.Fatalf("uncovered conversation = %+v (%v)", s, err)
 	}

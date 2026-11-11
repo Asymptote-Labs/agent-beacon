@@ -96,10 +96,10 @@ type CollectOptions struct {
 	// RotateBytes is the size the runtime log rotates at while this sweep writes it; zero is
 	// writer.DefaultRotateBytes.
 	RotateBytes int64
-	// LiveCoverage, when set, marks the conversations the live Antigravity hooks have already
-	// reported. The hook payload carries prompts and tool calls but no assistant text, reasoning or
-	// token counts, so the sweep keeps only what hooks cannot see from each covered conversation's
-	// first hook event on (see sessionsync.LiveCoverage.Suppresses).
+	// LiveCoverage, when set, is what the live Antigravity hooks already recorded. The hook payload
+	// carries prompts and tool calls but no assistant text, reasoning or token counts, so for a
+	// covered conversation the sweep keeps what hooks cannot see, and every prompt they did not
+	// record (see liveDuplicate).
 	LiveCoverage sessionsync.LiveCoverage
 
 	// guard keeps the sweep from rotating its own output out of the log; CollectOnce sets it.
@@ -207,9 +207,9 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	}
 	// written is how far through mapped the sweep got: an event suppressed as a live duplicate is
 	// passed over exactly as if it had been written, so the cursor moves past it.
-	written := 0
+	written, recordedPromptLine := 0, 0
 	for _, item := range mapped {
-		if opts.LiveCoverage.Suppresses(ref.ID, item.Event.Event.Action, item.TimestampMS) {
+		if liveDuplicate(item, ref.ID, opts.LiveCoverage, &recordedPromptLine) {
 			written++
 			summary.EventsSuppressedLive++
 			continue
@@ -224,6 +224,30 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	commit(cursor, mapped, written)
 	cursor.UpdatedAtMS = ref.ModTimeUnixMS
 	return true, nil
+}
+
+// liveDuplicate reports whether the live hooks already recorded item. Prompts are matched by
+// content hash, not by time: hooks written by Beacon v1.3.60 record only a conversation's first
+// prompt, and a PreInvocation hook that failed records none of its turn, so a prompt the hooks never
+// saw is backfilled even in a covered conversation. A handoff link goes with the prompt it was read
+// from, since the hook path records the two together; recordedPromptLine carries the line of the
+// last prompt found recorded. Everything else is sessionsync.LiveCoverage.Suppresses.
+func liveDuplicate(item MappedEvent, conversationID string, coverage sessionsync.LiveCoverage, recordedPromptLine *int) bool {
+	switch item.Event.Event.Action {
+	case "prompt.submitted":
+		hash := ""
+		if item.Event.Content != nil {
+			hash = item.Event.Content.Hash
+		}
+		if !coverage.RecordedPrompt(conversationID, hash) {
+			return false
+		}
+		*recordedPromptLine = item.SourceLine
+		return true
+	case "session.handoff":
+		return item.SourceLine > 0 && item.SourceLine == *recordedPromptLine
+	}
+	return coverage.Suppresses(conversationID, item.Event.Event.Action, item.TimestampMS)
 }
 
 // commit advances the cursor over the events that were actually written.
