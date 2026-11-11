@@ -299,3 +299,82 @@ func TestOwnerUIDNamesTheHomesOwner(t *testing.T) {
 		t.Fatalf("OwnerUID = %d, %v; want %d", uid, err, os.Getuid())
 	}
 }
+
+func TestOpenOutsideReadsTheUsersOwnFilesOutsideTheHome(t *testing.T) {
+	f := newFixture(t)
+	confine(t, f.home, os.Getuid())
+	file, err := OpenOutside(f.secret)
+	if err != nil {
+		t.Fatalf("OpenOutside of a file the console user owns: %v", err)
+	}
+	_ = file.Close()
+	// Inside the home it is Open: a link out of the home is still refused.
+	link := filepath.Join(f.home, "out.jsonl")
+	if err := os.Symlink(f.secret, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err = OpenOutside(link)
+	requireRefusedAsAbsent(t, "a link out of the home", err)
+}
+
+func TestOpenOutsideRefusesWhatTheUserCanPlant(t *testing.T) {
+	f := newFixture(t)
+	fifo := filepath.Join(f.outside, "npmrc")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("mkfifo: %v", err)
+	}
+	fileLink := filepath.Join(f.outside, "file-link")
+	dirLink := filepath.Join(f.outside, "dir-link")
+	if err := os.Symlink(f.secret, fileLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(f.secret), dirLink); err != nil {
+		t.Fatal(err)
+	}
+	c := confine(t, f.home, os.Getuid())
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := OpenOutside(fifo)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		requireRefusedAsAbsent(t, "a FIFO outside the home", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("opening a FIFO outside the home blocked; a planted one would hang the inventory job")
+	}
+	_, err := OpenOutside(fileLink)
+	requireRefusedAsAbsent(t, "a symlink the user made", err)
+	_, err = OpenOutside(filepath.Join(dirLink, filepath.Base(f.secret)))
+	requireRefusedAsAbsent(t, "a path through a directory symlink the user made", err)
+	if n, _ := c.Refused(); n != 3 {
+		t.Fatalf("refusals = %d, want 3", n)
+	}
+	// An absent file is absent, not a refusal.
+	_, err = OpenOutside(filepath.Join(f.outside, "missing"))
+	requireRefusedAsAbsent(t, "a missing file", err)
+	if n, _ := c.Refused(); n != 3 {
+		t.Fatalf("a missing file was counted as refused")
+	}
+}
+
+func TestOpenOutsideRefusesFilesAnotherUserOwns(t *testing.T) {
+	f := newFixture(t)
+	confine(t, f.home, os.Getuid()+1)
+	_, err := OpenOutside(f.secret)
+	requireRefusedAsAbsent(t, "a file outside the home another uid owns", err)
+}
+
+func TestOpenOutsideIsOSOpenUnconfined(t *testing.T) {
+	f := newFixture(t)
+	link := filepath.Join(f.outside, "link")
+	if err := os.Symlink(f.secret, link); err != nil {
+		t.Fatal(err)
+	}
+	file, err := OpenOutside(link)
+	if err != nil {
+		t.Fatalf("unconfined OpenOutside: %v", err)
+	}
+	_ = file.Close()
+}

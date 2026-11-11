@@ -2,7 +2,9 @@ package intel
 
 import (
 	"bufio"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -344,7 +346,10 @@ func (r *Registries) readNpmrc(path string) {
 		r.NPMScopes = map[string]bool{}
 	}
 	r.read[path] = true
-	lines, ok := readConfigLines(path)
+	lines, ok, refused := readConfigLines(path)
+	if refused {
+		r.NPM = true
+	}
 	if !ok {
 		return
 	}
@@ -490,7 +495,10 @@ func cutKeyValue(line string) (key, value string, ok bool) {
 }
 
 func registryLine(path string, match func(string) bool) bool {
-	lines, ok := readConfigLines(path)
+	lines, ok, refused := readConfigLines(path)
+	if refused {
+		return true
+	}
 	if !ok {
 		return false
 	}
@@ -502,26 +510,28 @@ func registryLine(path string, match func(string) bool) bool {
 	return false
 }
 
-// readConfigLines returns a config file's lines without blanks or comments.
-func readConfigLines(path string) ([]string, bool) {
+// readConfigLines returns a config file's lines without blanks or comments. refused reports a
+// file that is there but that a confined scan would not read: the system inventory job reads
+// the console user's config as root, and the paths it follows from there (an npmrc's
+// userconfig or prefix, a project directory, a server's cwd or PATH) are the user's to choose,
+// so sessionfs.OpenOutside admits only what is safe to read. Beacon cannot tell what such a
+// file says, so the caller holds its ecosystem back as private.
+func readConfigLines(path string) (lines []string, ok, refused bool) {
 	if path == "" {
-		return nil, false
+		return nil, false, false
 	}
-	open := os.Open
-	if sessionfs.Confined(path) {
-		// The system inventory job reads the console user's home as root: a file there opens
-		// only as the scan's own reads do, never through a symlink out of the home.
-		open = sessionfs.Open
-	}
-	f, err := open(path)
+	f, err := sessionfs.OpenOutside(path)
 	if err != nil {
-		return nil, false
+		if sessionfs.Active() {
+			_, statErr := os.Lstat(path)
+			refused = !errors.Is(statErr, fs.ErrNotExist)
+		}
+		return nil, false, refused
 	}
 	defer f.Close()
 	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
-		return nil, false
+		return nil, false, false
 	}
-	var lines []string
 	scanner := bufio.NewScanner(io.LimitReader(f, maxRegistryConfigBytes))
 	scanner.Buffer(make([]byte, 64*1024), maxRegistryConfigBytes)
 	for scanner.Scan() {
@@ -531,5 +541,5 @@ func readConfigLines(path string) ([]string, bool) {
 		}
 		lines = append(lines, line)
 	}
-	return lines, true
+	return lines, true, false
 }

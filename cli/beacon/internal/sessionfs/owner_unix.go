@@ -9,7 +9,10 @@ import (
 	"syscall"
 )
 
-const openNonblock = syscall.O_NONBLOCK
+const (
+	openNonblock = syscall.O_NONBLOCK
+	openNofollow = syscall.O_NOFOLLOW
+)
 
 func ownerUID(info fs.FileInfo) (int, bool) {
 	st, ok := info.Sys().(*syscall.Stat_t)
