@@ -151,6 +151,7 @@
             "pages": [
               "runtimes/index",
               "runtimes/integration-model",
+              "runtimes/llm-gateway",
               {
                 "group": "Local Agents",
                 "pages": [

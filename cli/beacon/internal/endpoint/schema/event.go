@@ -34,10 +34,11 @@ type Origin = asymptoteobserve.Origin
 // adapter and the collector exporter rather than bare string literals. See
 // pkg/asymptoteobserve/provenance.go for what each one means.
 const (
-	CollectionMethodHook   = asymptoteobserve.CollectionMethodHook
-	CollectionMethodOTLP   = asymptoteobserve.CollectionMethodOTLP
-	CollectionMethodPlugin = asymptoteobserve.CollectionMethodPlugin
-	CollectionMethodPoll   = asymptoteobserve.CollectionMethodPoll
+	CollectionMethodHook    = asymptoteobserve.CollectionMethodHook
+	CollectionMethodOTLP    = asymptoteobserve.CollectionMethodOTLP
+	CollectionMethodPlugin  = asymptoteobserve.CollectionMethodPlugin
+	CollectionMethodPoll    = asymptoteobserve.CollectionMethodPoll
+	CollectionMethodGateway = asymptoteobserve.CollectionMethodGateway
 
 	FidelityObserved = asymptoteobserve.FidelityObserved
 	FidelityInferred = asymptoteobserve.FidelityInferred

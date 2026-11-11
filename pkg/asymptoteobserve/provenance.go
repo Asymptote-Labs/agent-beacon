@@ -4,7 +4,7 @@ import "strings"
 
 // Provenance: how Beacon came to know a thing, recorded alongside the thing itself.
 //
-// Beacon collects from runtimes over four different mechanisms whose fidelity differs by roughly
+// Beacon collects from runtimes over five different mechanisms whose fidelity differs by roughly
 // an order of magnitude. A Claude Code `PermissionRequest` hook hands Beacon a typed payload that
 // names the operation. A Codex OTLP log record hands it a body string that Beacon has to classify
 // by substring match, with a catch-all that lands on `tool.invoked` when nothing matches. Both
@@ -41,6 +41,12 @@ const (
 	// ~/.fx/sessions log are both this: different transports, the same posture, and the same thing
 	// a consumer needs to know, which is that nothing on this path could have been intercepted.
 	CollectionMethodPoll = "poll"
+	// CollectionMethodGateway is a service in the path of the runtime's model calls -- an LLM
+	// gateway or proxy hook -- that sees each request and reply on the wire. It observes the
+	// conversation as the model receives it, not the runtime's own lifecycle: tool calls are what
+	// the model asked for and tool results what the client sent back, so actions it derives from
+	// them are inferred, and the endpoint and user are the gateway's view of the caller.
+	CollectionMethodGateway = "gateway"
 )
 
 const (
@@ -57,12 +63,12 @@ const (
 	FidelityInferred = "inferred"
 )
 
-// ValidCollectionMethod reports whether value is one of the four defined methods. The empty
+// ValidCollectionMethod reports whether value is one of the five defined methods. The empty
 // string is not a method and is rejected here; callers that allow "unset" check for it first,
 // which is what Validate does.
 func ValidCollectionMethod(value string) bool {
 	switch value {
-	case CollectionMethodHook, CollectionMethodOTLP, CollectionMethodPlugin, CollectionMethodPoll:
+	case CollectionMethodHook, CollectionMethodOTLP, CollectionMethodPlugin, CollectionMethodPoll, CollectionMethodGateway:
 		return true
 	}
 	return false

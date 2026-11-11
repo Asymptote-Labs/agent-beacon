@@ -42,6 +42,7 @@ Two optional fields carry that context.
 | `plugin` | A Beacon-managed plugin or extension file the runtime loads, which calls `beacon-hooks` from the runtime's own callbacks |
 | `otlp` | OpenTelemetry logs, traces, or metrics the runtime exported to Beacon's local collector |
 | `poll` | A periodic pull from a runtime's API, seen after the fact rather than as the agent works |
+| `gateway` | An LLM gateway or proxy in the path of the runtime's model calls, which sees each request and reply as it passes. Its `endpoint` is the gateway host, not the developer's machine |
 
 `event.fidelity` describes the specific action on the event:
 
@@ -82,7 +83,7 @@ call was seen. Anything counting real operator decisions should exclude them.
 | `severity` | `info`, `low`, `medium`, `high`, or `critical` |
 | `endpoint` | Host and operating system context |
 | `harness` | Runtime that produced the signal |
-| `harness.collection_method` | Optional. `hook`, `plugin`, `otlp`, or `poll`. See [Provenance](#provenance-how-beacon-knows-what-it-wrote) |
+| `harness.collection_method` | Optional. `hook`, `plugin`, `otlp`, `poll`, or `gateway`. See [Provenance](#provenance-how-beacon-knows-what-it-wrote) |
 
 `event.id` is written alongside these: a deterministic UUID identifying the event, described under
 [event identity](/telemetry-schema/normalization#event-identity). It is not required, so events

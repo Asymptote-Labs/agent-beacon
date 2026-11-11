@@ -1,0 +1,62 @@
+# beacon-gateway configuration. Run: beacon-gateway -config deploy/beacon-gateway.yaml
+# ${VAR} references are expanded from the environment.
+
+# /healthz and /stats (calls, refused, analysis failures, records dropped per output, Go
+# runtime). "off" disables it.
+admin: 127.0.0.1:4029
+
+# Profiling on the admin listener. pprof exposes internals: keep the listener on localhost.
+# debug:
+#   pprof: true
+#   mutex_profile_fraction: 100      # sample 1 in n contended locks
+#   block_profile_rate: 100000       # sample blocking events of 100µs and longer
+
+# Garbage collector. The call path allocates quickly against a small live heap; collecting less
+# often (percent, as GOGC) buys throughput with memory, and the limit (as GOMEMLIMIT) caps the
+# trade. GOGC and GOMEMLIMIT in the environment win.
+# gc:
+#   percent: 400                     # default
+#   memory_limit: 6GiB               # default: 80% of the container's limit (cgroup v2), else none
+
+# One entry per gateway attachment. `type` picks the adapter; the other keys are its config.
+gateways:
+  - type: litellm             # LiteLLM generic_guardrail_api (deploy/litellm.yaml)
+    addr: 127.0.0.1:4019
+  # - type: envoy             # Envoy ext_proc: Envoy, Envoy Gateway, Istio (deploy/envoy/envoy.yaml)
+  #   addr: 0.0.0.0:4021
+  #   identity_headers: { user: x-user-id, team: x-team-id }   # set by jwt_authn or the gateway
+  # - type: portkey           # Portkey default.webhook guardrail
+  #   addr: 127.0.0.1:4022
+  #   token: ${PORTKEY_WEBHOOK_TOKEN}
+
+pipeline:
+  # Request headers naming the conversation, in order of preference. Default:
+  # x-claude-code-session-id, session_id, x-session-id, conversation_id.
+  # session_headers: [x-claude-code-session-id, session_id]
+  # Admission: memory for the bodies being read and analyzed, processors for the calls being
+  # analyzed, and how long a call waits for either before it is let through unrecorded.
+  # max_body_bytes: 1GiB         # bodies read and analyzed at once (default: 1/4 of the gc memory limit, else 1GiB)
+  # max_in_flight: 24            # calls analyzed at once (default: 2 per CPU)
+  # queue_wait: 250ms
+  # How long a session remembers having reported a system prompt or tool definition.
+  seen_ttl: 6h
+
+# All cross-call state (what a session already reported) lives here; replicas keep none of their
+# own. "memory" is per process.
+store:
+  type: memory
+  max_entries: 1000000
+
+# What recorded events keep of the content they describe: full (default) or metadata, which writes
+# them as Beacon's Metadata-only forwarding does (no prompt, reply, instructions, tool arguments or
+# results; identifiers, paths, commands, model and token usage stay).
+content:
+  retention: full
+
+# Each output receives the record kinds listed (all kinds if none): beacon.event (lines in
+# runtime.jsonl's schema; `beacon scan --log-path` reads them) and finding.
+outputs:
+  - jsonl: gateway-events.jsonl
+    kinds: [beacon.event]
+  - jsonl: gateway-findings.jsonl
+    kinds: [finding]

@@ -1656,6 +1656,7 @@ function captureMethodLabel(value) {
     otlp: "OpenTelemetry",
     plugin: "Plugin",
     poll: "Poll",
+    gateway: "Gateway",
   };
   return labels[String(value).toLowerCase()] || value;
 }

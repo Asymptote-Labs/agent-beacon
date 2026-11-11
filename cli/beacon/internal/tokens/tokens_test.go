@@ -743,6 +743,7 @@ func TestAggregatePrefersLiveCaptureOverPollBackfill(t *testing.T) {
 		plugin = schema.CollectionMethodPlugin
 		hook   = schema.CollectionMethodHook
 		poll   = schema.CollectionMethodPoll
+		gw     = schema.CollectionMethodGateway
 	)
 
 	cases := []struct {
@@ -1047,6 +1048,19 @@ func TestAggregatePrefersLiveCaptureOverPollBackfill(t *testing.T) {
 			},
 			want:       tokens{input: 16},
 			wantEvents: 2,
+		},
+		{
+			// A gateway sees each model call live, so it is authoritative over a poll copy of
+			// the same session from the same endpoint, like any other live channel.
+			name: "gateway is a live channel",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "claude_code", gw, "g1", "prompt.submitted", nil, nil),
+				event("2026-06-11T10:00:04Z", "claude_code", poll, "g1", "agent.response", &tokens{input: 12, output: 40}, model("claude-opus-4-6")),
+				event("2026-06-11T10:00:05Z", "claude_code", gw, "g1", "agent.message", &tokens{input: 12, output: 40}, model("claude-opus-4-6")),
+			},
+			want:       tokens{input: 12, output: 40},
+			wantEvents: 1,
+			suppressed: 1,
 		},
 	}
 	for _, tc := range cases {

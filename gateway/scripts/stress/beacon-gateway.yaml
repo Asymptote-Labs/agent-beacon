@@ -1,0 +1,31 @@
+# Stress configuration: many listeners per adapter (one ephemeral-port range per destination port,
+# so HTTP/1.1 load is spread across ports), all on one pipeline, profiling on.
+# Outputs go to JSONL under /tmp.
+admin: 127.0.0.1:4029
+debug:
+  pprof: true
+  mutex_profile_fraction: 100
+  block_profile_rate: 100000   # 100µs
+gateways:
+  - {type: litellm, name: litellm-0, addr: 127.0.0.1:4100}
+  - {type: litellm, name: litellm-1, addr: 127.0.0.1:4101}
+  - {type: litellm, name: litellm-2, addr: 127.0.0.1:4102}
+  - {type: litellm, name: litellm-3, addr: 127.0.0.1:4103}
+  - {type: litellm, name: litellm-4, addr: 127.0.0.1:4104}
+  - {type: litellm, name: litellm-5, addr: 127.0.0.1:4105}
+  - {type: litellm, name: litellm-6, addr: 127.0.0.1:4106}
+  - {type: litellm, name: litellm-7, addr: 127.0.0.1:4107}
+  - {type: portkey, name: portkey-0, addr: 127.0.0.1:4110}
+  - {type: portkey, name: portkey-1, addr: 127.0.0.1:4111}
+  - {type: portkey, name: portkey-2, addr: 127.0.0.1:4112}
+  - {type: portkey, name: portkey-3, addr: 127.0.0.1:4113}
+  - {type: envoy, name: envoy-0, addr: 127.0.0.1:4120}
+  - {type: envoy, name: envoy-1, addr: 127.0.0.1:4121}
+store:
+  type: memory
+  max_entries: 2000000
+outputs:
+  - jsonl: /tmp/bgw-stress/events.jsonl
+    kinds: [beacon.event]
+  - jsonl: /tmp/bgw-stress/findings.jsonl
+    kinds: [finding]

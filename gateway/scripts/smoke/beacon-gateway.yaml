@@ -1,0 +1,13 @@
+# Smoke configuration: every adapter on one pipeline, observing, records under /tmp/bgw-smoke.
+gateways:
+  - type: litellm   # LiteLLM generic_guardrail_api → scripts/smoke/litellm.yaml
+    addr: 127.0.0.1:4019
+  - type: envoy     # Envoy ext_proc → deploy/envoy/envoy.yaml
+    addr: 0.0.0.0:4021
+  - type: portkey   # Portkey default.webhook
+    addr: 127.0.0.1:4022
+outputs:
+  - jsonl: /tmp/bgw-smoke/events.jsonl
+    kinds: [beacon.event]
+  - jsonl: /tmp/bgw-smoke/findings.jsonl
+    kinds: [finding]

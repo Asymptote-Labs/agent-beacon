@@ -1,0 +1,51 @@
+# Smoke config: mocked models, so no provider key and no spend. claude-tools answers with a
+# tool call reading a credentials file, which the post_call guardrail records.
+model_list:
+  - model_name: claude-mock
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: sk-dummy
+      mock_response: "ok"
+  - model_name: claude-tools
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: sk-dummy
+      # The Anthropic route mocks only when mock_response is set; the tool call rides along.
+      mock_response: "Reading your AWS credentials."
+      mock_tool_calls:
+        - id: toolu_smoke_read
+          type: function
+          function:
+            name: Read
+            arguments: '{"file_path": "/home/dev/.aws/credentials"}'
+  - model_name: gpt-mock
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: sk-dummy
+      mock_response: "ok"
+
+  # A real provider-shaped reply: scripts/smoke/upstream answers every call with a tool_use.
+  - model_name: claude-upstream
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: sk-dummy
+      api_base: http://127.0.0.1:4020
+
+guardrails:
+  - guardrail_name: beacon-gateway-request
+    litellm_params:
+      guardrail: generic_guardrail_api
+      mode: pre_call
+      api_base: http://127.0.0.1:4019
+      default_on: true
+      unreachable_fallback: fail_open
+      extra_headers: [x-claude-code-session-id, session_id]
+  - guardrail_name: beacon-gateway-response
+    litellm_params:
+      guardrail: generic_guardrail_api
+      mode: post_call
+      api_base: http://127.0.0.1:4019
+      default_on: true
+      unreachable_fallback: fail_open
+      extra_headers: [x-claude-code-session-id, session_id]
+      streaming_buffer_until_moderated: false

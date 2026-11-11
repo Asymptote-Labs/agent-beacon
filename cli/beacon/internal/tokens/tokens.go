@@ -710,10 +710,12 @@ func usageHarnessKey(harness string) string {
 
 // isLiveCollectionMethod reports whether a collection method observed the runtime as it worked.
 // An unset method is not live: it is a log written before provenance existed, or an event Beacon
-// emitted about itself, and neither is evidence that a live channel covered the session.
+// emitted about itself, and neither is evidence that a live channel covered the session. A
+// gateway sees each model call as it happens, so it is live; its events carry the gateway's own
+// endpoint, so they arbitrate only against poll events from that same endpoint.
 func isLiveCollectionMethod(method string) bool {
 	switch method {
-	case schema.CollectionMethodHook, schema.CollectionMethodOTLP, schema.CollectionMethodPlugin:
+	case schema.CollectionMethodHook, schema.CollectionMethodOTLP, schema.CollectionMethodPlugin, schema.CollectionMethodGateway:
 		return true
 	}
 	return false
