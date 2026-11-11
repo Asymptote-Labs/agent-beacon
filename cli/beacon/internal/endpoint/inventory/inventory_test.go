@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/launchpkg"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -881,7 +882,7 @@ func TestSkillScanFollowsSymlinkedSkillDirectories(t *testing.T) {
 	}
 }
 
-func TestSkillSourceComesFromTheSkillsCLILock(t *testing.T) {
+func TestSkillIntelKeyComesFromTheSkillsCLILock(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
 	agents := filepath.Join(home, ".agents", "skills")
@@ -904,9 +905,9 @@ func TestSkillSourceComesFromTheSkillsCLILock(t *testing.T) {
 	result := Scan(Options{HomeDir: home, WorkingDir: work, Runtimes: []string{"agent_skills", "claude_code"}, Now: fixedNow})
 
 	for _, tc := range []struct{ runtime, name, manifest, want string }{
-		{"agent_skills", "frontend-design", filepath.Join(agents, "frontend-design", "SKILL.md"), "anthropics/skills"},
-		// Claude's copy links to the CLI's, so it carries the same source.
-		{"claude_code", "frontend-design", filepath.Join(linkRoot, "frontend-design", "SKILL.md"), "anthropics/skills"},
+		{"agent_skills", "frontend-design", filepath.Join(agents, "frontend-design", "SKILL.md"), "skill:anthropics/skills#frontend-design"},
+		// Claude's copy links to the CLI's, so it carries the same key.
+		{"claude_code", "frontend-design", filepath.Join(linkRoot, "frontend-design", "SKILL.md"), "skill:anthropics/skills#frontend-design"},
 		{"agent_skills", "local-skill", filepath.Join(agents, "local-skill", "SKILL.md"), ""},
 		{"agent_skills", "from-git", filepath.Join(agents, "from-git", "SKILL.md"), ""},
 		{"agent_skills", "sneaky", filepath.Join(agents, "sneaky", "SKILL.md"), ""},
@@ -915,30 +916,39 @@ func TestSkillSourceComesFromTheSkillsCLILock(t *testing.T) {
 		if skill == nil {
 			t.Fatalf("%s %s not found in %#v", tc.runtime, tc.name, result.Skills)
 		}
-		if skill.Source != tc.want {
-			t.Errorf("%s %s source = %q, want %q", tc.runtime, tc.name, skill.Source, tc.want)
+		if skill.IntelKey != tc.want {
+			t.Errorf("%s %s intel key = %q, want %q", tc.runtime, tc.name, skill.IntelKey, tc.want)
 		}
 	}
 }
 
-func TestMCPServerKeepsItsLaunchOutOfTheRecord(t *testing.T) {
+// The record names the public package a server runs, never its other arguments or env; a package
+// from a private registry is named only in memory.
+func TestMCPServerRecordNamesItsPackageAndNothingElseOfItsLaunch(t *testing.T) {
 	home := t.TempDir()
-	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers": {"supabase": {"command": "npx", "args": ["-y", "@supabase/mcp-server-supabase@latest", "--project-ref=abc"], "env": {"SUPABASE_ACCESS_TOKEN": "secret"}}}}`)
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers": {
+		"supabase": {"command": "npx", "args": ["-y", "@supabase/mcp-server-supabase@latest", "--project-ref=abc"], "env": {"SUPABASE_ACCESS_TOKEN": "secret"}},
+		"billing": {"command": "npx", "args": ["--registry=https://npm.acme.internal", "-y", "@acme/billing-mcp"]}
+	}}`)
 
-	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow})
+	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow, LauncherEnv: &launchpkg.RegistryEnv{}})
 
-	if len(result.MCPServers) != 1 {
-		t.Fatalf("servers = %#v", result.MCPServers)
+	servers := map[string]MCPServer{}
+	for _, s := range result.MCPServers {
+		servers[s.ServerName] = s
 	}
-	server := result.MCPServers[0]
-	if server.Definition != nil || server.Launch["command"] != "npx" {
-		t.Fatalf("definition = %#v, launch = %#v", server.Definition, server.Launch)
+	supabase, billing := servers["supabase"], servers["billing"]
+	if supabase.Definition != nil || supabase.Package != "npm:@supabase/mcp-server-supabase" || supabase.PackageRegistry != PackageRegistryPublic {
+		t.Fatalf("supabase = %+v", supabase)
 	}
-	data, err := json.Marshal(server)
+	if billing.Package != "" || billing.PackageRegistry != PackageRegistryPrivate || billing.PrivatePackage != "npm:@acme/billing-mcp" {
+		t.Fatalf("billing = %+v", billing)
+	}
+	data, err := json.Marshal(result.MCPServers)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, leaked := range []string{"project-ref", "mcp-server-supabase", "secret"} {
+	for _, leaked := range []string{"project-ref", "secret", "acme"} {
 		if strings.Contains(string(data), leaked) {
 			t.Fatalf("record carries %q: %s", leaked, data)
 		}
@@ -1507,8 +1517,8 @@ func TestScanFollowsPiAgentDirForTheUserExtension(t *testing.T) {
 }
 
 // Claude Code starts a local-scope server (~/.claude.json projects.<path>.mcpServers) in its
-// project, so the scan keeps that directory for in-memory readers, and keeps it out of the record.
-func TestClaudeProjectServersCarryTheirProjectInMemoryOnly(t *testing.T) {
+// project, so the scan keeps that directory to read the launcher config there.
+func TestClaudeProjectServersCarryTheirProject(t *testing.T) {
 	home := t.TempDir()
 	a, b, c := filepath.Join(home, "work", "proj-alpha"), filepath.Join(home, "work", "proj-beta"), filepath.Join(home, "work", "proj-gamma")
 	config, err := json.Marshal(map[string]interface{}{
@@ -1527,19 +1537,39 @@ func TestClaudeProjectServersCarryTheirProjectInMemoryOnly(t *testing.T) {
 	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow, IncludeContents: true})
 	got := map[string][]string{}
 	for _, s := range result.MCPServers {
-		got[s.ServerName] = s.ProjectDirs
-		encoded, err := json.Marshal(s)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(encoded), "proj-") || strings.Contains(strings.ToLower(string(encoded)), "projectdirs") {
-			t.Errorf("project directory serialized: %s", encoded)
-		}
+		got[s.ServerName] = s.projectDirs
 	}
 	want := map[string][]string{"global": nil, "tool": {a, b}, "other": {c}, "rel": nil}
 	for name, dirs := range want {
 		if !slices.Equal(got[name], dirs) {
-			t.Errorf("%s ProjectDirs = %v, want %v", name, got[name], dirs)
+			t.Errorf("%s projectDirs = %v, want %v", name, got[name], dirs)
 		}
+	}
+}
+
+// A local-scope server's launcher reads its project's npmrc, so a scope that npmrc sends to a
+// private registry makes the package private however the scan was started.
+func TestScanResolvesPackagesWithTheProjectAServerRunsIn(t *testing.T) {
+	home := t.TempDir()
+	project := filepath.Join(home, "work", "acme")
+	writeFile(t, filepath.Join(project, ".npmrc"), "@acme:registry=https://npm.acme.internal/\n")
+	config, err := json.Marshal(map[string]interface{}{"projects": map[string]interface{}{
+		project: map[string]interface{}{"mcpServers": map[string]interface{}{
+			"tool":   map[string]interface{}{"command": "npx", "args": []string{"-y", "@acme/secret-tool"}},
+			"public": map[string]interface{}{"command": "npx", "args": []string{"-y", "@playwright/mcp"}},
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(home, ".claude.json"), string(config))
+	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow, LauncherEnv: &launchpkg.RegistryEnv{}})
+	got := map[string][3]string{}
+	for _, s := range result.MCPServers {
+		got[s.ServerName] = [3]string{s.Package, s.PackageRegistry, s.PrivatePackage}
+	}
+	if got["public"] != [3]string{"npm:@playwright/mcp", PackageRegistryPublic, ""} ||
+		got["tool"] != [3]string{"", PackageRegistryPrivate, "npm:@acme/secret-tool"} {
+		t.Fatalf("packages = %v", got)
 	}
 }

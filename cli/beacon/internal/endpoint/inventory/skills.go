@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -33,10 +32,10 @@ type Skill struct {
 	ModifiedAt       string           `json:"modified_at,omitempty"`
 	Redaction        string           `json:"redaction"`
 	Content          *CapturedContent `json:"content,omitempty"`
-	// Source is the GitHub repository (<owner>/<repo>) the skill was installed from, as the
-	// skills CLI (npx skills add) records it in its lock file; with the skill's name it is the
-	// skill's Beacon Intel key, skill:<owner>/<repo>#<name>. Empty when nothing records one.
-	Source string `json:"source,omitempty"`
+	// IntelKey is the skill's Beacon Intel entity key, skill:<owner>/<repo>#<name>: the GitHub
+	// repository the skills CLI (npx skills add) recorded installing it from in its lock file,
+	// and the name it installed it under. Empty when nothing records one.
+	IntelKey string `json:"intel_key,omitempty"`
 }
 
 type skillRoot struct {
@@ -148,7 +147,7 @@ func inspectSkillRoot(root skillRoot, redaction string, co contentOptions, locks
 		}
 		skill := inspectSkillManifest(root, entry.Name(), manifestPath, redaction, co)
 		if skill.Exists {
-			skill.Source = locks.source(filepath.Join(root.path, entry.Name()))
+			skill.IntelKey = locks.intelKey(filepath.Join(root.path, entry.Name()))
 		}
 		skills = append(skills, skill)
 	}
@@ -237,10 +236,11 @@ var githubRepo = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0
 // or unreadable.
 type skillLocks map[string]map[string]string
 
-// source is the repository the skills CLI installed the skill in dir from. Runtimes' own skill
-// directories usually link each skill to the CLI's copy, so the link is followed to it; a
-// confined scan does not follow one out of the home.
-func (l skillLocks) source(dir string) string {
+// intelKey is the Beacon Intel key of the skill in dir, when the skills CLI recorded the GitHub
+// repository it installed it from. Runtimes' own skill directories usually link each skill to
+// the CLI's copy, so the link is followed to it, and the lock beside that copy is a path the user
+// chose (see readChosenPath).
+func (l skillLocks) intelKey(dir string) string {
 	real, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return ""
@@ -250,20 +250,20 @@ func (l skillLocks) source(dir string) string {
 		return ""
 	}
 	path := filepath.Join(filepath.Dir(parent), skillLockFile)
-	if sessionfs.Confined(dir) && !sessionfs.Confined(path) {
-		// A confined scan reads only inside the home; a link out of it names no lock it may read.
-		return ""
-	}
 	sources, ok := l[path]
 	if !ok {
 		sources = readSkillLock(path)
 		l[path] = sources
 	}
-	return sources[filepath.Base(real)]
+	name := filepath.Base(real)
+	if repo := sources[name]; repo != "" {
+		return "skill:" + repo + "#" + name
+	}
+	return ""
 }
 
 func readSkillLock(path string) map[string]string {
-	data, err := readFilePath(path)
+	data, err := readChosenPath(path)
 	if err != nil {
 		return nil
 	}

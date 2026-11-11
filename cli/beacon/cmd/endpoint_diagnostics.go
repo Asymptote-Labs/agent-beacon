@@ -33,7 +33,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -261,7 +260,6 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		IncludeContents: endpointOpts.inventoryContents || inventorySettings.IncludeContents,
 		MaxContentBytes: inventorySettings.MaxContentBytes,
 	})
-	intel.AnnotatePackages(&configInventory, intel.LocalRegistries(intel.CurrentRegistryEnv()))
 	result := inventoryResult{
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
 		RuntimeLog:        status.RuntimeLog,
@@ -325,7 +323,14 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 			if name == "" {
 				name = server.ServerNameHash
 			}
-			fmt.Printf("MCP: %s %s scope=%s transport=%s command_present=%t args=%d env_keys=%d\n", server.Runtime, name, server.SourceScope, server.Transport, server.CommandPresent, server.ArgsCount, server.EnvKeyCount)
+			fmt.Printf("MCP: %s %s scope=%s transport=%s command_present=%t args=%d env_keys=%d", server.Runtime, name, server.SourceScope, server.Transport, server.CommandPresent, server.ArgsCount, server.EnvKeyCount)
+			if server.PackageRegistry != "" {
+				fmt.Printf(" package_registry=%s", server.PackageRegistry)
+			}
+			if server.Package != "" {
+				fmt.Printf(" package=%s", server.Package)
+			}
+			fmt.Println()
 			printInventoryDefinition(server.Definition)
 		}
 	}
@@ -345,7 +350,11 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 			if path == "" {
 				path = skill.ManifestPathHash
 			}
-			fmt.Printf("Skill: %s %s scope=%s status=%s path=%s\n", skill.Runtime, name, skill.SourceScope, skill.ParserStatus, path)
+			fmt.Printf("Skill: %s %s scope=%s status=%s path=%s", skill.Runtime, name, skill.SourceScope, skill.ParserStatus, path)
+			if skill.IntelKey != "" {
+				fmt.Printf(" intel_key=%s", skill.IntelKey)
+			}
+			fmt.Println()
 			printInventoryContent(skill.Content)
 		}
 	}
@@ -610,14 +619,6 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 			IncludeContents:  settings.IncludeContents,
 			MaxContentBytes:  settings.MaxContentBytes,
 		})
-		// The job's environment is not the user's shell, so only the files in their home and the
-		// system's say where packages come from. Read while the scan is still confined. A
-		// user-mode job scans its own home, as Scan does when given none.
-		registryHome := scope.HomeDir
-		if registryHome == "" {
-			registryHome, _ = os.UserHomeDir()
-		}
-		intel.AnnotatePackages(&inventoryResult, intel.LocalRegistries(intel.RegistryEnv{Home: registryHome, System: true}))
 		release()
 		digest = endpointinventory.SnapshotDigest(inventoryResult)
 		// Compare against the last digest for *this* home: a multi-user machine alternates

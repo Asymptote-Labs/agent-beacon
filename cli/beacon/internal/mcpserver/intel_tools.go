@@ -11,6 +11,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/agentskills"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/launchpkg"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/intelapi"
 )
@@ -27,8 +28,11 @@ func defaultIntelClient() (*intelapi.Client, error) {
 	return intel.New("beacon-mcp/" + version.GetVersion() + " (+https://beacon.sh)")
 }
 
+// defaultInventory scans what the agent asking has configured. The agent starts every launcher
+// with this process's environment and in its project, so their registry settings apply too.
 func defaultInventory(includeProject bool) inventory.Result {
-	opts := inventory.Options{IncludeContents: true, SkipProjectScope: !includeProject}
+	env := launchpkg.CurrentRegistryEnv()
+	opts := inventory.Options{SkipProjectScope: !includeProject, LauncherEnv: &env}
 	if includeProject {
 		if wd, err := os.Getwd(); err == nil {
 			opts.WorkingDir = wd
@@ -195,13 +199,8 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 	} else {
 		inv = defaultInventory(a.includeProject)
 	}
-	registryEnv := s.registryEnv
-	if registryEnv == nil {
-		registryEnv = intel.CurrentRegistryEnv
-	}
 	items, skipped := intel.FromInventory(inv, intel.FromInventoryOptions{
 		IncludePrivateNames: a.includePrivateNames,
-		Registries:          intel.LocalRegistries(registryEnv()),
 		BeaconSkill:         beaconSkill(agentskills.Names()),
 	})
 	report := installedReport{Sent: make([]intelapi.CheckItem, len(items)), Skipped: skipped}
@@ -249,7 +248,7 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 			// A package from a private registry or index is matched against the public package
 			// that shares its name, which may be a different artifact too.
 			byName := item.Basis == intel.BasisSkillName || item.Basis == intel.BasisServerName ||
-				item.Basis == intel.BasisPrivateNPM || item.Basis == intel.BasisPrivatePyPI || outcome.MatchedBy == "text"
+				intel.IsPrivateBasis(item.Basis) || outcome.MatchedBy == "text"
 			if outcome.Status == "matched" && byName {
 				result.NameOnly = true
 				result.Guidance = nameOnlyGuidance + result.Guidance

@@ -300,30 +300,41 @@ func TestOwnerUIDNamesTheHomesOwner(t *testing.T) {
 	}
 }
 
-func TestOpenOutsideReadsTheUsersOwnFilesOutsideTheHome(t *testing.T) {
-	f := newFixture(t)
-	confine(t, f.home, os.Getuid())
-	file, err := OpenOutside(f.secret)
-	if err != nil {
-		t.Fatalf("OpenOutside of a file the console user owns: %v", err)
+// requireDeclined asserts an OpenOutside error is a decline: ErrRefused, not an absent file.
+func requireDeclined(t *testing.T, what string, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s was read through the confinement", what)
 	}
-	_ = file.Close()
-	// Inside the home it is Open: a link out of the home is still refused.
-	link := filepath.Join(f.home, "out.jsonl")
+	if !errors.Is(err, ErrRefused) || errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
+		t.Fatalf("%s: err = %v, want ErrRefused that does not read as absent", what, err)
+	}
+}
+
+func TestOpenOutsideReadsTheUsersOwnFiles(t *testing.T) {
+	f := newFixture(t)
+	// A link placed in the home to the user's own file outside it is theirs to make.
+	link := filepath.Join(f.home, ".npmrc")
 	if err := os.Symlink(f.secret, link); err != nil {
 		t.Fatal(err)
 	}
-	_, err = OpenOutside(link)
-	requireRefusedAsAbsent(t, "a link out of the home", err)
+	confine(t, f.home, os.Getuid())
+	for _, path := range []string{f.secret, link, f.real} {
+		file, err := OpenOutside(path)
+		if err != nil {
+			t.Fatalf("OpenOutside(%s), a file the console user owns: %v", path, err)
+		}
+		_ = file.Close()
+	}
 }
 
-func TestOpenOutsideRefusesWhatTheUserCanPlant(t *testing.T) {
+func TestOpenOutsideDeclinesWhatTheUserCannotRead(t *testing.T) {
 	f := newFixture(t)
 	fifo := filepath.Join(f.outside, "npmrc")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Skipf("mkfifo: %v", err)
 	}
-	link := filepath.Join(f.outside, "link")
+	link := filepath.Join(f.home, ".npmrc")
 	if err := os.Symlink(f.secret, link); err != nil {
 		t.Fatal(err)
 	}
@@ -338,22 +349,48 @@ func TestOpenOutsideRefusesWhatTheUserCanPlant(t *testing.T) {
 	}()
 	select {
 	case err := <-done:
-		requireRefusedAsAbsent(t, "a FIFO outside the home", err)
+		requireDeclined(t, "a FIFO", err)
 	case <-time.After(5 * time.Second):
-		t.Fatal("opening a FIFO outside the home blocked; a planted one would hang the inventory job")
+		t.Fatal("opening a FIFO blocked; a planted one would hang the inventory job")
 	}
 	_, err := OpenOutside(f.secret)
-	requireRefusedAsAbsent(t, "a file the console user could not read", err)
+	requireDeclined(t, "a file the console user could not read", err)
 	_, err = OpenOutside(link)
-	requireRefusedAsAbsent(t, "a link to a file the console user could not read", err)
-	if n, _ := c.Refused(); n != 3 {
-		t.Fatalf("refusals = %d, want 3", n)
+	requireDeclined(t, "a link to a file the console user could not read", err)
+	_, err = OpenOutside(f.home)
+	requireDeclined(t, "a directory", err)
+	_, err = OpenOutside("npmrc")
+	requireDeclined(t, "a relative path", err)
+	if n, _ := c.Refused(); n != 5 {
+		t.Fatalf("refusals = %d, want 5", n)
 	}
-	// An absent file is absent, not a refusal.
+	// An absent file is absent, not a decline nor a refusal.
 	_, err = OpenOutside(filepath.Join(f.outside, "missing"))
 	requireRefusedAsAbsent(t, "a missing file", err)
-	if n, _ := c.Refused(); n != 3 {
+	if errors.Is(err, ErrRefused) {
+		t.Fatalf("a missing file was declined: %v", err)
+	}
+	if n, _ := c.Refused(); n != 5 {
 		t.Fatalf("a missing file was counted as refused")
+	}
+}
+
+func TestOpenOutsideReadsAnUnreachablePathAsAbsent(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can enter any directory")
+	}
+	f := newFixture(t)
+	locked := filepath.Join(f.outside, "locked")
+	mustWrite(t, filepath.Join(locked, "npmrc"), "x\n")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	confine(t, f.home, os.Getuid())
+	_, err := OpenOutside(filepath.Join(locked, "npmrc"))
+	requireRefusedAsAbsent(t, "a file under a directory that cannot be entered", err)
+	if errors.Is(err, ErrRefused) {
+		t.Fatalf("an unreachable path was declined: %v", err)
 	}
 }
 
@@ -364,7 +401,8 @@ func TestOpenOutsideReadsWhatAnyoneMayRead(t *testing.T) {
 		t.Skipf("%s is not a world-readable file here", system)
 	}
 	f := newFixture(t)
-	link := filepath.Join(f.outside, "hosts")
+	// A home-manager .npmrc is a link from the home into the world-readable Nix store.
+	link := filepath.Join(f.home, ".npmrc")
 	if err := os.Symlink(system, link); err != nil {
 		t.Fatal(err)
 	}
@@ -398,19 +436,6 @@ func TestConfinementCoversTheHomesRealPath(t *testing.T) {
 	}
 }
 
-func TestOpenOutsideIsOSOpenUnconfined(t *testing.T) {
-	f := newFixture(t)
-	link := filepath.Join(f.outside, "link")
-	if err := os.Symlink(f.secret, link); err != nil {
-		t.Fatal(err)
-	}
-	file, err := OpenOutside(link)
-	if err != nil {
-		t.Fatalf("unconfined OpenOutside: %v", err)
-	}
-	_ = file.Close()
-}
-
 // Opening a device can act on it (opening /dev/watchdog arms the timer), so a device the user
 // names must be turned down before it is opened, not after.
 func TestOpenOutsideRefusesDevicesBeforeOpeningThem(t *testing.T) {
@@ -418,19 +443,19 @@ func TestOpenOutsideRefusesDevicesBeforeOpeningThem(t *testing.T) {
 	if info, err := os.Stat(device); err != nil || info.Mode()&fs.ModeCharDevice == 0 {
 		t.Skipf("%s is not a character device here", device)
 	}
-	_, err := openRegular(device)
+	_, _, err := openRegular(device)
 	if !errors.Is(err, errNotRegular) {
 		t.Fatalf("openRegular(%s) = %v, want it refused as not a regular file before opening", device, err)
 	}
 	f := newFixture(t)
-	link := filepath.Join(f.outside, "npmrc")
+	link := filepath.Join(f.home, ".npmrc")
 	if err := os.Symlink(device, link); err != nil {
 		t.Fatal(err)
 	}
 	confine(t, f.home, os.Getuid())
 	for _, path := range []string{device, link} {
 		_, err := OpenOutside(path)
-		requireRefusedAsAbsent(t, "a device outside the home", err)
+		requireDeclined(t, "a device", err)
 	}
 }
 
@@ -442,19 +467,41 @@ func TestOpenRegularFollowsNoSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	file, err := openRegular(real)
+	file, othersCanEnter, err := openRegular(real)
 	if err != nil {
 		t.Fatalf("openRegular of a resolved regular file: %v", err)
 	}
 	_ = file.Close()
+	if othersCanEnter {
+		t.Fatalf("openRegular(%s) reports others can enter its 0700 directories", real)
+	}
 	dirLink := filepath.Join(filepath.Dir(filepath.Dir(real)), "swapped")
 	if err := os.Symlink(filepath.Dir(real), dirLink); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := openRegular(filepath.Join(dirLink, filepath.Base(real))); err == nil {
+	if _, _, err := openRegular(filepath.Join(dirLink, filepath.Base(real))); err == nil {
 		t.Fatal("openRegular followed a directory symlink")
 	}
-	if _, err := openRegular(filepath.Join(filepath.Dir(real), "missing")); !errors.Is(err, fs.ErrNotExist) {
+	if _, _, err := openRegular(filepath.Join(filepath.Dir(real), "missing")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("openRegular of a missing file = %v, want not-exist", err)
+	}
+}
+
+// openRegular reports whether every directory on the path may be entered by others.
+func TestOpenRegularReportsWhetherOthersCanEnter(t *testing.T) {
+	system, err := filepath.EvalSymlinks("/etc/hosts")
+	if err != nil {
+		t.Skipf("/etc/hosts: %v", err)
+	}
+	if info, err := os.Stat(system); err != nil || info.Mode().Perm()&0o004 == 0 {
+		t.Skipf("%s is not a world-readable file here", system)
+	}
+	file, othersCanEnter, err := openRegular(system)
+	if err != nil {
+		t.Fatalf("openRegular(%s): %v", system, err)
+	}
+	_ = file.Close()
+	if !othersCanEnter {
+		t.Fatalf("openRegular(%s) reports others cannot enter its directories", system)
 	}
 }

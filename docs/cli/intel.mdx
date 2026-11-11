@@ -178,7 +178,10 @@ Names that may be private are held back and listed as skipped unless the agent p
   `.yarnrc.yml`, `bunfig.toml`, `pip.conf`, `uv.toml`, `pyproject.toml`). A private npm scope holds back only that scope's packages.
   Settings that name the public registry don't count. A registry configured anywhere else (a
   shell profile the agent did not inherit, say) is not seen, so check with `dry_run` first;
-- skill names, since a skill may be one you wrote.
+- skills, since a skill may be one you wrote, or come from a private repository. A skill the
+  skills CLI (`npx skills add`) installed from GitHub is checked by its exact key,
+  `skill:<owner>/<repo>#<name>`, read from the CLI's `.skill-lock.json`; any other skill by its
+  name.
 
 Paths, URLs, environment variables and other arguments are never sent. Beacon's own server and
 skills are skipped: the `beacon` server that runs the `beacon` binary, the `beacon-managed`

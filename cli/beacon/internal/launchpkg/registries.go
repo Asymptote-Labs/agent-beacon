@@ -1,7 +1,8 @@
-package intel
+package launchpkg
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,8 +16,8 @@ import (
 // from. A launcher reads more than its command line: npm reads .npmrc and npm_config_*, yarn and
 // bun their own files, pip pip.conf and PIP_*, uv uv.toml and UV_*. When any of them points npm
 // or PyPI at a registry or index other than the public one, a package of that ecosystem (or of
-// that npm scope) may be private, so FromInventory holds it back like a --registry on the
-// command line.
+// that npm scope) may be private, so Resolve marks it private like a --registry on the command
+// line.
 type Registries struct {
 	// NPM is set when every npm package may come from another registry.
 	NPM bool
@@ -344,11 +345,11 @@ func (r *Registries) readNpmrc(path string) {
 		r.NPMScopes = map[string]bool{}
 	}
 	r.read[path] = true
-	lines, ok, refused := readConfigLines(path)
-	if refused {
+	lines, err := readConfigLines(path)
+	if errors.Is(err, sessionfs.ErrRefused) {
 		r.NPM = true
 	}
-	if !ok {
+	if err != nil {
 		return
 	}
 	for _, line := range lines {
@@ -493,12 +494,9 @@ func cutKeyValue(line string) (key, value string, ok bool) {
 }
 
 func registryLine(path string, match func(string) bool) bool {
-	lines, ok, refused := readConfigLines(path)
-	if refused {
+	lines, err := readConfigLines(path)
+	if errors.Is(err, sessionfs.ErrRefused) {
 		return true
-	}
-	if !ok {
-		return false
 	}
 	for _, line := range lines {
 		if match(line) {
@@ -508,30 +506,26 @@ func registryLine(path string, match func(string) bool) bool {
 	return false
 }
 
-// readConfigLines returns a config file's lines without blanks or comments. refused reports a
-// file that is there but that a confined scan would not read: the system inventory job reads
-// the console user's config as root, and the paths it follows from there (an npmrc's
-// userconfig or prefix, a project directory, a server's cwd or PATH) are the user's to choose,
-// so sessionfs.OpenOutside admits only what the user could read themselves. Beacon cannot tell
-// what such a file says, so the caller holds its ecosystem back as private. A path root cannot
-// even look up (macOS privacy protection over ~/Documents, a root-squashed network home) is
-// absent, as it is unconfined: refused needs the file to be seen there.
-func readConfigLines(path string) (lines []string, ok, refused bool) {
+// readConfigLines returns a config file's lines without blanks or comments. The system inventory
+// job reads the console user's config as root, and the paths it follows from there (an npmrc's
+// userconfig or prefix, a project directory, a server's cwd or PATH) are the user's to choose, so
+// they open through sessionfs.OpenOutside. A file there that the confinement turns down fails
+// with sessionfs.ErrRefused: Beacon cannot tell what it says, so the caller holds its ecosystem
+// back as private. Any other failure, a path root cannot even look up included, is an absent
+// file.
+func readConfigLines(path string) ([]string, error) {
 	if path == "" {
-		return nil, false, false
+		return nil, os.ErrNotExist
 	}
 	f, err := sessionfs.OpenOutside(path)
 	if err != nil {
-		if sessionfs.Active() {
-			_, statErr := os.Lstat(path)
-			refused = statErr == nil
-		}
-		return nil, false, refused
+		return nil, err
 	}
 	defer f.Close()
 	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
-		return nil, false, false
+		return nil, errors.New(path + ": not a regular file")
 	}
+	var lines []string
 	scanner := bufio.NewScanner(io.LimitReader(f, maxRegistryConfigBytes))
 	scanner.Buffer(make([]byte, 64*1024), maxRegistryConfigBytes)
 	for scanner.Scan() {
@@ -541,5 +535,5 @@ func readConfigLines(path string) (lines []string, ok, refused bool) {
 		}
 		lines = append(lines, line)
 	}
-	return lines, true, false
+	return lines, nil
 }

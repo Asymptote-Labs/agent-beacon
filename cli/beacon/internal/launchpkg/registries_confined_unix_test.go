@@ -1,6 +1,6 @@
 //go:build !windows
 
-package intel
+package launchpkg
 
 import (
 	"os"
