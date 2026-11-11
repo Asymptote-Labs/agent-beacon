@@ -58,17 +58,20 @@ const codexMCPNamespacePrefix = "mcp__"
 //
 //   - An MCP server's tool is mcp.tool_invoked, with mcp.server and mcp.tool, and named
 //     `mcp__<server>__<tool>` in tool.name and gen_ai.tool.name, the spelling the ingested-content
-//     scope and every other runtime's MCP events use. Its result is gen_ai.tool.call.result.
-//     The server is read from the namespace on both paths, because the rollout carries nothing
-//     else: an OTLP record's mcp_server attribute names the same server unsanitized, and using it
-//     would leave the two copies of one call with different targets.
+//     scope and every other runtime's MCP events use. The server is read from the namespace on
+//     both paths, because the rollout carries nothing else: an OTLP record's mcp_server attribute
+//     names the same server unsanitized, and using it would leave the two copies of one call
+//     with different targets. A call reported with no namespace under the already-qualified name
+//     is read from that name.
 //   - A shell tool is command.executed with command.command, command.output, and the exit code
 //     Codex wrote into the output's header. A nonzero exit code is a failure even where the
 //     runtime reported none, because the rollout records no success flag at all.
 //   - Any other tool is tool.completed, or tool.failed when it failed.
 //
-// gen_ai.tool.call.result is filled only inside the shared ingested-content scope, the one the
-// rules engine reads: a shell command's output is already command.output.
+// Every result but a shell command's is gen_ai.tool.call.result, which a shell command's output
+// would only repeat. That includes tools whose output is not outside content -- write_stdin
+// carries a long-running command's later output and exit status -- because the rules engine
+// decides for itself which results it reads (the shared ingested-content scope).
 func NormalizeCodexToolResult(r CodexToolResult) CodexToolResultFields {
 	name := strings.TrimSpace(r.Name)
 	namespace := strings.TrimSpace(r.Namespace)
@@ -78,7 +81,7 @@ func NormalizeCodexToolResult(r CodexToolResult) CodexToolResultFields {
 		out.Severity = SeverityMedium
 	}
 
-	server, isMCP := codexMCPServer(namespace)
+	server, mcpTool, isMCP := codexMCPTool(name, namespace)
 	toolName := CodexToolName(name, namespace)
 	out.Tool = &ToolInfo{Name: toolName}
 	out.GenAITool = &GenAIToolInfo{Name: toolName, Call: &GenAIToolCallInfo{ID: strings.TrimSpace(r.CallID), Arguments: args}}
@@ -86,7 +89,7 @@ func NormalizeCodexToolResult(r CodexToolResult) CodexToolResultFields {
 	switch {
 	case isMCP:
 		out.Action, out.Category, out.Message = "mcp.tool_invoked", "mcp", "Codex MCP tool completed"
-		out.MCP = &MCPInfo{Server: server, Tool: name}
+		out.MCP = &MCPInfo{Server: server, Tool: mcpTool}
 	case IsShellCommandTool(name):
 		out.Action, out.Category, out.Message = "command.executed", "command", "Codex command completed"
 		command := codexCommandLine(name, args)
@@ -105,8 +108,7 @@ func NormalizeCodexToolResult(r CodexToolResult) CodexToolResultFields {
 		out.Action, out.Category, out.Message = "tool.completed", "tool", "Codex tool completed"
 	}
 
-	if r.Output != "" && out.Command == nil &&
-		(IngestedContentAction(out.Action) || IngestedContentToolName(toolName)) {
+	if r.Output != "" && out.Command == nil {
 		out.GenAITool.Call.Result = r.Output
 		// Both writers store gen_ai at the raw-attribute limit, so that is the limit the marker
 		// has to answer against.
@@ -127,28 +129,48 @@ func CodexToolName(name, namespace string) string {
 	return name
 }
 
+// codexMCPTool is the MCP server and tool a Codex call names: from its `mcp__<server>` namespace,
+// or, when it has none, from a name already spelled `mcp__<server>__<tool>`.
+func codexMCPTool(name, namespace string) (server, tool string, ok bool) {
+	if server, ok := codexMCPServer(namespace); ok {
+		return server, name, true
+	}
+	if namespace != "" {
+		return "", "", false
+	}
+	rest, ok := strings.CutPrefix(name, codexMCPNamespacePrefix)
+	if !ok {
+		return "", "", false
+	}
+	server, tool, ok = strings.Cut(rest, "__")
+	return server, tool, ok && server != "" && tool != ""
+}
+
 func codexMCPServer(namespace string) (string, bool) {
 	server, ok := strings.CutPrefix(strings.TrimSpace(namespace), codexMCPNamespacePrefix)
 	return server, ok && server != ""
 }
 
-// codexExitCodePrefix is the header line exec_command writes once the process has exited. A
-// process still running when the call returns gets `Process running with session ID N` instead,
-// and no exit code.
-const codexExitCodePrefix = "Process exited with code "
+// codexExitCodePrefixes are the header lines that carry a finished command's exit code:
+// exec_command's `Process exited with code N` (a process still running when the call returns
+// gets `Process running with session ID N` instead, and no exit code), and the `Exit code: N`
+// that shell and shell_command write.
+var codexExitCodePrefixes = []string{"Process exited with code ", "Exit code: "}
 
-// codexExitCode reads the exit code from the header Codex's exec_command puts above a command's
-// output. Only the header is read -- the lines before `Output:` -- so a command that prints a line
-// of the same shape is never taken for its own exit status.
+// codexExitCode reads the exit code from the header Codex puts above a command's output. Only the
+// header is read -- the lines before `Output:` -- so a command that prints a line of the same
+// shape is never taken for its own exit status.
 func codexExitCode(output string) (int, bool) {
 	for line := range strings.Lines(output) {
 		line = strings.TrimSpace(line)
 		if line == "Output:" {
 			return 0, false
 		}
-		if rest, ok := strings.CutPrefix(line, codexExitCodePrefix); ok {
-			code, err := strconv.Atoi(rest)
-			return code, err == nil
+		for _, prefix := range codexExitCodePrefixes {
+			if rest, ok := strings.CutPrefix(line, prefix); ok {
+				code, err := strconv.Atoi(rest)
+				return code, err == nil
+			}
 		}
 	}
 	return 0, false

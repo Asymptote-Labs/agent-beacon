@@ -626,7 +626,9 @@ func NormalizeCodexToolResult(event *Event, attrs map[string]interface{}) {
 	event.Severity = string(fields.Severity)
 	event.Tool = fields.Tool
 	event.Command = fields.Command
-	event.MCP = fields.MCP
+	if fields.MCP != nil {
+		event.MCP = fields.MCP
+	}
 	event.Content = fields.Content
 	if event.GenAI == nil {
 		event.GenAI = &GenAIInfo{}
