@@ -284,8 +284,9 @@ the steps in both orders still fires once. A single event never satisfies two st
     The value of an option is never an operand (`head -n 5`, `scp -i key`, `tar --exclude x`,
     `gh gist create -d text`).
   - `stdin`: the content arrives on the command's standard input: the target of its `<` or
-    `<>` redirection, what a substitution in its here-string wrote, or what the stage before
-    it in its pipeline writes to the pipe.
+    `<>` redirection, what a substitution or a variable in its here-string or in the body of
+    its here-document wrote (a here-document whose delimiter is quoted expands nothing), or
+    what the stage before it in its pipeline writes to the pipe.
   - `argument`: the content is written into one of the command's words by a command
     substitution, an input process substitution (`<(..)`), or a variable assigned from one
     earlier in the command line. For `curl`, `wget`, `http`, `https`, `httpie`, `xh` and `xhs`
@@ -319,10 +320,12 @@ the steps in both orders still fires once. A single event never satisfies two st
   `export` or named in a later `export NAME`; a script's variables do not leave it. Files
   written are shared.
 
-  Standard input (`-`) and paths under `/dev/` are left out. The body of a here-document
-  that is not a script is not followed, nor is what a script of another language does with a
-  file through a variable. The reference derivation is `shellcmd.FileReads` over
-  `shellcmd.WithScripts`.
+  Standard input (`-`) and paths under `/dev/` are left out. The literal text of a
+  here-document that is not a script is not read as commands, and what a script of another
+  language does with a file through a variable is not followed. A shell that reads its
+  script from a here-document takes in what the body expands, and its script's commands do
+  not read that as their standard input. The reference derivation is `shellcmd.FileReads`
+  over `shellcmd.WithScripts`.
 - `socket_redirects` (since v1.3; a rule that selects it MUST declare
   `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` lists the
   command's redirections to or from bash's network pseudo-files, each `{path, op}`. `path` is

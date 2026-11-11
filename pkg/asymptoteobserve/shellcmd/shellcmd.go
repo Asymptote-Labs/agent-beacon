@@ -98,9 +98,11 @@ type Command struct {
 	subshell int32
 	// shell is, for a command WithScripts added, one more than the index of the shell whose
 	// script it is in, and 0 for a command of the command line itself. scripted is set on a
-	// shell whose script's commands follow it.
-	shell    int32
-	scripted bool
+	// shell whose script's commands follow it, and scriptOnStdin when it read that script from
+	// its standard input.
+	shell         int32
+	scripted      bool
+	scriptOnStdin bool
 }
 
 // wordRef is one thing a word of a command takes its value from: a command substitution or an
@@ -335,6 +337,11 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 		c.Redirects = append(c.Redirects, p.redirect(r))
 		if r.Word != nil {
 			c.refs = p.refs(c.refs, r.Word.Parts, refRedirect, i)
+		}
+		// What a here-document's body expands (unless its delimiter is quoted, which makes the
+		// body literal) is written onto the command's standard input.
+		if r.Hdoc != nil {
+			c.refs = p.refs(c.refs, r.Hdoc.Parts, refRedirect, i)
 		}
 	}
 	p.commands = append(p.commands, c)

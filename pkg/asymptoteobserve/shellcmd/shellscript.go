@@ -222,6 +222,10 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 			if sub, _ := Parse(script); len(sub) > 0 {
 				at := len(x.out)
 				x.out[at-1].scripted = true
+				// A script read from the shell's standard input leaves none for its commands.
+				if here, ok := c.HereInput(); ok && here == script {
+					x.out[at-1].scriptOnStdin = true
+				}
 				x.add(sub, int32(at), depth-1)
 			}
 		}

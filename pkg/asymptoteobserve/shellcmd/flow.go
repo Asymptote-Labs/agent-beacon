@@ -75,8 +75,9 @@ type FileRead struct {
 // Standard input (-), a device (/dev/stdin), a file on another host (scp host:path), a file a
 // command edits in place (sed -i, which FileEffects reports) and a file a command names without
 // taking it as input (a search pattern, an archive's exclusions, an identity file) are not reads.
-// The body of a here-document is not followed, and neither is what a script does with a file once
-// it has opened it, beyond opening it inside a call that sends it (FileRead.Sent).
+// The literal text of a here-document is not read; what its body expands is (the here-string and
+// here-document cases of stdin). What a script does with a file once it has opened it is not
+// followed, beyond opening it inside a call that sends it (FileRead.Sent).
 func FileReads(commands []Command) [][]FileRead {
 	f := flow{commands: commands}
 	for i := range commands {
@@ -334,20 +335,23 @@ func (f *flow) stdin(i int) {
 				f.read(i, r.Target.Unquoted, ViaStdin, false)
 			}
 			return
-		case "<<<":
+		case "<<<", "<<", "<<-":
+			// A here-string, or a here-document: what the substitutions and variables in it
+			// write is what the command reads.
 			value, _ := f.wordValue(c, refRedirect, k)
 			for _, path := range value {
 				f.read(i, path, ViaStdin, false)
 			}
 			return
-		case "<<", "<<-", "<&":
+		case "<&":
 			return
 		}
 	}
 	if c.Stage == 0 {
 		// A command of a script reads the standard input of the shell that runs the script,
-		// unless it is inside a substitution, which has none of its own to read.
-		if c.shell != 0 && c.within == 0 && f.reads != nil {
+		// unless the shell read the script from it, or the command is inside a substitution,
+		// which has none of its own to read.
+		if c.shell != 0 && c.within == 0 && f.reads != nil && !f.commands[c.shell-1].scriptOnStdin {
 			for _, r := range f.reads[c.shell-1] {
 				if r.Via == ViaStdin {
 					f.read(i, r.Path, ViaStdin, false)
