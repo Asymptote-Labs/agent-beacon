@@ -211,7 +211,8 @@ func sortedNames(m map[string]yaml.Node) []string {
 // routes builds every output: a sink of the type its entry names, fed the record kinds it lists
 // (every kind when it lists none). An entry with only a jsonl path is a jsonl output. A route is
 // named by the entry's name, a jsonl output by its path, and anything else by type and position,
-// which is how /stats reports what each one dropped.
+// which is how /stats reports what each one dropped. Two jsonl outputs may not share a file: each
+// cuts a failed write back out of its file, which would cut the other's records.
 func (cfg *config) routes(env Env) ([]pipeline.Route, error) {
 	var out []pipeline.Route
 	fail := func(err error) ([]pipeline.Route, error) {
@@ -220,6 +221,7 @@ func (cfg *config) routes(env Env) ([]pipeline.Route, error) {
 		}
 		return nil, err
 	}
+	files := map[string]int{}
 	for i := range cfg.Outputs {
 		n := &cfg.Outputs[i]
 		var head struct {
@@ -236,6 +238,16 @@ func (cfg *config) routes(env Env) ([]pipeline.Route, error) {
 		}
 		if head.Type == "" {
 			return fail(fmt.Errorf("outputs[%d]: no type (or jsonl path)", i))
+		}
+		if head.Type == "jsonl" && head.JSONL != "" {
+			path, err := filepath.Abs(expandHome(head.JSONL))
+			if err != nil {
+				return fail(fmt.Errorf("outputs[%d]: %w", i, err))
+			}
+			if j, dup := files[path]; dup {
+				return fail(fmt.Errorf("outputs[%d]: %s is also outputs[%d]'s file; give each jsonl output a file of its own (one output can take several kinds)", i, head.JSONL, j))
+			}
+			files[path] = i
 		}
 		build, ok := sinkFactories[head.Type]
 		if !ok {

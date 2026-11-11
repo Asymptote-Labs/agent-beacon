@@ -27,16 +27,19 @@ type file interface {
 // and reported; the rest of the batch is still written.
 //
 // A batch is written whole or not at all. When writing it fails (a full disk, a quota, an I/O
-// error), the file is cut back to the end of its last complete line, so it never holds half a
-// line, and the next batch starts with a fresh buffer: bufio.Writer keeps its first error forever,
-// so reusing it would fail every later batch even once the disk has room again.
+// error), the file is cut back to the size it had when the batch started, read from the file
+// itself, so it never holds half a line, and the next batch starts with a fresh buffer:
+// bufio.Writer keeps its first error forever, so reusing it would fail every later batch even
+// once the disk has room again. The size is never remembered across batches, so a file rotated
+// by copytruncate in between is cut back to its new size, never padded to its old one. The file
+// must be this output's own: another writer's lines appended during a failed batch would be cut
+// with it.
 type JSONL struct {
 	f file
 	w *bufio.Writer
-	// end is the offset just past the last complete line.
-	end int64
-	// cut reports that the file may hold bytes past end, from a write whose cutting back failed.
-	cut bool
+	// unfinished reports that a failed batch could not be cut back, so the file may end in part
+	// of a line, which the next batch cuts off before writing.
+	unfinished bool
 }
 
 // OpenJSONL opens path for appending, creating it with owner-only permissions: records carry
@@ -65,7 +68,7 @@ func newJSONL(f file) (*JSONL, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &JSONL{f: f, w: bufio.NewWriterSize(f, 64<<10), end: end}
+	s := &JSONL{f: f, w: bufio.NewWriterSize(f, 64<<10)}
 	if end != info.Size() {
 		if err := f.Truncate(end); err != nil {
 			return nil, err
@@ -96,14 +99,17 @@ func lastLineEnd(f io.ReaderAt, size int64) (int64, error) {
 // most the batch in flight. A batch that cannot be written is cut back out of the file and
 // reported as a pipeline.WriteError counting its records.
 func (s *JSONL) Write(_ context.Context, batch []pipeline.Record) error {
-	if s.cut {
-		if err := s.f.Truncate(s.end); err != nil {
-			return &pipeline.WriteError{Dropped: len(batch), Err: fmt.Errorf("cut back a failed write: %w", err)}
+	start, err := s.size()
+	if err == nil && s.unfinished {
+		if start, err = lastLineEnd(s.f, start); err == nil {
+			err = s.f.Truncate(start)
 		}
-		s.cut = false
+		s.unfinished = err != nil
+	}
+	if err != nil {
+		return &pipeline.WriteError{Dropped: len(batch), Err: err}
 	}
 	var skipped error
-	var n int64
 	written := 0
 	for _, r := range batch {
 		line, err := json.Marshal(r.Value)
@@ -113,21 +119,45 @@ func (s *JSONL) Write(_ context.Context, batch []pipeline.Record) error {
 		}
 		s.w.Write(line)
 		s.w.WriteByte('\n')
-		n += int64(len(line)) + 1
 		written++
 	}
 	if err := s.w.Flush(); err != nil {
 		s.w.Reset(s.f)
-		if terr := s.f.Truncate(s.end); terr != nil {
-			s.cut = true
-		}
+		s.unfinished = s.cutBack(start) != nil
 		return &pipeline.WriteError{Dropped: len(batch), Err: err}
 	}
-	s.end += n
 	if skipped != nil {
 		return &pipeline.WriteError{Dropped: len(batch) - written, Err: skipped}
 	}
 	return nil
+}
+
+func (s *JSONL) size() (int64, error) {
+	info, err := s.f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
+// cutBack removes what a failed batch wrote after start, never extending the file: if it shrank
+// below start meanwhile (rotated by copytruncate during the batch), it is cut back to its last
+// complete line instead.
+func (s *JSONL) cutBack(start int64) error {
+	cur, err := s.size()
+	if err != nil {
+		return err
+	}
+	target := start
+	if cur < start {
+		if target, err = lastLineEnd(s.f, cur); err != nil {
+			return err
+		}
+	}
+	if cur == target {
+		return nil
+	}
+	return s.f.Truncate(target)
 }
 
 // Close implements pipeline.Sink.

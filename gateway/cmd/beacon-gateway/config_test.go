@@ -30,6 +30,23 @@ func parse(t *testing.T, text string) *config {
 
 var env = Env{Log: slog.New(slog.DiscardHandler), Version: "test"}
 
+// Two jsonl outputs may not write one file, however the path is spelled.
+func TestOutputsShareNoFile(t *testing.T) {
+	dir := t.TempDir()
+	cfg := parse(t, "gateways: [{type: litellm}]\noutputs:\n  - {jsonl: "+dir+"/a.jsonl, kinds: [finding]}\n  - {jsonl: "+dir+"/x/../a.jsonl, kinds: [beacon.event]}\n")
+	if _, err := cfg.routes(env); err == nil || !strings.Contains(err.Error(), "also outputs[0]'s file") {
+		t.Errorf("routes = %v, want the shared file refused", err)
+	}
+	cfg = parse(t, "gateways: [{type: litellm}]\noutputs:\n  - {jsonl: "+dir+"/a.jsonl}\n  - {jsonl: "+dir+"/b.jsonl}\n")
+	routes, err := cfg.routes(env)
+	if err != nil || len(routes) != 2 {
+		t.Fatalf("routes = %v, %v", routes, err)
+	}
+	for _, r := range routes {
+		r.Sink.Close()
+	}
+}
+
 // The open build runs the events analyzer alone, with the default policy, the in-memory store and
 // no observers; it rejects configuration for extensions it does not have.
 func TestOpenBuild(t *testing.T) {

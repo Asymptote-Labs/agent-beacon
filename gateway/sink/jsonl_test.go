@@ -83,6 +83,51 @@ func TestWriteRecoversFromFailure(t *testing.T) {
 	}
 }
 
+// The file rotated by copytruncate between batches, and another writer's line appended to it,
+// then a failed batch: the batch is cut back to the file's size when it started, read from the
+// file, so the file is neither padded with NUL bytes to its old size nor stripped of the other
+// line, and the next batch follows it.
+func TestFailureAfterExternalTruncate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.jsonl")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ff := &failing{File: f}
+	s, err := newJSONL(ff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := s.Write(ctx, records(strings.Repeat("a", 5000), "b")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, 0); err != nil { // logrotate copytruncate
+		t.Fatal(err)
+	}
+	other, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.WriteString("{\"other\":1}\n")
+	other.Close()
+	ff.fail = true
+	if err := s.Write(ctx, records("c", strings.Repeat("d", 1000))); err == nil {
+		t.Fatal("the failing write succeeded")
+	}
+	if got := content(t, path); got != "{\"other\":1}\n" {
+		t.Fatalf("after the failed batch the file holds %q", got)
+	}
+	ff.fail = false
+	if err := s.Write(ctx, records("e")); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if got := content(t, path); got != "{\"other\":1}\n\"e\"\n" {
+		t.Errorf("file holds %q", got)
+	}
+}
+
 // A record that does not marshal is skipped and counted; the rest of its batch is written.
 func TestWriteSkipsUnmarshalable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "out.jsonl")
