@@ -101,24 +101,24 @@ func TestFromInventorySendsOnlyPublicIdentifiers(t *testing.T) {
 	}
 }
 
-// A skill the skills CLI installed from GitHub is checked by its exact key, which names its
-// repository, so it waits for consent like a skill's name does.
-func TestFromInventoryChecksASkillBySourceWithConsent(t *testing.T) {
+// A skill the skills CLI installed from GitHub is checked by default by its exact key; a skill
+// with only a name waits for consent.
+func TestFromInventoryChecksASkillByItsKey(t *testing.T) {
 	res := inventory.Result{Skills: []inventory.Skill{
 		{Runtime: "claude_code", SkillName: "frontend-design", SourceScope: "user", Exists: true, IntelKey: "skill:anthropics/skills#frontend-design"},
 		{Runtime: "agent_skills", SkillName: "frontend-design", SourceScope: "user", Exists: true, IntelKey: "skill:anthropics/skills#frontend-design"},
 		{Runtime: "claude_code", SkillName: "local", SourceScope: "user", Exists: true},
 	}}
 	items, skipped := FromInventory(res, FromInventoryOptions{})
-	if len(items) != 0 || len(skipped) != 3 || skipped[0].Reason != ReasonPrivateSkill {
-		t.Fatalf("without consent: items %+v, skipped %+v", items, skipped)
+	if len(items) != 1 || items[0].Q != "skill:anthropics/skills#frontend-design" || items[0].Basis != BasisSkillSource || len(items[0].Sources) != 2 {
+		t.Fatalf("without consent: items %+v", items)
+	}
+	if len(skipped) != 1 || skipped[0].Name != "local" || skipped[0].Reason != ReasonPrivateSkill {
+		t.Fatalf("without consent: skipped %+v", skipped)
 	}
 	items, _ = FromInventory(res, FromInventoryOptions{IncludePrivateNames: true})
 	if len(items) != 2 || items[0].Q != "local" || items[0].Basis != BasisSkillName {
 		t.Fatalf("with consent = %+v", items)
-	}
-	if keyed := items[1]; keyed.Q != "skill:anthropics/skills#frontend-design" || keyed.Basis != BasisSkillSource || len(keyed.Sources) != 2 {
-		t.Fatalf("keyed skill = %+v", keyed)
 	}
 }
 

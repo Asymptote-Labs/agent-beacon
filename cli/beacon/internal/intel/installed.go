@@ -13,11 +13,12 @@ import (
 // lockfile, this reads the MCP servers and skills Beacon's inventory finds in each runtime's
 // own config, and names each the way the index does.
 //
-// By default only a public identifier leaves the machine: an npm or PyPI package the inventory
-// found in a server's launch command and fetched from the public registry. Names that may be
-// private (a server's configured name, a package from a registry or index named by the command,
-// the server's env, or the launcher's own config and environment, a skill's name or the
-// repository it was installed from) are sent only when the caller opts in. Paths, URLs,
+// By default only identifiers the inventory recorded leave the machine: an npm or PyPI package
+// in a server's launch command and fetched from the public registry, and the Intel key of a skill
+// the skills CLI installed from GitHub (skill:<owner>/<repo>#<name>; Intel keeps nothing it is
+// asked, the repository included). Names that may be private (a server's configured name, a
+// package from a registry or index named by the command, the server's env, or the launcher's own
+// config and environment, a skill's name) are sent only when the caller opts in. Paths, URLs,
 // environment, other arguments and the rest of a definition are never sent.
 
 // Installed is one lookup and every place it was found.
@@ -56,7 +57,7 @@ const (
 	ReasonNoPackage      = "no npm or PyPI package Beacon can read with confidence in its launch command; pass include_private_names to look it up by its configured name"
 	ReasonRemote         = "a remote URL; pass include_private_names to look it up by its configured name"
 	ReasonPrivatePackage = "its package comes from a private registry or index, so its name may be private; pass include_private_names to send it"
-	ReasonPrivateSkill   = "a skill's name, or the repository it was installed from, may be private; pass include_private_names to check skills"
+	ReasonPrivateSkill   = "a skill's name may be one a person gave a private skill; pass include_private_names to check skills by name"
 	ReasonNoName         = "no name to look up"
 )
 
@@ -69,8 +70,8 @@ func IsPrivateBasis(basis string) bool {
 // FromInventoryOptions tunes FromInventory.
 type FromInventoryOptions struct {
 	// IncludePrivateNames also sends names that may be private: a server's configured name when
-	// its command names no package, a package from a private registry or index, and skills.
-	// Off by default, so only packages from the public npm and PyPI registries leave.
+	// its command names no package, a package from a private registry or index, and the name of
+	// a skill with no Intel key. Off by default, so only public packages and skill keys leave.
 	IncludePrivateNames bool
 	// BeaconSkill reports whether a skill is one Beacon installed itself (an agentskills name
 	// in a directory carrying Beacon's marker), never checked. A skill that only shares the
@@ -176,20 +177,20 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 			continue
 		}
 		// The repository the skills CLI installed it from names the skill exactly; a name alone
-		// may match a different skill that shares it.
-		q, basis := s.IntelKey, BasisSkillSource
-		if q == "" {
-			if !validName(name) {
-				skipped = append(skipped, Skipped{Kind: "skill", Runtime: s.Runtime, Name: name, Reason: ReasonNoName})
-				continue
-			}
-			q, basis = name, BasisSkillName
+		// may match a different skill that shares it, and may be private.
+		if s.IntelKey != "" {
+			add("skill", s.IntelKey, BasisSkillSource, InstalledSource{Runtime: s.Runtime, Name: name, Scope: s.SourceScope})
+			continue
+		}
+		if !validName(name) {
+			skipped = append(skipped, Skipped{Kind: "skill", Runtime: s.Runtime, Name: name, Reason: ReasonNoName})
+			continue
 		}
 		if !opts.IncludePrivateNames {
 			skipped = append(skipped, Skipped{Kind: "skill", Runtime: s.Runtime, Name: name, Reason: ReasonPrivateSkill})
 			continue
 		}
-		add("skill", q, basis, InstalledSource{Runtime: s.Runtime, Name: name, Scope: s.SourceScope})
+		add("skill", name, BasisSkillName, InstalledSource{Runtime: s.Runtime, Name: name, Scope: s.SourceScope})
 	}
 
 	out := make([]Installed, 0, len(order))
