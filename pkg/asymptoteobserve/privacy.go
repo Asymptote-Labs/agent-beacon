@@ -88,9 +88,16 @@ func quotedRules(kind quotedKind, keep func(string) bool) []redactionRule {
 			rest, ok := separator(rest)
 			return ok && strings.HasPrefix(rest, open)
 		}
+		// In double quotes the shell still runs a command substitution, so a value that is one
+		// holds the command and not the secret (isWholeSubstitution). In single quotes it is
+		// text, and a backtick-quoted value is as often a secret in prose as a command.
+		keeps := keep
+		if strings.HasSuffix(quoted[0], `"`) {
+			keeps = func(value string) bool { return keep != nil && keep(value) || isWholeSubstitution(value) }
+		}
 		rules = append(rules, redactionRule{
 			expr: `(?i)(` + prefix + quoted[0] + `)(?P<value>` + quoted[1] + `)`, replacement: "${1}" + redactedValue,
-			keep: keep, needles: needles, start: start, runsOn: awsPairRunsOn,
+			keep: keeps, needles: needles, start: start, runsOn: awsPairRunsOn,
 		})
 	}
 	return rules
@@ -569,6 +576,44 @@ func isSubstitutionOpening(value string) bool {
 		}
 	}
 	return word != ""
+}
+
+// isWholeSubstitution reports whether a double-quoted value is one command substitution and
+// nothing else, opening as isSubstitutionOpening says: `$(gh auth token)`,
+// `$(security find-generic-password -s 'GitHub' -w)`. As there, the text is the command and the
+// secret is what it prints. Replacing it hid the command that read the credential and no secret
+// of the line; what the command is given is redacted by the rules for it (a labeled argument, a
+// secret-named flag, curl's -u), as it is in a command line that assigns nothing. The
+// parenthesis `$(` opens must be the one that ends the value, so text beside the substitution
+// (`$(a)hunter2$(b)`) is replaced as before; a parenthesis inside single quotes is not counted.
+func isWholeSubstitution(value string) bool {
+	if !strings.HasPrefix(value, "$(") || !strings.HasSuffix(value, ")") {
+		return false
+	}
+	opening := value
+	if i := strings.IndexAny(value, regexpSpace); i >= 0 {
+		opening = value[:i]
+	}
+	if !isSubstitutionOpening(opening) {
+		return false
+	}
+	depth, quoted := 0, false
+	for i := 0; i < len(value); i++ {
+		switch c := value[i]; {
+		case c == '\\':
+			i++
+		case c == '\'':
+			quoted = !quoted
+		case quoted:
+		case c == '(':
+			depth++
+		case c == ')':
+			if depth--; depth == 0 && i != len(value)-1 {
+				return false
+			}
+		}
+	}
+	return depth == 0 && !quoted
 }
 
 // isAuthSchemeOrSubstitution is what an unquoted labeled value keeps: isAuthScheme and
@@ -1264,10 +1309,10 @@ func keptLabel(t string, end int) bool {
 // that a later rule can change it, or make it long enough to remove.
 func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string]struct{}) (_ map[string]struct{}, kept bool) {
 	value := text.value
-	// A substitution's opening is a command's name, not a value: its copies elsewhere in the
-	// text are other commands, and stay (isSubstitutionOpening).
+	// A substitution, or its opening, is a command and not a value: its copies elsewhere in
+	// the text are other commands, and stay (isSubstitutionOpening, isWholeSubstitution).
 	add := func(s string) {
-		if len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) && !isSubstitutionOpening(s) {
+		if len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) && !isSubstitutionOpening(s) && !isWholeSubstitution(s) {
 			if assigned == nil {
 				assigned = map[string]struct{}{}
 			}

