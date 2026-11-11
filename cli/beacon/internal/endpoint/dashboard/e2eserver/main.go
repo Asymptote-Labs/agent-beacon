@@ -10,6 +10,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -28,15 +29,24 @@ func main() {
 	flag.Var(&lenses, "lens", "lens file to serve (repeatable)")
 	flag.Parse()
 	token := os.Getenv("BEACON_E2E_DASHBOARD_TOKEN")
+	printURL := false
 	if token == "" {
+		printURL = true
 		var err error
 		if token, err = dashboard.NewToken(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Println(dashboard.LaunchURL(*addr, token, "/"))
 	}
-	err := dashboard.ListenAndServe(dashboard.Options{Addr: *addr, LogPath: *logPath, UserMode: true, LensFiles: lenses, Token: token})
+	err := dashboard.ListenAndServe(dashboard.Options{
+		Addr: *addr, LogPath: *logPath, UserMode: true, LensFiles: lenses, Token: token,
+		Ready: func(bound net.Addr) error {
+			if printURL {
+				fmt.Println(dashboard.LaunchURL(bound.String(), token, "/"))
+			}
+			return nil
+		},
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

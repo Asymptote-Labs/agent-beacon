@@ -38,6 +38,10 @@ type Options struct {
 	// Token is this launch's secret (NewToken). ListenAndServe refuses to start without one and
 	// serves only requests that carry it (RequireToken); print it only inside LaunchURL.
 	Token string
+	// Ready runs after the port is bound and before requests are served. The dashboard command
+	// and lens preview print the launch URL and open the browser from here, so a failed bind
+	// never discloses the token. A non-nil error closes the listener and is returned.
+	Ready func(addr net.Addr) error
 }
 
 type StatusResponse struct {
@@ -417,12 +421,22 @@ func ListenAndServe(opts Options) error {
 	if err != nil {
 		return err
 	}
+	ln, err := net.Listen("tcp", opts.Addr)
+	if err != nil {
+		return err
+	}
+	if opts.Ready != nil {
+		if err := opts.Ready(ln.Addr()); err != nil {
+			ln.Close()
+			return err
+		}
+	}
 	server := &http.Server{
 		Addr:              opts.Addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	return server.ListenAndServe()
+	return server.Serve(ln)
 }
 
 // servedHandler is the handler ListenAndServe serves: Handler behind the loopback Host check and
