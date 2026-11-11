@@ -369,6 +369,12 @@ func skipFlagSeparator(rest string) (string, bool) {
 // regexpSpace is \s in Go's regexp syntax: ASCII whitespace, never Unicode.
 const regexpSpace = " \t\n\f\r"
 
+// authorizationCredential is the credential after an Authorization header's scheme. It ends at a
+// quote, a comma, whitespace or a backslash: in a command held as a JSON-encoded string the header
+// is quoted with `\"`, and a credential that took the backslash left a bare quote that ended the
+// string early. No credential the header carries holds a backslash (RFC 9110's token68 has none).
+const authorizationCredential = `[^"'\s,\\]+`
+
 // isAuthScheme reports whether a labeled value is an Authorization scheme, alone or with its
 // credential already redacted, rather than a credential. `Authorization: Bearer x` is redacted to
 // `Authorization: Bearer [REDACTED]` by the header rule, and the assignment rules must not then
@@ -390,12 +396,33 @@ func isAuthSchemeName(word string) bool {
 	return false
 }
 
-// opensWithAuthScheme reports whether an Authorization value opens with a scheme the header rule
-// names. That rule has already replaced the credential after it and kept the scheme, so the rule
-// for every other scheme leaves the value as it is.
-func opensWithAuthScheme(value string) bool {
+// keepAuthorizationValue reports whether the rule for an Authorization value with any scheme should
+// leave a match alone, for the rules after it to read as they did before it existed:
+//   - The value opens with a scheme the header rule names. That rule has already replaced the
+//     credential after it and kept the scheme.
+//   - The second word is not a credential but the next item on the line: a flag (`--token`, `-u`)
+//     or a secret label and its separator (`password:`, `PASSWORD=`, `"api_key":`). Taken as the
+//     credential, it would be replaced and the secret it introduces would stay, since the flag and
+//     label rules would no longer see the flag or the label in front of it.
+func keepAuthorizationValue(value string) bool {
 	fields := strings.Fields(value)
-	return len(fields) > 0 && isAuthSchemeName(fields[0])
+	if len(fields) == 0 {
+		return false
+	}
+	if isAuthSchemeName(fields[0]) {
+		return true
+	}
+	if len(fields) < 2 {
+		return false
+	}
+	second := fields[1]
+	if strings.HasPrefix(second, "-") {
+		return true
+	}
+	if i := strings.IndexAny(second, ":="); i > 0 {
+		return labelEndsAt(second[:i+1])
+	}
+	return false
 }
 
 // isRedactedJWTPrefix keeps the `eyJ` the header rule left in `Bearer eyJ[REDACTED]`, which the
@@ -407,6 +434,15 @@ func isRedactedJWTPrefix(value string) bool {
 // isRedactedValue keeps a value an earlier pass already replaced, so redaction stays idempotent.
 func isRedactedValue(value string) bool {
 	return value == redactedValue
+}
+
+// isAuthSchemeOrEscapedMarker is isAuthScheme, plus a value an earlier rule already replaced that
+// runs on only over the backslash escaping a closing quote. In a command held as a JSON-encoded
+// string, `\"Authorization: ApiKey x\"` becomes `\"Authorization: [REDACTED]\"`, and the unquoted
+// label rule then reads `[REDACTED]\` up to the quote as a value of its own. Replacing that again
+// dropped the backslash and left a bare quote that ended the string early.
+func isAuthSchemeOrEscapedMarker(value string) bool {
+	return value == redactedValue+`\` || isAuthScheme(value)
 }
 
 // isLiteralOrAuthScheme is isAuthScheme, plus the JSON literals that carry no secret.
@@ -428,7 +464,7 @@ var redactionRules = concatRules([]redactionRule{
 	// keeps its public `eyJ` prefix, as the shape rules below keep theirs, so `Bearer eyJ[REDACTED]`
 	// still says a token was there where `Bearer [REDACTED]` may only have been the word "token" or
 	// a `$VARIABLE`.
-	foldedRule(`(?i)(authorization["']?\s*[:=]\s*["']?(?:bearer|basic|token|digest)[ \t]+(?-i:eyJ)?)([^"'\s,]+)()`, "${1}"+redactedValue, nil, "authorization"),
+	foldedRule(`(?i)(authorization["']?\s*[:=]\s*["']?(?:bearer|basic|token|digest)[ \t]+(?-i:eyJ)?)(`+authorizationCredential+`)()`, "${1}"+redactedValue, nil, "authorization"),
 	foldedRule(`(?i)(\bbearer[ \t]+(?-i:eyJ)?)(?P<value>[a-z0-9._~+/=-]+)`, "${1}"+redactedValue, isRedactedJWTPrefix, "bearer"),
 	// An Authorization header with any other scheme: `ApiKey` (Elasticsearch), `SSWS` (Okta), `Bot`
 	// (Discord), `Splunk`, `Negotiate`, and whatever a vendor names its own. The label rules below
@@ -436,8 +472,10 @@ var redactionRules = concatRules([]redactionRule{
 	// and left the credential in the text. The scheme and the credential go together here, as they
 	// already do when the value is quoted whole (`"Authorization": "ApiKey x"`). The first word is
 	// not kept the way a listed scheme is: a credential sent with no scheme is also one word, and
-	// kept as if it were a scheme it would stay whenever something follows it on the line.
-	foldedRule(`(?i)(authorization["']?\s*[:=]\s*["']?)(?P<value>[a-z][a-z0-9_.-]*[ \t]+[^"'\s,]+)`, "${1}"+redactedValue, opensWithAuthScheme, "authorization"),
+	// kept as if it were a scheme it would stay whenever something follows it on the line. A
+	// second word that is a flag or a secret label is left to the rules for those
+	// (keepAuthorizationValue).
+	foldedRule(`(?i)(authorization["']?\s*[:=]\s*["']?)(?P<value>[a-z][a-z0-9_.-]*[ \t]+`+authorizationCredential+`)`, "${1}"+redactedValue, keepAuthorizationValue, "authorization"),
 	// A labeled assignment in prose, shell, env files, YAML, TOML or JSON: `token=x`,
 	// `export GITHUB_TOKEN="x"`, `{"api_key": "x"}`. The closing quote of a quoted label is allowed
 	// between the label and the separator. A quoted value runs to its closing quote; the unquoted
@@ -460,7 +498,7 @@ var redactionRules = concatRules([]redactionRule{
 	{
 		expr: `(?i)(?:([?&]` + redactLabel + `=)(?P<value>` + redactParamValue + `)|` +
 			`(\b` + redactLabel + `\s*[:=]\s*)(?P<value>` + redactUnquoted + `))`,
-		replacement: "${1}${3}" + redactedValue, keep: isAuthScheme, needles: redactLabelNeedles, start: startParam,
+		replacement: "${1}${3}" + redactedValue, keep: isAuthSchemeOrEscapedMarker, needles: redactLabelNeedles, start: startParam,
 		runsOn: awsPairRunsOn,
 	},
 	// A command-line flag: `--password x`, `--token=x`, `--api-key x`, and quoted, the way agents
@@ -1118,7 +1156,7 @@ func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string
 		// A value that is itself a label hides the assignment it begins from the capture, as a kept
 		// one does from the label rules.
 		text.hidden = text.hidden || keptLabel(value, match[g+1])
-		if s := value[match[g]:match[g+1]]; len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) {
+		if s := value[match[g]:match[g+1]]; len(s) >= redactCopyMin && s != redactedValue && !isAuthSchemeOrEscapedMarker(s) {
 			if assigned == nil {
 				assigned = map[string]struct{}{}
 			}
