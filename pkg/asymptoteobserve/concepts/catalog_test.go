@@ -13,6 +13,9 @@ import (
 const smallCatalog = `
 catalog: credential-stores
 version: 1
+predicates:
+  path: credential_path
+  command: credential_command
 kinds:
   - {id: cloud, title: Cloud}
   - {id: dotenv, title: Environment files}
@@ -201,9 +204,12 @@ func TestSelect(t *testing.T) {
 	}
 }
 
-// A catalog that decodes means what its examples say: Decode refuses one whose shape is wrong or
-// whose examples disagree with its patterns.
-func TestDecodeRefuses(t *testing.T) {
+// Decode refuses a catalog whose shape or patterns are wrong, and Check one whose examples
+// disagree with its patterns: a catalog that passes both means what its examples say.
+func TestDecodeAndCheckRefuse(t *testing.T) {
+	if c, err := Decode([]byte(smallCatalog)); err != nil || c.Check() != nil {
+		t.Fatalf("the catalog the cases change does not pass itself: %v", err)
+	}
 	for name, tc := range map[string]struct {
 		old, new string
 		want     string
@@ -228,6 +234,9 @@ func TestDecodeRefuses(t *testing.T) {
 		"no stores":                      {smallCatalog[strings.Index(smallCatalog, "stores:"):], "stores: []\n", "no stores"},
 		"bad version":                    {"version: 1", "version: 0", "version 0"},
 		"bad name":                       {"catalog: credential-stores", "catalog: Credential Stores", `catalog "Credential Stores"`},
+		"bad predicate name":             {"path: credential_path", "path: Credential-Path", `predicates.path "Credential-Path"`},
+		"predicates named alike":         {"command: credential_command", "command: credential_path", `path and command are both "credential_path"`},
+		"predicate for no store":         {smallCatalog[strings.Index(smallCatalog, "  - id: aws-export"):], "", `predicates.command "credential_command": the catalog has no store it would be about`},
 		"name is not a string":           {"catalog: credential-stores", "catalog: [a]", "cannot unmarshal"},
 
 		"paths and commands":              {"      - {name: aws, words: [configure, export-credentials]}\n", "      - {name: aws, words: [configure, export-credentials]}\n    match: [\".aws/x\"]\n", "store aws-export: both paths and commands"},
@@ -248,9 +257,12 @@ func TestDecodeRefuses(t *testing.T) {
 		if !strings.Contains(smallCatalog, tc.old) {
 			t.Fatalf("%s: the catalog does not contain %q", name, tc.old)
 		}
-		_, err := Decode([]byte(strings.Replace(smallCatalog, tc.old, tc.new, 1)))
+		c, err := Decode([]byte(strings.Replace(smallCatalog, tc.old, tc.new, 1)))
+		if err == nil {
+			err = c.Check()
+		}
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: Decode = %v, want an error about %q", name, err, tc.want)
+			t.Errorf("%s: Decode and Check = %v, want an error about %q", name, err, tc.want)
 		}
 	}
 }
@@ -262,7 +274,10 @@ func credentialStores(t *testing.T) *Catalog {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	c, err := Load(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "rules", "concepts", "credential-stores.yaml"))
+	c, err := Load(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "rules", "concepts", "credential-stores.catalog.yaml"))
+	if err == nil {
+		err = c.Check()
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

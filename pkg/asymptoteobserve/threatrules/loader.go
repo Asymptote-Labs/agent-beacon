@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -42,20 +41,11 @@ func DecodeRule(data []byte) (*Rule, error) {
 	return &rule, nil
 }
 
-// LoadRule reads, decodes, and validates a single rule file.
+// LoadRule reads, decodes, and validates a single rule file on its own: without the
+// definitions of a pack, so a rule that calls a predicate does not validate. LoadDir loads a
+// pack's rules with its definitions, and Library.LoadRule one rule with a library.
 func LoadRule(path string) (*Rule, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	rule, err := DecodeRule(data)
-	if err != nil {
-		return nil, fmt.Errorf("%s: decode: %w", path, err)
-	}
-	if err := rule.Validate(); err != nil {
-		return nil, fmt.Errorf("%s: validate: %w", path, err)
-	}
-	return rule, nil
+	return (*Library)(nil).LoadRule(path)
 }
 
 // SkippedRule is a rule file a loader left out because it needs a newer spec than this
@@ -86,6 +76,9 @@ func LoadDir(root string) ([]*Rule, error) {
 // SupportedSpec is left out and returned in skipped rather than failing the load, so an
 // older engine keeps running the rest of a newer corpus. Every other failure still fails
 // the whole load.
+//
+// The definitions under root (see Library) are loaded first and are what the rules' expressions
+// compile against. A definitions file that needs a newer spec is skipped the same way.
 func LoadDirSkipping(root string) (rules []*Rule, skipped []SkippedRule, err error) {
 	var paths []string
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -105,10 +98,18 @@ func LoadDirSkipping(root string) (rules []*Rule, skipped []SkippedRule, err err
 	}
 	sort.Strings(paths)
 
+	lib, skipped, err := LoadLibraryDir(root)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: definitions: %w", root, err)
+	}
+	for i := range skipped {
+		skipped[i].Path = filepath.Join(root, skipped[i].Path)
+	}
+
 	rules = make([]*Rule, 0, len(paths))
 	seen := make(map[string]string, len(paths)) // id -> path
 	for _, path := range paths {
-		rule, err := LoadRule(path)
+		rule, err := lib.LoadRule(path)
 		if unsupported, ok := AsUnsupportedSpec(err); ok {
 			skipped = append(skipped, SkippedRule{Path: path, Err: unsupported})
 			continue

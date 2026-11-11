@@ -18,12 +18,15 @@ Use this command while authoring rules or before installing or publishing a rule
 `beacon rules lint`:
 
 - loads one `.rule.yaml` file or every `.rule.yaml` file under a directory
+- for a directory, loads the pack's definitions first (`*.catalog.yaml` and `*.predicates.yaml`, which say what the [predicates](/detections/yaml-schema#predicates) its rules call mean), runs each predicate's fixtures and each catalog's examples, and compiles the rules against them
 - validates rule structure
 - compiles CEL expressions against the Beacon endpoint event schema
 - enforces maturity gates for `experimental`, `stable`, and `deprecated` rules
 - runs every embedded fixture and checks the declared verdict
 
 Stable rules must include at least one `match` fixture and at least one `no_match` fixture.
+
+A rule file linted on its own has no definitions. Lint a rule that calls a predicate through its pack's directory.
 
 ## Examples
 

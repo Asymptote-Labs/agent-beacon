@@ -525,3 +525,130 @@ func TestRulesListAndRemoveShowBaseline(t *testing.T) {
 		t.Fatalf("want the baseline note, got:\n%s", buf.String())
 	}
 }
+
+// A pack whose rule calls a predicate: a catalog, a predicate defined over it, and the rule.
+var packWithDefinitions = map[string]string{
+	"rules/concepts/tokens.catalog.yaml": `
+catalog: tokens
+version: 1
+predicates: {command: token_command}
+kinds:
+  - {id: cli, title: CLI tokens}
+stores:
+  - id: gh-token
+    title: GitHub CLI token
+    kind: cli
+    tier: definite
+    commands: [{name: gh, words: [auth, token]}]
+    examples: ["gh auth token"]
+`,
+	"rules/concepts/tokens.predicates.yaml": `
+library: tokens
+version: 1
+definitions:
+  - name: prints_token
+    params: [e]
+    description: The event is a command that prints a token.
+    body: e.event.action == "command.executed" && e.command.parsed_commands.exists(c, token_command(c))
+    tests:
+      - name: gh
+        verdict: match
+        events: [{event: {action: command.executed}, command: {command: "gh auth token"}}]
+      - name: status
+        verdict: no_match
+        events: [{event: {action: command.executed}, command: {command: "gh auth status"}}]
+`,
+	"rules/credential-access/token-printed.rule.yaml": `
+id: token-printed
+spec: threat-rules/v1.3
+version: 1
+title: T
+severity: low
+status: experimental
+posture: detect
+match: prints_token(e)
+emit:
+  reason: ok
+tests:
+  - name: p
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gh auth token" }
+`,
+}
+
+func writePack(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		writeRuleFile(t, filepath.Join(dir, filepath.Dir(name)), filepath.Base(name), body)
+	}
+	return dir
+}
+
+// `rules lint` on a pack runs the pack's definitions as well as its rules, and a rule that calls
+// a predicate is linted through the pack, not on its own.
+func TestRulesLintRunsAPacksDefinitions(t *testing.T) {
+	dir := writePack(t, packWithDefinitions)
+	cmd, buf := newCmd()
+	if err := lintRulesPath(cmd, dir); err != nil {
+		t.Fatalf("lint: %v\n%s", err, buf.String())
+	}
+	for _, want := range []string{
+		"ok   predicate prints_token(e) (2 fixtures)",
+		"ok   predicate token_command(subject[, tier[, kind...]]) (rules/concepts/tokens.catalog.yaml)",
+		"ok   token-printed (1 fixtures)",
+		"1 rule(s), 2 predicate(s), 3 fixture(s), 0 failure(s)",
+	} {
+		if !strings.Contains(filepath.ToSlash(buf.String()), want) {
+			t.Errorf("want %q in:\n%s", want, buf.String())
+		}
+	}
+
+	cmd, buf = newCmd()
+	err := lintRulesPath(cmd, filepath.Join(dir, "rules", "credential-access", "token-printed.rule.yaml"))
+	if err == nil || !strings.Contains(err.Error(), "prints_token is not a predicate of the definitions this rule was loaded with") {
+		t.Errorf("lint of the rule file alone: want the missing-definitions error, got %v\n%s", err, buf.String())
+	}
+
+	wrong := map[string]string{}
+	for name, body := range packWithDefinitions {
+		wrong[name] = strings.Replace(body, "      - name: status\n        verdict: no_match", "      - name: status\n        verdict: match", 1)
+	}
+	cmd, buf = newCmd()
+	if err := lintRulesPath(cmd, writePack(t, wrong)); err == nil || !strings.Contains(buf.String(), "FAIL predicate prints_token/status: expected match, got no_match") {
+		t.Errorf("lint of a pack whose predicate fixture is wrong: %v\n%s", err, buf.String())
+	}
+}
+
+// A pulled tarball is installed with the definitions it carries, so its rules mean in the store
+// what they mean in the pack.
+func TestRulesPullInstallsAPacksDefinitions(t *testing.T) {
+	pullTestSetup(t)
+	pack := makeTarGz(t, packWithDefinitions)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(pack) }))
+	t.Cleanup(srv.Close)
+	rulesPullTransport = srv.Client().Transport
+
+	cmd, buf := newCmd()
+	if err := runRulesPull(cmd, []string{srv.URL + "/threat-rules.tar.gz"}); err != nil {
+		t.Fatalf("pull: %v\n%s", err, buf.String())
+	}
+	for _, want := range []string{"installed definitions tokens -> ", "installed token-printed -> ", "1 rule(s) installed, with 2 definitions file(s)."} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("want %q in:\n%s", want, buf.String())
+		}
+	}
+	loaded, skipped, err := detect.LoadActiveSkipping(true, "")
+	if err != nil || len(skipped) != 0 {
+		t.Fatalf("load the store: %v, skipped %v", err, skipped)
+	}
+	found := false
+	for _, lr := range loaded {
+		found = found || lr.Rule.ID == "token-printed" && lr.Source == detect.SourceStore
+	}
+	if !found {
+		t.Error("the pulled rule is not among the active rules")
+	}
+}

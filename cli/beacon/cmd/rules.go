@@ -82,8 +82,12 @@ var rulesListCmd = &cobra.Command{
 }
 
 var rulesAddCmd = &cobra.Command{
-	Use:          "add <path>",
-	Short:        "Install rule file(s) from a local path into the store",
+	Use:   "add <path>",
+	Short: "Install rule file(s) from a local path into the store",
+	Long: `Installs the rule file, or every rule file under the directory, into the store, with
+the definitions found beside them (*.catalog.yaml and *.predicates.yaml: what the predicates
+the rules call mean). A rule that calls a predicate needs its pack's definitions, so add the
+pack's directory rather than one of its rule files, unless the store already has them.`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -92,13 +96,29 @@ var rulesAddCmd = &cobra.Command{
 			return err
 		}
 		detect.WarnSkipped(cmd.ErrOrStderr(), skipped)
-		out := cmd.OutOrStdout()
-		for _, in := range installed {
-			fmt.Fprintf(out, "installed %s -> %s\n", in.ID, in.Path)
-		}
-		fmt.Fprintf(out, "%d rule(s) installed.\n", len(installed))
+		printInstalled(cmd.OutOrStdout(), installed)
 		return nil
 	},
+}
+
+// printInstalled reports what an install wrote: each rule and each definitions file, then the
+// counts.
+func printInstalled(out io.Writer, installed []detect.Installed) {
+	rules, definitions := 0, 0
+	for _, in := range installed {
+		if in.Definitions {
+			definitions++
+			fmt.Fprintf(out, "installed definitions %s -> %s\n", in.ID, in.Path)
+			continue
+		}
+		rules++
+		fmt.Fprintf(out, "installed %s -> %s\n", in.ID, in.Path)
+	}
+	if definitions > 0 {
+		fmt.Fprintf(out, "%d rule(s) installed, with %d definitions file(s).\n", rules, definitions)
+		return
+	}
+	fmt.Fprintf(out, "%d rule(s) installed.\n", rules)
 }
 
 var rulesRemoveCmd = &cobra.Command{
@@ -123,7 +143,8 @@ var rulesPullCmd = &cobra.Command{
 	Use:   "pull <url>",
 	Short: "Fetch a rule pack from a URL into the store (reaches the network)",
 	Long: `Downloads a rule file (.rule.yaml) or a gzipped tarball (.tar.gz/.tgz) of rules
-from an explicit URL and installs the valid rules into the store.
+from an explicit URL and installs the valid rules into the store, with the definitions
+(*.catalog.yaml, *.predicates.yaml) a tarball carries beside them.
 
 This is the only Beacon command that reaches the network, and only when you run it. The
 agent never fetches rules on its own. The URL is whatever you supply; there is no hosted
@@ -146,7 +167,7 @@ var (
 	rulesPullMaxDownloadBytes int64 = 32 << 20 // bytes read from the network
 	rulesPullMaxTarEntries          = 10000    // every tar header, rule file or not
 	rulesPullMaxTarBytes      int64 = 64 << 20 // the decompressed tar stream as a whole
-	rulesPullMaxEntryBytes    int64 = 1 << 20  // one .rule.yaml file
+	rulesPullMaxEntryBytes    int64 = 1 << 20  // one .rule.yaml or definitions file
 )
 
 // rulesPullTransport is the HTTP transport `beacon rules pull` uses; nil means the
@@ -295,10 +316,7 @@ func runRulesPull(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	detect.WarnSkipped(cmd.ErrOrStderr(), skipped)
-	for _, in := range installed {
-		fmt.Fprintf(out, "installed %s -> %s\n", in.ID, in.Path)
-	}
-	fmt.Fprintf(out, "%d rule(s) installed.\n", len(installed))
+	printInstalled(out, installed)
 	return nil
 }
 
@@ -336,12 +354,13 @@ func tarLimitError(err error) error {
 	return nil
 }
 
-// extractRuleTarball extracts *.rule.yaml entries from a gzipped tarball into dir. Entry
+// extractRuleTarball extracts the *.rule.yaml entries of a gzipped tarball into dir, and the
+// definitions entries (*.catalog.yaml, *.predicates.yaml) the rules are installed with. Entry
 // paths keep their relative archive layout so two entries that share a base name (e.g.
 // network/exfil.rule.yaml and secrets/exfil.rule.yaml) do not overwrite each other;
 // path-traversal entries are rejected. InstallFiles walks dir recursively and keys the
 // installed file on rule id, so preserving subdirectories here loses no rules. The
-// number of entries, the size of each rule entry and the decompressed size of the whole
+// number of entries, the size of each extracted entry and the decompressed size of the whole
 // stream are capped, so a gzip bomb fails with an error instead of filling the disk.
 func extractRuleTarball(r io.Reader, dir string) error {
 	gz, err := gzip.NewReader(r)
@@ -367,7 +386,8 @@ func extractRuleTarball(r io.Reader, dir string) error {
 		if entries > rulesPullMaxTarEntries {
 			return fmt.Errorf("tarball has more than %d entries", rulesPullMaxTarEntries)
 		}
-		if hdr.Typeflag != tar.TypeReg || !strings.HasSuffix(hdr.Name, ".rule.yaml") || isAppleDoubleArchiveEntry(hdr.Name) {
+		isRule := strings.HasSuffix(hdr.Name, ".rule.yaml")
+		if hdr.Typeflag != tar.TypeReg || !isRule && !threatrules.IsDefinitionFile(hdr.Name) || isAppleDoubleArchiveEntry(hdr.Name) {
 			continue
 		}
 		// Reject any entry whose name contains a path-traversal element before it is
@@ -377,7 +397,11 @@ func extractRuleTarball(r io.Reader, dir string) error {
 			return fmt.Errorf("archive entry %q contains a path traversal element", hdr.Name)
 		}
 		if hdr.Size > rulesPullMaxEntryBytes {
-			return fmt.Errorf("archive entry %q is %d bytes, over the %d-byte limit for one rule", hdr.Name, hdr.Size, rulesPullMaxEntryBytes)
+			what := "rule"
+			if !isRule {
+				what = "definitions file"
+			}
+			return fmt.Errorf("archive entry %q is %d bytes, over the %d-byte limit for one %s", hdr.Name, hdr.Size, rulesPullMaxEntryBytes, what)
 		}
 		// Preserve the entry's relative directory structure (rejecting absolute paths),
 		// then confirm the joined destination stays within cleanDir before any file
@@ -401,7 +425,9 @@ func extractRuleTarball(r io.Reader, dir string) error {
 			}
 			return err
 		}
-		count++
+		if isRule {
+			count++
+		}
 	}
 	if count == 0 {
 		return fmt.Errorf("tarball contained no .rule.yaml files")
@@ -437,7 +463,12 @@ var rulesLintCmd = &cobra.Command{
 	Short: "Validate rule files and run their embedded conformance fixtures",
 	Long: `Loads a rule file or a directory of *.rule.yaml files, validates each (structure
 plus CEL compilation against the event schema), enforces the maturity gate, and runs every
-embedded test fixture. Exits non-zero if anything fails. With no path, lints ./rules.`,
+embedded test fixture. Exits non-zero if anything fails. With no path, lints ./rules.
+
+A directory is linted as a pack: its definitions (*.catalog.yaml and *.predicates.yaml, found
+anywhere under it) are loaded first, a catalog's examples and a predicate's fixtures are run,
+and the rules are compiled against them. A rule file linted on its own has no definitions, so
+one that calls a predicate is linted through its pack's directory.`,
 	Args:         cobra.MaximumNArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -492,7 +523,16 @@ func lintRulesPath(cmd *cobra.Command, path string) error {
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)
 	}
-	if len(rules) == 0 && len(skipped) == 0 {
+	// The pack's definitions loaded with the rules above, or the load would have failed; they
+	// are read again here for their own fixtures.
+	var lib *threatrules.Library
+	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+		if lib, _, err = threatrules.LoadLibraryDir(path); err != nil {
+			return fmt.Errorf("load rules: %w", err)
+		}
+	}
+	predicates := lib.Predicates()
+	if len(rules) == 0 && len(skipped) == 0 && len(predicates) == 0 {
 		return fmt.Errorf("no *.rule.yaml files found under %s", filepath.Clean(path))
 	}
 	// Lint cannot vouch for a rule it cannot evaluate, so a skip fails the run, but the
@@ -502,6 +542,35 @@ func lintRulesPath(cmd *cobra.Command, path string) error {
 	}
 
 	failures, fixtures := 0, 0
+	results := lib.Check()
+	for _, p := range predicates {
+		// A definition's fixtures are its own; a catalog's predicate is held to the catalog's
+		// examples, which are not counted among the fixtures.
+		ran, failed, catalog := 0, false, false
+		for _, res := range results {
+			if res.RuleID != p.Name {
+				continue
+			}
+			if res.Fixture == threatrules.CatalogExamples {
+				catalog = true
+			} else {
+				ran++
+				fixtures++
+			}
+			if !res.OK() {
+				failed = true
+				failures++
+				fmt.Fprintf(out, "FAIL predicate %s\n", res.String())
+			}
+		}
+		switch {
+		case failed:
+		case catalog:
+			fmt.Fprintf(out, "ok   predicate %s (%s)\n", p.Signature, p.Source)
+		default:
+			fmt.Fprintf(out, "ok   predicate %s (%d fixtures)\n", p.Signature, ran)
+		}
+	}
 	for _, rule := range rules {
 		results, err := threatrules.CheckRule(rule)
 		if err != nil {
@@ -522,10 +591,14 @@ func lintRulesPath(cmd *cobra.Command, path string) error {
 			fmt.Fprintf(out, "ok   %s (%d fixtures)\n", rule.ID, len(results))
 		}
 	}
+	counted := fmt.Sprintf("%d rule(s)", len(rules))
+	if len(predicates) > 0 {
+		counted += fmt.Sprintf(", %d predicate(s)", len(predicates))
+	}
 	if len(skipped) > 0 {
-		fmt.Fprintf(out, "\n%d rule(s), %d fixture(s), %d failure(s), %d skipped (need a newer Beacon)\n", len(rules), fixtures, failures, len(skipped))
+		fmt.Fprintf(out, "\n%s, %d fixture(s), %d failure(s), %d skipped (need a newer Beacon)\n", counted, fixtures, failures, len(skipped))
 	} else {
-		fmt.Fprintf(out, "\n%d rule(s), %d fixture(s), %d failure(s)\n", len(rules), fixtures, failures)
+		fmt.Fprintf(out, "\n%s, %d fixture(s), %d failure(s)\n", counted, fixtures, failures)
 	}
 	switch {
 	case failures > 0:

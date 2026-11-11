@@ -51,6 +51,19 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 		"the commands over a parsed command `c` in CEL, which reads `c.name` and `c.args`. The regular\n" +
 		"expressions are RE2 syntax, which CEL and KQL read the same way. Commands have no KQL form: a\n" +
 		"query over raw events has no parsed command line.\n")
+	if c.Predicates.Path != "" || c.Predicates.Command != "" {
+		b.WriteString("\nA rule of a pack that ships this catalog calls it by name instead of carrying the\nexpressions:\n\n")
+		for _, p := range []struct{ name, subject, about string }{
+			{c.Predicates.Path, "p", "a path that is a store of files"},
+			{c.Predicates.Command, "c", "a parsed command that reads a store of commands"},
+		} {
+			if p.name != "" {
+				fmt.Fprintf(&b, "- `%[1]s(%[2]s)` is true for %[3]s, of either tier. `%[1]s(%[2]s, \"definite\")` takes the\n"+
+					"  definite stores only, and kinds after the tier take those kinds only:\n"+
+					"  `%[1]s(%[2]s, \"likely\", \"%[4]s\")`.\n", p.name, p.subject, p.about, c.Kinds[0].ID)
+			}
+		}
+	}
 	for _, tier := range []Tier{TierDefinite, TierLikely} {
 		selection, err := c.Select(tier)
 		if err != nil {

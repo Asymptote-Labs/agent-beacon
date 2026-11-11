@@ -44,13 +44,32 @@ func (least Tier) includes(t Tier) bool {
 // Catalog is a list of stores.
 type Catalog struct {
 	// Name identifies the catalog (credential-stores), and Version counts its revisions.
-	Name        string `yaml:"catalog"`
-	Version     int    `yaml:"version"`
+	Name    string `yaml:"catalog"`
+	Version int    `yaml:"version"`
+	// Spec is the Threat Rules spec version the file needs, read by the rule engine before it
+	// decodes the rest. This package does not interpret it.
+	Spec        string `yaml:"spec,omitempty"`
 	Description string `yaml:"description"`
+	// Predicates are the names a rule calls the catalog by.
+	Predicates Predicates `yaml:"predicates,omitempty"`
 	// Kinds are the groups a store may belong to, in the order they are documented.
 	Kinds  []Kind  `yaml:"kinds"`
 	Stores []Store `yaml:"stores"`
 }
+
+// Predicates names the predicates a rule pack's rules call a catalog by. Each takes what it is
+// asked about, then optionally a tier and kinds, as Select does:
+// credential_path(e.file.path), credential_path(f.path, "definite"),
+// credential_command(c, "likely", "keychain").
+type Predicates struct {
+	// Path is the predicate over a path: whether it is a store of files.
+	Path string `yaml:"path,omitempty"`
+	// Command is the predicate over a parsed command: whether it reads a store of commands.
+	Command string `yaml:"command,omitempty"`
+}
+
+// predicateName is the form of a predicate's name: a CEL identifier in lower case.
+var predicateName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // Kind is a group of stores a rule can select on its own: the Kubernetes ones, the browser ones.
 type Kind struct {
@@ -84,7 +103,8 @@ type Store struct {
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// Load reads and decodes the catalog file at path.
+// Load reads and decodes the catalog file at path. It does not run the catalog's examples:
+// that is Check.
 func Load(path string) (*Catalog, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -97,9 +117,10 @@ func Load(path string) (*Catalog, error) {
 	return c, nil
 }
 
-// Decode strictly decodes a catalog and checks it: its shape, its patterns, and that every store
-// matches its examples and no store matches a counterexample. A catalog that decodes means what
-// its examples say.
+// Decode strictly decodes a catalog and checks its shape and its patterns. It is what a rule
+// engine does each time it loads a pack, so it does not run the catalog's examples: Check does,
+// when a catalog is linted, tested or installed, as a rule's fixtures are run then and not on
+// every load.
 func Decode(data []byte) (*Catalog, error) {
 	var c Catalog
 	dec := yaml.NewDecoder(bytes.NewReader(data))
@@ -110,6 +131,13 @@ func Decode(data []byte) (*Catalog, error) {
 	if err := c.compile(); err != nil {
 		return nil, err
 	}
+	return &c, nil
+}
+
+// Check holds the catalog to its examples: every store matches its own examples, no store
+// matches a counterexample, and every pattern is shown at work by one. A catalog that passes
+// means what its examples say.
+func (c *Catalog) Check() error {
 	for i := range c.Stores {
 		s := &c.Stores[i]
 		check := c.checkPaths
@@ -117,10 +145,10 @@ func Decode(data []byte) (*Catalog, error) {
 			check = c.checkCommands
 		}
 		if err := check(s); err != nil {
-			return nil, fmt.Errorf("store %s: %w", s.ID, err)
+			return fmt.Errorf("store %s: %w", s.ID, err)
 		}
 	}
-	return &c, nil
+	return nil
 }
 
 func (c *Catalog) compile() error {
@@ -174,6 +202,23 @@ func (c *Catalog) compile() error {
 			}
 			s.commands = append(s.commands, p)
 		}
+	}
+	for _, p := range []struct {
+		form, name string
+		commands   bool
+	}{{"path", c.Predicates.Path, false}, {"command", c.Predicates.Command, true}} {
+		form, name := p.form, p.name
+		has := slices.ContainsFunc(c.Stores, func(s Store) bool { return p.commands == (len(s.commands) > 0) })
+		switch {
+		case name == "":
+		case !predicateName.MatchString(name):
+			return fmt.Errorf("predicates.%s %q: want a name like credential_path", form, name)
+		case !has:
+			return fmt.Errorf("predicates.%s %q: the catalog has no store it would be about", form, name)
+		}
+	}
+	if c.Predicates.Path != "" && c.Predicates.Path == c.Predicates.Command {
+		return fmt.Errorf("predicates: path and command are both %q", c.Predicates.Path)
 	}
 	return nil
 }

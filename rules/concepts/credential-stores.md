@@ -1,6 +1,6 @@
 # credential-stores
 
-<!-- Generated from credential-stores.yaml (version 1). Do not edit: change the catalog, then run
+<!-- Generated from credential-stores.catalog.yaml (version 1). Do not edit: change the catalog, then run
      go test ./concepts -run TestCredentialStoresReferenceInSync -update (in pkg/asymptoteobserve) -->
 
 Where credentials are kept and how they are got out: the files that hold them, by path, and the commands that hand them over. It is what a threat rule means when it says an agent read a credential.
@@ -139,6 +139,16 @@ selections of every kind: the files over a path `p` in CEL and a column `FilePat
 the commands over a parsed command `c` in CEL, which reads `c.name` and `c.args`. The regular
 expressions are RE2 syntax, which CEL and KQL read the same way. Commands have no KQL form: a
 query over raw events has no parsed command line.
+
+A rule of a pack that ships this catalog calls it by name instead of carrying the
+expressions:
+
+- `credential_path(p)` is true for a path that is a store of files, of either tier. `credential_path(p, "definite")` takes the
+  definite stores only, and kinds after the tier take those kinds only:
+  `credential_path(p, "likely", "cloud")`.
+- `credential_command(c)` is true for a parsed command that reads a store of commands, of either tier. `credential_command(c, "definite")` takes the
+  definite stores only, and kinds after the tier take those kinds only:
+  `credential_command(c, "likely", "cloud")`.
 
 ### `definite` stores
 

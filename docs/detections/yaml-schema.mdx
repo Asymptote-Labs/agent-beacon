@@ -158,6 +158,49 @@ CEL expressions use `e.<field>` paths that match the Beacon event schema. Common
 
 Use [`beacon rules fields`](/cli/rules-fields) or the generated upstream field reference to confirm available paths.
 
+## Predicates
+
+A rule on `spec: threat-rules/v1.3` can call a predicate: a named expression its rule pack defines once, instead of every rule carrying its own copy.
+
+```yaml title="A rule that calls a predicate"
+spec: threat-rules/v1.3
+match: credential_read(e)
+```
+
+A predicate is expanded where it is called, before the rule is checked, so the rule is evaluated exactly as if it carried the predicate's body. The pack's **definitions** say what its predicates mean. They are the files beside the rules whose names end in `.predicates.yaml` or `.catalog.yaml`, and they travel with the pack: `beacon rules add` and `beacon rules pull` install them with the rules, and `beacon rules lint` runs their fixtures.
+
+The rule corpus defines these:
+
+| Predicate | True for |
+| --- | --- |
+| `credential_path(path)` | A path that is a credential store: `~/.aws/credentials`, an SSH private key, `.env`, a kubeconfig, a browser's cookie store. `credential_path(path, "definite")` leaves out stores that only often hold a credential, and kinds after the tier take those kinds only: `credential_path(path, "likely", "kubernetes", "gpg")`. |
+| `credential_command(c)` | A parsed command that gets a credential out of a store that is not a file: `security find-generic-password -w`, `gh auth token`, `ssh-add -l`, `gpg --export-secret-keys`. It takes a tier and kinds the same way. |
+| `command_reads_credential(c)` | A parsed command that takes in a credential file, or is a `credential_command`. |
+| `credential_read(e)` | An event that reads a credential: a `file.read` of a credential path, or a command one of whose commands reads one. |
+
+The first two come from a catalog, `rules/concepts/credential-stores.catalog.yaml`: a reviewed list of stores, each with path patterns or commands, a tier, a kind, and examples that are checked. The other two are written over them in `rules/concepts/credentials.predicates.yaml`:
+
+```yaml title="A predicate definition"
+library: credentials
+version: 1
+definitions:
+  - name: command_reads_credential
+    params: [c]
+    description: A parsed command reads a credential file or gets one out of a store.
+    body: c.file_reads.exists(f, credential_path(f.path)) || credential_command(c)
+    tests:
+      - name: cat_credentials
+        match: e.command.parsed_commands.exists(c, command_reads_credential(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat ~/.aws/credentials" }
+```
+
+A body reads only its parameters, so a predicate that needs the event takes it as `e`. It can call other predicates but not itself. Each definition carries at least one fixture; `match` says how the predicate is called and can be left out when the one parameter is `e`.
+
+A rule file loaded on its own has no definitions, so lint or install a rule that calls a predicate through its pack's directory.
+
 ## Related
 
 <Columns cols={2}>

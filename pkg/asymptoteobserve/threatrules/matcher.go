@@ -23,12 +23,12 @@ type matcher struct {
 	untracked *untracked
 }
 
-func compileMatcher(expr string) (matcher, error) {
-	prog, ast, err := compileMatch(expr)
+func compileMatcher(lib *Library, expr string) (matcher, error) {
+	prog, ast, err := lib.compileMatch(expr)
 	if err != nil {
 		return matcher{}, err
 	}
-	env, err := Env()
+	env, err := lib.environment()
 	if err != nil {
 		return matcher{}, err
 	}

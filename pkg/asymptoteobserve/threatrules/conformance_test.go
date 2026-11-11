@@ -239,12 +239,13 @@ func TestPackCategoriesMatchDirectories(t *testing.T) {
 	}
 }
 
-// TestBaselineRulesAreCorpusCopies keeps the embedded baseline byte-identical to the rules it was
-// taken from, so a fix to a corpus rule cannot leave a stale copy in every binary.
-func TestBaselineRulesAreCorpusCopies(t *testing.T) {
-	baseline, err := filepath.Glob(filepath.Join(repoRoot(t), "pkg", "asymptoteobserve", "rulestore", "baseline", "*.rule.yaml"))
+// TestBaselineIsCorpusCopies keeps the embedded baseline byte-identical to the corpus files it
+// was taken from: its rules, and the definitions embedded for them. A fix to a corpus rule or
+// catalog then cannot leave a stale copy in every binary.
+func TestBaselineIsCorpusCopies(t *testing.T) {
+	baseline, err := filepath.Glob(filepath.Join(repoRoot(t), "pkg", "asymptoteobserve", "rulestore", "baseline", "*.yaml"))
 	if err != nil || len(baseline) == 0 {
-		t.Fatalf("baseline rules: %v, %v", baseline, err)
+		t.Fatalf("baseline files: %v, %v", baseline, err)
 	}
 	for _, path := range baseline {
 		matches, _ := filepath.Glob(filepath.Join(rulesDir(t), "*", filepath.Base(path)))
@@ -255,7 +256,32 @@ func TestBaselineRulesAreCorpusCopies(t *testing.T) {
 		got, _ := os.ReadFile(path)
 		want, _ := os.ReadFile(matches[0])
 		if string(got) != string(want) {
-			t.Errorf("%s differs from %s; copy the corpus rule over", path, matches[0])
+			t.Errorf("%s differs from %s; copy the corpus file over", path, matches[0])
 		}
+	}
+}
+
+// TestPackDefinitionsConformance runs the fixtures of the pack's definitions, as
+// TestPackConformance runs its rules': each predicate definition's own, and each catalog's
+// examples. Every predicate has to be shown at work by one.
+func TestPackDefinitionsConformance(t *testing.T) {
+	lib, skipped, err := LoadLibraryDir(rulesDir(t))
+	if err != nil || len(skipped) > 0 {
+		t.Fatalf("load the pack's definitions: %v, skipped %v", err, skipped)
+	}
+	tested := map[string]bool{}
+	for _, res := range lib.Check() {
+		tested[res.RuleID] = true
+		if !res.OK() {
+			t.Errorf("predicate %s", res.String())
+		}
+	}
+	for _, p := range lib.Predicates() {
+		if !tested[p.Name] {
+			t.Errorf("predicate %s (%s) has no fixture", p.Name, p.Source)
+		}
+	}
+	if len(lib.Predicates()) == 0 {
+		t.Error("the pack defines no predicate")
 	}
 }

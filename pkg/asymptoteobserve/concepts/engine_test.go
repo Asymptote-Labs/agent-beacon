@@ -29,7 +29,10 @@ func conceptsDir(t *testing.T) string {
 
 func credentialStores(t *testing.T) *concepts.Catalog {
 	t.Helper()
-	c, err := concepts.Load(filepath.Join(conceptsDir(t), "credential-stores.yaml"))
+	c, err := concepts.Load(filepath.Join(conceptsDir(t), "credential-stores.catalog.yaml"))
+	if err == nil {
+		err = c.Check()
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +91,7 @@ func TestCredentialStoresInTheRuleEngine(t *testing.T) {
 // TestCredentialStoresReferenceInSync asserts the committed reference is the one generated from
 // the catalog, so a change to a store shows up in review as a change to the expressions rules use.
 func TestCredentialStoresReferenceInSync(t *testing.T) {
-	want, err := credentialStores(t).Markdown("credential-stores.yaml", regenerate)
+	want, err := credentialStores(t).Markdown("credential-stores.catalog.yaml", regenerate)
 	if err != nil {
 		t.Fatal(err)
 	}

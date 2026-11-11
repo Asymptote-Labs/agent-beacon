@@ -11,7 +11,7 @@ This makes the format portable. Any engine that loads the same rule pack and pro
 
 ## Version
 
-The current rule format is `threat-rules/v1.3`. `threat-rules/v1.1` added `correlation.order` to `threat-rules/v1`, v1.2 the derived field `e.command.parsed_commands`, and v1.3 adds `file_reads` and `script_sends`, the files each parsed command takes as input and the ones its inline script sends, finds the command behind `timeout`, `nice` and similar wrappers, and reads the here-document a shell takes its script from; every v1, v1.1 and v1.2 rule is still a valid v1.3 rule.
+The current rule format is `threat-rules/v1.3`. `threat-rules/v1.1` added `correlation.order` to `threat-rules/v1`, v1.2 the derived field `e.command.parsed_commands`, and v1.3 adds `args`, `file_reads` and `script_sends` (a parsed command's arguments as text, the files it takes as input and the ones its inline script sends), finds the command behind `timeout`, `nice` and similar wrappers, reads the here-document a shell takes its script from, and adds [predicates](/detections/yaml-schema#predicates), named expressions a rule pack defines once for all its rules; every v1, v1.1 and v1.2 rule is still a valid v1.3 rule.
 
 The version covers the rule document shape, required metadata, CEL contract, correlation model, and fixture semantics. Rule files also include their own integer `version` field, which is the content revision for that individual rule.
 
@@ -48,6 +48,7 @@ The CEL contract has a few important requirements:
 - Missing fields evaluate as empty or zero values rather than crashing a scan.
 - Regular expressions use RE2 semantics through CEL `.matches(...)`.
 - Invalid CEL is rejected when the rule loads, before scanning begins.
+- A predicate a rule calls is expanded before the expression is checked, so the rule is checked and evaluated as if it carried the predicate's body.
 
 ## Maturity ladder
 

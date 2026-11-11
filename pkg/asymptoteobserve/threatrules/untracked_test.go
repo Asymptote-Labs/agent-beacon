@@ -42,7 +42,7 @@ func TestUntrackedCostIsBounded(t *testing.T) {
 					}
 					events = append(events, random...)
 					for _, expr := range ruleExpressions(r) {
-						m, err := compileMatcher(expr)
+						m, err := compileMatcher(r.lib, expr)
 						if err != nil {
 							t.Fatal(err)
 						}

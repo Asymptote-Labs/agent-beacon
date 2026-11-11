@@ -70,7 +70,7 @@ func Compile(rule *Rule) (*CompiledRule, error) {
 	if rule.Correlation != nil {
 		c.steps = make([]matcher, len(rule.Correlation.Steps))
 		for i, step := range rule.Correlation.Steps {
-			m, err := compileMatcher(step.Match)
+			m, err := compileMatcher(rule.lib, step.Match)
 			if err != nil {
 				return nil, fmt.Errorf("correlation.steps[%d] (%s): %w", i, step.ID, err)
 			}
@@ -85,7 +85,7 @@ func Compile(rule *Rule) (*CompiledRule, error) {
 		c.anyOrder = rule.Correlation.AnyOrder()
 		return c, nil
 	}
-	m, err := compileMatcher(rule.Match)
+	m, err := compileMatcher(rule.lib, rule.Match)
 	if err != nil {
 		return nil, fmt.Errorf("match: %w", err)
 	}
