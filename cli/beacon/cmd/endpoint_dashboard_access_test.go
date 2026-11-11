@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,10 +18,12 @@ func useDashboardTestDefaults(t *testing.T) *dashboard.Options {
 	oldOpts := endpointOpts
 	oldListen := dashboardListenAndServe
 	oldSwitch := dashboardSystemDisabled
+	oldOpen := openDashboardBrowser
 	t.Cleanup(func() {
 		endpointOpts = oldOpts
 		dashboardListenAndServe = oldListen
 		dashboardSystemDisabled = oldSwitch
+		openDashboardBrowser = oldOpen
 	})
 	home := t.TempDir()
 	testenv.SetHome(t, home)
@@ -28,7 +31,10 @@ func useDashboardTestDefaults(t *testing.T) *dashboard.Options {
 		t.Fatal(err)
 	}
 	served := &dashboard.Options{}
-	dashboardListenAndServe = func(opts dashboard.Options) error { *served = opts; return nil }
+	dashboardListenAndServe = func(opts dashboard.Options) error {
+		*served = opts
+		return acceptDashboardBind(opts)
+	}
 	endpointOpts.userMode = true
 	endpointOpts.systemMode = false
 	endpointOpts.logPath = ""
@@ -61,6 +67,47 @@ func TestRunEndpointDashboardPrintsTheLaunchURL(t *testing.T) {
 	if served.Token == first {
 		t.Fatal("two launches shared one secret")
 	}
+}
+
+func TestRunEndpointDashboardOpensTheBrowserOnlyAfterThePortBinds(t *testing.T) {
+	served := useDashboardTestDefaults(t)
+	var opened string
+	openDashboardBrowser = func(url string) error { opened = url; return nil }
+	endpointOpts.dashboardOpen = true
+	out, err := captureStdout(t, func() error { return runEndpointDashboard(nil, nil) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "http://127.0.0.1:8765/?token=" + served.Token
+	if opened != want {
+		t.Fatalf("opened %q, want %q", opened, want)
+	}
+	if strings.Count(out, served.Token) != 1 {
+		t.Fatalf("output = %q", out)
+	}
+
+	opened = ""
+	dashboardListenAndServe = func(dashboard.Options) error {
+		return errors.New("listen tcp 127.0.0.1:8765: bind: address already in use")
+	}
+	out, err = captureStdout(t, func() error { return runEndpointDashboard(nil, nil) })
+	if err == nil || !strings.Contains(err.Error(), "bind") {
+		t.Fatalf("taken port = %v", err)
+	}
+	if opened != "" || strings.Contains(out, "token=") || strings.Contains(out, "Beacon endpoint dashboard:") {
+		t.Fatalf("a failed bind disclosed the launch: opened %q, output %q", opened, out)
+	}
+}
+
+func acceptDashboardBind(opts dashboard.Options) error {
+	if opts.Ready == nil {
+		return nil
+	}
+	addr, err := net.ResolveTCPAddr("tcp", opts.Addr)
+	if err != nil {
+		return err
+	}
+	return opts.Ready(addr)
 }
 
 func TestRunEndpointDashboardRefusesWhenTheAdministratorDisabledIt(t *testing.T) {

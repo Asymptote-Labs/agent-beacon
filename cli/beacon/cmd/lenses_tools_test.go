@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,9 +164,12 @@ func TestLensesPreviewServesTheFileAgainstARealSession(t *testing.T) {
 	useLensToolsDefaults(t)
 	lensToolsOpts.logPath = writeLensLog(t)
 	var served dashboard.Options
-	prev := dashboardListenAndServe
-	dashboardListenAndServe = func(opts dashboard.Options) error { served = opts; return nil }
-	t.Cleanup(func() { dashboardListenAndServe = prev })
+	prev, prevOpen := dashboardListenAndServe, openDashboardBrowser
+	dashboardListenAndServe = func(opts dashboard.Options) error {
+		served = opts
+		return acceptDashboardBind(opts)
+	}
+	t.Cleanup(func() { dashboardListenAndServe, openDashboardBrowser = prev, prevOpen })
 
 	file := writeTestLens(t, t.TempDir(), "my-lens", "1")
 	cmd, buf := newCmd()
@@ -196,5 +200,27 @@ func TestLensesPreviewServesTheFileAgainstARealSession(t *testing.T) {
 	lensToolsOpts.addr = "0.0.0.0:8766"
 	if err := lensesPreviewCmd.RunE(cmd, []string{file}); err == nil {
 		t.Fatal("a non-loopback preview address was accepted")
+	}
+}
+
+func TestLensesPreviewDoesNotDiscloseTheTokenWhenThePortIsTaken(t *testing.T) {
+	useLensToolsDefaults(t)
+	lensToolsOpts.logPath = writeLensLog(t)
+	lensToolsOpts.open = true
+	opened := false
+	prev, prevOpen := dashboardListenAndServe, openDashboardBrowser
+	dashboardListenAndServe = func(dashboard.Options) error {
+		return errors.New("listen tcp 127.0.0.1:8766: bind: address already in use")
+	}
+	openDashboardBrowser = func(string) error { opened = true; return nil }
+	t.Cleanup(func() { dashboardListenAndServe, openDashboardBrowser = prev, prevOpen })
+
+	cmd, buf := newCmd()
+	err := lensesPreviewCmd.RunE(cmd, []string{writeTestLens(t, t.TempDir(), "my-lens", "1")})
+	if err == nil || !strings.Contains(err.Error(), "bind") {
+		t.Fatalf("taken port = %v", err)
+	}
+	if opened || strings.Contains(buf.String(), "token=") || strings.Contains(buf.String(), "Open:") {
+		t.Fatalf("a failed bind disclosed the preview: opened %v, output %q", opened, buf.String())
 	}
 }

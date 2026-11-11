@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -200,19 +201,9 @@ installed; use 'beacon lenses add' when it is done. Runs until interrupted.`,
 		if session == "" {
 			session, _ = latestSession(logPath)
 		}
-		page := dashboard.LaunchURL(lensToolsOpts.addr, token, "/")
+		pagePath := "/"
 		if session != "" {
-			page = dashboard.LaunchURL(lensToolsOpts.addr, token, "/session.html?"+url.Values{"id": {session}, "lens": {manifest.ID}}.Encode())
-		}
-		fmt.Fprintf(out, "Previewing %s (%s) from %s\n", manifest.Title, manifest.ID, file)
-		if session == "" {
-			fmt.Fprintln(out, "No sessions in the runtime log yet; open a session in the dashboard and add the lens from its + menu.")
-		}
-		fmt.Fprintf(out, "Open: %s\nEdits to the file show on reload. Press Ctrl-C to stop.\n", page)
-		if lensToolsOpts.open {
-			if err := dashboard.OpenBrowser(page); err != nil && !errors.Is(err, auth.ErrNoDisplay) {
-				return err
-			}
+			pagePath = "/session.html?" + url.Values{"id": {session}, "lens": {manifest.ID}}.Encode()
 		}
 		return dashboardListenAndServe(dashboard.Options{
 			Addr:      lensToolsOpts.addr,
@@ -220,6 +211,21 @@ installed; use 'beacon lenses add' when it is done. Runs until interrupted.`,
 			UserMode:  lensesUserMode(),
 			LensFiles: []string{file},
 			Token:     token,
+			Ready: func(addr net.Addr) error {
+				page := dashboard.LaunchURL(addr.String(), token, pagePath)
+				fmt.Fprintf(out, "Previewing %s (%s) from %s\n", manifest.Title, manifest.ID, file)
+				if session == "" {
+					fmt.Fprintln(out, "No sessions in the runtime log yet; open a session in the dashboard and add the lens from its + menu.")
+				}
+				fmt.Fprintf(out, "Open: %s\nEdits to the file show on reload. Press Ctrl-C to stop.\n", page)
+				if !lensToolsOpts.open {
+					return nil
+				}
+				if err := openDashboardBrowser(page); err != nil && !errors.Is(err, auth.ErrNoDisplay) {
+					return err
+				}
+				return nil
+			},
 		})
 	},
 }

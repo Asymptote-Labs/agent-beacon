@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 
@@ -67,6 +68,9 @@ var endpointDashboardCmd = &cobra.Command{
 
 var dashboardListenAndServe = dashboard.ListenAndServe
 
+// openDashboardBrowser is dashboard.OpenBrowser. Tests replace it to see whether a launch opened one.
+var openDashboardBrowser = dashboard.OpenBrowser
+
 func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	cfg := loadOrDefaultConfig()
 	userMode := endpointUserMode()
@@ -82,33 +86,37 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	if err := refuseDisabledDashboard(); err != nil {
 		return err
 	}
-	// The launch secret lives only in memory and in the URL printed here, which is the one way in:
-	// another account that reaches the loopback port without it is refused.
+	// The launch secret lives only in memory and in the URL printed after the port binds, which is
+	// the one way in: another account that reaches the loopback port without it is refused.
 	token, err := dashboard.NewToken()
 	if err != nil {
 		return fmt.Errorf("create the dashboard launch secret: %w", err)
-	}
-	url := dashboard.LaunchURL(endpointOpts.dashboardAddr, token, "/")
-	fmt.Printf("Beacon endpoint dashboard: %s\n", url)
-	fmt.Printf("Runtime log: %s\n", cfg.LogPath)
-	if runtimeLog.Warning != "" {
-		fmt.Printf("Runtime log source: %s\n", runtimeLog.Warning)
-	}
-	if endpointOpts.dashboardOpen {
-		if err := dashboard.OpenBrowser(url); err != nil {
-			// Over SSH the dashboard is still worth serving: forward its port and open it on
-			// the client.
-			if !errors.Is(err, auth.ErrNoDisplay) {
-				return err
-			}
-			fmt.Printf("Not opening a browser (%v).\n", err)
-		}
 	}
 	return dashboardListenAndServe(dashboard.Options{
 		Addr:     endpointOpts.dashboardAddr,
 		LogPath:  endpointOpts.logPath,
 		UserMode: userMode,
 		Token:    token,
+		Ready: func(addr net.Addr) error {
+			url := dashboard.LaunchURL(addr.String(), token, "/")
+			fmt.Printf("Beacon endpoint dashboard: %s\n", url)
+			fmt.Printf("Runtime log: %s\n", cfg.LogPath)
+			if runtimeLog.Warning != "" {
+				fmt.Printf("Runtime log source: %s\n", runtimeLog.Warning)
+			}
+			if !endpointOpts.dashboardOpen {
+				return nil
+			}
+			if err := openDashboardBrowser(url); err != nil {
+				// Over SSH the dashboard is still worth serving: forward its port and open it on
+				// the client.
+				if !errors.Is(err, auth.ErrNoDisplay) {
+					return err
+				}
+				fmt.Printf("Not opening a browser (%v).\n", err)
+			}
+			return nil
+		},
 	})
 }
 

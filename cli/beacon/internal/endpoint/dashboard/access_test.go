@@ -3,12 +3,14 @@ package dashboard
 import (
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 const accessTestAddr = "127.0.0.1:8765"
@@ -62,6 +64,52 @@ func TestServedHandlerRequiresAToken(t *testing.T) {
 	}
 	if err := ListenAndServe(Options{Addr: "127.0.0.1:0", UserMode: true}); !errors.Is(err, errNoToken) {
 		t.Fatalf("ListenAndServe without a token = %v", err)
+	}
+}
+
+func TestListenAndServeAnnouncesOnlyAfterThePortIsBound(t *testing.T) {
+	token, err := NewToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	announced := false
+	err = ListenAndServe(Options{
+		Addr: busy.Addr().String(), UserMode: true, Token: token,
+		Ready: func(net.Addr) error { announced = true; return nil },
+	})
+	if err == nil {
+		t.Fatal("ListenAndServe bound a port that was already taken")
+	}
+	if announced {
+		t.Fatal("Ready ran even though the listen failed")
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- ListenAndServe(Options{
+			Addr: "127.0.0.1:0", UserMode: true, Token: token,
+			Ready: func(addr net.Addr) error {
+				conn, dialErr := net.Dial("tcp", addr.String())
+				if dialErr != nil {
+					return dialErr
+				}
+				conn.Close()
+				return errors.New("stop after bind")
+			},
+		})
+	}()
+	select {
+	case err := <-errCh:
+		if err == nil || err.Error() != "stop after bind" {
+			t.Fatalf("ListenAndServe = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Ready was not called after the port bound")
 	}
 }
 
