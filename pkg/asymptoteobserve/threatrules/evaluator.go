@@ -66,16 +66,16 @@ func Compile(rule *Rule) (*CompiledRule, error) {
 	if err := rule.Validate(); err != nil {
 		return nil, err
 	}
-	c := &CompiledRule{rule: rule, derived: referencesDerivedField(rule.Match)}
+	c := &CompiledRule{rule: rule}
 	if rule.Correlation != nil {
 		c.steps = make([]matcher, len(rule.Correlation.Steps))
 		for i, step := range rule.Correlation.Steps {
-			c.derived = c.derived || referencesDerivedField(step.Match)
 			m, err := compileMatcher(step.Match)
 			if err != nil {
 				return nil, fmt.Errorf("correlation.steps[%d] (%s): %w", i, step.ID, err)
 			}
 			c.steps[i] = m
+			c.derived = c.derived || m.derived
 		}
 		window, err := rule.Correlation.ParseWindow()
 		if err != nil {
@@ -90,11 +90,27 @@ func Compile(rule *Rule) (*CompiledRule, error) {
 		return nil, fmt.Errorf("match: %w", err)
 	}
 	c.match = m
+	c.derived = m.derived
 	return c, nil
 }
 
 // Rule returns the underlying rule.
 func (c *CompiledRule) Rule() *Rule { return c.rule }
+
+// CheckedExpressions returns the rule's expressions as the engine evaluates them: the match of
+// a single-event rule, or the steps of a correlation rule in their order. A caller that analyses
+// what a rule reads (which fields, which actions) must use these rather than compile the rule's
+// text itself: the text is what the author wrote, and only the engine knows what it stands for.
+func (c *CompiledRule) CheckedExpressions() []*cel.Ast {
+	if c.steps == nil {
+		return []*cel.Ast{c.match.ast}
+	}
+	asts := make([]*cel.Ast, len(c.steps))
+	for i, step := range c.steps {
+		asts[i] = step.ast
+	}
+	return asts
+}
 
 // Evaluate reports whether the rule fires over the given ordered event sequence.
 //

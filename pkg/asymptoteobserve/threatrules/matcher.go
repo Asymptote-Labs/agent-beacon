@@ -12,8 +12,12 @@ import (
 
 // matcher is one compiled match expression and the event actions it can be true for.
 type matcher struct {
-	prog    cel.Program
+	prog cel.Program
+	// ast is the checked expression prog was built from.
+	ast     *cel.Ast
 	actions map[string]bool // nil: the expression does not limit the action
+	// derived is set when the expression selects an engine-derived field.
+	derived bool
 	// untracked, when set, is the expression without cost tracking, for events within a tier of
 	// sizes where its cost cannot reach the limit (matcher.go).
 	untracked *untracked
@@ -32,7 +36,7 @@ func compileMatcher(expr string) (matcher, error) {
 	if err != nil {
 		return matcher{}, fmt.Errorf("build CEL program: %w", err)
 	}
-	return matcher{prog: prog, actions: eventActions(ast.NativeRep().Expr()), untracked: u}, nil
+	return matcher{prog: prog, ast: ast, actions: eventActions(ast.NativeRep().Expr()), derived: selectsDerivedField(ast), untracked: u}, nil
 }
 
 // excludes reports whether the expression is false for every event with this action.

@@ -306,3 +306,28 @@ func TestCorrelationRejectsUnknownOrder(t *testing.T) {
 		t.Fatal("want validation error for an unknown correlation.order")
 	}
 }
+
+// CheckedExpressions are the expressions the engine evaluates, in the rule's order: what a
+// caller that asks which fields or actions a rule reads has to analyse.
+func TestCheckedExpressionsFollowTheRule(t *testing.T) {
+	c := compileCorrelation(t, "", "120s",
+		CorrelationStep{ID: "read", Match: `e.event.action == "file.read" && e.file.path.endsWith(".env")`},
+		CorrelationStep{ID: "egress", Match: `e.command.output.contains("200 OK")`},
+	)
+	steps := c.CheckedExpressions()
+	if len(steps) != 2 || !selectsField(steps[0], "path") || selectsField(steps[0], "output") || !selectsField(steps[1], "output") {
+		t.Errorf("a correlation rule's expressions are not its steps in order: %d expressions", len(steps))
+	}
+
+	rule, err := DecodeRule([]byte(specRule("r", "", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	single, err := Compile(rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match := single.CheckedExpressions(); len(match) != 1 || !selectsField(match[0], "action") {
+		t.Errorf("a single-event rule's expressions are not its match: %d expressions", len(match))
+	}
+}
