@@ -82,10 +82,11 @@ func (t *Turn) ToolCall(id string) (llm.ToolCall, bool) {
 // requestDelta computes what a request adds. The tail is stateless; system text and tool
 // definitions are resent on every call, so whether the session reported them before is asked of
 // the store, unless the memo says this process already confirmed the same set; and so is whether
-// it reported this very tail, which a client's retry sends again. Both are asked in one batch.
+// it reported this very tail, which a client's retry sends again. Both are asked in one batch,
+// which also adds extra when it is not nil (the session a root named, for the call's reply).
 // When the store fails, everything counts as new: a record reported twice is better than one
 // never reported.
-func requestDelta(ctx context.Context, s store.Store, memo *seenMemo, session string, r *llm.Request, ttl time.Duration) (Delta, error) {
+func requestDelta(ctx context.Context, s store.Store, memo *seenMemo, session string, r *llm.Request, ttl time.Duration, extra *store.Entry) (Delta, error) {
 	var d Delta
 	now := time.Now()
 	start := llm.TailStart(r.Messages)
@@ -109,8 +110,13 @@ func requestDelta(ctx context.Context, s store.Store, memo *seenMemo, session st
 			entries = append(entries, seenEntry(session, ttl, "tool", t.Name, t.Description, unsafe.String(unsafe.SliceData(t.Parameters), len(t.Parameters))))
 		}
 	}
+	tail := -1
 	if len(d.Tail) > 0 {
+		tail = len(entries)
 		entries = append(entries, tailEntry(session, ttl, r.Messages, start, d.Tail))
+	}
+	if extra != nil {
+		entries = append(entries, *extra)
 	}
 	if len(entries) == 0 {
 		return d, nil
@@ -131,7 +137,7 @@ func requestDelta(ctx context.Context, s store.Store, memo *seenMemo, session st
 			memo.confirm(session, fp, now.Add(ttl))
 		}
 	}
-	if len(d.Tail) > 0 && err == nil && !added[len(entries)-1] {
+	if tail >= 0 && err == nil && !added[tail] {
 		d.TailReported = true
 	}
 	return d, err

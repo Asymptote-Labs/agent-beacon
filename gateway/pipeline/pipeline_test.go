@@ -3,8 +3,11 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -161,11 +164,61 @@ func TestSessionID(t *testing.T) {
 		{"session header wins over the gateway's id",
 			gateway.Call{Gateway: "g", ID: "c", Client: gateway.Client{Session: "trace", Headers: map[string]string{"session_id": "codex-1"}}}, "codex-1"},
 		{"gateway's conversation id", gateway.Call{Gateway: "g", ID: "c", Client: gateway.Client{Session: "trace"}}, "trace"},
-		{"no session: the call is its own", gateway.Call{Gateway: "g", ID: "c"}, "g:c"},
+		{"no session and no conversation: the call is its own", gateway.Call{Gateway: "g", ID: "c", Phase: gateway.PhaseRequest}, "g:c"},
 	} {
-		if got := p.sessionID(&tc.c); got != tc.want {
+		if got, _, _ := p.sessionID(context.Background(), &tc.c); got != tc.want {
 			t.Errorf("%s: sessionID = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// With no session header or gateway session (Portkey without session metadata, Envoy without
+// session headers), a conversation is named by its root: every call of one conversation, and each
+// call's reply, share a session, and conversations that open differently, or are another caller's,
+// do not. The first message is read even where the skim elides the rest of the history.
+func TestRootSession(t *testing.T) {
+	rec := &recorder{}
+	p := New(Config{Analyzers: []Analyzer{rec}})
+	defer p.Close()
+	ctx := context.Background()
+	body := func(first string, turns int) []byte {
+		var b strings.Builder
+		b.WriteString(`{"model":"m","system":"You are a coding agent.","messages":[{"role":"user","content":` + strconv.Quote(first) + `}`)
+		for k := range turns {
+			fmt.Fprintf(&b, `,{"role":"assistant","content":"step %d"},{"role":"user","content":"go on %d"}`, k, k)
+		}
+		return []byte(b.String() + "]}")
+	}
+	call := func(id string, phase gateway.Phase, b []byte, user string) {
+		p.Handle(ctx, &gateway.Call{Gateway: "pk", ID: id, Phase: phase, Protocol: llm.AnthropicMessages, Body: b,
+			Client: gateway.Client{Identity: gateway.Identity{User: user}}})
+	}
+	reply := []byte(`{"id":"msg","model":"m","content":[{"type":"text","text":"ok"}]}`)
+	call("c1", gateway.PhaseRequest, body("fix the tests", 0), "alice")
+	call("c1", gateway.PhaseResponse, reply, "alice")
+	call("c2", gateway.PhaseRequest, body("fix the tests", 1), "alice")
+	call("c3", gateway.PhaseRequest, body("fix the tests", 40), "alice")
+	call("c4", gateway.PhaseRequest, body("write the docs", 1), "alice")
+	call("c5", gateway.PhaseRequest, body("fix the tests", 1), "bob")
+	call("c6", gateway.PhaseResponse, reply, "alice") // a reply whose request was never seen
+	got := make([]string, len(rec.turns))
+	for i, turn := range rec.turns {
+		got[i] = turn.SessionID
+	}
+	if !strings.HasPrefix(got[0], "root:") || got[1] != got[0] || got[2] != got[0] || got[3] != got[0] {
+		t.Errorf("one conversation got sessions %v", got[:4])
+	}
+	if got[4] == got[0] || got[5] == got[0] || got[4] == got[5] {
+		t.Errorf("another opening or another caller shared a session: %v", got)
+	}
+	if got[6] != "pk:c6" {
+		t.Errorf("a reply with no request seen: session %q, want the call's own", got[6])
+	}
+	// Messages[0] is the system text; the root is the first user message, and the history after it
+	// is still elided.
+	msgs := rec.turns[3].Call.Request.Messages
+	if first := msgs[1]; first.Elided || first.Text() != "fix the tests" || !msgs[5].Elided {
+		t.Errorf("long conversation's root %+v, a middle message elided %v", first, msgs[5].Elided)
 	}
 }
 

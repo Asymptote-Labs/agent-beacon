@@ -25,6 +25,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
 	"github.com/asymptote-labs/agent-beacon/gateway/harness"
+	"github.com/asymptote-labs/agent-beacon/gateway/llm"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm/codec"
 	"github.com/asymptote-labs/agent-beacon/gateway/store"
 )
@@ -222,7 +223,11 @@ func (p *Pipeline) run(ctx context.Context, c *gateway.Call) gateway.Verdict {
 	if err := decode(c); err != nil {
 		errs = append(errs, err)
 	}
-	t := &Turn{Call: c, SessionID: p.sessionID(c), Harness: harness.Identify(c.Client.UserAgent), Store: p.cfg.Store, wantsResent: p.resent}
+	session, rootEntry, err := p.sessionID(ctx, c)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("store: %w", err))
+	}
+	t := &Turn{Call: c, SessionID: session, Harness: harness.Identify(c.Client.UserAgent), Store: p.cfg.Store, wantsResent: p.resent}
 
 	var findings, standing []Finding
 	var recs []Record
@@ -230,7 +235,7 @@ func (p *Pipeline) run(ctx context.Context, c *gateway.Call) gateway.Verdict {
 		switch c.Phase {
 		case gateway.PhaseRequest:
 			var err error
-			if t.New, err = requestDelta(ctx, p.cfg.Store, p.seen, t.SessionID, c.Request, p.cfg.SeenTTL); err != nil {
+			if t.New, err = requestDelta(ctx, p.cfg.Store, p.seen, t.SessionID, c.Request, p.cfg.SeenTTL, rootEntry); err != nil {
 				errs = append(errs, fmt.Errorf("store: %w", err))
 			}
 		case gateway.PhaseResponse:
@@ -317,16 +322,75 @@ func decode(c *gateway.Call) error {
 	return nil
 }
 
+// rootTTL bounds how long a call's request remembers the session its root named, for the call's
+// reply, which normally follows within minutes.
+const rootTTL = time.Hour
+
 // sessionID names the call's conversation: a session header the client sent, the gateway's own
-// conversation id, or failing both the call itself.
-func (p *Pipeline) sessionID(c *gateway.Call) string {
+// conversation id, or failing both the conversation's root (rootSession), and failing that the
+// call itself. A reply carries no conversation, so its call's request leaves the session its root
+// named in the store, under the call's id, for the reply to find: root is that entry, which the
+// request adds in the batch requestDelta sends anyway. Only a reply whose session is named by a
+// root costs a store round trip.
+func (p *Pipeline) sessionID(ctx context.Context, c *gateway.Call) (session string, root *store.Entry, err error) {
 	for _, h := range p.cfg.SessionHeaders {
 		if v := c.Client.Headers[h]; v != "" {
-			return v
+			return v, nil, nil
 		}
 	}
 	if c.Client.Session != "" {
-		return c.Client.Session
+		return c.Client.Session, nil, nil
 	}
-	return c.Gateway + ":" + c.ID
+	key := "root/" + c.Gateway + "/" + c.ID
+	switch c.Phase {
+	case gateway.PhaseRequest:
+		if c.Request != nil {
+			if s, ok := rootSession(c); ok {
+				return s, &store.Entry{Key: key, Value: []byte(s), TTL: rootTTL}, nil
+			}
+		}
+	case gateway.PhaseResponse:
+		vals, gerr := p.cfg.Store.Get(ctx, key)
+		if gerr != nil {
+			err = gerr
+		} else if vals[0] != nil {
+			return string(vals[0]), nil, nil
+		}
+	}
+	return c.Gateway + ":" + c.ID, nil, err
+}
+
+// rootSession names a conversation no header names by its root, which a client resends unchanged
+// with every call: a digest of the gateway, the caller's identity (user and key), the system text
+// and the first non-system message, as "root:<hex>". The skim always decodes that message.
+//
+// It is a heuristic, with two known limits. Two conversations with the same identity, system text
+// and first message (a scripted agent sending the same opening prompt twice) are one session, so
+// their resent system text and tools are recorded once and a retried tail of one hides the other's
+// identical tail. A conversation whose system text changes part-way (a client that puts the date or
+// a changing status in it) is split where it changes. A request that carries no history (OpenAI
+// Responses continuing previous_response_id) has no root to read and stays its own session.
+func rootSession(c *gateway.Call) (string, bool) {
+	msgs := c.Request.Messages
+	first := -1
+	for i := range msgs {
+		if msgs[i].Role != llm.RoleSystem {
+			first = i
+			break
+		}
+	}
+	if first < 0 || msgs[first].Elided {
+		return "", false
+	}
+	d := newDigest()
+	d.field(c.Gateway)
+	d.field(c.Client.Identity.User)
+	d.field(c.Client.Identity.Key)
+	for i := range msgs {
+		if msgs[i].Role == llm.RoleSystem {
+			d.message(&msgs[i])
+		}
+	}
+	d.message(&msgs[first])
+	return "root:" + d.hex(), true
 }

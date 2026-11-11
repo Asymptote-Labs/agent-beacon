@@ -34,10 +34,12 @@ import (
 // message has no parts, and the volume of its content is in Request.Elided, by channel, exactly
 // as counting its decoded parts would have measured it.
 //
-// Fully decoded are every system message; every message from the start of the final run of
-// assistant messages before the tail through the end; and every earlier message holding a tool
-// call that a tool result in those references, so that binding a tail tool result to its call
-// finds what a full decode finds. Every other field is as DecodeRequest decodes it.
+// Fully decoded are every system message; the first non-system message, the conversation's root,
+// which names a conversation that no header names (its parts are memoized with its measure, so a
+// session decodes it once); every message from the start of the final run of assistant messages
+// before the tail through the end; and every earlier message holding a tool call that a tool
+// result in those references, so that binding a tail tool result to its call finds what a full
+// decode finds. Every other field is as DecodeRequest decodes it.
 func SkimRequest(p llm.Protocol, body []byte) (*llm.Request, error) {
 	c, ok := For(p)
 	if !ok {
@@ -318,8 +320,8 @@ func sameElem(a, b *skimMsg) bool {
 }
 
 // keep marks message i kept, decoding the element it comes from and checking that it yields the
-// messages the measure counted.
-func (sk *skimmer) keep(i int) error {
+// messages the measure counted. root marks the conversation's first non-system message.
+func (sk *skimmer) keep(i int, root bool) error {
 	sk.msgs[i].keep = true
 	if sk.msgs[i].parts != 0 {
 		return nil
@@ -348,9 +350,10 @@ func (sk *skimmer) keep(i int) error {
 		sm.parts = int32(len(sk.parts))
 		system = system || m.Role == llm.RoleSystem
 	}
-	if system && sk.msgs[lo].measured {
-		// A system message is decoded on every call: keep its parts with its measure.
-		sk.rememberParts(sk.msgs[i].raw, lo, hi)
+	if (system || root) && sk.msgs[lo].measured {
+		// System messages and the conversation's root are decoded on every call: keep their parts
+		// with the element's measure.
+		sk.rememberParts(sk.msgs[i].raw, lo, hi, root)
 	}
 	return nil
 }
@@ -369,9 +372,16 @@ func (sk *skimmer) finish() ([]llm.Message, llm.Inventory, []string, error) {
 	for start > 0 && sk.msgs[start-1].role == llm.RoleAssistant {
 		start--
 	}
+	root := -1
 	for i := range sk.msgs {
-		if i >= start || sk.msgs[i].role == llm.RoleSystem {
-			if err := sk.keep(i); err != nil {
+		if sk.msgs[i].role != llm.RoleSystem {
+			root = i
+			break
+		}
+	}
+	for i := range sk.msgs {
+		if i >= start || i == root || sk.msgs[i].role == llm.RoleSystem {
+			if err := sk.keep(i, i == root); err != nil {
 				return nil, nil, nil, err
 			}
 		}
@@ -395,7 +405,7 @@ func (sk *skimmer) finish() ([]llm.Message, llm.Inventory, []string, error) {
 		}
 		for _, id := range sk.ids[m.idLo:m.idHi] {
 			if referenced[string(id)] {
-				if err := sk.keep(i); err != nil {
+				if err := sk.keep(i, false); err != nil {
 					return nil, nil, nil, err
 				}
 				break

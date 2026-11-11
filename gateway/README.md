@@ -38,6 +38,19 @@ the gateway is down).
 names, paths, command lines, model and token usage, and no prompt, reply, system instructions, tool
 arguments or results.
 
+## Sessions
+
+`session.id` is, in order: a session header the client sent (`pipeline.session_headers`, by default
+`x-claude-code-session-id`, `session_id`, `x-session-id`, `conversation_id`); the gateway's own
+conversation id (LiteLLM's trace id, Portkey's `session_id` metadata); or, failing both, a digest
+of the conversation's root, `root:<hex>`: the gateway, the caller's identity, the system text and
+the first user message, which a client resends unchanged on every call. A call's reply joins the
+session its request was given. The root is a heuristic: two conversations with the same caller,
+system text and opening message are one session, a conversation whose system text changes part-way
+is split there, and a request that carries no history (OpenAI Responses continuing
+`previous_response_id`) is its own session. Send a session header, or Portkey `session_id`
+metadata, where that matters.
+
 ## Events
 
 | What the call carries | Event |
