@@ -50,7 +50,7 @@ func installFakeInventoryJobWithLoadError(t *testing.T, supported bool, loadErr 
 	t.Helper()
 	calls := &[]string{}
 	old := newInventoryJob
-	newInventoryJob = func(userMode bool, kind service.Kind) inventoryJobController {
+	newInventoryJob = func(userMode bool, kind service.Kind) service.ScheduledJob {
 		return recordingInventoryJob{calls: calls, supported: supported, unitPath: "/fake/" + InventoryUnitName(userMode), loadErr: loadErr}
 	}
 	t.Cleanup(func() { newInventoryJob = old })

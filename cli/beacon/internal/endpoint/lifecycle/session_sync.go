@@ -14,7 +14,7 @@ import (
 var (
 	// newSessionSyncJob and removeSessionSyncJob are the seams tests replace so Install,
 	// Uninstall and Repair can be exercised without touching launchd or systemd.
-	newSessionSyncJob = func(userMode bool, kind service.Kind) inventoryJobController {
+	newSessionSyncJob = func(userMode bool, kind service.Kind) service.ScheduledJob {
 		return service.SessionSyncManager{UserMode: userMode, Kind: kind, Env: sessionSyncJobEnv(userMode)}
 	}
 	removeSessionSyncJob = func(userMode bool) {
@@ -83,7 +83,7 @@ func ReconcileSessionSyncJob(opts InventoryJobOptions) (SessionSyncJobResult, er
 	return reconcileSessionSyncJobWith(newSessionSyncJob(opts.UserMode, opts.Kind), opts)
 }
 
-func reconcileSessionSyncJobWith(job inventoryJobController, opts InventoryJobOptions) (SessionSyncJobResult, error) {
+func reconcileSessionSyncJobWith(job service.ScheduledJob, opts InventoryJobOptions) (SessionSyncJobResult, error) {
 	result := SessionSyncJobResult{Enabled: sessionSyncEnabledFromConfigFile(endpointconfig.ConfigPath(opts.UserMode))}
 	if !result.Enabled {
 		// Removing is safe with or without a scheduler, and it is what turning the setting off

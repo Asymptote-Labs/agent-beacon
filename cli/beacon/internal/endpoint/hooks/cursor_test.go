@@ -154,7 +154,7 @@ func TestReadCursorHooksFileReturnsCorruptJSONError(t *testing.T) {
 
 func TestRemoveEndpointHooksDeletesFileWhenOnlyBeaconHooksRemain(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")
-	existing := `{"version":1,"hooks":{"sessionStart":[{"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks session-start"}],"stop":[{"command":"beacon-hooks stop"}]}}`
+	existing := `{"version":1,"hooks":{"sessionStart":[{"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks session-start"}],"stop":[{"command":"'/opt/beacon/hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' stop"}]}}`
 	if err := os.WriteFile(path, []byte(existing), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -168,6 +168,31 @@ func TestRemoveEndpointHooksDeletesFileWhenOnlyBeaconHooksRemain(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("hooks.json still exists or unexpected error: %v", err)
+	}
+}
+
+// A user's own hook whose script is merely named after the binary is not Beacon's, even when it
+// takes a --config flag of its own; uninstall must leave it in place.
+func TestRemoveEndpointHooksKeepsUserWrapperNamedAfterTheBinary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	wrapper := `'/home/u/scripts/my-beacon-hooks-wrapper.sh' --config ~/.w.json stop`
+	existing := `{"version":1,"hooks":{"stop":[{"command":"'/opt/beacon/hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' stop"},{"command":"` + wrapper + `"}]}}`
+	if err := os.WriteFile(path, []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := removeEndpointHooks(path); err != nil {
+		t.Fatalf("removeEndpointHooks returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read hooks.json: %v", err)
+	}
+	if !strings.Contains(string(data), "my-beacon-hooks-wrapper.sh") {
+		t.Fatalf("user's wrapper hook was removed: %s", data)
+	}
+	if strings.Contains(string(data), "/opt/beacon/hooks/beacon-hooks") {
+		t.Fatalf("Beacon hook was not removed: %s", data)
 	}
 }
 

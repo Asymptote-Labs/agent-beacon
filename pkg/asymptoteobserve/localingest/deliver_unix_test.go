@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -463,10 +464,16 @@ func TestWriteOutcome(t *testing.T) {
 	}
 }
 
-func TestDefaultSpoolDir(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	if got, want := DefaultSpoolDir(), filepath.Join(home, ".beacon", "endpoint", "spool"); got != want {
-		t.Fatalf("DefaultSpoolDir = %q, want %q", got, want)
+// The spool is under the home of the account the process runs as, whatever HOME says: a process
+// started under other credentials (sudo without -H) can inherit its parent's HOME, and a spool there
+// is one this account should not write.
+func TestTheSpoolIsInTheAccountsHomeNotHOME(t *testing.T) {
+	u, err := user.Current()
+	if err != nil || u.HomeDir == "" {
+		t.Skipf("this account has no home in the account database: %v", err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	if got, want := DefaultSpoolDir(), filepath.Join(u.HomeDir, ".beacon", "endpoint", "spool"); got != want {
+		t.Fatalf("DefaultSpoolDir = %q, want %q under the account's home", got, want)
 	}
 }

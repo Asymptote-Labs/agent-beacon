@@ -49,6 +49,35 @@ func TestTraceEventFromEvent(t *testing.T) {
 	}
 }
 
+func TestToolFailedProjectsAnErrorType(t *testing.T) {
+	// Shaped as the hook adapter writes them: Claude Code's PostToolUseFailure and Cursor's
+	// postToolUseFailure, which puts its message under tool.error. Neither carries error.
+	for name, line := range map[string]string{
+		"claude": `{"timestamp":"2026-10-01T10:00:03Z","event":{"id":"failed-claude","action":"tool.failed","category":"tool","severity":"high"},"harness":{"name":"claude","collection_method":"hook"},"session":{"id":"s"},"message":"Tool execution failed","tool":{"name":"Read","path":"/tmp/missing"}}`,
+		"cursor": `{"timestamp":"2026-10-01T10:00:03Z","event":{"id":"failed-cursor","action":"tool.failed","category":"tool","severity":"high"},"harness":{"name":"cursor","collection_method":"hook"},"session":{"id":"s"},"message":"Tool execution failed","tool":{"name":"Read","failure_type":"error","error":"ENOENT"}}`,
+	} {
+		var event Event
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatal(err)
+		}
+		te := TraceEventFromEvent(event, "", 1)
+		if te.Type != "tool_result" || te.Error == nil || te.Error.Type != ToolFailedErrorType {
+			t.Fatalf("%s: type=%q error=%+v, want tool_result with error.type %q", name, te.Type, te.Error, ToolFailedErrorType)
+		}
+	}
+
+	reported := shareEventAt("2026-10-01T10:00:04Z", "copilot", CollectionMethodPoll, "tool.failed", "tool")
+	reported.Error = &ErrorInfo{Type: "mcp_timeout"}
+	if te := TraceEventFromEvent(reported, "", 2); te.Error == nil || te.Error.Type != "mcp_timeout" {
+		t.Fatalf("reported error = %+v, want mcp_timeout kept", te.Error)
+	}
+
+	completed := shareEventAt("2026-10-01T10:00:05Z", "claude", CollectionMethodHook, "tool.completed", "tool")
+	if te := TraceEventFromEvent(completed, "", 3); te.Type != "tool_result" || te.Error != nil {
+		t.Fatalf("completed: type=%q error=%+v, want tool_result without error", te.Type, te.Error)
+	}
+}
+
 func TestAssistantActionsRetainTheirAnswerInTraceMessages(t *testing.T) {
 	for _, tc := range []struct{ action, category string }{
 		{"agent.message", "agent"},

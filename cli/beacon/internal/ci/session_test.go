@@ -20,7 +20,7 @@ import (
 func TestProvisionUsesRunnerTempAndWritesCollectorConfig(t *testing.T) {
 	runnerTemp := t.TempDir()
 	t.Setenv("RUNNER_TEMP", runnerTemp)
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\nsleep 60\n")
+	collector := fakeExecutable(t, "collector", fakeCollectorPrelude+"sleep 60\n")
 	oldResolve := resolveCollectorBinary
 	resolveCollectorBinary = func(configured string) (string, error) {
 		if configured != collector {
@@ -54,7 +54,7 @@ func TestProvisionUsesRunnerTempAndWritesCollectorConfig(t *testing.T) {
 func TestProvisionUsesLogPathDirectoryAsBaseDir(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "artifacts", "runtime.jsonl")
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\nsleep 60\n")
+	collector := fakeExecutable(t, "collector", fakeCollectorPrelude+"sleep 60\n")
 	oldResolve := resolveCollectorBinary
 	resolveCollectorBinary = func(string) (string, error) { return collector, nil }
 	t.Cleanup(func() { resolveCollectorBinary = oldResolve })
@@ -84,7 +84,7 @@ func TestStartStopCollectorProcess(t *testing.T) {
 	t.Setenv("RUNNER_TRACKING_ID", "github-actions-tracker")
 	// exec so SIGTERM reaches the sleeping process directly; a trap in a `sleep 1` loop only runs
 	// after the current sleep returns, which made every Stop wait up to a second.
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\nenv > \"$2.env\"\nexec sleep 60\n")
+	collector := fakeExecutable(t, "collector", fakeCollectorPrelude+"env > \"$2.env\"\nexec sleep 60\n")
 	oldWait := waitCollectorReady
 	waitCollectorReady = func(endpointconfig.Config, time.Duration) error { return nil }
 	t.Cleanup(func() { waitCollectorReady = oldWait })
@@ -138,7 +138,7 @@ func TestStartDetachedWritesStateAndExports(t *testing.T) {
 		t.Skip("shell fake uses POSIX signal semantics")
 	}
 	dir := t.TempDir()
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\nexec sleep 60\n")
+	collector := fakeExecutable(t, "collector", fakeCollectorPrelude+"exec sleep 60\n")
 	oldWait := waitCollectorReady
 	waitCollectorReady = func(endpointconfig.Config, time.Duration) error { return nil }
 	t.Cleanup(func() { waitCollectorReady = oldWait })
@@ -213,7 +213,7 @@ func TestRunChildPassesTheCallersWebFetchOptIn(t *testing.T) {
 // bodies the job turned on reach the collector config as capture_model_context, and anything else
 // leaves it dropping every body.
 func TestProvisionCapturesModelContextWhenTheJobTurnsInlineBodiesOn(t *testing.T) {
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\nsleep 60\n")
+	collector := fakeExecutable(t, "collector", fakeCollectorPrelude+"sleep 60\n")
 	oldResolve := resolveCollectorBinary
 	resolveCollectorBinary = func(string) (string, error) { return collector, nil }
 	t.Cleanup(func() { resolveCollectorBinary = oldResolve })
@@ -437,7 +437,7 @@ func TestProvisionForwardWritesSecureExporterConfig(t *testing.T) {
 	runnerTemp := t.TempDir()
 	t.Setenv("RUNNER_TEMP", runnerTemp)
 	t.Setenv(EnvSplunkToken, "top-secret-token")
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\nsleep 60\n")
+	collector := fakeExecutable(t, "collector", fakeCollectorPrelude+"sleep 60\n")
 	oldResolve := resolveCollectorBinary
 	resolveCollectorBinary = func(string) (string, error) { return collector, nil }
 	t.Cleanup(func() { resolveCollectorBinary = oldResolve })
@@ -560,6 +560,12 @@ func TestRunChildStripsUploadCredentialsWhenUploadConfigured(t *testing.T) {
 		t.Fatalf("child env missing Claude telemetry vars:\n%s", env)
 	}
 }
+
+// fakeCollectorPrelude starts every fake collector script. Writing the collector config runs
+// `<collector> components` on macOS and Windows to decide on peer attribution; a fake that went on
+// to sleep there would hold each Provision until that run timed out. Answering with an empty listing
+// at once reads as a collector that cannot list its components, the same as before.
+const fakeCollectorPrelude = "#!/bin/sh\n[ \"$1\" = components ] && exit 0\n"
 
 func fakeExecutable(t *testing.T, name, script string) string {
 	t.Helper()

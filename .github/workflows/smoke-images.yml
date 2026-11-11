@@ -1,0 +1,51 @@
+name: Smoke images
+
+# Publishes the container images the Linux smoke tests run in (packaging/linux/smoke/*.Dockerfile)
+# to GHCR, so CI pulls them instead of running apt-get or dnf against the distribution mirrors on
+# every pull request. Each image is tagged with a digest of its Dockerfile (see smoke/image.sh):
+#
+#   - on a push to main that changes a Dockerfile, the new recipe is published under its new tag;
+#   - weekly, every image is rebuilt from a freshly pulled base under its existing tag, so the
+#     smoke tests keep running on a patched base without a pull request to bump anything.
+#
+# Until the first publish of a recipe, the smoke scripts build it themselves, as on a developer
+# machine, so a pull request that changes a Dockerfile still tests the change.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - packaging/linux/smoke/**
+      - .github/workflows/smoke-images.yml
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [systemd, package-deb, package-rpm]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Log in to GHCR
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push ${{ matrix.image }}
+        run: |
+          BEACON_SMOKE_REGISTRY="ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')" \
+            sh packaging/linux/smoke/image.sh --publish "${{ matrix.image }}"

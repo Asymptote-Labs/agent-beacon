@@ -59,13 +59,16 @@ type TurnContext struct {
 }
 
 type ResponseItem struct {
-	Type      string      `json:"type"`
-	ID        string      `json:"id,omitempty"`
-	Role      string      `json:"role,omitempty"`
-	Content   interface{} `json:"content,omitempty"`
-	Status    string      `json:"status,omitempty"`
-	CallID    string      `json:"call_id,omitempty"`
-	Name      string      `json:"name,omitempty"`
+	Type    string      `json:"type"`
+	ID      string      `json:"id,omitempty"`
+	Role    string      `json:"role,omitempty"`
+	Content interface{} `json:"content,omitempty"`
+	Status  string      `json:"status,omitempty"`
+	CallID  string      `json:"call_id,omitempty"`
+	Name    string      `json:"name,omitempty"`
+	// Namespace is the namespace Codex gives a tool call: `mcp__<server>` for an MCP server's
+	// tools, beside a Name that is the tool's bare name.
+	Namespace string      `json:"namespace,omitempty"`
 	Input     interface{} `json:"input,omitempty"`
 	Output    interface{} `json:"output,omitempty"`
 	Arguments string      `json:"arguments,omitempty"`

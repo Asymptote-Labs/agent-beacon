@@ -118,7 +118,7 @@ Codex runs a non-managed hook only after you review and trust its exact definiti
 | Prompt telemetry | Supported when emitted through Codex semantic logs |
 | Agent responses | Supported live through the Stop hook (`last_assistant_message`, recorded as `agent.message`); Codex's OTLP export carries no response text. `beacon endpoint codex sync` also recovers every committed assistant message |
 | Turn identity | Supported. Codex's `turn_id` from hooks, `turn.id` from OTLP, and the turn bracket in `beacon endpoint codex sync` are promoted to `prompt.id` |
-| Command, tool, and file telemetry | Supported when emitted through Codex semantic logs |
+| Command, tool, and file telemetry | Supported live from `codex.tool_result`. A shell call is `command.executed` with `command.output` and the exit code from the header Codex writes above the output (`Process exited with code N`, or `Exit code: N`); an MCP server's tool is `mcp.tool_invoked` named `mcp__<server>__<tool>`, with its reply as `gen_ai.tool.call.result`; any other tool is `tool.completed` or `tool.failed`, with its output as `gen_ai.tool.call.result`. `beacon endpoint codex sync` records the same call the same way, as a second event with `harness.collection_method=poll` |
 | Token usage | Supported per turn through a selective OTLP trace (input, output, cache read, cache creation, reasoning) |
 | Cost attribution | Not available; Codex emits no cost signal |
 | Per-session attribution | Supported from `thread.id` on the turn span |

@@ -18,10 +18,13 @@ type AntigravityOptions struct {
 }
 
 type AntigravityStatus struct {
-	Installed  bool   `json:"installed"`
-	BinaryPath string `json:"binary_path,omitempty"`
-	ConfigPath string `json:"config_path,omitempty"`
-	Message    string `json:"message,omitempty"`
+	Installed bool `json:"installed"`
+	// NeedsReinstall reports that Beacon's managed block uses the legacy grouped lifecycle schema,
+	// which Antigravity does not run. Installed stays true so repair still rewrites the block.
+	NeedsReinstall bool   `json:"needs_reinstall,omitempty"`
+	BinaryPath     string `json:"binary_path,omitempty"`
+	ConfigPath     string `json:"config_path,omitempty"`
+	Message        string `json:"message,omitempty"`
 }
 
 type antigravityHookGroup struct {
@@ -30,18 +33,19 @@ type antigravityHookGroup struct {
 }
 
 type antigravityHookRef struct {
-	Type    string `json:"type,omitempty"`
-	Command string `json:"command"`
-	Timeout int    `json:"timeout,omitempty"`
+	Type    string               `json:"type,omitempty"`
+	Command string               `json:"command"`
+	Timeout int                  `json:"timeout,omitempty"`
+	Hooks   []antigravityHookRef `json:"hooks,omitempty"`
 }
 
 type antigravityHookBlock struct {
-	PreInvocation    []antigravityHookGroup `json:"PreInvocation,omitempty"`
-	UserPromptSubmit []antigravityHookGroup `json:"UserPromptSubmit,omitempty"`
-	PostInvocation   []antigravityHookGroup `json:"PostInvocation,omitempty"`
-	PreToolUse       []antigravityHookGroup `json:"PreToolUse,omitempty"`
-	PostToolUse      []antigravityHookGroup `json:"PostToolUse,omitempty"`
-	Stop             []antigravityHookGroup `json:"Stop,omitempty"`
+	SessionStart   []antigravityHookRef   `json:"SessionStart,omitempty"`
+	PreInvocation  []antigravityHookRef   `json:"PreInvocation,omitempty"`
+	PostInvocation []antigravityHookRef   `json:"PostInvocation,omitempty"`
+	PreToolUse     []antigravityHookGroup `json:"PreToolUse,omitempty"`
+	PostToolUse    []antigravityHookGroup `json:"PostToolUse,omitempty"`
+	Stop           []antigravityHookRef   `json:"Stop,omitempty"`
 }
 
 type antigravityConfig struct {
@@ -73,7 +77,24 @@ func UninstallAntigravity(opts AntigravityOptions) (AntigravityStatus, error) {
 }
 
 func AntigravityHookStatus(opts AntigravityOptions) AntigravityStatus {
-	return antigravityStatusFromRuntime(runtimeHookStatus(antigravityRuntime, RuntimeOptions(opts)))
+	status := antigravityStatusFromRuntime(runtimeHookStatus(antigravityRuntime, RuntimeOptions(opts)))
+	if status.Installed {
+		if _, legacy := antigravityManagedHookState(status.ConfigPath); legacy {
+			status.NeedsReinstall = true
+			status.Message = AntigravityLegacyHooksMessage(opts.Level)
+		}
+	}
+	return status
+}
+
+// AntigravityLegacyHooksMessage explains a Beacon hook block written in the legacy grouped
+// lifecycle schema and names the command that rewrites it at level.
+func AntigravityLegacyHooksMessage(level Level) string {
+	command := "beacon endpoint hooks install --harness antigravity"
+	if level == LevelProject {
+		command += " --level project"
+	}
+	return "Beacon's Antigravity CLI hooks use the legacy schema, which Antigravity does not run; rerun " + command + " to rewrite them"
 }
 
 func IsAntigravityInstalled(opts AntigravityOptions) bool {
@@ -96,24 +117,16 @@ func installAntigravityHooks(path, binaryPath, logPath, configPath string) error
 	}
 	prefix := endpointCommandPrefix("antigravity", binaryPath, logPath, configPath)
 	block := antigravityHookBlock{
-		PreInvocation: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " prompt-submit", Timeout: 30}},
-		}},
-		UserPromptSubmit: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " prompt-submit", Timeout: 30}},
-		}},
+		SessionStart: []antigravityHookRef{{Type: "command", Command: prefix + " session-start"}},
 		PreToolUse: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " pre-tool"}},
+			Matcher: "*",
+			Hooks:   []antigravityHookRef{{Type: "command", Command: prefix + " pre-tool"}},
 		}},
 		PostToolUse: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " post-tool"}},
+			Matcher: "*",
+			Hooks:   []antigravityHookRef{{Type: "command", Command: prefix + " post-tool"}},
 		}},
-		PostInvocation: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " stop", Timeout: 45}},
-		}},
-		Stop: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " stop", Timeout: 45}},
-		}},
+		Stop: []antigravityHookRef{{Type: "command", Command: prefix + " stop", Timeout: 45}},
 	}
 	data, err := json.Marshal(block)
 	if err != nil {
@@ -173,39 +186,81 @@ func removeAntigravityEndpointHooks(path string) (bool, error) {
 }
 
 func isAntigravityInstalledAt(path string) bool {
+	installed, _ := antigravityManagedHookState(path)
+	return installed
+}
+
+// antigravityManagedHookState reports whether Beacon's managed block names an endpoint hook, in
+// either schema, and whether that block uses the legacy grouped schema Antigravity does not run.
+// A legacy block still counts as installed so that repair targets and rewrites it.
+func antigravityManagedHookState(path string) (installed, legacy bool) {
 	config, err := readAntigravityConfig(path)
 	if err != nil {
-		return false
+		return false, false
 	}
 	raw, ok := config.values[antigravityBeaconHookName]
 	if !ok {
-		return false
+		return false, false
 	}
-	return hasAntigravityEndpointHook(raw)
+	found, legacy := antigravityEndpointHookShape(raw)
+	return found, found && legacy
 }
 
-func hasAntigravityEndpointHook(raw json.RawMessage) bool {
+// AntigravityConfigEndpointHooks reports whether any block of an Antigravity hooks.json document
+// names a Beacon endpoint hook in the schema Antigravity runs (current), and whether one names it
+// only in the legacy grouped lifecycle schema, which Antigravity does not run (legacy). The error
+// is the document's parse error.
+func AntigravityConfigEndpointHooks(data []byte) (current, legacy bool, err error) {
+	var blocks map[string]json.RawMessage
+	if err := json.Unmarshal(data, &blocks); err != nil {
+		return false, false, err
+	}
+	for _, block := range blocks {
+		found, grouped := antigravityEndpointHookShape(block)
+		if !found {
+			continue
+		}
+		if grouped {
+			legacy = true
+		} else {
+			current = true
+		}
+	}
+	return current, legacy, nil
+}
+
+// antigravityEndpointHookShape reports whether a hooks block names a Beacon endpoint command
+// anywhere, and whether a lifecycle event in it lists {"hooks": [...]} groups where Antigravity
+// expects handlers. Antigravity does not run a block in that legacy shape.
+func antigravityEndpointHookShape(raw json.RawMessage) (found, legacy bool) {
 	var block antigravityHookBlock
 	if err := json.Unmarshal(raw, &block); err != nil {
-		return false
+		return false, false
 	}
-	for _, groups := range [][]antigravityHookGroup{
+	for _, hooks := range [][]antigravityHookRef{
+		block.SessionStart,
 		block.PreInvocation,
-		block.UserPromptSubmit,
 		block.PostInvocation,
-		block.PreToolUse,
-		block.PostToolUse,
 		block.Stop,
 	} {
+		for _, hook := range hooks {
+			if hook.Hooks != nil {
+				legacy = true
+				for _, grouped := range hook.Hooks {
+					found = found || hookcmd.IsEndpointHook(grouped.Command, "antigravity")
+				}
+			}
+			found = found || hookcmd.IsEndpointHook(hook.Command, "antigravity")
+		}
+	}
+	for _, groups := range [][]antigravityHookGroup{block.PreToolUse, block.PostToolUse} {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
-				if hookcmd.IsEndpointHook(hook.Command, "antigravity") {
-					return true
-				}
+				found = found || hookcmd.IsEndpointHook(hook.Command, "antigravity")
 			}
 		}
 	}
-	return false
+	return found, legacy
 }
 
 func antigravityConfigPath(level Level) (string, error) {

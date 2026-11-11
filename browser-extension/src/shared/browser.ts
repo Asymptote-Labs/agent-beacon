@@ -10,8 +10,9 @@
 // promise-returning object without a polyfill or per-call feature checks.
 //
 // Scope is deliberately small: only the APIs this extension uses (storage,
-// runtime, alarms, permissions, tabs.onRemoved), which have the same shape on
-// all three engines.
+// including the policy-fed storage.managed, runtime, alarms, permissions,
+// tabs.onRemoved, management.getSelf), which have the same shape on all three
+// engines.
 // The type is Chrome's, because @types/chrome describes the promise overloads we
 // call and Firefox/Safari match them for this subset.
 

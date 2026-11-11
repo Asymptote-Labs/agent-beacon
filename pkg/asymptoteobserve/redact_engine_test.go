@@ -44,7 +44,8 @@ func TestNeedleScannerFindsEveryOccurrence(t *testing.T) {
 			b.WriteString(pieces[r.IntN(len(pieces))])
 		}
 		text := b.String()
-		got, found := sc.scan(text, nil)
+		var found idSet
+		got := sc.scan(text, nil, &found)
 		expected := want(text)
 		key := func(a, b redactHit) int {
 			if a.start != b.start {
@@ -57,12 +58,46 @@ func TestNeedleScannerFindsEveryOccurrence(t *testing.T) {
 		if !slices.Equal(got, expected) {
 			t.Fatalf("scan(%q)\n = %v\nwant %v", text, got, expected)
 		}
-		var mask uint64
+		var mask idSet
 		for _, h := range expected {
-			mask |= 1 << h.id
+			mask.add(h.id)
 		}
 		if found != mask {
-			t.Fatalf("scan(%q) found %b, want %b", text, found, mask)
+			t.Fatalf("scan(%q) found %x, want %x", text, found, mask)
+		}
+	}
+}
+
+// The rules use fewer needles and sets than one word of an idSet holds, so nothing else reaches
+// the ids past 63. A scanner over idSetCap needles must report each one, in either word, and the
+// set of those found must hold exactly them.
+func TestNeedleScannerReportsIDsInEveryWord(t *testing.T) {
+	var sc needleScanner
+	needles := make([]redactNeedle, idSetCap)
+	for id := range needles {
+		needles[id] = redactNeedle{text: fmt.Sprintf("<n%d>", id)}
+	}
+	sc.build(needles)
+	for _, ids := range [][]int{{0}, {63}, {64}, {idSetCap - 1}, {1, 63, 64, 65, idSetCap - 1}} {
+		var text strings.Builder
+		var want idSet
+		for _, id := range ids {
+			text.WriteString("x " + needles[id].text)
+			want.add(id)
+		}
+		var found idSet
+		hits := sc.scan(text.String(), nil, &found)
+		var got []int
+		for _, h := range hits {
+			got = append(got, h.id)
+		}
+		if !slices.Equal(got, ids) || found != want {
+			t.Errorf("scan(%q): ids %v, found %x; want ids %v, found %x", text.String(), got, found, ids, want)
+		}
+		for id := range idSetCap {
+			if found.has(id) != slices.Contains(ids, id) {
+				t.Errorf("found.has(%d) = %t for ids %v", id, found.has(id), ids)
+			}
 		}
 	}
 }
@@ -264,6 +299,78 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		}
 		return b.String() + repeatTo("ghp_"+strings.Repeat("a", 40)+" ", n/2)
 	}
+	// Long assigned values, whose copies are searched for in the whole text: one as long as half
+	// the text, many of fixed length, and many ending the same way, which share a run of states
+	// with many edges out of it.
+	texts["one value as long as half the text"] = func(n int) string {
+		a := strings.Repeat("a", n/2)
+		return "token=" + a + " hf_" + a
+	}
+	texts["many long values"] = func(n int) string {
+		var b strings.Builder
+		for i := 0; b.Len() < n; i++ {
+			fmt.Fprintf(&b, "token=%070d\n", i)
+		}
+		return b.String()
+	}
+	texts["many long values ending the same way"] = func(n int) string {
+		var b strings.Builder
+		tail := strings.Repeat("a", 70)
+		for i := 0; b.Len() < n/2; i++ {
+			fmt.Fprintf(&b, "token=%d%s\n", i, tail)
+		}
+		return b.String() + repeatTo("a", n/2)
+	}
+	// Every flag on a curl line is redacted in one pass: many on one line, after values that never
+	// close, and many lines.
+	texts["curl passwords on one line"] = func(n int) string { return "curl" + repeatTo(" -u a:b", n) }
+	texts["curl cookies on one line"] = func(n int) string { return "curl" + repeatTo(" -b a=1", n) }
+	texts["curl cookies that never close"] = func(n int) string { return "curl -b a=1" + repeatTo(" -b 'x", n) }
+	texts["curl lines with flags"] = func(n int) string { return repeatTo("curl -b a=1 -u a:b -b 'x\n", n) }
+	// URLs whose scheme a Bearer token took, and replaced schemes with no password after them.
+	texts["URLs after Bearer tokens"] = func(n int) string { return repeatTo("Bearer a://u:p@h ", n) }
+	texts["replaced schemes without passwords"] = func(n int) string { return "[REDACTED]://u:" + repeatTo("[REDACTED]://u:", n) }
+	// Labeled values ending in AWS key ids, with and without their secrets after them.
+	texts["labeled key ids and secrets"] = func(n int) string {
+		return repeatTo("token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY ", n)
+	}
+	texts["labeled key ids without secrets"] = func(n int) string { return repeatTo("token=xAKIAIOSFODNN7EXAMPLE::|,", n) }
+	// Key pairs after labeled key ids, each followed by a run a label could be spelled in.
+	texts["labeled key pairs before label runs"] = func(n int) string {
+		return repeatTo("token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY-"+strings.Repeat("_", 200)+": ", n/2) +
+			"token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" + repeatTo("-", n/2)
+	}
+	// Copies that end alike after one byte each, X+a^9 and X+a^10 for every printable X, so two
+	// states of the copy finder have as many children; a token of every shape, each a chain that
+	// asks for the copies; and a long run of `a`, over which the finder would go between those two
+	// states at every byte, with the tokens before it and after it. Their work per byte, that of
+	// the whole redaction, is held to a ceiling too, not only its growth: about 90 now, where it
+	// was over 3,000 when every chain read the whole text through child lists.
+	wideCopies := func(tokensFirst bool) func(n int) string {
+		return func(n int) string {
+			var b, tokens strings.Builder
+			for c := byte('!'); c <= '~'; c++ {
+				if c == 'a' || strings.IndexByte("\"'`,\\", c) >= 0 {
+					continue
+				}
+				fmt.Fprintf(&b, "token=%c%s\ntoken=%c%s\n", c, strings.Repeat("a", 9), c, strings.Repeat("a", 10))
+			}
+			for _, token := range adjacentSecrets {
+				tokens.WriteString(token + " ")
+			}
+			run := repeatTo("a", n-b.Len()-tokens.Len())
+			if tokensFirst {
+				return b.String() + tokens.String() + run
+			}
+			return b.String() + run + tokens.String()
+		}
+	}
+	texts["copies that end alike, tokens of every shape, a long run"] = wideCopies(true)
+	texts["copies that end alike, a long run, tokens of every shape"] = wideCopies(false)
+	perByte := map[string]int{
+		"copies that end alike, tokens of every shape, a long run": 128,
+		"copies that end alike, a long run, tokens of every shape": 128,
+	}
 	for name, text := range texts {
 		work := func(n int) int {
 			total := 0
@@ -277,6 +384,10 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 			w := work(n)
 			if w > 5*previous/2+4096 {
 				t.Errorf("%s: work %d on %d bytes, %d on half as many: not linear", name, w, n, previous)
+				break
+			}
+			if ceiling := perByte[name]; ceiling > 0 && w > ceiling*n {
+				t.Errorf("%s: work %d on %d bytes, %d a byte, more than %d", name, w, n, w/n, ceiling)
 				break
 			}
 			previous = w

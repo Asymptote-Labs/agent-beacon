@@ -43,6 +43,29 @@ grep "  ${PKG}$" checksums.txt | sha256sum --check - && sudo dnf install "./${PK
 APT reads a local package as its unprivileged `_apt` user. If the `.deb` sits somewhere `_apt` cannot read, such as your home directory, the install still succeeds, but APT ends with `Download is performed unsandboxed as root` and `pkgAcquire::Run (13: Permission denied)`. That is a warning, not a failure, and there is nothing to repair; `beacon version` confirms the install. The installer and the Debian block above download into a readable directory under `/tmp` so the warning does not appear.
 </Note>
 
+### From the apt repository (Debian, Ubuntu)
+
+Beacon also publishes a signed apt repository at `https://apt.beacon.sh`, so `apt` installs the package and brings later releases in with your other updates. This block downloads the repository key into a private temporary directory, stops unless it is Beacon's release key (`07BEA34ED6A411F4C066D98322F94195DCDC8F45`, see [Release signing](#release-signing)), then adds the repository and installs. It needs `gpg` to read the key:
+
+```bash title="Add the repository and install"
+(
+  set -euo pipefail
+  FPR=07BEA34ED6A411F4C066D98322F94195DCDC8F45
+  DIR="$(mktemp -d)"
+  trap 'rm -rf "$DIR"' EXIT
+  curl -fsSL https://apt.beacon.sh/beacon-archive-keyring.gpg -o "$DIR/beacon-archive-keyring.gpg"
+  GOT="$(GNUPGHOME="$DIR" gpg --batch --show-keys --with-colons "$DIR/beacon-archive-keyring.gpg" |
+    awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }')"
+  [ "$GOT" = "$FPR" ] || { echo "unexpected repository key: ${GOT:-none}" >&2; exit 1; }
+  sudo install -m 0644 "$DIR/beacon-archive-keyring.gpg" /usr/share/keyrings/beacon-archive-keyring.gpg
+  echo "deb [signed-by=/usr/share/keyrings/beacon-archive-keyring.gpg] https://apt.beacon.sh stable main" |
+    sudo tee /etc/apt/sources.list.d/beacon.list >/dev/null
+  sudo apt update && sudo apt install beacon
+)
+```
+
+`apt` refuses the repository's index unless that key signed it, and checks every package against the index. The package is the same `.deb` the release publishes, so the install sets up the system service exactly as above, and `sudo apt upgrade` updates it. The repository starts at 1.3.57; for an older release, use the installer with `BEACON_VERSION` or the manual steps.
+
 ### Without root, or without a package manager
 
 If you are not an administrator on the machine, or you would rather not touch system paths, use the tarball and install in user mode:
@@ -149,6 +172,8 @@ beacon scan                  # run threat detection rules over the log
 beacon token-usage           # token and cost rollups
 ```
 
+An unattended package install, such as one from a configuration manager or MDM, turns the dashboard off unless `BEACON_DASHBOARD=enabled` was set; see [Turning the dashboard off](/cli/dashboard#turning-the-dashboard-off).
+
 See the [event schema](/telemetry-schema/event-schema) for the full field reference.
 
 ## Forwarding
@@ -172,16 +197,55 @@ Vector comes with Beacon. The `.deb` and `.rpm` install it at `/opt/beacon/bin/v
 | Unpack | `beacon`, `beacon-hooks`, `beacon-otelcol` and `vector` under `/opt/beacon/bin` |
 | System install | Config and collector config under `/etc/beacon/endpoint` |
 | Service | `/etc/systemd/system/beacon-collector.service`, enabled and started |
-| Runtime log | `/var/log/beacon-agent/runtime.jsonl` |
-| Agent runtime | Claude Code and Codex CLI settings for the installing user, pointed at `127.0.0.1:4317` |
+| Runtime log | `/var/log/beacon-agent/runtime.jsonl`, in [restricted log access](/security/restricted-log-access) on a first install: `0640 root:beacon-log`, written only by the collector |
+| Agent runtime | Claude Code and Codex CLI settings and hooks for the installing user and everyone logged in, pointed at `127.0.0.1:4317` |
 
-That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. Beacon uses `SUDO_USER`, which is set for every normal install path, and falls back to asking logind who has an active session. If it cannot identify anyone, it says so instead of failing, and you can configure yourself later:
+That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. Beacon configures the user named by `SUDO_USER`, which is set when you install with `sudo`, and every account logind reports a live login session for (a desktop, ssh or terminal login; not a display manager's greeter or a background session such as cron's), which is what an install by a configuration manager running as root (Salt, Ansible, Puppet) has to go on. Each is configured as that user, in their own home, and the install prints one line per person:
+
+```
+beacon: the hook lines above are root's own; configuring the agent runtimes of logged-in users
+Configured alice (/home/alice): telemetry for claude, codex; hooks for claude, codex, writing to /var/log/beacon-agent/runtime.jsonl
+Configured bob (/home/bob): telemetry for claude, codex; hooks for claude, codex, writing to /var/log/beacon-agent/runtime.jsonl
+```
+
+The `Claude Code hooks installed: /root/...` lines printed before it are root's own settings, not anyone else's. A person who was not logged in during the install is not configured. If nobody can be identified, the install says so instead of failing, and each person configures themselves later:
 
 ```bash title="Configure your own agent runtime against an already-installed endpoint"
 sudo beacon endpoint user-config repair-installed --system
 ```
 
-Other users on the same machine run the same command for themselves. They all export to the same collector and the same log. That is why `/var/log/beacon-agent/runtime.jsonl` is group- and world-writable: hooks run as the logged-in user and append to it directly. To stop other accounts from modifying or reading it, install with [`--log-access restricted`](/cli/endpoint-install#restricted-log-access): the collector becomes the only writer and hooks send their events to it over a local socket.
+Other users on the same machine run the same command for themselves. They all export to the same collector and the same log. A first package install on a host where systemd runs the collector sets the log to [restricted access](/cli/endpoint-install#restricted-log-access): the collector is the only writer, hooks hand their events to it over a local socket and are recorded under the account the kernel says sent them, and only root and the `beacon-log` group can read the log. That includes the people using the machine: the dashboard, `beacon share` and `beacon traces` cannot read the system log for an account outside `beacon-log`. When you install the package yourself with `sudo`, you are added to `beacon-log` (log in again for it to take effect); a configuration manager's install adds nobody. Add anyone else with `sudo usermod -aG beacon-log <user>`, or name them in `BEACON_LOG_READERS` (see [Package installs](/security/restricted-log-access#package-installs)). Without systemd as PID 1 (a container, WSL without systemd) or with `BEACON_SERVICE=none`, the collector is a process nothing restarts, so those installs stay shared unless you ask for restricted. A package upgrade, or a reinstall over a log kept by `uninstall --keep-logs`, keeps whatever mode the endpoint already has, so an endpoint installed from an earlier package stays shared until you switch it with `sudo beacon endpoint repair --system --log-access restricted`. A configuration manager's first install also turns the [local dashboard](/cli/dashboard#turning-the-dashboard-off) off for every account, wherever the collector runs, while an install you run yourself with `sudo` keeps it; `BEACON_DASHBOARD=enabled|disabled` decides either way, and an upgrade keeps whatever an endpoint already has. To install with the older shared log instead, where every account appends to the file directly, set `BEACON_LOG_ACCESS=shared` (see below).
+
+### Settings for configuration-manager installs
+
+Salt's `pkg.installed`, Ansible's `apt` and `dnf` modules, Puppet and Chef run the package manager for you and give you no way to set the environment of the package's install script. Write the settings to `/etc/default/beacon` (Debian, Ubuntu) or `/etc/sysconfig/beacon` (Fedora, RHEL) before the package is installed, and the install script reads them:
+
+```bash title="/etc/default/beacon"
+BEACON_LOG_ACCESS=restricted
+BEACON_LOG_READERS=            # nobody is added to beacon-log implicitly
+BEACON_ENDPOINT_HARNESSES=claude,codex,cursor
+BEACON_SESSION_SYNC=1
+```
+
+```yaml title="Salt state"
+/etc/default/beacon:
+  file.managed:
+    - user: root
+    - group: root
+    - mode: "0600"
+    - contents: |
+        BEACON_LOG_ACCESS=restricted
+        BEACON_LOG_READERS=
+
+beacon:
+  pkg.installed:
+    - sources:
+      - beacon: salt://beacon/beacon_<version>_linux_amd64.deb
+    - require:
+      - file: /etc/default/beacon
+```
+
+The file is read, not run: each line is a `KEY=VALUE` written as a shell would read it (an `export` in front, quotes around the value, and `# comments` on their own line or after the value are allowed; a value with an unquoted space or an unclosed quote is skipped with a warning naming the key), and only the install settings the script documents are taken (`BEACON_LOG_ACCESS`, `BEACON_LOG_READERS`, `BEACON_ENDPOINT_HARNESSES`, `BEACON_OTLP_GRPC_PORT`, `BEACON_OTLP_HTTP_PORT`, `BEACON_SESSION_SYNC`, `BEACON_SERVICE`, `BEACON_NO_START`, `BEACON_COLLECTOR` and the `BEACON_SPLUNK_*` settings). Because the install script runs as root, the file is ignored, with a warning, unless root owns it and no other account can write it. A variable set in the install script's environment, or passed as one of its positional arguments when you run `/opt/beacon/scripts/install-endpoint.sh` yourself, wins over the file. A key the file sets twice takes the last value, as a shell would, so appending a line overrides an earlier one. The package reads it for both of its steps, so `BEACON_ENDPOINT_HARNESSES` reaches the system install and the agent runtimes of the people it configures. The file is read on every install and upgrade, so keep it in step with what you want the endpoint to be; an unset `BEACON_LOG_ACCESS` on an upgrade keeps the mode the endpoint has.
 
 ## Managing the service
 
@@ -259,20 +323,25 @@ sudo beacon endpoint update --check
 sudo beacon endpoint update --apply
 ```
 
-`--apply` downloads the release package for your platform, verifies its SHA-256, installs it with `dpkg` or `rpm`, restarts the collector, and rolls back if the new version fails its health check. Verification is checksum-over-HTTPS from GitHub Releases, the same trust root you used to download the package in the first place. macOS additionally verifies Apple notarization. On Linux, once a build pins the release key (see [Release signing](#release-signing)), the package must also be listed in a `checksums.txt` signed by that key, which needs `gpgv`. `beacon endpoint update` reports which verification it performed (`sha256`, `sha256+gpg` or `sha256+notarization`) rather than implying more.
+`--apply` downloads the release package for your platform, verifies its SHA-256, installs it with `dpkg` or `rpm`, restarts the collector, and rolls back if the new version fails its health check. Verification is checksum-over-HTTPS from GitHub Releases, the same trust root you used to download the package in the first place. macOS additionally verifies Apple notarization. On Linux, builds after 1.3.57 pin the release key (see [Release signing](#release-signing)), so the package must also be listed in a `checksums.txt` signed by that key, which needs `gpgv` or `sqv`. `beacon endpoint update` reports which verification it performed (`sha256`, `sha256+gpg` or `sha256+notarization`) rather than implying more.
 
 ## Release signing
 
-Signing is wired into the release but not yet active: Beacon has no Linux release key yet, so current `.deb`, `.rpm` and `checksums.txt` files are unsigned, and the installer and `beacon endpoint update` check checksums only. This section applies once a release publishes the key. A signed release never becomes the latest release without its signature: GoReleaser signs `checksums.txt` and attaches the signature and the public key before it publishes the release, and when the macOS and Windows packages are added later, `checksums.txt` is signed again before the extended file replaces it.
+Releases from 1.3.57 on are signed with Beacon's Linux release key:
 
-A signed release carries `checksums.txt.sig` (a detached OpenPGP signature over `checksums.txt`) and the public key as `beacon-release-key.asc` and `beacon-release-key.gpg`. The `.rpm` carries an RPM signature and the `.deb` a `_gpgorigin` signature member, both from the same key. Release key fingerprint: _not yet published_.
+```text title="Release key"
+Beacon Linux Release Signing <security@asymptotelabs.ai>
+RSA 4096, fingerprint 07BE A34E D6A4 11F4 C066  D983 22F9 4195 DCDC 8F45
+```
 
-The installer and the self-updater pin that fingerprint. They take the key from the release but trust it only if its fingerprint matches, and they refuse a package whose `checksums.txt` is unsigned, signed by another key, or does not list the package. To check a download yourself:
+A signed release carries `checksums.txt.sig` (a detached OpenPGP signature over `checksums.txt`) and the public key as `beacon-release-key.asc` and `beacon-release-key.gpg`. The `.rpm` carries an RPM signature and the `.deb` a `_gpgorigin` signature member, both from the same key, and the same key signs the [apt repository](#from-the-apt-repository-debian-ubuntu). A signed release never becomes the latest release without its signature: GoReleaser signs `checksums.txt` and attaches the signature and the public key before it publishes the release, and when the macOS and Windows packages are added later, `checksums.txt` is signed again before the extended file replaces it.
+
+The installer and the self-updater of every release after 1.3.57 pin that fingerprint. They take the key from the release but trust it only if its fingerprint matches, and they refuse a package whose `checksums.txt` is unsigned, signed by another key, or does not list the package. Releases before 1.3.57 are unsigned, so the current installer refuses them: to install one with `BEACON_VERSION`, use that release's own `install.sh` (`https://github.com/asymptote-labs/agent-beacon/releases/download/v<version>/install.sh`) or the manual steps above. To check a download yourself:
 
 ```bash title="Verify a signed release"
 (
   set -euo pipefail
-  FPR="<release key fingerprint>"
+  FPR="07BEA34ED6A411F4C066D98322F94195DCDC8F45"
   H="$(mktemp -d)"
   curl -fsSLO "${BASE}/checksums.txt" -O "${BASE}/checksums.txt.sig" -O "${BASE}/beacon-release-key.gpg"
   # Keep only the pinned key: the file comes from the release, so it may hold others.

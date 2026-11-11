@@ -47,7 +47,7 @@ var (
 	}
 	// newInventoryJob and removeInventoryJob are the seams tests replace so Install, Uninstall
 	// and Repair can be exercised without touching launchd or systemd.
-	newInventoryJob = func(userMode bool, kind service.Kind) inventoryJobController {
+	newInventoryJob = func(userMode bool, kind service.Kind) service.ScheduledJob {
 		return service.InventoryManager{UserMode: userMode, Kind: kind, Env: inventoryJobEnv(userMode)}
 	}
 	removeInventoryJob = func(userMode bool) {
@@ -79,19 +79,6 @@ var (
 	sentinelForwarderStatus = sentinel.ReadStatus
 )
 
-// inventoryJobController is what lifecycle needs from service.InventoryManager.
-type inventoryJobController interface {
-	Supported() bool
-	UnsupportedReason() string
-	UnitPath() (string, error)
-	UnitPaths() []string
-	WriteUnit(program, logPath string) (string, error)
-	Load() error
-	Unload() error
-	RemoveUnits()
-	Status() service.Status
-}
-
 // InventoryJobOptions drives ReconcileInventoryJob.
 type InventoryJobOptions struct {
 	UserMode bool
@@ -122,7 +109,7 @@ func ReconcileInventoryJob(opts InventoryJobOptions) (InventoryJobResult, error)
 	return reconcileInventoryJobWith(newInventoryJob(opts.UserMode, opts.Kind), opts)
 }
 
-func reconcileInventoryJobWith(job inventoryJobController, opts InventoryJobOptions) (InventoryJobResult, error) {
+func reconcileInventoryJobWith(job service.ScheduledJob, opts InventoryJobOptions) (InventoryJobResult, error) {
 	result := InventoryJobResult{Enabled: inventoryEnabledFromConfigFile(endpointconfig.ConfigPath(opts.UserMode))}
 	if !job.Supported() {
 		result.Skipped = job.UnsupportedReason()
@@ -340,9 +327,17 @@ type InstallOptions struct {
 	// LogAccess sets the system log's access mode, "shared" or "restricted". Empty keeps what the
 	// existing config records, so repair and a package upgrade never change it.
 	LogAccess string
+	// LogReaders are accounts to add to the readers group of a restricted system log after the
+	// install. Members are only ever added, never removed, and an account that cannot be added is
+	// reported rather than failing the install. Ignored, and reported, for a shared log.
+	LogReaders []string
 	// SessionSync turns the scheduled session-store sync on or off; nil keeps what the existing
 	// config records (off for a new install), so repair and package upgrades never change it.
 	SessionSync *bool
+	// Dashboard is the administrator's switch for the local dashboard, "enabled" or "disabled".
+	// Empty keeps what the existing config records (enabled for a new install). It applies to a
+	// system install only.
+	Dashboard string
 }
 
 type UninstallOptions struct {
@@ -382,8 +377,12 @@ type InstallResult struct {
 	LogAccess string `json:"log_access,omitempty"`
 	// LogReadersGroupCreated is true when this install created the readers group a restricted log
 	// is readable by, which then has no members yet.
-	LogReadersGroupCreated bool   `json:"log_readers_group_created,omitempty"`
-	InventoryJobDetail     string `json:"inventory_job_detail,omitempty"`
+	LogReadersGroupCreated bool `json:"log_readers_group_created,omitempty"`
+	// LogReadersAdded are the LogReaders accounts now in the readers group; LogReaderErrors say why
+	// any others are not, or that they were ignored because the log is shared.
+	LogReadersAdded    []string `json:"log_readers_added,omitempty"`
+	LogReaderErrors    []string `json:"log_reader_errors,omitempty"`
+	InventoryJobDetail string   `json:"inventory_job_detail,omitempty"`
 	// SessionSyncJobPath is the scheduled session sync unit when `session_sync.enabled` is on;
 	// SessionSyncJobDetail says why it is not installed on a host without a scheduler.
 	SessionSyncJobPath   string `json:"session_sync_job_path,omitempty"`
@@ -422,6 +421,12 @@ type Status struct {
 	SentinelForwarder *sentinel.Status `json:"sentinel_forwarder,omitempty"`
 	// LogAccess is the system log's access mode, "shared" or "restricted"; empty in user mode.
 	LogAccess string `json:"log_access,omitempty"`
+	// Dashboard is "enabled" or "disabled": whether the system config lets anyone on this machine
+	// run `beacon endpoint dashboard`. It is reported in both modes, because the system setting
+	// applies to every account. DashboardError says why the setting could not be read, in which
+	// case the dashboard refuses to start and Dashboard reads disabled.
+	Dashboard      string `json:"dashboard"`
+	DashboardError string `json:"dashboard_error,omitempty"`
 }
 
 type DestinationStatus struct {
@@ -498,14 +503,14 @@ type installRollback struct {
 	// it started, so the scheduler is not left registered against rolled-back config.
 	// InventoryWasLoaded records a job that was already scheduled before this install began; a
 	// reinstall that re-enabled it and then failed must bring it back, exactly like the collector.
-	InventoryJob       inventoryJobController
+	InventoryJob       service.ScheduledJob
 	InventoryLoaded    bool
 	InventoryWasLoaded bool
 	// SessionSyncJob and the two flags beside it do the same for the scheduled session sync.
 	// SessionSyncRemoved records that this install unloaded and removed the job (the setting
 	// turned off): unlike the inventory job, off is an ordinary choice here, so a rollback has to
 	// put back a job that was scheduled before as well as unload one it started.
-	SessionSyncJob       inventoryJobController
+	SessionSyncJob       service.ScheduledJob
 	SessionSyncLoaded    bool
 	SessionSyncRemoved   bool
 	SessionSyncWasLoaded bool
@@ -678,6 +683,7 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		logReadersGroupCreated = created
 		restoreLogAccess = restore
 	}
+	logReadersAdded, logReaderErrors := addLogReaders(cfg, opts.LogReaders)
 
 	tx := newInstallRollback(manager)
 	tx.RestoreLogAccess = restoreLogAccess
@@ -705,6 +711,9 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	manifest.Files = append(manifest.Files, configPath)
 	forwardSecretsPath := endpointconfig.OTLPForwardSecretsPath(cfg.UserMode)
 	tx.Track(forwardSecretsPath)
+	// Save writes or removes the dashboard marker beside the system config; a failed install puts it
+	// back as it was, so it keeps matching the config the rollback restores.
+	tx.Track(endpointconfig.DashboardMarkerPath(configPath))
 	if _, err := saveEndpointConfig(cfg); err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
@@ -884,6 +893,8 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		SessionSyncJobDetail:   sessionSyncResult.Skipped,
 		LogAccess:              logAccessOf(cfg),
 		LogReadersGroupCreated: logReadersGroupCreated,
+		LogReadersAdded:        logReadersAdded,
+		LogReaderErrors:        logReaderErrors,
 	}, nil
 }
 
@@ -977,6 +988,10 @@ func Uninstall(opts UninstallOptions) error {
 	// would otherwise leave the backend's token behind.
 	if !opts.KeepManagedIngest {
 		fail("remove the OTLP forward headers", os.Remove(forwardSecretsPath))
+		// The dashboard marker records config.json's switch, so it goes whenever config.json does,
+		// however that was removed: left behind, a later install's buildConfig would read it as
+		// the switch of a config that no longer exists and come back disabled.
+		fail("remove the dashboard switch marker", os.Remove(endpointconfig.DashboardMarkerPath(endpointConfigPath)))
 	}
 	if !opts.KeepLogs {
 		for _, path := range runtimeLogFiles(cfg.LogPath) {
@@ -1177,6 +1192,7 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 			Message:  runtimeLog.Warning,
 		})
 	}
+	dashboardMode, dashboardErr := dashboardStatus()
 	return Status{
 		Version:            version.GetVersion(),
 		Edition:            version.ReportedEdition(),
@@ -1195,7 +1211,44 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 		ScriptForwarders:   scriptForwarderStatuses(),
 		SentinelForwarder:  sentinelForwarderStatusFor(requestedUserMode),
 		LogAccess:          logAccessOf(effectiveCfg),
+		Dashboard:          dashboardMode,
+		DashboardError:     dashboardErr,
 	}
+}
+
+// carriedDashboard is the dashboard switch a repair or upgrade keeps from the existing config. A
+// value --dashboard would refuse (one written into config.json by hand, such as "off") is kept as
+// disabled, which is how the dashboard already reads it, rather than carried raw into a preflight
+// that would then fail every repair and package upgrade over a flag nobody passed.
+func carriedDashboard(value string) string {
+	mode, err := endpointconfig.ParseDashboardMode(value)
+	if err != nil {
+		return endpointconfig.DashboardDisabled
+	}
+	return mode
+}
+
+// systemDashboardMarked reports whether the disabled-dashboard marker sits beside the system config.
+// A variable so tests need not write to the system config directory.
+var systemDashboardMarked = func() bool {
+	_, err := os.Stat(endpointconfig.DashboardMarkerPath(endpointconfig.SystemConfigPath()))
+	return err == nil
+}
+
+// systemDashboardDisabled is the seam status reads the administrator's dashboard switch through.
+var systemDashboardDisabled = endpointconfig.SystemDashboardDisabled
+
+// dashboardStatus is the dashboard switch as status reports it. A setting that cannot be read
+// reads disabled, because that is what `beacon endpoint dashboard` then does.
+func dashboardStatus() (string, string) {
+	disabled, err := systemDashboardDisabled()
+	switch {
+	case err != nil:
+		return endpointconfig.DashboardDisabled, err.Error()
+	case disabled:
+		return endpointconfig.DashboardDisabled, ""
+	}
+	return endpointconfig.DashboardEnabled, ""
 }
 
 func sentinelForwarderStatusFor(userMode bool) *sentinel.Status {
@@ -1278,17 +1331,29 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		// The log access mode is an operator's security choice; a repair or upgrade that dropped
 		// it would silently make a restricted log world-writable again.
 		cfg.LogAccess = existing.LogAccess
-	} else if !opts.UserMode && logIsRestricted(cfg.LogPath) {
-		// No config to carry the mode over from -- an uninstall with --keep-logs removed it, or it
-		// does not load -- but the root-owned marker beside the kept log still records restricted.
-		// Defaulting to shared here would make every kept event world-readable.
-		cfg.LogAccess = asymptoteobserve.LogAccessRestricted
+		// The dashboard switch is an administrator's choice too; an upgrade must not turn it back on.
+		cfg.Dashboard = carriedDashboard(existing.Dashboard)
+	} else if !opts.UserMode {
+		if logIsRestricted(cfg.LogPath) {
+			// No config to carry the mode over from -- an uninstall with --keep-logs removed it, or it
+			// does not load -- but the root-owned marker beside the kept log still records restricted.
+			// Defaulting to shared here would make every kept event world-readable.
+			cfg.LogAccess = asymptoteobserve.LogAccessRestricted
+		}
+		if systemDashboardMarked() {
+			// Likewise a config that no longer loads still has the dashboard marker beside it, so a
+			// repair of a damaged file keeps the dashboard off instead of turning it back on.
+			cfg.Dashboard = endpointconfig.DashboardDisabled
+		}
 	}
 	if opts.LogAccess != "" {
 		cfg.LogAccess = opts.LogAccess
 	}
 	if opts.SessionSync != nil {
 		cfg.SessionSync = &endpointconfig.SessionSync{Enabled: *opts.SessionSync}
+	}
+	if opts.Dashboard != "" {
+		cfg.Dashboard = opts.Dashboard
 	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses
@@ -1454,6 +1519,9 @@ func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) 
 		return err
 	}
 	if err := validateLogAccess(cfg); err != nil {
+		return err
+	}
+	if err := validateDashboard(cfg); err != nil {
 		return err
 	}
 	// Replaces a blanket "macOS only" refusal. What actually matters is whether a service

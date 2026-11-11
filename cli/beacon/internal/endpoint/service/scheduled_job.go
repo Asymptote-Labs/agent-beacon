@@ -48,6 +48,21 @@ func intervalFromEnv(env string, def time.Duration) time.Duration {
 	return def
 }
 
+// ScheduledJob is what callers ask of a scheduled job's manager, InventoryManager or
+// SessionSyncManager: install and repair reconcile one through it, and their dry-run plan asks it
+// whether the host can schedule the job and where its unit goes.
+type ScheduledJob interface {
+	Supported() bool
+	UnsupportedReason() string
+	UnitPath() (string, error)
+	UnitPaths() []string
+	WriteUnit(program, logPath string) (string, error)
+	Load() error
+	Unload() error
+	RemoveUnits()
+	Status() Status
+}
+
 // scheduledJob is one jobSpec installed in one mode. It is a one-shot job on a timer, like the
 // updater, but it exists in both user and system modes, like the forwarder.
 //

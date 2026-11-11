@@ -22,8 +22,8 @@ type Evaluator interface {
 // Evaluate calls.
 type CompiledRule struct {
 	rule     *Rule
-	match    cel.Program   // set for single-event rules
-	steps    []cel.Program // set for correlation rules
+	match    matcher       // set for single-event rules
+	steps    []matcher     // set for correlation rules
 	window   time.Duration // parsed correlation window
 	anyOrder bool          // correlation steps may match in any order
 	// derived is set when any of the rule's expressions references an engine-derived field
@@ -37,21 +37,26 @@ type CompiledRule struct {
 var evalObserver func()
 
 // eval evaluates one compiled expression against one event, deriving fields first only for
-// rules that reference them.
-func (c *CompiledRule) eval(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
+// rules that reference them. An expression that cannot be true for the event's action is not
+// evaluated (see eventActions).
+func (c *CompiledRule) eval(m matcher, event asymptoteobserve.Event) (bool, error) {
+	if m.excludes(event.Event.Action) {
+		return false, nil
+	}
 	if c.derived {
 		event = withDerivedFields(event)
 	}
-	return evalDerived(prog, event)
+	act := newEventActivation(event)
+	return evalObserved(m.program(act), act)
 }
 
-// evalDerived evaluates one compiled expression against an event whose derived fields the
-// caller has already filled, if the rule needs them.
-func evalDerived(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
+// evalObserved evaluates one compiled expression against an activation whose event the caller
+// has already derived, if the rule needs it.
+func evalObserved(prog cel.Program, act *eventActivation) (bool, error) {
 	if evalObserver != nil {
 		evalObserver()
 	}
-	return evalMatch(prog, event)
+	return evalMatch(prog, act)
 }
 
 // Compile validates a rule and compiles its CEL expressions into a reusable evaluator.
@@ -63,14 +68,14 @@ func Compile(rule *Rule) (*CompiledRule, error) {
 	}
 	c := &CompiledRule{rule: rule, derived: referencesDerivedField(rule.Match)}
 	if rule.Correlation != nil {
-		c.steps = make([]cel.Program, len(rule.Correlation.Steps))
+		c.steps = make([]matcher, len(rule.Correlation.Steps))
 		for i, step := range rule.Correlation.Steps {
 			c.derived = c.derived || referencesDerivedField(step.Match)
-			prog, err := CompileMatch(step.Match)
+			m, err := compileMatcher(step.Match)
 			if err != nil {
 				return nil, fmt.Errorf("correlation.steps[%d] (%s): %w", i, step.ID, err)
 			}
-			c.steps[i] = prog
+			c.steps[i] = m
 		}
 		window, err := rule.Correlation.ParseWindow()
 		if err != nil {
@@ -80,11 +85,11 @@ func Compile(rule *Rule) (*CompiledRule, error) {
 		c.anyOrder = rule.Correlation.AnyOrder()
 		return c, nil
 	}
-	prog, err := CompileMatch(rule.Match)
+	m, err := compileMatcher(rule.Match)
 	if err != nil {
 		return nil, fmt.Errorf("match: %w", err)
 	}
-	c.match = prog
+	c.match = m
 	return c, nil
 }
 

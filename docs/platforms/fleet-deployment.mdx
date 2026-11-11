@@ -1,0 +1,156 @@
+---
+title: "Fleet Deployment"
+description: "Deploy Beacon to managed Linux, macOS and Windows machines with restricted log access, per-person attribution and pinned versions, in one step per platform"
+---
+
+This page puts the fleet settings together for each platform: the package, the settings your fleet tooling writes before installing it, how to pin and roll out versions, and how to check the result. The behavior is the same on Linux, macOS and Windows.
+
+<Note>
+  Everything on this page needs a release newer than 1.3.57. Version 1.3.57 and earlier ignore these settings and install a shared log, and record OpenTelemetry events on macOS and Windows under the collector's account. Pin a newer version in the examples below.
+</Note>
+
+## What a fleet install gives you
+
+| | Result |
+|---|---|
+| Log access | A first package install is [restricted](/security/restricted-log-access): only the collector writes the runtime log, and only root (SYSTEM and Administrators on Windows) and the `beacon-log` group can read it. No second command |
+| Who can read the log | Nobody is added to `beacon-log` by an unattended install. Name exactly who is with `BEACON_LOG_READERS`, such as a log shipper's account |
+| Who acted | Hook events are recorded under the account the operating system says sent them. OpenTelemetry events (browser chats, Claude Code and Codex spans and token data) are recorded under the account that owns the sending connection. On a shared machine each person's events carry their own account, not `root` |
+| The local dashboard | Off for every account on an unattended first install. `BEACON_DASHBOARD=enabled` keeps it, and then it opens only through the per-launch URL it prints |
+| Versions | Nothing updates on its own. You choose the version each machine installs, including holding back one release |
+
+## The settings
+
+Fleet tooling cannot set the environment of a package's install script, so each platform reads the same `BEACON_*` settings from the place its tooling already writes settings. Write them **before** installing the package. They are read again on every upgrade.
+
+| Setting | Fleet value | Effect |
+|---|---|---|
+| `BEACON_LOG_ACCESS` | `restricted` | Explicit restricted log access. A first install is restricted without it; setting it keeps the intent in your configuration |
+| `BEACON_LOG_READERS` | empty, or a list | Exactly the accounts added to `beacon-log`, comma-separated (`DOMAIN\name` on Windows). Empty means nobody is ever added implicitly |
+| `BEACON_DASHBOARD` | `disabled` | Refuse to start the local dashboard and lens preview on the machine. An unattended first install is disabled without it; setting it also covers a machine someone installed by hand and machines upgraded from an earlier release |
+| `BEACON_ENDPOINT_HARNESSES` | for example `claude,codex,cursor` | The agent runtimes to configure |
+
+| Platform | Where the settings live |
+|---|---|
+| Linux | `/etc/default/beacon` (Debian, Ubuntu) or `/etc/sysconfig/beacon` (Fedora, RHEL), `KEY=VALUE` lines, owned by root, mode `0600` or `0644` |
+| macOS | A configuration profile for the preference domain `com.beacon.endpoint`, keys named like the settings |
+| Windows | String values under `HKLM\SOFTWARE\Policies\Beacon\Endpoint` |
+
+Each is ignored, with a warning in the install output, unless root (SYSTEM or Administrators) controls it. See [Package installs](/security/restricted-log-access#package-installs) for the full rules.
+
+## Linux with Salt
+
+The signed apt repository at `https://apt.beacon.sh` keeps every release it has published, so a machine can install any of them by version. Pin the repository key by its hash, so a changed key stops the state instead of being trusted:
+
+```yaml title="beacon.sls"
+/etc/default/beacon:
+  file.managed:
+    - user: root
+    - group: root
+    - mode: "0600"
+    - contents: |
+        BEACON_LOG_ACCESS=restricted
+        BEACON_LOG_READERS=
+        BEACON_DASHBOARD=disabled
+        BEACON_ENDPOINT_HARNESSES=claude,codex,cursor
+
+/usr/share/keyrings/beacon-archive-keyring.gpg:
+  file.managed:
+    - source: https://apt.beacon.sh/beacon-archive-keyring.gpg
+    - source_hash: sha256=c84a354e5210ca4fb892decc961e9aed6cebcb8194191a90aa508197b1b69e0c
+    - mode: "0644"
+
+/etc/apt/sources.list.d/beacon.list:
+  file.managed:
+    - contents: "deb [signed-by=/usr/share/keyrings/beacon-archive-keyring.gpg] https://apt.beacon.sh stable main"
+    - require:
+      - file: /usr/share/keyrings/beacon-archive-keyring.gpg
+
+beacon:
+  pkg.installed:
+    - version: "<version>"   # the release you approved (newer than 1.3.57); raise it to roll forward
+    - hold: True
+    - refresh: True
+    - require:
+      - file: /etc/default/beacon
+      - file: /etc/apt/sources.list.d/beacon.list
+```
+
+The hash is of the keyring holding Beacon's release key, fingerprint `07BEA34ED6A411F4C066D98322F94195DCDC8F45` (see [Release signing](/platforms/linux#release-signing)). It changes only when the key is rotated, which is announced with the fingerprint of the new key. To serve the packages from your own mirror instead (Artifactory, Nexus, Pulp, aptly), mirror `https://apt.beacon.sh` and point `beacon.list` at the mirror; `apt` still checks the index against the same key.
+
+For Fedora, RHEL and other `.rpm` hosts, install the versioned `.rpm` from the release with `pkg.installed` and `sources`, after the same `/etc/sysconfig/beacon`.
+
+## macOS with Jamf, Kandji or Intune
+
+1. Push a configuration profile for `com.beacon.endpoint` to the machines, scoped before the package:
+
+   ```xml title="Custom settings payload (com.beacon.endpoint)"
+   <dict>
+     <key>BEACON_LOG_ACCESS</key>
+     <string>restricted</string>
+     <key>BEACON_LOG_READERS</key>
+     <string></string>
+     <key>BEACON_DASHBOARD</key>
+     <string>disabled</string>
+     <key>BEACON_ENDPOINT_HARNESSES</key>
+     <string>claude,codex,cursor</string>
+   </dict>
+   ```
+
+2. Deploy the signed, notarized `.pkg` of the release you approved (`BeaconEndpointAgent-<version>-arm64.pkg` from the release page). Your MDM decides which version each machine gets; upload the next one when you roll forward. See [Jamf Pro](/mdm/jamf) for package and policy setup.
+
+## Windows with Intune or Group Policy
+
+1. Set the policy values, before the MSI, with an Intune registry setting or script, or a Group Policy registry preference:
+
+   ```powershell title="Install settings as policy values (runs elevated)"
+   $key = 'HKLM:\SOFTWARE\Policies\Beacon\Endpoint'
+   New-Item -Path $key -Force | Out-Null
+   Set-ItemProperty -Path $key -Name BEACON_LOG_ACCESS -Value restricted
+   Set-ItemProperty -Path $key -Name BEACON_LOG_READERS -Value ''
+   Set-ItemProperty -Path $key -Name BEACON_DASHBOARD -Value disabled
+   Set-ItemProperty -Path $key -Name BEACON_ENDPOINT_HARNESSES -Value 'claude,codex,cursor'
+   ```
+
+2. Deploy the MSI of the release you approved silently:
+
+   ```powershell title="Silent install"
+   msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn /l*v install.log
+   ```
+
+   A silent install adds nobody to `beacon-log`. See [Windows](/platforms/windows) for logs and time limits.
+
+## Versions and updates
+
+Beacon never updates itself. `beacon endpoint update --apply` runs only when someone runs it, and the update notice appears only in an interactive terminal. Your fleet tooling decides the version: `version:` in the Salt state (or a pin in your apt mirror), the package you upload to the MDM, the MSI you assign in Intune. To stay one release behind, approve each release after the next one is out. Upgrades keep the log access mode and the `beacon-log` members, and read the settings again.
+
+## Check a machine
+
+On Linux and macOS, as root:
+
+```bash title="Status (Linux, macOS)"
+sudo beacon endpoint status --system --json | jq '{log_access, dashboard}'
+sudo beacon endpoint doctor --system
+```
+
+On Windows, in an elevated PowerShell:
+
+```powershell title="Status (Windows)"
+beacon endpoint status --system --json | ConvertFrom-Json | Select-Object log_access, dashboard
+beacon endpoint doctor --system
+```
+
+Expect `log_access` to be `restricted` (and `dashboard` to be `disabled` if you set it), and `runtime_log_access: ok` from `doctor`. Then confirm that events name the person: as an ordinary account, send one prompt in an agent Beacon configured, and look at the newest events:
+
+```bash title="Who acted (Linux, macOS)"
+sudo tail -n 20 /var/log/beacon-agent/runtime.jsonl | jq -c '{action: .event.action, harness: .harness.name, user: .user.name}'
+```
+
+```powershell title="Who acted (Windows, elevated)"
+Get-Content "$env:ProgramData\Beacon\Endpoint\logs\runtime.jsonl" -Tail 20 | ConvertFrom-Json |
+  Select-Object @{n='action';e={$_.event.action}}, @{n='harness';e={$_.harness.name}}, @{n='user';e={$_.user.name}}
+```
+
+The person's account should appear, not `root` (or `COMPUTERNAME$` on Windows). An event recorded with an empty `user` came from a sender the collector could not identify, for example one that disconnected before the lookup; it is never attributed to someone else. Events from collectors older than this behavior carry the collector's account until the endpoint is upgraded or repaired. In Microsoft Sentinel the same account is the `UserName` column; see [Microsoft Sentinel](/log-forwarding/microsoft-sentinel).
+
+If a log shipper reads the file as its own account, add that account to `BEACON_LOG_READERS` (or to `beacon-log` directly) and restart it; Beacon's own forwarders run as root or SYSTEM and need nothing. See [Let your log shipper read the log](/security/restricted-log-access#let-your-log-shipper-read-the-log).

@@ -100,6 +100,16 @@ beacon endpoint dashboard
 
 The dashboard binds to loopback by default and reads the configured runtime log and its local rotated archives. It is intended for local investigation, not remote administration.
 
+The command prints the address to open, including a secret for this run:
+
+```text title="Sample output"
+Beacon endpoint dashboard: http://127.0.0.1:8765/?token=3Wq…
+Runtime log: /Users/you/.beacon/endpoint/logs/runtime.jsonl
+```
+
+Open that exact URL (over SSH, forward the port and open it on your machine). See
+[Access control](#access-control) for why the bare address is refused.
+
 ### Examples
 
 Start the dashboard:
@@ -129,6 +139,53 @@ beacon endpoint dashboard --log-path /path/to/runtime.jsonl
 <Note>
   During normal use, the dashboard has no external network dependency. It reads local Beacon logs and serves a local read-only UI from a loopback address.
 </Note>
+
+## Access control
+
+Every account on a machine can reach a loopback port, so loopback binding alone would let
+another local account read your runtime log through a dashboard you started. Each run therefore
+makes a fresh 256-bit secret, keeps it only in memory, and puts it in the URL it prints (and
+opens with `--open`). It is never written to a file, a log or JSON output.
+
+- The first request with the secret sets an `HttpOnly`, `SameSite=Strict` cookie for that port
+  and redirects to the same page without `?token=`, so the secret leaves the address bar.
+- Every other request needs that cookie. Without it the dashboard answers `401` (`403` for a
+  wrong token) and says to open the URL the command printed. Stopping and restarting the
+  dashboard makes a new secret, so an old link or tab stops working.
+- The dashboard still binds only to loopback addresses and refuses requests whose `Host` is not
+  a loopback name, which keeps DNS-rebinding pages out.
+- Lens frames and the data the session page hands them load with the same cookie; nothing
+  about the [lens sandbox](/concepts/lenses) changes.
+
+The secret protects against other accounts that do not have it. It does not protect against
+software that already runs as you, and while a browser is starting, the URL it was handed can
+be visible in the process list. A browser sends cookies for `127.0.0.1` to every port, so do
+not open pages served by other local accounts' servers in the browser you use for the
+dashboard while it runs. `beacon lenses preview` uses the same scheme.
+
+### Turning the dashboard off
+
+An administrator can turn the dashboard off for every account on a machine, root included:
+
+```bash title="Turn the dashboard off for everyone"
+sudo beacon endpoint repair --system --dashboard disabled
+```
+
+This records `"dashboard": "disabled"` in the system `config.json`, which install, repair and
+package upgrades keep until `--dashboard enabled` turns it back on. While it is off,
+`beacon endpoint dashboard` and `beacon lenses preview` refuse to start for everyone, in user
+mode too, and say that the administrator disabled it. Accounts that cannot read a root-only
+system config read the switch from a world-readable marker beside it, and a config that does not
+parse also refuses. `beacon endpoint status` (and `--json`, as `dashboard`) reports the setting.
+Package installs take it from `BEACON_DASHBOARD=enabled|disabled`. When it is not set, an
+unattended first package install (the `.deb` or `.rpm`, the macOS `.pkg` or the Windows MSI, with
+no system config or log already on the machine, installed by a configuration manager, an MDM or a
+silent `msiexec`) turns the dashboard off. A person who installs the package on their own machine
+(`sudo` at a terminal, Installer.app, the MSI's full interface) keeps it, and upgrades keep what
+the endpoint already has. To keep the dashboard on an unattended install, set
+`BEACON_DASHBOARD=enabled`, or turn it on afterwards with
+`sudo beacon endpoint repair --system --dashboard enabled`; see
+[`beacon endpoint install`](/cli/endpoint-install#local-dashboard).
 
 ## Related
 

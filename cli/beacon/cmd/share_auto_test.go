@@ -12,6 +12,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/accounthome"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
 )
 
@@ -33,8 +34,11 @@ func runShareAuto(t *testing.T, args ...string) (string, string, error) {
 func shareAutoTestEnv(t *testing.T, connected bool, mode string) string {
 	t.Helper()
 	env := newShareEnv(t)
+	// The CLI and the hooks both use the account's home, not HOME; stand the test home in for it.
+	prevHome := accounthome.Dir
+	accounthome.Dir = func() (string, error) { return env.home, nil }
+	t.Cleanup(func() { accounthome.Dir = prevHome })
 	path := filepath.Join(env.home, ".beacon", "endpoint", shareauto.FileName)
-	t.Setenv(shareauto.PathEnv, path)
 	prev := shareAutoCloud
 	shareAutoCloud = func() (bool, string) { return connected, mode }
 	t.Cleanup(func() { shareAutoCloud = prev })

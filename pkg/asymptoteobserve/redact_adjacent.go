@@ -58,8 +58,8 @@ const (
 // redactShape is what the adjacency checks know of one shape rule's pattern.
 type redactShape struct {
 	rule    int
-	needles uint64 // scanner needle bits
-	offset  int    // the rule's offset: how many bytes before its needle a match starts
+	needles idSet // scanner needle ids
+	offset  int   // the rule's offset: how many bytes before its needle a match starts
 	// tail, when set, is the class of the open-ended repeat the pattern ends in, at least tailMin
 	// long, after at most head bytes. Without it the pattern matches at most bound-1 bytes.
 	tail    *[256]bool
@@ -83,7 +83,7 @@ type redactShape struct {
 // start of a word that a replacement made.
 type redactFollower struct {
 	rule    int
-	needles uint64
+	needles idSet
 	kind    redactFollowerKind
 	// charset is every byte the pattern can match, for followRun.
 	charset [256]bool
@@ -101,8 +101,8 @@ const (
 	followRun redactFollowerKind = iota
 	// followScheme: a URL, which holds no `/` and no whitespace after its `://`.
 	followScheme
-	// followLine: a curl rule, which reads its whole command line and is applied to it until it
-	// stops changing (redactLinesAfterMarkers).
+	// followLine: a curl rule, which reads its whole command line and redacts every flag on it
+	// (redactLinesAfterMarkers).
 	followLine
 )
 
@@ -138,7 +138,7 @@ func (e *redactEngine) adjacency() *redactAdjacency {
 			switch {
 			case rule.start == startScheme:
 				f.kind = followScheme
-			case rule.repeat:
+			case rule.wholeLine:
 				f.kind = followLine
 				f.lead = leadPattern(rule)
 			default:
@@ -176,7 +176,7 @@ func leadPattern(rule redactionRule) *regexp.Regexp {
 
 // shapeOf reads a shape rule's pattern: a concatenation that ends, before any trailing assertion,
 // either in an open-ended repeat of one class or in something of bounded length.
-func shapeOf(index int, rule redactionRule, parsed *syntax.Regexp, needles uint64) redactShape {
+func shapeOf(index int, rule redactionRule, parsed *syntax.Regexp, needles idSet) redactShape {
 	s := redactShape{rule: index, needles: needles, offset: rule.offset, jwt: rule.shape == shapeJWT}
 	parts := []*syntax.Regexp{parsed}
 	if parsed.Op == syntax.OpConcat {
@@ -348,14 +348,13 @@ type redactChain struct {
 	// last place followerAt was asked about and its answer.
 	runFrom, runTo int
 	asked          []redactAsked
-	// The assigned values whose copies are removed after every rule has run (overCopy), what
-	// running on over them may still read (copyBudget), and whether running on over one, or
-	// over an AWS secret that holds a `/`, may hide a match from this pass, as replacing a copy
-	// may (copyHidesMatch); matches reports it to the gate.
-	copies     *redactCopies
-	copyBudget int
-	hid        bool
-	slashed    bool
+	// The pass's assigned values whose copies are removed after every rule has run (overCopy),
+	// and whether running on over a copy, or over an AWS secret that holds a `/`, may hide a
+	// match from this pass, as replacing a copy may (copyHidesMatch); matches reports it to the
+	// gate.
+	copies  *copyIndex
+	hid     bool
+	slashed bool
 }
 
 // redactAsked is followerAt's answer for one follower at a place.
@@ -366,16 +365,8 @@ type redactAsked struct {
 
 func newRedactChain(engine *redactEngine, t string, hits []redactHit) *redactChain {
 	return &redactChain{engine: engine, adj: engine.adjacency(), t: t, hits: hits, segFrom: -1, restAt: -1,
-		schemeFrom: -1, schemeTo: -1, schemeAt: -1, lineFrom: -1, lineTo: -1, lineFirst: -1, runFrom: -1, runTo: -1,
-		copyBudget: redactCopyWorkPerByte*len(t) + redactCopyWorkBase}
+		schemeFrom: -1, schemeTo: -1, schemeAt: -1, lineFrom: -1, lineTo: -1, lineFirst: -1, runFrom: -1, runTo: -1}
 }
-
-// overCopy may read redactCopyWorkPerByte bytes and copies per byte of the text, and
-// redactCopyWorkBase more; past that it leaves items as they are, as main does.
-const (
-	redactCopyWorkPerByte = 8
-	redactCopyWorkBase    = 1 << 16
-)
 
 func redactWorked(n int) {
 	if redactWork != nil {
@@ -425,9 +416,9 @@ func hitsFrom(hits []redactHit, pos int) int {
 }
 
 // hasNeedleAt reports whether one of needles occurs at pos.
-func (c *redactChain) hasNeedleAt(needles uint64, pos int) bool {
+func (c *redactChain) hasNeedleAt(needles *idSet, pos int) bool {
 	for i := hitsFrom(c.hits, pos); i < len(c.hits) && c.hits[i].start == pos; i++ {
-		if needles&(1<<c.hits[i].id) != 0 {
+		if needles.has(c.hits[i].id) {
 			return true
 		}
 	}
@@ -478,7 +469,7 @@ func (c *redactChain) rescue(si, q int) []int {
 		h := c.hits[i]
 		for sj := range c.adj.shapes {
 			x := h.start - c.adj.shapes[sj].offset
-			if c.adj.shapes[sj].needles&(1<<h.id) == 0 || x <= q || x >= q+s.bound {
+			if !c.adj.shapes[sj].needles.has(h.id) || x <= q || x >= q+s.bound {
 				continue
 			}
 			if m := c.find(s.rule, q, x); m != nil && m[1] == x {
@@ -503,7 +494,7 @@ func (c *redactChain) rescue(si, q int) []int {
 func (c *redactChain) redactedAt(x int) bool {
 	for si := range c.adj.shapes {
 		s := &c.adj.shapes[si]
-		if !c.hasNeedleAt(s.needles, x+s.offset) {
+		if !c.hasNeedleAt(&s.needles, x+s.offset) {
 			continue
 		}
 		end := min(len(c.t), x+s.prefix+len(redactedValue))
@@ -524,7 +515,7 @@ func (c *redactChain) rescueBefore(si, pos, limit int) []int {
 	}
 	for i := hitsFrom(c.hits, pos+s.offset); i < len(c.hits) && c.hits[i].start-s.offset < limit; i++ {
 		q := c.hits[i].start - s.offset
-		if s.needles&(1<<c.hits[i].id) == 0 || !wordBoundary(c.t, q) {
+		if !s.needles.has(c.hits[i].id) || !wordBoundary(c.t, q) {
 			continue
 		}
 		if m := c.rescue(si, q); m != nil {
@@ -545,7 +536,7 @@ func (c *redactChain) secretAt(p int) (int, []int) {
 	shape, match := -1, []int(nil)
 	for si := range c.adj.shapes {
 		s := &c.adj.shapes[si]
-		if !c.hasNeedleAt(s.needles, p+s.offset) {
+		if !c.hasNeedleAt(&s.needles, p+s.offset) {
 			continue
 		}
 		if m, open := c.shapeAt(si, p); m != nil {
@@ -621,7 +612,7 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 				item[1] = sm[2*g]
 			}
 			// The item is yielded with the first secret's rule: an AWS secret it takes is not seen
-			// as one where the replacements are made (redactionRule.applyOnce).
+			// as one where the replacements are made (redactionRule.apply).
 			c.slashed = c.slashed || slashedAWSSecret(redactionRules[c.adj.shapes[sj].rule].expr, c.t, sm)
 			si, m = sj, sm
 			continue
@@ -671,32 +662,76 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 // ends past it, the item having taken the copy's first bytes; or item. The copy is removed after
 // every rule has run, which finds it only whole: of `hf_…opaque-flag-value` with `opaque-flag-value`
 // assigned, the token's pattern takes `opaque`, and `-flag-value` was left. Such a copy starts
-// less than the longest copy's length before the item's end. What it reads, places, copies looked
-// at and bytes compared, comes out of the chain's copyBudget, linear in the text; once that is
-// spent, items are left as they are.
+// less than the longest copy's length before the item's end, and once the item runs on, a copy
+// that starts before its new end and ends past it takes it further.
+//
+// What it reads of the text is what copyIndex.longestAt finds near the items, for every chain of
+// the pass that reads the same text, and each item reads its own bytes, which no other item of the
+// chain holds: what overCopy reads stays linear in the text.
 func (c *redactChain) overCopy(item []int) []int {
-	if c.copies == nil || c.copyBudget <= 0 {
+	if c.copies == nil {
 		return item
 	}
-	t, work := c.t, 0
-	for x := max(item[0]+1, item[1]-c.copies.longest+1); x < item[1] && x+redactCopyMin <= len(t) && work < c.copyBudget; x++ {
-		work++
-		for _, v := range c.copies.byFirst[t[x:x+redactCopyMin]] {
-			work++
-			if x+len(v) <= item[1] {
-				continue
-			}
-			work += len(v)
-			if strings.HasPrefix(t[x:], v) {
-				item = slices.Clone(item)
-				item[1] = x + len(v)
-				c.hid = true
-			}
+	idx := c.copies
+	from, end := max(item[0]+1, item[1]-idx.built().maxLen+1), item[1]
+	for x := from; x < end; x++ {
+		if e := x + int(idx.longestAt(c.t, x, end)); e > end {
+			end, c.hid = e, true
 		}
 	}
-	c.copyBudget -= work
-	redactWorked(work)
+	redactWorked(max(0, end-from))
+	if end == item[1] {
+		return item
+	}
+	item = slices.Clone(item)
+	item[1] = end
 	return item
+}
+
+// copyIndex is what the chains of one redaction pass find of the assigned values in the text
+// (overCopy): their finder, built the first time a chain asks, and, for the text the gate holds,
+// the length of the longest copy starting at each byte of the stretch [lo, lo+len(at)) that the
+// chains asked about last. A rule that changes the text moves its bytes, so redactGate.set drops
+// what was found of it.
+type copyIndex struct {
+	values map[string]struct{}
+	finder *literalFinder
+	lo     int
+	at     []int32
+}
+
+// built returns the finder over the values, building it the first time.
+func (idx *copyIndex) built() *literalFinder {
+	if idx.finder == nil {
+		values := make([]string, 0, len(idx.values))
+		for v := range idx.values {
+			values = append(values, v)
+		}
+		idx.finder = newLiteralFinder(values)
+		redactWorked(len(idx.finder.label) + idx.finder.work)
+	}
+	return idx.finder
+}
+
+// longestAt returns the length of the longest copy starting at x in t, the text of the gate the
+// index belongs to, after built. Where it has not found that yet, it finds the bytes from x, or
+// from the end of the stretch it found last when that ends less than the longest value's length
+// before x, up to upto and at least that length past where it starts (literalFinder.longestIn). The
+// chains ask about places in order, so it finds each byte of the text at most once per chain, and
+// reads at most twice what it finds: only the stretches near items, however long the text.
+func (idx *copyIndex) longestAt(t string, x, upto int) int32 {
+	if hi := idx.lo + len(idx.at); idx.lo <= x && x < hi {
+		return idx.at[x-idx.lo]
+	}
+	f := idx.finder
+	hi := idx.lo + len(idx.at)
+	if len(idx.at) == 0 || x < idx.lo || x > hi+f.maxLen {
+		idx.lo, idx.at, hi = x, idx.at[:0], x
+	}
+	end := min(len(t), max(upto, x+1, hi+f.maxLen))
+	idx.at = slices.Grow(idx.at, end-hi)[:end-idx.lo]
+	redactWorked(f.longestIn(t, idx.at[hi-idx.lo:], hi, end))
+	return idx.at[x-idx.lo]
 }
 
 // slashedAWSSecret reports whether m, a match of the pattern expr, is one of the rule for an AWS
@@ -769,7 +804,7 @@ func (c *redactChain) crossing(si int, m []int) (int, int, []int) {
 			if q >= best {
 				break
 			}
-			if s.needles&(1<<h.id) == 0 || q < lo {
+			if !s.needles.has(h.id) || q < lo {
 				continue
 			}
 			if s.jwt {
@@ -864,8 +899,8 @@ func markerBeforeWord(t string, from int) int {
 // before a word byte, the followers and then the shape rules, in rule order, are tried there; the
 // first that matches is applied, and a shape rule's chain after it. Each place is tried once, left
 // to right, so a chain that alternates between them is redacted in one pass. The curl rules,
-// which read a whole command line and are applied to it until it stops changing, are then
-// applied to the line from the first such place where a curl command starts.
+// which read a whole command line and redact every flag on it, are then applied to the line from
+// the first such place where a curl command starts.
 //
 // It also reports whether it replaced an AWS secret that holds a `/` (slashedAWSSecret).
 func (e *redactEngine) redactAfterMarkers(t string) (string, bool) {
@@ -873,7 +908,8 @@ func (e *redactEngine) redactAfterMarkers(t string) (string, bool) {
 	if p < 0 {
 		return t, false
 	}
-	hits, _ := e.scanner.scan(t, nil)
+	var found idSet
+	hits := e.scanner.scan(t, nil, &found)
 	c := newRedactChain(e, t, hits)
 	var out []byte
 	last := 0
@@ -1036,7 +1072,7 @@ func (c *redactChain) followerCrossing(m []int) (int, int) {
 		}
 		for _, needle := range redactionRules[f.rule].needles.needles {
 			q := e - len(needle)
-			if q <= start || !c.hasNeedleAt(f.needles, q) {
+			if q <= start || !c.hasNeedleAt(&f.needles, q) {
 				continue
 			}
 			if f.kind == followLine {
@@ -1098,7 +1134,7 @@ func (c *redactChain) lineFollowerAt(q int) []int {
 		}
 	}
 	for k, f := range c.adj.followers {
-		if f.kind != followLine || !c.hasNeedleAt(f.needles, q) {
+		if f.kind != followLine || !c.hasNeedleAt(&f.needles, q) {
 			continue
 		}
 		// The pattern opens with the needle and \b: where a word byte follows the needle it finds
@@ -1171,7 +1207,7 @@ func (c *redactChain) followerAt(p int) ([]int, redactUse) {
 			m = c.schemeFollowerAt(f, p)
 			c.asked[k] = redactAsked{p, m}
 		default:
-			if !c.hasNeedleAt(f.needles, p) {
+			if !c.hasNeedleAt(&f.needles, p) {
 				continue
 			}
 			// The word, the blanks after it, and a run of the charset without blanks. A run
@@ -1192,11 +1228,7 @@ func (c *redactChain) followerAt(p int) ([]int, redactUse) {
 		}
 		rule, re := &redactionRules[f.rule], c.pattern(f.rule)
 		if rule.keep != nil {
-			index := re.SubexpIndex("value")
-			if index < 0 {
-				index = 2
-			}
-			if g := 2 * index; m[g] >= 0 && rule.keep(t[m[g]:m[g+1]]) {
+			if g := 2 * valueGroup(re, m); m[g] >= 0 && rule.keep(t[m[g]:m[g+1]]) {
 				continue
 			}
 		}

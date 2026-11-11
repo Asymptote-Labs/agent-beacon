@@ -1,6 +1,7 @@
 package writer
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -416,5 +417,22 @@ func TestAppendEventDropsAnEmptiedGenAIObject(t *testing.T) {
 	}
 	if strings.Contains(string(data), `"gen_ai"`) {
 		t.Fatalf("compacted line kept an empty gen_ai object:\n%s", data)
+	}
+}
+
+// AppendEvent may write a JSON object of exactly MaxEventBytes and then a newline.
+// The scanner has to hold that newline or it reports the legal line as too long.
+func TestLastLineReadsAMaxSizedEvent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	payload := append(append([]byte(`"`), bytes.Repeat([]byte("x"), MaxEventBytes-2)...), '"')
+	if err := os.WriteFile(path, append(append([]byte("short\n"), payload...), '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	line, err := LastLine(path)
+	if err != nil {
+		t.Fatalf("LastLine: %v", err)
+	}
+	if line != string(payload) {
+		t.Fatalf("LastLine returned %d bytes, want %d", len(line), len(payload))
 	}
 }

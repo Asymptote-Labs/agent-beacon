@@ -131,7 +131,7 @@ func scanBackfillLines(path string, since time.Time, keep func([]byte)) error {
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), writer.MaxEventBytes+1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), writer.MaxLineBytes)
 	for scanner.Scan() {
 		raw := scanner.Bytes()
 		var line backfillLine

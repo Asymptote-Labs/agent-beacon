@@ -98,6 +98,24 @@ func TestMapCodexShellCommandIsACommand(t *testing.T) {
 	}
 }
 
+// Codex writes an MCP tool call with its bare name and the server in `namespace`. The call is an MCP
+// call, as the live collector records the same call's codex.tool_result.
+func TestMapCodexMCPCallReadsItsNamespace(t *testing.T) {
+	ref := SessionRef{ID: "sess-1", Path: "/tmp/codex.jsonl", Workspace: "/tmp/repo"}
+	mapped := MapSession(ref, decodeFixture(t, []string{
+		sessionMetaLine("sess-1", "/tmp/repo"),
+		`{"timestamp":"2026-09-19T22:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"read_notes","namespace":"mcp__notes","arguments":"{}","call_id":"call_2"}}`,
+		`{"timestamp":"2026-09-19T22:00:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_2","output":"note body"}}`,
+	}), MapOptions{})
+	call := findAction(t, mapped, "mcp.tool_invoked")
+	if call.MCP == nil || call.MCP.Server != "notes" || call.MCP.Tool != "read_notes" || call.Tool == nil || call.Tool.Name != "mcp__notes__read_notes" {
+		t.Fatalf("mcp = %+v tool = %+v, want notes/read_notes named mcp__notes__read_notes", call.MCP, call.Tool)
+	}
+	if call.GenAI == nil || call.GenAI.Tool == nil || call.GenAI.Tool.Call == nil || call.GenAI.Tool.Call.Result != "note body" {
+		t.Fatalf("gen_ai.tool = %+v, want the server's reply as the result", call.GenAI)
+	}
+}
+
 // The desktop app writes its rollouts to the same store, with its client name verbatim in
 // session_meta. Its events are codex_desktop, as the live collector names the same conversation,
 // including on a later sweep that starts past the session_meta line.

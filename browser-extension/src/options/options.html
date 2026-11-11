@@ -15,6 +15,7 @@
       .perm { margin: 12px 0; padding: 10px; border: 1px solid #e0a800; background: #fff8e1; border-radius: 4px; }
       .perm p { margin: 0 0 8px; }
       .perm button { margin-top: 0; }
+      .managed { margin: 12px 0; padding: 10px; border: 1px solid #c5d3e8; background: #f2f6fc; border-radius: 4px; }
     </style>
   </head>
   <body>
@@ -26,6 +27,8 @@
         <span id="perm-list" data-testid="perm-list"></span></p>
       <button id="perm-grant" data-testid="perm-grant">Grant site access</button>
     </div>
+
+    <p class="managed" id="managed" data-testid="managed" hidden>Some settings are managed by your organization and cannot be changed here.</p>
 
     <label for="endpoint">OTLP logs endpoint</label>
     <input type="text" id="endpoint" data-testid="endpoint" />

@@ -59,6 +59,11 @@ const (
 	// startScheme: at a letter on a word boundary in the run of [A-Za-z0-9+.-] before the needle,
 	// a URL's `\b[a-z][a-z0-9+.-]*` scheme. The pattern opens with \b.
 	startScheme
+	// startParam: at the `?` or `&` right before the run of [A-Za-z0-9_.-] that ends at the
+	// needle, where a URL query parameter opens, and where startLabel begins when there is none
+	// there or the pattern does not match from it. The pattern is two alternatives: the parameter
+	// with its `?` or `&`, and a label that opens with \b.
+	startParam
 	// startLine: anywhere on the line of the needle or the blank lines before it. The pattern runs
 	// whole from the start of that line, where its (?m)^ and \b see what they see in the whole
 	// text.
@@ -162,7 +167,7 @@ var (
 // cost every hook run its allocations whether it redacts or not (TestPackageInitStaysCheap).
 type redactEngine struct {
 	scanner  needleScanner
-	setMasks [64]uint64 // redactNeedles id -> the needles of the set, as scanner needle bits
+	setMasks [idSetCap]idSet // redactNeedles id -> the needles of the set, as scanner needle ids
 	rules    []redactSlot
 	assigned redactSlot
 	// adjacent is what redact_adjacent.go knows of the rules, built the first time it is needed.
@@ -189,7 +194,7 @@ var redactEngineFor = sync.OnceValue(func() *redactEngine {
 					ids[n] = id
 					needles = append(needles, n)
 				}
-				e.setMasks[set.id] |= 1 << id
+				e.setMasks[set.id].add(id)
 			}
 		}
 	}
@@ -199,11 +204,11 @@ var redactEngineFor = sync.OnceValue(func() *redactEngine {
 	register(redactAssignedRule().needles)
 	// Not needles of any rule: they mark text a case-insensitive pattern can match without one.
 	for _, text := range []string{"\u017f", "\u212a"} {
-		e.scanner.unfoldable |= 1 << len(needles)
+		e.scanner.unfoldable.add(len(needles))
 		needles = append(needles, redactNeedle{text: text})
 	}
-	if len(needles) > 64 {
-		panic("asymptoteobserve: redaction tracks at most 64 needles")
+	if len(needles) > idSetCap {
+		panic("asymptoteobserve: more redaction needles than an idSet holds; lengthen idSet")
 	}
 	e.scanner.build(needles)
 	return e
@@ -230,22 +235,26 @@ type redactGate struct {
 	engine  *redactEngine
 	scanned bool
 	hits    []redactHit
-	found   uint64 // scanner needle bits
-	// known and present are bit sets over redactNeedles ids: which sets were looked for in this
-	// version of the text, and which were found.
-	known, present uint64
+	found   idSet // scanner needle ids
+	// known and present are sets of redactNeedles ids: which sets were looked for in this version
+	// of the text, and which were found.
+	known, present idSet
 	// hidden is set when a match may hide another from this pass: a value a rule keeps, or the
 	// capture takes, that is itself a label and its separator (keptLabel), inside a match that
 	// neither looks into; a copy a token ran on over, as replacing a copy may (copyHidesMatch); or a
 	// replaced AWS secret's `/`, where a URL's password stopped.
 	hidden bool
-	// copies are the assigned values whose copies are removed after every rule has run.
-	copies *redactCopies
+	// copies are the assigned values whose copies are removed after every rule has run, and what
+	// the chains of this pass found of them in the text (copyIndex).
+	copies *copyIndex
 }
 
 func (g *redactGate) set(value string) {
 	if value != g.value {
-		g.value, g.scanned, g.known, g.present = value, false, 0, 0
+		g.value, g.scanned, g.known, g.present = value, false, idSet{}, idSet{}
+		if g.copies != nil {
+			g.copies.lo, g.copies.at = 0, g.copies.at[:0]
+		}
 	}
 }
 
@@ -258,7 +267,7 @@ func (g *redactGate) e() *redactEngine {
 
 func (g *redactGate) scan() {
 	if !g.scanned {
-		g.hits, g.found = g.e().scanner.scan(g.value, g.hits[:0])
+		g.hits = g.e().scanner.scan(g.value, g.hits[:0], &g.found)
 		g.scanned = true
 	}
 }
@@ -267,14 +276,14 @@ func (g *redactGate) scan() {
 // equates with s and k: such a pattern can match "ſecret", which holds no needle "secret".
 func (g *redactGate) unfoldable() bool {
 	g.scan()
-	return g.found&g.e().scanner.unfoldable != 0
+	return g.found.meets(&g.e().scanner.unfoldable)
 }
 
 // holdsNothing reports whether the text holds no needle at all, and so no set: no rule can match
 // it.
 func (g *redactGate) holdsNothing() bool {
 	g.scan()
-	return g.enabled && g.found == 0
+	return g.enabled && g.found.empty()
 }
 
 func (g *redactGate) holds(set *redactNeedles) bool {
@@ -284,23 +293,22 @@ func (g *redactGate) holds(set *redactNeedles) bool {
 	if set.within != nil && !g.holds(set.within) {
 		return false
 	}
-	bit := uint64(1) << set.id
-	if g.known&bit != 0 {
-		return g.present&bit != 0
+	if g.known.has(set.id) {
+		return g.present.has(set.id)
 	}
-	g.known |= bit
+	g.known.add(set.id)
 	if set.folded && g.unfoldable() {
-		g.present |= bit
+		g.present.add(set.id)
 		return true
 	}
 	g.scan()
-	mask := g.e().setMasks[set.id]
-	if g.found&mask == 0 {
+	mask := &g.e().setMasks[set.id]
+	if !g.found.meets(mask) {
 		return false
 	}
 	for _, h := range g.hits {
-		if mask&(1<<h.id) != 0 && set.passes(g.e(), g.value, h, false) {
-			g.present |= bit
+		if mask.has(h.id) && set.passes(g.e(), g.value, h, false) {
+			g.present.add(set.id)
 			return true
 		}
 	}
@@ -318,7 +326,7 @@ func (g *redactGate) holds(set *redactNeedles) bool {
 func (set *redactNeedles) passes(engine *redactEngine, t string, h redactHit, within bool) bool {
 	masks := &engine.setMasks
 	for s := set; s != nil; s = s.within {
-		if masks[s.id]&(1<<h.id) != 0 && (s.followedBy != nil && !s.followedBy(t[h.end:]) || s.precededBy != nil && !s.precededBy(t[:h.start])) {
+		if masks[s.id].has(h.id) && (s.followedBy != nil && !s.followedBy(t[h.end:]) || s.precededBy != nil && !s.precededBy(t[:h.start])) {
 			return false
 		}
 		if !within {
@@ -342,7 +350,8 @@ func (set *redactNeedles) passes(engine *redactEngine, t string, h redactHit, wi
 // Where a match can begin anywhere in a run before the needle (startLabel, startScheme), only the
 // leftmost place in the run is tried. Whatever a match from a later place in the run takes, a
 // match from the earlier one can take too, its lazy or starred run of the same characters taking
-// the ones between; so when the earlier place does not match, no place in the run does.
+// the ones between; so when the earlier place does not match, no place in the run does. A
+// startParam rule tries the `?` or `&` before the run first, then that place.
 //
 // When the places would hand the pattern more text than the budget allows (redactAnchoredPerByte),
 // the whole pattern runs once from a safe start before the first of them instead. No match starts
@@ -418,8 +427,8 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 		}
 		text.scan()
 		engine := text.e()
-		mask := engine.setMasks[rule.needles.id]
-		if text.found&mask == 0 {
+		mask := &engine.setMasks[rule.needles.id]
+		if !text.found.meets(mask) {
 			return
 		}
 		if rule.start == startLine {
@@ -433,7 +442,7 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 		first, handed, last := -1, 0, -1
 		budget := redactAnchoredPerByte*len(t) + redactAnchoredBase
 		for _, h := range text.hits {
-			if mask&(1<<h.id) == 0 || !rule.needles.passes(engine, t, h, true) {
+			if !mask.has(h.id) || !rule.needles.passes(engine, t, h, true) {
 				continue
 			}
 			q := rule.startFor(t, h, 0, slot.boundary)
@@ -444,7 +453,11 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 				first = q
 			}
 			last = q
-			if handed += len(t) - q; handed > budget {
+			places := 1
+			if rule.opensParam(t, q) {
+				places = 2 // the label after it, where the parameter does not match
+			}
+			if handed += places * (len(t) - q); handed > budget {
 				break
 			}
 		}
@@ -455,15 +468,7 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 			whole(slot.safeStart(t, first))
 			return
 		}
-		pos, failed := 0, -1
-		for _, h := range text.hits {
-			if mask&(1<<h.id) == 0 || h.start < pos || !rule.needles.passes(engine, t, h, true) {
-				continue
-			}
-			q := rule.startFor(t, h, pos, slot.boundary)
-			if q < 0 || q == failed {
-				continue
-			}
+		anchoredAt := func(q int) []int {
 			if redactWork != nil {
 				redactWork(len(t) - q)
 			}
@@ -472,6 +477,25 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 				if m[i] >= 0 {
 					m[i] += q
 				}
+			}
+			return m
+		}
+		pos, failed := 0, -1
+		for _, h := range text.hits {
+			if !mask.has(h.id) || h.start < pos || !rule.needles.passes(engine, t, h, true) {
+				continue
+			}
+			q := rule.startFor(t, h, pos, slot.boundary)
+			if q < 0 || q == failed {
+				continue
+			}
+			m := anchoredAt(q)
+			if m == nil && rule.opensParam(t, q) {
+				// No parameter opens at the `?` or `&`: the label after it may still match.
+				if q = rule.startFor(t, h, q+1, slot.boundary); q < 0 {
+					continue
+				}
+				m = anchoredAt(q)
 			}
 			if m == nil && chain != nil {
 				m = chain.rescue(chain.adj.byRule[slot.index], q)
@@ -513,7 +537,7 @@ func (rule redactionRule) startFor(t string, h redactHit, pos int, boundary bool
 			return -1
 		}
 		return q
-	case startLabel, startScheme:
+	case startLabel, startScheme, startParam:
 		class, last := &labelClass, h.start
 		if rule.start == startScheme {
 			class, last = &schemeClass, h.start-1
@@ -525,8 +549,11 @@ func (rule redactionRule) startFor(t string, h redactHit, pos int, boundary bool
 		if redactWork != nil {
 			redactWork(h.start - run)
 		}
+		if rule.start == startParam && run > pos && (t[run-1] == '?' || t[run-1] == '&') {
+			return run - 1
+		}
 		for q := max(run, pos); q <= last; q++ {
-			if wordBoundary(t, q) && (rule.start == startLabel || isASCIILetter(t[q])) {
+			if wordBoundary(t, q) && (rule.start != startScheme || isASCIILetter(t[q])) {
 				return q
 			}
 		}
@@ -546,13 +573,19 @@ func (rule redactionRule) startFor(t string, h redactHit, pos int, boundary bool
 	panic("asymptoteobserve: no start for a redaction rule")
 }
 
+// opensParam reports whether q, a place startFor returned, is the `?` or `&` a startParam rule's
+// query parameter opens with, rather than its label's place: a label holds neither.
+func (rule redactionRule) opensParam(t string, q int) bool {
+	return rule.start == startParam && (t[q] == '?' || t[q] == '&')
+}
+
 // lineStart returns the start of a line at or before every place a startLine match holding one of
 // the needles can begin: before the needle, an optional `set-`, a quote, whitespace across lines,
 // and a few bytes (`=`, `--header`) more.
-func lineStart(engine *redactEngine, t string, hits []redactHit, mask uint64, set *redactNeedles) (int, bool) {
+func lineStart(engine *redactEngine, t string, hits []redactHit, mask *idSet, set *redactNeedles) (int, bool) {
 	from, ok := len(t), false
 	for _, h := range hits {
-		if mask&(1<<h.id) == 0 || !set.passes(engine, t, h, true) {
+		if !mask.has(h.id) || !set.passes(engine, t, h, true) {
 			continue
 		}
 		b := h.start
@@ -604,6 +637,58 @@ var labelClass, schemeClass = func() (label, scheme [256]bool) {
 	return label, scheme
 }()
 
+// ---- id sets ----
+
+// idSet is a set of small ids: the scanner's needle ids, or redactNeedles ids. What the gate asks
+// of one (does the text hold one of this set's needles, is this hit's needle one of them) is a few
+// ANDs, with nothing allocated. Its methods take pointers: the sets sit in arrays and structs, and
+// Go copies an array of more than one word for a value receiver and passes it in memory.
+//
+// It holds idSetCap ids. To hold more, lengthen the array, to a power of two: idBit masks an id's
+// word index with len-1, which the compiler can prove in range, so has and add carry no bounds
+// check. The engine panics at build time before an id reaches idSetCap.
+type idSet [2]uint64
+
+// idSetCap is how many ids an idSet holds.
+const idSetCap = len(idSet{}) * 64
+
+// An idSet's length must be a power of two (idBit); this constant overflows, and the package
+// fails to compile, when it is not.
+const _ = -uint(len(idSet{}) & (len(idSet{}) - 1))
+
+// idBit returns the index of id's word in an idSet and its bit in that word.
+func idBit(id int) (int, uint64) {
+	return int(uint(id)>>6) & (len(idSet{}) - 1), 1 << (uint(id) & 63)
+}
+
+func (s *idSet) add(id int) {
+	w, bit := idBit(id)
+	s[w] |= bit
+}
+
+func (s *idSet) has(id int) bool {
+	w, bit := idBit(id)
+	return s[w]&bit != 0
+}
+
+func (s *idSet) empty() bool { return *s == idSet{} }
+
+// meets reports whether s and o hold an id in common.
+func (s *idSet) meets(o *idSet) bool {
+	var common uint64
+	for i := range s {
+		common |= s[i] & o[i]
+	}
+	return common != 0
+}
+
+// union adds every id of o to s.
+func (s *idSet) union(o *idSet) {
+	for i := range s {
+		s[i] |= o[i]
+	}
+}
+
 // ---- the needle scanner ----
 
 // redactNeedle is one literal some rule's pattern cannot match without; folded needles are lower
@@ -628,11 +713,11 @@ type needleScanner struct {
 	needles    []redactNeedle
 	class      [256]uint8 // byte -> input class; 0 for bytes no needle holds
 	delta      []uint32   // state + class -> next state
-	out        []uint64   // (state-firstOut)/nc -> the needles ending there
+	out        []idSet    // (state-firstOut)/nc -> the needles ending there
 	nc         int        // number of classes, the length of a row
 	firstOut   int
-	longest    int    // the longest needle's length
-	unfoldable uint64 // the needles that are U+017F and U+212A
+	longest    int   // the longest needle's length
+	unfoldable idSet // the needles that are U+017F and U+212A
 }
 
 func asciiLower(c byte) byte {
@@ -661,19 +746,19 @@ func (sc *needleScanner) build(needles []redactNeedle) {
 	}
 	// The trie.
 	next := [][]int{make([]int, n)}
-	out := []uint64{0}
+	out := []idSet{{}}
 	for id, nd := range needles {
 		s := 0
 		for i := range len(nd.text) {
 			c := sc.class[nd.text[i]]
 			if next[s][c] == 0 {
 				next = append(next, make([]int, n))
-				out = append(out, 0)
+				out = append(out, idSet{})
 				next[s][c] = len(next) - 1
 			}
 			s = next[s][c]
 		}
-		out[s] |= 1 << id
+		out[s].add(id)
 	}
 	// Failure links, breadth first, folded into a complete transition table. Class 0 never
 	// continues a needle, so it always returns to the root.
@@ -689,7 +774,7 @@ func (sc *needleScanner) build(needles []redactNeedle) {
 	for len(queue) > 0 {
 		s := queue[0]
 		queue = queue[1:]
-		out[s] |= out[fail[s]]
+		out[s].union(&out[fail[s]])
 		for c := 1; c < n; c++ {
 			if t := next[s][c]; t != 0 {
 				fail[t] = delta[fail[s]*n+c]
@@ -703,13 +788,13 @@ func (sc *needleScanner) build(needles []redactNeedle) {
 	// Renumber: the root first, then the states no needle ends in, then those some do.
 	order := make([]int, 0, len(next))
 	for s := range next {
-		if out[s] == 0 {
+		if out[s].empty() {
 			order = append(order, s)
 		}
 	}
 	sc.firstOut = len(order) * n
 	for s := range next {
-		if out[s] != 0 {
+		if !out[s].empty() {
 			order = append(order, s)
 			sc.out = append(sc.out, out[s])
 		}
@@ -730,10 +815,11 @@ func (sc *needleScanner) build(needles []redactNeedle) {
 // dependent loads; independent ones overlap.
 const scanLanes = 4
 
-// scan appends every needle occurrence in t to hits, ordered by start, and returns them with the
-// set of needles found.
-func (sc *needleScanner) scan(t string, hits []redactHit) ([]redactHit, uint64) {
-	var found uint64
+// scan appends every needle occurrence in t to hits, ordered by start, returns them, and sets
+// found to the needles that occur. found is written in place rather than returned: Go passes an
+// array of more than one word in memory, so returning one cost a copy on every text.
+func (sc *needleScanner) scan(t string, hits []redactHit, found *idSet) []redactHit {
+	*found = idSet{}
 	delta, class, first := sc.delta, &sc.class, uint32(sc.firstOut)
 	s, from := uint32(0), 0
 	if seg := len(t) / scanLanes; seg >= 64 {
@@ -754,7 +840,7 @@ func (sc *needleScanner) scan(t string, hits []redactHit) ([]redactHit, uint64) 
 			if s0 >= first || s1 >= first || s2 >= first || s3 >= first {
 				for k, st := range [scanLanes]uint32{s0, s1, s2, s3} {
 					if end := k*seg - overlap*min(k, 1) + j + 1; st >= first && end > k*seg && end <= (k+1)*seg {
-						hits = sc.record(t, st, end, hits, &found)
+						hits = sc.record(t, st, end, hits, found)
 					}
 				}
 			}
@@ -764,27 +850,36 @@ func (sc *needleScanner) scan(t string, hits []redactHit) ([]redactHit, uint64) 
 	}
 	for i := from; i < len(t); i++ {
 		if s = delta[s+uint32(class[t[i]])]; s >= first {
-			hits = sc.record(t, s, i+1, hits, &found)
+			hits = sc.record(t, s, i+1, hits, found)
 		}
 	}
 	// The automaton finds occurrences by where they end, lane by lane; the rules want them by
 	// where they start.
 	slices.SortStableFunc(hits, func(a, b redactHit) int { return a.start - b.start })
-	return hits, found
+	return hits
 }
 
 // record appends the occurrences ending at end, where the automaton is in state s. A needle that
 // is not folded must match the text byte for byte.
-func (sc *needleScanner) record(t string, s uint32, end int, hits []redactHit, found *uint64) []redactHit {
-	for m := sc.out[(int(s)-sc.firstOut)/sc.nc]; m != 0; m &= m - 1 {
-		id := bits.TrailingZeros64(m)
-		nd := &sc.needles[id]
-		start := end - len(nd.text)
-		if !nd.folded && t[start:end] != nd.text {
-			continue
+func (sc *needleScanner) record(t string, s uint32, end int, hits []redactHit, found *idSet) []redactHit {
+	// The words are read here, and each word's needles found gathered in a register and stored
+	// once, rather than through an iterator and idSet.add: a store per occurrence into found made
+	// the scan of 8 KiB of tool output about 8% slower.
+	out := &sc.out[(int(s)-sc.firstOut)/sc.nc]
+	for w, m := range out {
+		var got uint64
+		for ; m != 0; m &= m - 1 {
+			bit := bits.TrailingZeros64(m)
+			id := w<<6 | bit
+			nd := &sc.needles[id]
+			start := end - len(nd.text)
+			if !nd.folded && t[start:end] != nd.text {
+				continue
+			}
+			got |= 1 << bit
+			hits = append(hits, redactHit{start: start, end: end, id: id})
 		}
-		*found |= 1 << id
-		hits = append(hits, redactHit{start: start, end: end, id: id})
+		found[w] |= got
 	}
 	return hits
 }

@@ -110,6 +110,33 @@ func TestNewExporterAcceptsDeprecatedContentRetention(t *testing.T) {
 	}
 }
 
+// The run block and the top-level model, repository and branch come from resource attributes and
+// the CI environment, where a pull request names its own branch. They are redacted and capped like
+// every other attribute string: a credential in one does not reach the line, and a branch name past
+// the event size limit no longer makes the whole event unwritable.
+func TestJSONLWriterSanitizesRunAndMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writer := jsonlWriter{path: path, maxEventBytes: defaultMaxEventBytes, rotateBytes: defaultRotateBytes, rotateArchives: defaultRotateArchives, redactSecrets: true}
+
+	event := newBeaconEvent("tool.invoked", "tool", "info", "test", time.Now())
+	event.Model = "token=model-secret"
+	event.Repository = "https://example.com/repo?token=repository-secret"
+	event.Branch = strings.Repeat("b", defaultMaxEventBytes+1)
+	event.Run = &beaconevent.RunInfo{Branch: "feature/AKIAABCDEFGHIJKLMNOP", PR: "token=pr-secret"}
+	if err := writer.append(event); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"model-secret", "repository-secret", "AKIAABCDEFGHIJKLMNOP", "pr-secret"} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("%q reached the log: %s", secret, data)
+		}
+	}
+}
+
 func TestIntAttrRejectsOutOfRangeString(t *testing.T) {
 	attrs := map[string]interface{}{"value": "9223372036854775808"}
 	if got, ok := intAttr(attrs, "value"); ok {
@@ -958,8 +985,8 @@ func TestCodexToolResultExtractsShellCommand(t *testing.T) {
 	if event.Command == nil || event.Command.Command != "date" {
 		t.Fatalf("command = %#v, want parsed date command", event.Command)
 	}
-	if event.Tool == nil || event.Tool.Command != `{"cmd":"date","workdir":"/tmp"}` {
-		t.Fatalf("tool payload not preserved: %#v", event.Tool)
+	if event.Tool == nil || event.Tool.Command != "date" {
+		t.Fatalf("tool.command = %#v, want the command line the session sync records", event.Tool)
 	}
 }
 
@@ -976,8 +1003,8 @@ func TestCodexToolResultExtractsShellCommandArgument(t *testing.T) {
 	}
 	event := newBeaconEvent("tool.invoked", "tool", "info", "codex_cli", time.Now())
 	normalizeCodexToolResult(&event, map[string]interface{}{"tool": "deploy__run", "arguments": `{"command":"status"}`})
-	if event.Event.Action != "tool.invoked" || event.Command != nil {
-		t.Fatalf("non-shell tool with a command argument = %q %#v, want tool.invoked", event.Event.Action, event.Command)
+	if event.Event.Action != "tool.completed" || event.Command != nil {
+		t.Fatalf("non-shell tool with a command argument = %q %#v, want tool.completed", event.Event.Action, event.Command)
 	}
 }
 

@@ -199,6 +199,7 @@
                 "group": "Browser Chat",
                 "pages": [
                   "runtimes/browser-extension",
+                  "runtimes/browser-extension-chrome-policy",
                   "runtimes/browser-extension-chromium",
                   "runtimes/claude-web",
                   "runtimes/chatgpt-web"
@@ -275,7 +276,8 @@
                   "platforms/macos",
                   "platforms/linux",
                   "platforms/linux-deployment-profile",
-                  "platforms/windows"
+                  "platforms/windows",
+                  "platforms/fleet-deployment"
                 ]
               },
               "cli/upgrade",

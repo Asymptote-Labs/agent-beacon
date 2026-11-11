@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/accounthome"
 )
 
 const (
@@ -121,11 +123,12 @@ func DefaultPath() string {
 	return HookPath()
 }
 
-// HookPath is the user file the hooks read: ~/.beacon/endpoint/share.json. It ignores
-// BEACON_SHARE_SETTINGS_FILE, because a hook's environment can come from the repository it runs
-// in, and a repository must never be able to turn auto-share on for itself.
+// HookPath is the user file the hooks read: ~/.beacon/endpoint/share.json, in the home of the
+// account the hook runs as. It ignores BEACON_SHARE_SETTINGS_FILE and $HOME, because a hook's
+// environment can come from the repository it runs in, and a repository must never be able to turn
+// auto-share on for itself.
 func HookPath() string {
-	home, err := os.UserHomeDir()
+	home, err := accounthome.Dir()
 	if err != nil || home == "" {
 		return ""
 	}

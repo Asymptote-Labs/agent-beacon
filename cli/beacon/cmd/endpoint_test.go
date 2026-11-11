@@ -182,6 +182,11 @@ func TestCanonicalHookTargetsNormalizesAliasesToSwitchNames(t *testing.T) {
 	}
 }
 
+// hostSchedulesJobs reports whether this host can schedule Beacon's jobs (launchd on macOS,
+// systemd as PID 1 on Linux; not Windows or a container), so a plan test expects what the install
+// would do here. TestPlannedInstallActionsSkipJobsForASupervisedCollector covers the skip on any host.
+func hostSchedulesJobs() bool { return service.InventoryManager{UserMode: true}.Supported() }
+
 func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 	old := endpointOpts
 	t.Cleanup(func() { endpointOpts = old })
@@ -213,17 +218,22 @@ func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 	if counts["devin"] != 0 {
 		t.Fatalf("legacy devin alias should be deduped, counts=%#v", counts)
 	}
-	inventoryUnits := 0
+	// A host with no scheduler skips the job, and the plan says so once instead.
+	inventoryLine := "write_unit"
+	if !hostSchedulesJobs() {
+		inventoryLine = "skip_unit"
+	}
+	inventoryLines := 0
 	for _, action := range actions {
-		if action.Action == "write_unit" && action.Message == "scheduled inventory heartbeat job" {
-			inventoryUnits++
+		if action.Action == inventoryLine && strings.HasPrefix(action.Message, "scheduled inventory heartbeat job") {
+			inventoryLines++
 		}
 		if action.Action == "load_service" {
 			t.Fatalf("--no-start plan must not load anything: %+v", action)
 		}
 	}
-	if inventoryUnits != 1 {
-		t.Fatalf("plan should write the scheduled inventory job once, got %d in %+v", inventoryUnits, actions)
+	if inventoryLines != 1 {
+		t.Fatalf("plan should name the scheduled inventory job once as %s, got %d in %+v", inventoryLine, inventoryLines, actions)
 	}
 }
 
@@ -236,7 +246,7 @@ func TestPlannedInstallActionsFollowSessionSync(t *testing.T) {
 	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
 	endpointOpts.noStart = false
 
-	plan := func() (units, loads, removals int) {
+	plan := func() (units, loads, removals, skips int) {
 		for _, action := range plannedInstallActions(false, service.KindAuto, nil, nil) {
 			switch {
 			case action.Action == "write_unit" && action.Message == "scheduled session sync job":
@@ -245,21 +255,67 @@ func TestPlannedInstallActionsFollowSessionSync(t *testing.T) {
 				loads++
 			case action.Action == "unload_service" && action.Message == "remove scheduled session sync job if present":
 				removals++
+			case action.Action == "skip_unit" && strings.HasPrefix(action.Message, "scheduled session sync job"):
+				skips++
 			}
 		}
-		return units, loads, removals
+		return units, loads, removals, skips
 	}
 	endpointOpts.sessionSync, endpointOpts.noSessionSync = false, false
-	if u, l, r := plan(); u+l+r != 0 {
-		t.Fatalf("default plan names the session sync job: units=%d loads=%d removals=%d", u, l, r)
+	if u, l, r, s := plan(); u+l+r+s != 0 {
+		t.Fatalf("default plan names the session sync job: units=%d loads=%d removals=%d skips=%d", u, l, r, s)
 	}
+	// --session-sync writes and starts the job, or on a host with no scheduler says it is skipped.
 	endpointOpts.sessionSync = true
-	if u, l, r := plan(); u != 1 || l != 1 || r != 0 {
-		t.Fatalf("--session-sync plan: units=%d loads=%d removals=%d", u, l, r)
+	wantScheduled, wantSkips := 1, 0
+	if !hostSchedulesJobs() {
+		wantScheduled, wantSkips = 0, 1
+	}
+	if u, l, r, s := plan(); u != wantScheduled || l != wantScheduled || r != 0 || s != wantSkips {
+		t.Fatalf("--session-sync plan: units=%d loads=%d removals=%d skips=%d", u, l, r, s)
 	}
 	endpointOpts.sessionSync, endpointOpts.noSessionSync = false, true
-	if u, l, r := plan(); u != 0 || l != 0 || r != 1 {
-		t.Fatalf("--no-session-sync plan: units=%d loads=%d removals=%d", u, l, r)
+	if u, l, r, s := plan(); u != 0 || l != 0 || r != 1 || s != 0 {
+		t.Fatalf("--no-session-sync plan: units=%d loads=%d removals=%d skips=%d", u, l, r, s)
+	}
+}
+
+// A supervised collector has no scheduler on any platform, so the install skips the inventory and
+// session sync jobs and says why. The plan has to say the same: it used to name a launchd unit and
+// a start step for each.
+func TestPlannedInstallActionsSkipJobsForASupervisedCollector(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	endpointOpts.userMode, endpointOpts.systemMode = true, false
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.noStart = false
+	endpointOpts.sessionSync, endpointOpts.noSessionSync = true, false
+
+	skipped, collectorStarts := 0, 0
+	for _, action := range plannedInstallActions(false, service.KindSupervised, nil, nil) {
+		if action.Action == "load_service" && action.Message == "start endpoint collector service" {
+			collectorStarts++
+		}
+		if strings.Contains(action.Target, "LaunchAgents") || strings.Contains(action.Target, "LaunchDaemons") {
+			t.Errorf("plan names a launchd unit for a supervised collector: %+v", action)
+		}
+		if action.Action == "load_service" && strings.Contains(action.Message, "scheduled") {
+			t.Errorf("plan starts a scheduled job a supervised collector cannot run: %+v", action)
+		}
+		if action.Action == "skip_unit" {
+			skipped++
+			if !strings.Contains(action.Message, "needs launchd or systemd") {
+				t.Errorf("skipped job does not say why: %+v", action)
+			}
+		}
+	}
+	if skipped != 2 {
+		t.Errorf("plan should skip the inventory and session sync jobs, skipped %d", skipped)
+	}
+	// The collector is not a scheduled job: the plan still starts it.
+	if collectorStarts != 1 {
+		t.Errorf("plan should start the collector once, got %d", collectorStarts)
 	}
 }
 
@@ -302,9 +358,7 @@ func TestRepairInstalledEndpointUserConfigConfiguresNativeAndHooks(t *testing.T)
 	loadConfigForUserRepair = func(userMode bool, logPath string) endpointconfig.Config {
 		return endpointconfig.Default(userMode, logPath)
 	}
-	activeConsoleUser = func() (consoleUserInfo, bool, error) {
-		return consoleUserInfo{Username: "alice", HomeDir: home}, true, nil
-	}
+	stubConsoleUsers(t, consoleUserInfo{Username: "alice", HomeDir: home})
 	var repairArgs []string
 	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
 		if info.Username != "alice" || info.HomeDir != home {
@@ -401,9 +455,7 @@ func TestRepairInstalledEndpointUserConfigAllowsNativeOnlyHarness(t *testing.T) 
 	endpointOpts.userMode = true
 	endpointOpts.systemMode = true
 	endpointOpts.hookHarnesses = "gemini"
-	activeConsoleUser = func() (consoleUserInfo, bool, error) {
-		return consoleUserInfo{Username: "alice", HomeDir: home}, true, nil
-	}
+	stubConsoleUsers(t, consoleUserInfo{Username: "alice", HomeDir: home})
 	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
 		t.Fatalf("native-only Gemini repair should not invoke hook repair, args=%v", args)
 		return nil
@@ -439,9 +491,7 @@ func TestRepairInstalledEndpointUserConfigHonorsHookOnlyAliases(t *testing.T) {
 	endpointOpts.userMode = true
 	endpointOpts.systemMode = true
 	endpointOpts.hookHarnesses = "claude-hooks"
-	activeConsoleUser = func() (consoleUserInfo, bool, error) {
-		return consoleUserInfo{Username: "alice", HomeDir: home}, true, nil
-	}
+	stubConsoleUsers(t, consoleUserInfo{Username: "alice", HomeDir: home})
 	var repairArgs []string
 	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
 		repairArgs = append([]string(nil), args...)
@@ -1199,6 +1249,7 @@ func TestRepairInstalledEndpointHooksDetectsAlreadyInstalledBeaconHooks(t *testi
 	writeTestFile(t, filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"},{"type":"command","command":"BEACON_ENDPOINT_MODE=1 old-beacon-hooks --platform claude session-start"}]}]}}`)
 	writeTestFile(t, filepath.Join(home, ".codex", "hooks.json"), `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`)
 	writeTestFile(t, filepath.Join(home, ".factory", "settings.json"), `{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform factory post-tool"}]}]}}`)
+	writeTestFile(t, filepath.Join(home, ".gemini", "config", "hooks.json"), `{"beacon-endpoint":{"Stop":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform antigravity stop"}]}]}}`)
 	activeConsoleUser = func() (consoleUserInfo, bool, error) {
 		return consoleUserInfo{Username: "shad", HomeDir: home}, true, nil
 	}
@@ -1215,10 +1266,10 @@ func TestRepairInstalledEndpointHooksDetectsAlreadyInstalledBeaconHooks(t *testi
 	if err != nil {
 		t.Fatalf("repairInstalledEndpointHooks returned error: %v", err)
 	}
-	if strings.Join(result.Targets, ",") != "claude,factory" {
-		t.Fatalf("targets = %#v, want claude,factory", result.Targets)
+	if strings.Join(result.Targets, ",") != "claude,factory,antigravity" {
+		t.Fatalf("targets = %#v, want claude,factory,antigravity", result.Targets)
 	}
-	wantArgs := []string{"endpoint", "hooks", "install", "--harness", "claude,factory", "--level", "user", "--log-path", logPath}
+	wantArgs := []string{"endpoint", "hooks", "install", "--harness", "claude,factory,antigravity", "--level", "user", "--log-path", logPath}
 	if strings.Join(gotArgs, "\x00") != strings.Join(wantArgs, "\x00") {
 		t.Fatalf("repair args = %#v, want %#v", gotArgs, wantArgs)
 	}
@@ -2035,5 +2086,132 @@ func TestEndpointInstallHookFailureIsAWarningAndOtherHooksStillInstall(t *testin
 	}
 	if data, _ := os.ReadFile(filepath.Join(claudeDir, "settings.json")); string(data) != `{"hooks": "not-an-object"}` {
 		t.Fatalf("a settings file the merge cannot read must be left untouched, got %s", data)
+	}
+}
+
+// stubConsoleUsers makes users the people a system install resolves: the first is the console user,
+// and all of them are who repair-installed configures.
+func stubConsoleUsers(t *testing.T, users ...consoleUserInfo) {
+	t.Helper()
+	oldUser, oldUsers := activeConsoleUser, activeConsoleUsers
+	t.Cleanup(func() { activeConsoleUser, activeConsoleUsers = oldUser, oldUsers })
+	activeConsoleUser = func() (consoleUserInfo, bool, error) {
+		if len(users) == 0 {
+			return consoleUserInfo{}, false, nil
+		}
+		return users[0], true, nil
+	}
+	activeConsoleUsers = func() ([]consoleUserInfo, error) {
+		return append([]consoleUserInfo(nil), users...), nil
+	}
+}
+
+// Every logged-in person is configured, each in their own home and as themselves, and one person's
+// failure neither stops the others nor goes unreported.
+func TestRepairInstalledEndpointUserConfigConfiguresEveryLoggedInUser(t *testing.T) {
+	writeNativeConfigInProcess(t)
+	oldOpts := endpointOpts
+	oldRunHookRepairAsUser := runHookRepairAsUser
+	oldLoadConfigForUserRepair := loadConfigForUserRepair
+	t.Cleanup(func() {
+		endpointOpts = oldOpts
+		runHookRepairAsUser = oldRunHookRepairAsUser
+		loadConfigForUserRepair = oldLoadConfigForUserRepair
+	})
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = true
+	endpointOpts.logPath = logPath
+	endpointOpts.hookHarnesses = ""
+	endpointOpts.hookLevel = "user"
+	loadConfigForUserRepair = func(userMode bool, logPath string) endpointconfig.Config {
+		return endpointconfig.Default(userMode, logPath)
+	}
+	alice := consoleUserInfo{Username: "alice", HomeDir: t.TempDir()}
+	bob := consoleUserInfo{Username: "bob", HomeDir: t.TempDir()}
+	carol := consoleUserInfo{Username: "carol", HomeDir: t.TempDir()}
+	stubConsoleUsers(t, alice, bob, carol)
+	hooked := map[string]string{}
+	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
+		if info.Username == "bob" {
+			return fmt.Errorf("refresh hooks for bob: runuser refused")
+		}
+		hooked[info.Username] = strings.Join(args, " ")
+		return nil
+	}
+
+	result, err := repairInstalledEndpointUserConfig()
+	if err == nil || !strings.Contains(err.Error(), "bob") {
+		t.Fatalf("err = %v, want bob's failure reported", err)
+	}
+	if len(result.Users) != 3 {
+		t.Fatalf("users = %+v, want alice, bob and carol", result.Users)
+	}
+	for _, u := range []consoleUserInfo{alice, carol} {
+		if !strings.Contains(hooked[u.Username], "--harness claude,codex,cursor") {
+			t.Errorf("%s hooks = %q, want the default hook targets installed", u.Username, hooked[u.Username])
+		}
+		settings, err := os.ReadFile(filepath.Join(u.HomeDir, ".claude", "settings.json"))
+		if err != nil || !strings.Contains(string(settings), "127.0.0.1:4317") {
+			t.Errorf("%s's Claude Code settings do not point at the collector: %v %s", u.Username, err, settings)
+		}
+	}
+	if result.Users[1].User != "bob" || result.Users[1].Error == "" {
+		t.Errorf("bob's entry = %+v, want his error", result.Users[1])
+	}
+	if result.Users[2].User != "carol" || result.Users[2].Error != "" {
+		t.Errorf("carol's entry = %+v, want configured after bob failed", result.Users[2])
+	}
+	// When the first person fails, the single-user fields carry the error too, so a reader of the
+	// older shape never sees their user without it.
+	bobFirst, err := func() (endpointUserConfigRepairResult, error) {
+		stubConsoleUsers(t, bob, alice)
+		return repairInstalledEndpointUserConfig()
+	}()
+	if err == nil || bobFirst.User != "bob" || bobFirst.Error == "" {
+		t.Fatalf("bob first = %+v, %v; want bob with his error at the top level", bobFirst, err)
+	}
+	stubConsoleUsers(t, alice, bob, carol)
+	if result.Error != "" {
+		t.Errorf("top-level error = %q when the first person succeeded", result.Error)
+	}
+
+	// The single-user fields still describe the first person, for readers of the older shape.
+	if result.User != "alice" || result.HomeDir != alice.HomeDir || strings.Join(result.HookTargets, ",") != "claude,codex,cursor" {
+		t.Errorf("top-level result = %+v, want alice's", result)
+	}
+
+	var out strings.Builder
+	reportUserConfigRepair(&out, result)
+	text := out.String()
+	for _, want := range []string{
+		"Configured alice (" + alice.HomeDir + "): telemetry for claude, codex; hooks for claude, codex, cursor, writing to " + logPath,
+		"Could not configure bob (" + bob.HomeDir + "): refresh hooks for bob: runuser refused",
+		"Configured carol (" + carol.HomeDir + ")",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("report missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// With nobody to configure the command says so and says what to run, instead of printing nothing
+// after a package install that otherwise reported success.
+func TestRepairInstalledEndpointUserConfigReportsNobodyToConfigure(t *testing.T) {
+	oldOpts := endpointOpts
+	t.Cleanup(func() { endpointOpts = oldOpts })
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = true
+	stubConsoleUsers(t)
+
+	result, err := repairInstalledEndpointUserConfig()
+	if err != nil || result.SkippedReason != "no_active_console_user" {
+		t.Fatalf("result, err = %+v, %v; want a no_active_console_user skip", result, err)
+	}
+	var out strings.Builder
+	reportUserConfigRepair(&out, result)
+	if !strings.Contains(out.String(), "No logged-in user to configure") ||
+		!strings.Contains(out.String(), "sudo beacon endpoint user-config repair-installed --system") {
+		t.Fatalf("report = %q, want the skip explained with the command to run", out.String())
 	}
 }
