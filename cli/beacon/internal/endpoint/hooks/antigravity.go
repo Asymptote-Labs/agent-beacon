@@ -116,8 +116,11 @@ func installAntigravityHooks(path, binaryPath, logPath, configPath string) error
 		return err
 	}
 	prefix := endpointCommandPrefix("antigravity", binaryPath, logPath, configPath)
+	// PreInvocation runs before every model call; the adapter records the turn's prompt only on
+	// the first call of each turn (invocationNum 0), so it is the per-turn prompt hook.
 	block := antigravityHookBlock{
-		SessionStart: []antigravityHookRef{{Type: "command", Command: prefix + " session-start"}},
+		SessionStart:  []antigravityHookRef{{Type: "command", Command: prefix + " session-start"}},
+		PreInvocation: []antigravityHookRef{{Type: "command", Command: prefix + " prompt-submit"}},
 		PreToolUse: []antigravityHookGroup{{
 			Matcher: "*",
 			Hooks:   []antigravityHookRef{{Type: "command", Command: prefix + " pre-tool"}},

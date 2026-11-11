@@ -260,6 +260,35 @@ func TestSkippedBackfillFloorsOnlyRuntimesWithoutCursors(t *testing.T) {
 	}
 }
 
+// A runtime an upgrade adds after a skipped backfill was not there to be floored and has no cursors.
+// It reads from the earliest recorded floor, not the whole window the operator opted out of, and
+// keeps reading from it once its first sweep has saved cursors.
+func TestRuntimeAddedAfterASkippedBackfillReadsFromTheEarliestFloor(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	isolateSweepState(t)
+	stubBackfill(t, 1<<20, 1<<20, writingRunner("Claude", 1, nil))
+	skipped := endpointBackfillNow()
+	recordSkippedBackfill(&bytes.Buffer{}, true)
+
+	var since time.Time
+	cursor := filepath.Join(t.TempDir(), "antigravity-sessions.json")
+	added := endpointBackfillRunner{Name: "Antigravity", Sync: "beacon endpoint antigravity sync",
+		State: func(bool) []string { return []string{cursor} },
+		Run: func(r endpointBackfillRun) (int, error) {
+			since = r.Since
+			return 0, os.WriteFile(cursor, []byte("{}"), 0o600)
+		}}
+	stubBackfill(t, 1<<20, 1<<20, writingRunner("Claude", 1, nil), added)
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	for sweep, after := range []time.Duration{72 * time.Hour, 72*time.Hour + 15*time.Minute} {
+		endpointBackfillNow = func() time.Time { return skipped.Add(after) }
+		runSessionSweep(logPath, true, true)
+		if !since.Equal(skipped) {
+			t.Fatalf("sweep %d read a runtime added after the skip from %s, want the skip's floor %s", sweep+1, since, skipped)
+		}
+	}
+}
+
 // Every session-store runner names its cursor files in both modes, so a skipped backfill can tell
 // which runtimes a sweep has already read.
 func TestEveryBackfillRunnerNamesItsCursors(t *testing.T) {

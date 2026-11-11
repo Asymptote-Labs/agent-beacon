@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	hookconfig "github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Cursor reads the pre-tool answer as the call's permission; a payload with no session must still
@@ -285,39 +286,66 @@ func TestRunPromptSubmitEmitsFactoryPromptEvent(t *testing.T) {
 	}
 }
 
-// Antigravity names the prompt `prompt` on one hook and `userPrompt` on another.
-func TestRunPromptSubmitEmitsAntigravityPromptEvent(t *testing.T) {
-	for _, key := range []string{"prompt", "userPrompt"} {
-		t.Run(key, func(t *testing.T) {
-			setupHookConfigDirs(t)
-			platformFlag = "antigravity"
-			logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-			t.Setenv("BEACON_CONTENT_RETENTION", "full")
+// Antigravity's PreInvocation runs before every model call and carries the turn's prompt as
+// `lastUserInput` each time; `invocationNum` restarts at 0 on every turn. The sequence below is
+// what agy 1.5.3 sent for a two-turn conversation whose first turn ran one tool. Each turn's
+// prompt is recorded once, and the first tool call does not replay the first prompt from the
+// transcript. A prompt is normalized the way the session-store sync normalizes the transcript's
+// copy, so both hash alike and the sync recognizes it as recorded.
+func TestRunPromptSubmitRecordsEachAntigravityTurnOnce(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "full")
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	if err := os.WriteFile(transcriptPath, []byte(`{"source":"USER_EXPLICIT","type":"USER_INPUT","content":"<USER_REQUEST>\nsummarize token=ag-secret\n</USER_REQUEST>"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	invocation := func(n int, prompt string) map[string]interface{} {
+		return map[string]interface{}{
+			"conversationId": "ag-session",
+			"workspacePaths": []interface{}{"/repo"},
+			"transcriptPath": transcriptPath,
+			"invocationNum":  float64(n),
+			"lastUserInput":  prompt,
+		}
+	}
 
-			out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
-				"conversationId": "ag-session",
-				"workspacePaths": []interface{}{"/repo"},
-				key:              "summarize token=ag-secret",
-			})
-			if len(out) != 0 {
-				t.Fatalf("antigravity prompt response = %#v, want empty response", out)
-			}
+	if out := runHookWithInput(t, runPromptSubmit, invocation(0, "summarize token=ag-secret")); len(out) != 0 {
+		t.Fatalf("antigravity prompt response = %#v, want empty response", out)
+	}
+	toolCall := invocation(0, "summarize token=ag-secret")
+	delete(toolCall, "invocationNum")
+	toolCall["toolCall"] = map[string]interface{}{"name": "run_command", "args": map[string]interface{}{"CommandLine": "ls"}}
+	runHookWithInput(t, runPreTool, toolCall)
+	if out := runHookWithInput(t, runPromptSubmit, invocation(1, "summarize token=ag-secret")); len(out) != 0 {
+		t.Fatalf("antigravity prompt response = %#v, want empty response", out)
+	}
+	runHookWithInput(t, runPromptSubmit, invocation(0, "\n  now say done  \n"))
 
-			event := lastEndpointEvent(t, logPath)
-			if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
-				t.Fatalf("event.action = %q, want prompt.submitted", action)
-			}
-			if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity_cli" {
-				t.Fatalf("harness = %q, want antigravity_cli", harness)
-			}
-			if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize token=[REDACTED]" {
-				t.Fatalf("prompt.text = %q, want redacted prompt", got)
-			}
-			if got := event["repository"]; got != "/repo" {
-				t.Fatalf("repository = %q, want /repo", got)
-			}
-		})
+	var prompts []map[string]interface{}
+	for _, event := range endpointEvents(t, logPath) {
+		if event["event"].(map[string]interface{})["action"] == "prompt.submitted" {
+			prompts = append(prompts, event)
+		}
+	}
+	if len(prompts) != 2 {
+		t.Fatalf("prompt.submitted events = %d, want one per turn: %#v", len(prompts), prompts)
+	}
+	for i, want := range []string{"summarize token=[REDACTED]", "now say done"} {
+		if got := prompts[i]["prompt"].(map[string]interface{})["text"]; got != want {
+			t.Errorf("turn %d prompt.text = %q, want %q", i+1, got, want)
+		}
+		if harness := prompts[i]["harness"].(map[string]interface{})["name"]; harness != "antigravity_cli" {
+			t.Errorf("turn %d harness = %q, want antigravity_cli", i+1, harness)
+		}
+		if got := prompts[i]["repository"]; got != "/repo" {
+			t.Errorf("turn %d repository = %q, want /repo", i+1, got)
+		}
+	}
+	if got, want := prompts[1]["content"].(map[string]interface{})["hash"], asymptoteobserve.RetainedContent(asymptoteobserve.AntigravityPrompt("<USER_REQUEST>\nnow say done\n</USER_REQUEST>"), 0).Hash; got != want {
+		t.Errorf("turn 2 content.hash = %v, want the hash the sync gives the transcript's copy (%s)", got, want)
 	}
 }
 

@@ -365,31 +365,14 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	store := &Store{path: path, db: db}
-	if store.sessionCols, err = tableColumns(db, "sessions"); err == nil {
-		store.messageCols, err = tableColumns(db, "messages")
+	if store.sessionCols, err = sessionsync.TableColumns(db, "sessions"); err == nil {
+		store.messageCols, err = sessionsync.TableColumns(db, "messages")
 	}
 	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return store, nil
-}
-
-func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
-	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	cols := map[string]bool{}
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		cols[name] = true
-	}
-	return cols, rows.Err()
 }
 
 // column is alias.name when the table has the column, and fallback when it does not.

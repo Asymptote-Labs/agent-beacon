@@ -58,11 +58,7 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []no
 	switch eventType {
 	case "chat.message":
 		if prompt := opencodePromptText(input); prompt != "" {
-			fields["prompt"] = map[string]interface{}{"text": prompt}
-			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
-				"input": map[string]interface{}{"messages": asymptoteobserve.TextInputMessages(prompt)},
-			})
-			fields["content"] = retainedContentFields(prompt)
+			setPromptFields(fields, prompt)
 		}
 		events := one("prompt.submitted", "prompt", "info", "Prompt submitted to opencode", fields)
 		if link, ok := handoffLinkEvent(fields, opencodePromptText(input)); ok {

@@ -19,7 +19,20 @@ Before enabling Antigravity hooks, make sure:
 
 ## Collection path
 
-Antigravity invokes Beacon's hook adapter from Antigravity hook configuration. The adapter writes normalized endpoint events to the configured runtime JSONL log.
+Beacon collects Antigravity CLI two ways:
+
+- **Hooks.** Antigravity invokes Beacon's hook adapter from Antigravity hook configuration. The adapter writes normalized endpoint events to the configured runtime JSONL log as they happen.
+- **Session sync.** `beacon endpoint antigravity sync` (alias `antigravity-cli`) reads the conversations Antigravity keeps under `~/.gemini/antigravity-cli/brain/<conversationId>/.system_generated/logs/transcript_full.jsonl`, with each conversation's working directory from `~/.gemini/antigravity-cli/conversation_summaries.db`, and writes events marked `harness.collection_method=poll` under the same session id the hooks use. It records prompts, agent messages and reasoning, tool calls, commands with exit code and output, file reads and edits, and per-response token usage. The install-time backfill and the scheduled session sync run it too, so conversations from before the hooks were installed are recorded.
+
+For a conversation the hooks already recorded, sync writes only what the hooks cannot see: agent messages, reasoning, and token usage from the point the hooks started reporting it, plus any prompt the hooks did not record. Prompts are matched to the hooks' by content hash, so the later prompts of a conversation recorded by v1.3.60 hooks, or a turn whose `PreInvocation` hook failed, are still backfilled; a prompt identical to one the hooks recorded in the same conversation counts as recorded. Prompts and tool events from before the hooks started are backfilled too. Sync runs after the fact, so it cannot hold, allow, or deny a tool call.
+
+```bash title="Preview, run, and inspect Antigravity session sync"
+beacon endpoint antigravity sync --print   # map conversations without writing or moving the cursor
+beacon endpoint antigravity sync           # write new events to the runtime log
+beacon endpoint antigravity status         # conversations found and collected
+```
+
+Use `--brain-dir` to read another brain directory.
 
 ## Discovery and status
 
@@ -47,13 +60,15 @@ Beacon writes user-level Antigravity hooks to `~/.gemini/config/hooks.json` and 
 
 | Area | Support |
 |------|---------|
-| Prompt telemetry | The first prompt in a session can be recovered from the transcript by `PreToolUse`. Sessions without tool calls do not use this fallback |
-| Session, command, tool, and file telemetry | Uses `SessionStart`, `PreToolUse`, `PostToolUse`, and `Stop`, where Antigravity emits those hooks and exposes the corresponding payloads |
+| Prompt telemetry | Every prompt, recorded by `PreInvocation`. Antigravity runs that hook before each model call and counts the calls from 0 again at the start of every turn, so Beacon records the turn's prompt (`lastUserInput`) on call 0 only, resumed conversations included |
+| Session, command, tool, and file telemetry | Uses `SessionStart`, `PreToolUse`, `PostToolUse`, and `Stop`, where Antigravity emits those hooks and exposes the corresponding payloads. `run_command` is a command; `view_file`, `list_dir`, `grep_search`, and `find_by_name` are file reads; `write_to_file`, `replace_file_content`, and `multi_replace_file_content` are file edits with the `TargetFile` path. Antigravity runs `SessionStart` only for a new conversation, not when one is resumed. `Stop` records the end of each turn |
+| Agent messages, reasoning, and token usage | From session sync only: Antigravity's hook payloads carry no response text, reasoning, or token counts. Token usage records input, output, and cache-read tokens per model response |
+| History from before the hooks | From session sync, including the install-time backfill |
 | Approvals | Not recorded or synthesized. The `PreToolUse` hook writes nothing to stdout, so Antigravity's own permission settings decide every call: Antigravity reads a hook's `allow` as approving the call automatically and an object without a decision as a deny. A deny from a `BEACON_POLICY_PROVIDER` policy provider still returns `{"decision":"deny"}` |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Antigravity hooks are installed separately in the logged-in user's context or project context |
 
-Antigravity can invoke a pre-tool hook before its transcript file contains readable prompt text. Beacon waits until the transcript is available before marking `prompt.submitted` as emitted, so the next hook in the same session can still record the prompt event. Beacon remembers that a session's first prompt was recorded for 14 days, so a conversation resumed within that time does not record it again.
+Hooks written by Beacon v1.3.60 have no `PreInvocation` handler. For them, the first prompt of a session is recovered from the transcript on its first tool call, and later prompts are not recorded; package repair, or rerunning `beacon endpoint hooks install --harness antigravity` at the same level, adds the handler. Beacon remembers that a session's first prompt was recorded for 14 days, so neither path records it again when a conversation is resumed within that time.
 
 ## Deployment notes
 

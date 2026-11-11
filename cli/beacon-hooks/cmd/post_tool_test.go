@@ -354,6 +354,36 @@ func TestRunPostToolEmitsAntigravityFileModifiedEvent(t *testing.T) {
 	}
 }
 
+// Antigravity's documented edit tools, replace_file_content and multi_replace_file_content, carry
+// no edit/write verb the substring rule matches and name their file TargetFile. They are file
+// edits on the live path as on the session-store path, with the path recorded.
+func TestRunPostToolRecordsAntigravityReplaceToolsAsFileEdits(t *testing.T) {
+	for _, tool := range []string{"replace_file_content", "multi_replace_file_content", "write_to_file"} {
+		t.Run(tool, func(t *testing.T) {
+			setupHookConfigDirs(t)
+			platformFlag = "antigravity"
+			logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+			runHookWithInput(t, runPostTool, map[string]interface{}{
+				"conversationId": "ag-session",
+				"toolCall": map[string]interface{}{
+					"name": tool,
+					"args": map[string]interface{}{"TargetFile": "/repo/main.go", "Instruction": "rename the handler"},
+				},
+			})
+
+			event := lastEndpointEvent(t, logPath)
+			if action := event["event"].(map[string]interface{})["action"]; action != "file.modified" {
+				t.Fatalf("event.action = %q, want file.modified", action)
+			}
+			if file, _ := event["file"].(map[string]interface{}); file["path"] != "/repo/main.go" {
+				t.Fatalf("file = %#v, want the TargetFile path", event["file"])
+			}
+		})
+	}
+}
+
 func TestRunPostToolEmitsAntigravityFileReadPathFields(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "antigravity"
