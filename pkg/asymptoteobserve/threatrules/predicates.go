@@ -21,8 +21,9 @@ import (
 // predicate's body written out. Nothing about a predicate exists at evaluation time.
 //
 // A predicate is defined in one of two ways. A definition (a *.predicates.yaml file) gives a
-// body over named parameters. A catalog (a *.catalog.yaml file) provides one for its paths and
-// one for its commands, whose body is generated from the catalog's stores.
+// body over named parameters. A catalog (a *.catalog.yaml file) provides one for its paths, one
+// for its commands and one for a text that mentions its paths, whose body is generated from the
+// catalog's stores.
 type predicate struct {
 	name string
 	// source says where the predicate is defined, for error messages.
@@ -33,9 +34,10 @@ type predicate struct {
 	text   string
 	body   celast.Expr
 	uses   []string
-	// catalog and commands are set for a catalog's predicate: over its paths, or its commands.
-	catalog  *concepts.Catalog
-	commands bool
+	// catalog and render are set for a catalog's predicate: render writes a selection of the
+	// catalog's stores as an expression over a subject.
+	catalog *concepts.Catalog
+	render  func(concepts.Selection, string) string
 	// selections caches the catalog predicate's parsed body for each tier and kinds it is
 	// called with.
 	mu         sync.Mutex
@@ -118,10 +120,7 @@ func (p *predicate) selection(tier concepts.Tier, kinds []string) (celast.Expr, 
 	if err != nil {
 		return nil, err
 	}
-	text := selection.PathCEL(subjectParam)
-	if p.commands {
-		text = selection.CommandCEL(subjectParam)
-	}
+	text := p.render(selection, subjectParam)
 	env, err := Env()
 	if err != nil {
 		return nil, err

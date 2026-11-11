@@ -114,6 +114,8 @@ type Library struct {
 	env   *cel.Env
 	tests []predicateTest
 	info  []Predicate
+	// catalogs are the pack's catalogs, in the order of their files' names.
+	catalogs []*concepts.Catalog
 }
 
 // predicateTest is one fixture Check runs: a definition's, or a catalog's examples, which stand
@@ -214,18 +216,21 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 			if err := declare("catalog", catalog.Name, file.Name); err != nil {
 				return nil, nil, err
 			}
+			l.catalogs = append(l.catalogs, catalog)
 			for _, p := range []struct {
 				name, about string
-				commands    bool
+				render      func(concepts.Selection, string) string
 			}{
-				{catalog.Predicates.Path, "a path that is one of the catalog's stores of files", false},
-				{catalog.Predicates.Command, "a parsed command that reads one of the catalog's stores of commands", true},
+				{catalog.Predicates.Path, "a path that is one of the catalog's stores of files", concepts.Selection.PathCEL},
+				{catalog.Predicates.Command, "a parsed command that reads one of the catalog's stores of commands", concepts.Selection.CommandCEL},
+				{catalog.Predicates.Mention, "a text that names one of the catalog's stores of files", concepts.Selection.MentionCEL},
+				{catalog.Predicates.Redacted, "a command line in which redaction took the name of a command that reads one of the catalog's stores of commands", concepts.Selection.RedactedCEL},
 			} {
 				if p.name == "" {
 					continue
 				}
 				description := fmt.Sprintf("True for %s (%s): of either tier, or of the tier and the kinds given after it.", p.about, catalog.Name)
-				if err := add(&predicate{name: p.name, source: file.Name, catalog: catalog, commands: p.commands}, description, p.name+"("+subjectParam+"[, tier[, kind...]])"); err != nil {
+				if err := add(&predicate{name: p.name, source: file.Name, catalog: catalog, render: p.render}, description, p.name+"("+subjectParam+"[, tier[, kind...]])"); err != nil {
 					return nil, nil, err
 				}
 				l.tests = append(l.tests, predicateTest{predicate: p.name, test: PredicateTest{Name: CatalogExamples, Verdict: VerdictMatch}, catalog: catalog})
@@ -262,11 +267,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 	if err != nil {
 		return nil, nil, fmt.Errorf("build CEL env: %w", err)
 	}
-	macros := make([]cel.Macro, len(l.order))
-	for i, name := range l.order {
-		macros[i] = l.predicates[name].macro()
-	}
-	if l.env, err = base.Extend(cel.Macros(macros...)); err != nil {
+	if l.env, err = l.extend(base); err != nil {
 		return nil, nil, fmt.Errorf("build CEL env: %w", err)
 	}
 	if err := l.resolve(base, definitions); err != nil {
@@ -413,6 +414,19 @@ func (l *Library) environment() (*cel.Env, error) {
 		return Env()
 	}
 	return l.env, nil
+}
+
+// extend returns env with the library's predicates added: each is a macro, expanded where an
+// expression calls it.
+func (l *Library) extend(env *cel.Env) (*cel.Env, error) {
+	if l == nil {
+		return env, nil
+	}
+	macros := make([]cel.Macro, len(l.order))
+	for i, name := range l.order {
+		macros[i] = l.predicates[name].macro()
+	}
+	return env.Extend(cel.Macros(macros...))
 }
 
 // undeclared finds the name in the checker's report of a call to a function it does not know.

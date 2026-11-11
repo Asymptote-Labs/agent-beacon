@@ -1,5 +1,6 @@
 id: high-risk-approval-allowed-without-reason
-version: 2
+spec: threat-rules/v1.3  # needed for predicates
+version: 3
 title: High-risk action approved with an empty approval reason
 description: >
   An approval was granted (event.action approval.allowed) for a high-risk operation —
@@ -10,7 +11,8 @@ description: >
   without a human-supplied rationale. The rule fires on a single approval.allowed event
   and intentionally requires approval.required == true so it ignores informational
   no-gate allows. It scopes the dangerous-target test tightly to avoid flagging routine
-  approved edits.
+  approved edits. A credential file is any store of files in the pack's credential
+  catalog (rules/concepts/credential-stores.catalog.yaml).
 severity: high
 status: stable
 posture: detect
@@ -24,7 +26,8 @@ match: >
   e.approval.reason == "" &&
   (
     e.command.command.matches("(?i)(\\brm\\s+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*\\b|\\bmkfs\\b|\\bdd\\s+if=|\\bsudo\\b|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b)") ||
-    e.file.path.matches("(?i)(\\.env$|\\.env\\.|/credentials$|id_rsa$|\\.aws/|\\.github/workflows/|\\.gitlab-ci\\.yml$|/auth\\.|/security\\.)")
+    credential_path(e.file.path) ||
+    e.file.path.matches("(?i)(\\.github/workflows/|\\.gitlab-ci\\.yml$|/auth\\.|/security\\.)")
   )
 
 emit:

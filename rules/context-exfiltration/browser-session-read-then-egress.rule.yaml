@@ -1,15 +1,18 @@
 id: browser-session-read-then-egress
-spec: threat-rules/v1.2  # needed for e.command.parsed_commands
-version: 6
+spec: threat-rules/v1.3  # needed for predicates and file_reads
+version: 7
 title: Browser session store read followed by network egress
 description: >
   Within one session, the agent read a browser cookie/login store and then issued an
   outbound network command — the SaaS session-hijack path (steal live session
-  material, then ship it off the host). The read step requires a real browser store:
-  cookies.sqlite / logins.json by name, or the ambiguous basenames cookies / "login
-  data" only inside a known browser profile directory (Chrome/Chromium/Brave/Edge/
-  Firefox/Safari, including their real on-disk dir names) so a project file named
-  "cookies" does not trip it. The egress command is read as bash: a network client
+  material, then ship it off the host). The read step requires a real browser store,
+  as browser-session-store-read does (the browser stores of the pack's credential
+  catalog, rules/concepts/credential-stores.catalog.yaml): cookies.sqlite /
+  logins.json by name, or the ambiguous basenames cookies / "login data" only inside
+  a known browser profile directory (Chrome/Chromium/Brave/Edge/Firefox/Safari,
+  including their real on-disk dir names) so a project file named "cookies" does not
+  trip it, read with a file tool or by a shell command that takes the file in. The
+  egress command is read as bash: a network client
   the egress rules share (curl, wget, httpie, xh, nc, ncat, netcat, socat, by any
   path, under sudo, timeout or torsocks, or inside bash -c), a /dev/tcp redirect, a
   remote copy, a gist, a cloud storage upload or an inline script request; the same
@@ -29,10 +32,9 @@ correlation:
   steps:
     - id: read_browser_store
       match: >
-        e.event.action == "file.read" && (
-          e.file.path.matches("(?i)(^|/)(cookies\\.sqlite|logins\\.json)$") ||
-          e.file.path.matches("(?i)/(google-chrome|chromium|chrome|brave[ -]?browser|bravesoftware|microsoft[ -]?edge|edge|firefox|mozilla|safari)([ -](beta|dev|canary|unstable|sxs))?/.*(cookies|login data)$")
-        )
+        (e.event.action == "file.read" && credential_path(e.file.path, "likely", "browser")) ||
+        (e.event.action == "command.executed" && e.command.parsed_commands.exists(c,
+          c.file_reads.exists(f, credential_path(f.path, "likely", "browser"))))
     # The sender check (s), the /dev/tcp check and the remote-copy check are the egress
     # rules' shared definition; TestPackSharedEgressSender keeps every copy identical.
     - id: egress

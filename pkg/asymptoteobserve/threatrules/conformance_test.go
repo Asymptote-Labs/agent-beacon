@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -100,45 +101,49 @@ func TestPackMatchesWhatTheLogHolds(t *testing.T) {
 	}
 }
 
-// TestPackSharedCredentialRead pins correlation read steps that are meant to reuse
-// credential-file-read's definition of a secret. The format has no include mechanism, so
-// the expression is copied; this fails when one copy changes without the other.
-func TestPackSharedCredentialRead(t *testing.T) {
-	rules, err := LoadDir(rulesDir(t))
+// TestPackCopiesNoCatalog holds the corpus to its own definitions: no rule carries a regular
+// expression that spells out the stores of a catalog the pack ships. A rule that did would be
+// right until the catalog changed, and then wrong without anything failing. The second half
+// shows the check sees a copy: the list a rule used to carry before the catalog.
+func TestPackCopiesNoCatalog(t *testing.T) {
+	for _, rule := range corpusRules(t) {
+		for _, copied := range CatalogCopies(rule) {
+			t.Errorf("%s: %s", rule.ID, copied)
+		}
+	}
+
+	lib, _, err := LoadLibraryDir(rulesDir(t))
 	if err != nil {
-		t.Fatalf("load rule pack: %v", err)
+		t.Fatal(err)
 	}
-	byID := make(map[string]*Rule, len(rules))
-	for _, r := range rules {
-		byID[r.ID] = r
+	decode := func(match string) *Rule {
+		rule, err := lib.DecodeRule([]byte("id: copy\nversion: 1\ntitle: t\ndescription: d\nseverity: low\nmatch: >\n  " + match + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rule
 	}
-	base := byID["credential-file-read"]
-	if base == nil {
-		t.Fatal("credential-file-read missing from the pack")
+	copies := CatalogCopies(decode(`e.event.action == "file.read" && (e.file.path.matches("(?i)\\.aws/credentials") || e.file.path.matches("(?i)(^|/)(\\.netrc|\\.pgpass)$"))`))
+	if len(copies) != 1 || copies[0].Catalog != "credential-stores" || !slices.Equal(copies[0].Stores, []string{"aws-shared-credentials", "netrc", "pgpass"}) || len(copies[0].Patterns) != 2 {
+		t.Errorf("a rule with its own list of credential files: got %+v, want one copy of aws-shared-credentials, netrc and pgpass in two patterns", copies)
 	}
-	for _, ref := range []struct{ rule, step string }{
-		{"secret-read-then-destructive", "read_secret"},
+	for _, match := range []string{
+		// One store, named for the rule's own reason.
+		`e.event.action == "file.modified" && e.file.path.matches("(?i)(^|/)\\.netrc$")`,
+		// The catalog, called.
+		`e.event.action == "file.read" && credential_path(e.file.path, "definite")`,
+		// Names in a text no predicate is asked about.
+		`e.gen_ai.tool.description.matches("(?i)read .{0,60}(\\.aws/credentials|\\.netrc)")`,
 	} {
-		r := byID[ref.rule]
-		if r == nil || r.Correlation == nil {
-			t.Fatalf("%s missing or not a correlation rule", ref.rule)
-		}
-		var got string
-		for _, s := range r.Correlation.Steps {
-			if s.ID == ref.step {
-				got = s.Match
-			}
-		}
-		if normalizeCEL(got) != normalizeCEL(base.Match) {
-			t.Errorf("%s step %s drifted from credential-file-read's match:\n  got:  %s\n  want: %s",
-				ref.rule, ref.step, normalizeCEL(got), normalizeCEL(base.Match))
+		if copies := CatalogCopies(decode(match)); len(copies) != 0 {
+			t.Errorf("%s: reported as a copy: %v", match, copies)
 		}
 	}
 }
 
 // The egress rules' shared definition of "this command sends data over the network", in the
-// normalized form TestPackSharedEgressSender compares. The format has no include mechanism,
-// so each rule carries a copy.
+// normalized form TestPackSharedEgressSender compares. These are still copied into each rule:
+// they predate predicates (see rules/concepts), which is how a rule pack now says a thing once.
 const (
 	// egressSender: a parsed command (s) that is a network client by base name, or runs one
 	// under a wrapper the parser does not unwrap.
@@ -228,10 +233,7 @@ func TestPackCategoriesMatchDirectories(t *testing.T) {
 		t.Fatalf("rule files: %v, %v", paths, err)
 	}
 	for _, path := range paths {
-		rule, err := LoadRule(path)
-		if err != nil {
-			t.Fatalf("%s: %v", path, err)
-		}
+		rule := loadPackRule(t, path)
 		want := filepath.Base(filepath.Dir(path))
 		if got := rule.Taxonomy["beacon_category"]; got != want {
 			t.Errorf("%s: taxonomy.beacon_category = %q, want its directory %q", path, got, want)

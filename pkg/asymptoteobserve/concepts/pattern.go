@@ -48,6 +48,19 @@ const (
 	notSeparator = `[^/\\]`
 )
 
+// In a text (a command line, a prompt) a file is named among other words, so the mention form
+// of a pattern is bounded by what a file name is written with rather than by the ends of a
+// path: nameChar is a character of a name, and a name starts after something that is not one
+// and ends before something that is neither one nor a separator. A full stop that ends a
+// sentence may come between: "read ~/.netrc." names .netrc.
+const (
+	nameChar     = `[\w.~%+-]`
+	mentionStart = `(?:^|[^\w.~%+-])`
+	mentionEnd   = `\.?(?:$|[^\w.~%+/\\-])`
+	// mentionDirectory is a directory of a "**" in a text: it does not run over a space or a quote.
+	mentionDirectory = `(?:[^/\\\s'"]+[/\\])*`
+)
+
 func parsePattern(source string) (pattern, error) {
 	p := pattern{source: source}
 	if source == "" {
@@ -261,6 +274,66 @@ func patternsRegex(patterns []pattern) string {
 		alternatives[i] = patterns[i].regex()
 	}
 	return `(?i)(?:^|` + separator + `)(?:` + strings.Join(alternatives, "|") + `)`
+}
+
+// plainWord reports whether the pattern is one component written without a ".", such as
+// "credentials" or "id_rsa": a word a text also uses for what is not a file.
+func (p *pattern) plainWord() bool {
+	if p.under || len(p.parts) != 1 || p.parts[0].any {
+		return false
+	}
+	var dotted func(items []item) bool
+	dotted = func(items []item) bool {
+		for _, it := range items {
+			if strings.Contains(it.lit, ".") || slices.ContainsFunc(it.alts, dotted) {
+				return true
+			}
+		}
+		return false
+	}
+	return !dotted(p.parts[0].items)
+}
+
+// mentionRegex returns the pattern as an RE2 regular expression for where a text names the
+// file, to follow the start of a name, under (?i).
+func (p *pattern) mentionRegex() string {
+	var b strings.Builder
+	for i, part := range p.parts {
+		if part.any {
+			b.WriteString(mentionDirectory)
+			continue
+		}
+		writeItems(&b, part.items, nameChar)
+		if i < len(p.parts)-1 || p.under {
+			b.WriteString(separator)
+		}
+	}
+	if !p.under {
+		b.WriteString(mentionEnd)
+	}
+	return b.String()
+}
+
+// mentionsRegex returns one RE2 regular expression that matches a text which names a file any
+// of the patterns names. A plain word counts only with a directory before it: "the credentials"
+// is prose and "config/credentials" is a file.
+func mentionsRegex(patterns []pattern) string {
+	var named, words []string
+	for i := range patterns {
+		if patterns[i].plainWord() {
+			words = append(words, patterns[i].mentionRegex())
+		} else {
+			named = append(named, patterns[i].mentionRegex())
+		}
+	}
+	var alternatives []string
+	if len(named) > 0 {
+		alternatives = append(alternatives, mentionStart+`(?:`+strings.Join(named, "|")+`)`)
+	}
+	if len(words) > 0 {
+		alternatives = append(alternatives, separator+`(?:`+strings.Join(words, "|")+`)`)
+	}
+	return `(?i)(?:` + strings.Join(alternatives, "|") + `)`
 }
 
 // fold maps s to the form two strings share exactly when RE2 matches one against the other under

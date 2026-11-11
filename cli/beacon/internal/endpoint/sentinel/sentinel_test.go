@@ -3,13 +3,19 @@ package sentinel
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/concepts"
 )
+
+var update = flag.Bool("update", false, "rewrite the pack's credential file filter from the credential catalog")
 
 func TestDCRTransformMentionsExpectedColumns(t *testing.T) {
 	got := DCRTransform()
@@ -242,6 +248,57 @@ func TestKQLAssetsMentionSentinelTableAndValidation(t *testing.T) {
 	}
 	if !strings.Contains(mustRead("pack/queries.kql"), "Beacon endpoint Sentinel validation event") {
 		t.Fatal("queries.kql should include the Sentinel validation phrase")
+	}
+}
+
+// TestCredentialFileFilterIsTheCatalog keeps the pack's "credential-like file" filter the one
+// the threat rules use: the expression the credential catalog generates for Kusto. The queries
+// are text a workspace runs, so they carry the expression rather than a reference to it; this
+// fails when the catalog changes and they were not regenerated.
+func TestCredentialFileFilterIsTheCatalog(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("no caller information")
+	}
+	dir := filepath.Dir(thisFile)
+	catalog, err := concepts.Load(filepath.Join(dir, "..", "..", "..", "..", "..", "rules", "concepts", "credential-stores.catalog.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection, err := catalog.Select(concepts.TierLikely)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const column = "| extend FilePath = tostring(RawData.file.path)"
+	want := "| where " + selection.PathKQL("FilePath")
+	for _, name := range []string{"queries.kql", "detections.kql"} {
+		path := filepath.Join(dir, "pack", name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(string(data), "\n")
+		filters := 0
+		for i := 0; i+1 < len(lines); i++ {
+			if lines[i] != column {
+				continue
+			}
+			filters++
+			if lines[i+1] != want {
+				if !*update {
+					t.Errorf("%s:%d: the credential file filter is not the catalog's; regenerate with: go test ./internal/endpoint/sentinel -run TestCredentialFileFilterIsTheCatalog -update (in cli/beacon)", name, i+2)
+				}
+				lines[i+1] = want
+			}
+		}
+		if filters == 0 {
+			t.Errorf("%s: no query filters on FilePath", name)
+		}
+		if *update {
+			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }
 

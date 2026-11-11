@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shellcmd"
 )
@@ -218,6 +219,88 @@ func (p *commandPattern) term() CommandTerm {
 		t.Flags = b.String()
 	}
 	return t
+}
+
+// A log does not always hold a command line as it ran. Redaction replaces a value that looks
+// like a secret, and the value of TOKEN=$(gh auth token) or of "Bearer $(gcloud auth
+// print-access-token)" starts with the command's name: what the log holds is
+// "TOKEN=[REDACTED] auth token)", which no longer reads as bash and names no command. The
+// redacted form of a command match finds what is left: the redaction mark, then the match's
+// words and one of its options within the same command.
+const (
+	redactionMark = `\[REDACTED\]`
+	// textWordChar is a character of a word in a command text, and textWordEnd what ends one.
+	textWordChar = `[^\s;&|'"()]`
+	textWordEnd  = `(?:$|[\s;&|)'"])`
+	// textWordsBefore is words of the same command before the ones asked for. A quoted word is
+	// not passed: what follows it may be inside the quotes.
+	textWordsBefore = `(?:[^;&|\n'"]*\s)?`
+	// textWordsBetween is the rest of the same command up to an option, quoted values included.
+	textWordsBetween = `(?:[^;&|\n]*\s)?`
+	// textOptionsBefore is options of the same command, and nothing else, before an option.
+	textOptionsBefore = `(?:-` + textWordChar + `*\s+)*`
+)
+
+// redactedRegex returns the match as an RE2 regular expression, under (?i), for a command text
+// in which redaction took the command's name, or "" when what would be left does not tell the
+// command from another: a match with two words or more, or with a word and options, or with a
+// word that is more than letters (auth:token), or with a whole option word (--export-secret-keys)
+// has a redacted form; one told by its name, by one plain word (lookup), or by one-letter
+// options has none.
+func (p *commandPattern) redactedRegex() string {
+	options := p.short != "" || len(p.long) > 0
+	var b strings.Builder
+	b.WriteString(redactionMark + `\s+`)
+	switch {
+	case len(p.words) >= 2, len(p.words) == 1 && (options || !plainWord(p.words[0])):
+		b.WriteString(textWordsBefore)
+		for i, word := range p.words {
+			if i > 0 {
+				b.WriteString(`\s+`)
+			}
+			writeItems(&b, word, textWordChar)
+		}
+		b.WriteString(textWordEnd)
+		if !options {
+			return b.String()
+		}
+		b.WriteString(textWordsBetween + `(?:`)
+		if p.short != "" {
+			b.WriteString(`(?-i:-[A-Za-z0-9]*[` + p.short + `][A-Za-z0-9]*)`)
+			if len(p.long) > 0 {
+				b.WriteByte('|')
+			}
+		}
+	case len(p.words) == 0 && len(p.long) > 0:
+		b.WriteString(textOptionsBefore + `(?:`)
+	default:
+		return ""
+	}
+	if len(p.long) > 0 {
+		b.WriteString(`(?:`)
+		for i, option := range p.long {
+			if i > 0 {
+				b.WriteByte('|')
+			}
+			writeItems(&b, option, textWordChar)
+		}
+		b.WriteString(`)(?:=` + textWordChar + `*)?`)
+	}
+	b.WriteString(`)` + textWordEnd)
+	return b.String()
+}
+
+// plainWord reports whether a word pattern is letters and digits only: a word many commands take.
+func plainWord(word []item) bool {
+	for _, it := range word {
+		if strings.ContainsFunc(it.lit, func(r rune) bool { return r > unicode.MaxASCII || !isAlnum(byte(r)) }) {
+			return false
+		}
+		if slices.ContainsFunc(it.alts, func(alt []item) bool { return !plainWord(alt) }) {
+			return false
+		}
+	}
+	return true
 }
 
 // invocation is one command of a command line as a command store sees it.

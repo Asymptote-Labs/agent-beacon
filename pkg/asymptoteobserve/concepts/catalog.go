@@ -60,12 +60,17 @@ type Catalog struct {
 // Predicates names the predicates a rule pack's rules call a catalog by. Each takes what it is
 // asked about, then optionally a tier and kinds, as Select does:
 // credential_path(e.file.path), credential_path(f.path, "definite"),
-// credential_command(c, "likely", "keychain").
+// credential_command(c, "likely", "keychain"), credential_mention(e.command.command).
 type Predicates struct {
 	// Path is the predicate over a path: whether it is a store of files.
 	Path string `yaml:"path,omitempty"`
 	// Command is the predicate over a parsed command: whether it reads a store of commands.
 	Command string `yaml:"command,omitempty"`
+	// Mention is the predicate over a text: whether it names a store of files.
+	Mention string `yaml:"mention,omitempty"`
+	// Redacted is the predicate over a command line as a log holds it: whether it reads a store
+	// of commands by a command whose name redaction replaced.
+	Redacted string `yaml:"redacted,omitempty"`
 }
 
 // predicateName is the form of a predicate's name: a CEL identifier in lower case.
@@ -99,6 +104,8 @@ type Store struct {
 
 	match, exclude []pattern
 	commands       []commandPattern
+	// names are what a regular expression that copies the store spells out (see Named).
+	names []string
 }
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -203,23 +210,26 @@ func (c *Catalog) compile() error {
 			s.commands = append(s.commands, p)
 		}
 	}
+	seen := map[string]string{}
 	for _, p := range []struct {
 		form, name string
 		commands   bool
-	}{{"path", c.Predicates.Path, false}, {"command", c.Predicates.Command, true}} {
+	}{{"path", c.Predicates.Path, false}, {"command", c.Predicates.Command, true}, {"mention", c.Predicates.Mention, false}, {"redacted", c.Predicates.Redacted, true}} {
 		form, name := p.form, p.name
 		has := slices.ContainsFunc(c.Stores, func(s Store) bool { return p.commands == (len(s.commands) > 0) })
 		switch {
 		case name == "":
+			continue
 		case !predicateName.MatchString(name):
 			return fmt.Errorf("predicates.%s %q: want a name like credential_path", form, name)
 		case !has:
 			return fmt.Errorf("predicates.%s %q: the catalog has no store it would be about", form, name)
+		case seen[name] != "":
+			return fmt.Errorf("predicates: %s and %s are both %q", seen[name], form, name)
 		}
+		seen[name] = form
 	}
-	if c.Predicates.Path != "" && c.Predicates.Path == c.Predicates.Command {
-		return fmt.Errorf("predicates: path and command are both %q", c.Predicates.Path)
-	}
+	c.nameStores()
 	return nil
 }
 
@@ -375,10 +385,14 @@ func (c *Catalog) first(matches func(*Store) bool) (*Store, bool) {
 // Selection is some of a catalog's stores as regular expressions (RE2 syntax, which Go, CEL's
 // matches and Kusto's `matches regex` share). A path is in the selection when it matches the
 // Include of one of Paths and not that term's Exclude. A command is in it when it matches every
-// expression of one of Commands.
+// expression of one of Commands. A text mentions the selection when it matches the Include of
+// one of Mentions and not that term's Exclude. Redacted is "" or one expression over a command
+// text: it matches where redaction took the name of one of the selection's commands.
 type Selection struct {
 	Paths    []PathTerm
 	Commands []CommandTerm
+	Mentions []PathTerm
+	Redacted string
 }
 
 // PathTerm is one alternative of a selection's paths. Exclude is "" when it excludes nothing.
@@ -401,6 +415,7 @@ func (c *Catalog) Select(min Tier, kinds ...string) (Selection, error) {
 	// The stores of files that exclude nothing share one expression; one that excludes gets its
 	// own, so that what it leaves out is not taken from a store that keeps it.
 	var plain []pattern
+	var redacted []string
 	for i := range c.Stores {
 		s := &c.Stores[i]
 		switch {
@@ -408,15 +423,23 @@ func (c *Catalog) Select(min Tier, kinds ...string) (Selection, error) {
 		case len(s.commands) > 0:
 			for k := range s.commands {
 				selection.Commands = append(selection.Commands, s.commands[k].term())
+				if text := s.commands[k].redactedRegex(); text != "" {
+					redacted = append(redacted, text)
+				}
 			}
 		case len(s.exclude) == 0:
 			plain = append(plain, s.match...)
 		default:
 			selection.Paths = append(selection.Paths, PathTerm{Include: patternsRegex(s.match), Exclude: patternsRegex(s.exclude)})
+			selection.Mentions = append(selection.Mentions, PathTerm{Include: mentionsRegex(s.match), Exclude: mentionsRegex(s.exclude)})
 		}
 	}
 	if len(plain) > 0 {
 		selection.Paths = slices.Insert(selection.Paths, 0, PathTerm{Include: patternsRegex(plain)})
+		selection.Mentions = slices.Insert(selection.Mentions, 0, PathTerm{Include: mentionsRegex(plain)})
+	}
+	if len(redacted) > 0 {
+		selection.Redacted = `(?i)(?:` + strings.Join(redacted, "|") + `)`
 	}
 	return selection, nil
 }
@@ -424,7 +447,34 @@ func (c *Catalog) Select(min Tier, kinds ...string) (Selection, error) {
 // PathCEL returns the selection's paths as a CEL boolean expression over subject, a string
 // expression such as e.file.path. It is false for a selection without stores of files.
 func (s Selection) PathCEL(subject string) string {
-	return anyOf(s.Paths, " || ", func(t PathTerm) string {
+	return termsCEL(s.Paths, subject)
+}
+
+// MentionCEL returns a CEL boolean expression over subject, a string expression such as
+// e.command.command, that is true when the text names a file of the selection: for a command
+// line that does not parse, or a prompt handed to another program. It is coarser than PathCEL
+// over a path, by what a text cannot say. A file is named by characters a name is written with,
+// so one with a space in it is not found. A file named by one plain word ("credentials",
+// "id_rsa") counts only after a directory. And a store that excludes some names is not
+// mentioned by a text that also names one of those: ".env.local" beside ".env.example".
+func (s Selection) MentionCEL(subject string) string {
+	return termsCEL(s.Mentions, subject)
+}
+
+// RedactedCEL returns a CEL boolean expression over subject, a string expression for a command
+// line (e.command.command), that is true when the text holds one of the selection's commands
+// with its name redacted: "TOKEN=[REDACTED] auth token)", which is what a log keeps of
+// TOKEN=$(gh auth token). A command told only by its name, or by its name and one-letter
+// options, has no such form. It is false for a selection without one.
+func (s Selection) RedactedCEL(subject string) string {
+	if s.Redacted == "" {
+		return "false"
+	}
+	return subject + ".matches(" + strconv.Quote(s.Redacted) + ")"
+}
+
+func termsCEL(terms []PathTerm, subject string) string {
+	return anyOf(terms, " || ", func(t PathTerm) string {
 		include := subject + ".matches(" + strconv.Quote(t.Include) + ")"
 		if t.Exclude == "" {
 			return include
@@ -452,7 +502,7 @@ func (s Selection) PathKQL(column string) string {
 // expression for one parsed command such as the c of e.command.parsed_commands.exists(c, ..).
 // It reads the command's name and args. It is false for a selection without stores of commands.
 func (s Selection) CommandCEL(subject string) string {
-	return anyOf(s.Commands, " || ", func(t CommandTerm) string {
+	terms := anyOf(s.Commands, " || ", func(t CommandTerm) string {
 		parts := []string{subject + ".name.matches(" + strconv.Quote(t.Name) + ")"}
 		for _, regex := range []string{t.Words, t.Flags} {
 			if regex != "" {
@@ -464,6 +514,19 @@ func (s Selection) CommandCEL(subject string) string {
 		}
 		return "(" + strings.Join(parts, " && ") + ")"
 	})
+	// A rule asks this of every command an agent runs, and almost none is one of the
+	// selection's: one test of the name says so before each term asks again.
+	const prefix, suffix = `(?i)^`, `$`
+	var names []string
+	for _, t := range s.Commands {
+		if name := strings.TrimSuffix(strings.TrimPrefix(t.Name, prefix), suffix); !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	if len(s.Commands) < 3 {
+		return terms
+	}
+	return "(" + subject + ".name.matches(" + strconv.Quote(prefix+`(?:`+strings.Join(names, "|")+`)`+suffix) + ") && " + terms + ")"
 }
 
 // anyOf joins the rendering of each term with or, and is false for no terms.

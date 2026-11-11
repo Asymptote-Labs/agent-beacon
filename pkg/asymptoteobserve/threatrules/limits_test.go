@@ -110,17 +110,6 @@ func corpusRules(t testing.TB) []*Rule {
 	return all
 }
 
-func ruleExpressions(r *Rule) []string {
-	if r.Correlation == nil {
-		return []string{r.Match}
-	}
-	var exprs []string
-	for _, s := range r.Correlation.Steps {
-		exprs = append(exprs, s.Match)
-	}
-	return exprs
-}
-
 // fillStrings sets every empty string field reachable from v (allocating nil sub-objects)
 // to s.
 func fillStrings(v reflect.Value, s string, depth int) {
@@ -163,9 +152,9 @@ func TestCorpusStaysUnderEvalCostLimit(t *testing.T) {
 	var maxFixtureID, maxPessimisticID string
 	for _, r := range corpusRules(t) {
 		for _, expr := range ruleExpressions(r) {
-			ast, iss := env.Compile(expr)
-			if iss != nil && iss.Err() != nil {
-				t.Fatalf("%s: %v", r.ID, iss.Err())
+			_, ast, err := r.lib.compileMatch(expr)
+			if err != nil {
+				t.Fatalf("%s: %v", r.ID, err)
 			}
 			prog, err := env.Program(ast, cel.EvalOptions(cel.OptTrackCost))
 			if err != nil {
@@ -217,12 +206,23 @@ func manyAnchors(n int) []asymptoteobserve.Event {
 	return events
 }
 
+// loadPackRule loads one rule file of the corpus with the definitions the corpus ships.
+func loadPackRule(t *testing.T, path string) *Rule {
+	t.Helper()
+	lib, _, err := LoadLibraryDir(rulesDir(t))
+	if err != nil {
+		t.Fatalf("load the corpus definitions: %v", err)
+	}
+	rule, err := lib.LoadRule(path)
+	if err != nil {
+		t.Fatalf("load %s: %v", path, err)
+	}
+	return rule
+}
+
 func loadCorpusRule(t *testing.T, rel string) *CompiledRule {
 	t.Helper()
-	rule, err := LoadRule(filepath.Join(rulesDir(t), rel))
-	if err != nil {
-		t.Fatalf("load %s: %v", rel, err)
-	}
+	rule := loadPackRule(t, filepath.Join(rulesDir(t), rel))
 	c, err := Compile(rule)
 	if err != nil {
 		t.Fatalf("compile %s: %v", rel, err)

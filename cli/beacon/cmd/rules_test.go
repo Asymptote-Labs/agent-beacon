@@ -622,6 +622,65 @@ func TestRulesLintRunsAPacksDefinitions(t *testing.T) {
 	}
 }
 
+// `rules lint` fails a rule that spells out a catalog's stores in a regular expression of its
+// own instead of calling the catalog: the copy would drift from it.
+func TestRulesLintFailsARuleThatCopiesItsPacksCatalog(t *testing.T) {
+	pack := map[string]string{
+		"rules/concepts/tokens.catalog.yaml": `
+catalog: tokens
+version: 1
+predicates: {command: token_command}
+kinds:
+  - {id: cli, title: CLI tokens}
+stores:
+  - id: gh-token
+    title: GitHub CLI token
+    kind: cli
+    tier: definite
+    commands: [{name: gh, words: [auth, token]}]
+    examples: ["gh auth token"]
+  - id: vault-token
+    title: Vault token
+    kind: cli
+    tier: definite
+    commands: [{name: vault, words: [print, token]}]
+    examples: ["vault print token"]
+`,
+		"rules/credential-access/token-printed.rule.yaml": `
+id: token-printed
+spec: threat-rules/v1.3
+version: 1
+title: T
+severity: low
+status: experimental
+posture: detect
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)\\b(gh\\s+auth\\s+token|vault\\s+print\\s+token)\\b")
+emit:
+  reason: ok
+tests:
+  - name: p
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gh auth token" }
+`,
+	}
+	cmd, buf := newCmd()
+	err := lintRulesPath(cmd, writePack(t, pack))
+	if err == nil || !strings.Contains(buf.String(), "FAIL token-printed: its regular expressions spell out gh-token, vault-token of catalog tokens") {
+		t.Fatalf("lint of a rule that copies the catalog: %v\n%s", err, buf.String())
+	}
+
+	pack["rules/credential-access/token-printed.rule.yaml"] = strings.Replace(pack["rules/credential-access/token-printed.rule.yaml"],
+		`e.command.command.matches("(?i)\\b(gh\\s+auth\\s+token|vault\\s+print\\s+token)\\b")`, `e.command.parsed_commands.exists(c, token_command(c))`, 1)
+	cmd, buf = newCmd()
+	if err := lintRulesPath(cmd, writePack(t, pack)); err != nil {
+		t.Fatalf("lint of the rule calling the catalog: %v\n%s", err, buf.String())
+	}
+}
+
 // A pulled tarball is installed with the definitions it carries, so its rules mean in the store
 // what they mean in the pack.
 func TestRulesPullInstallsAPacksDefinitions(t *testing.T) {

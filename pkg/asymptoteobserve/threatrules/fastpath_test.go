@@ -54,10 +54,14 @@ func activationEvent(a *eventActivation) asymptoteobserve.Event {
 	return a.e.(asymptoteobserve.Event)
 }
 
-// nativeProgram compiles expr in nativeEnv with the cost limit, and with opts.
-func nativeProgram(t testing.TB, expr string, opts ...cel.ProgramOption) cel.Program {
+// nativeProgram compiles expr, which may call lib's predicates, in nativeEnv with the cost
+// limit, and with opts.
+func nativeProgram(t testing.TB, lib *Library, expr string, opts ...cel.ProgramOption) cel.Program {
 	t.Helper()
 	env, err := nativeEnv()
+	if err == nil {
+		env, err = lib.extend(env)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +84,7 @@ func referenceRule(t testing.TB, rule *Rule) *CompiledRule {
 		t.Fatalf("%s: %v", rule.ID, err)
 	}
 	ref := func(expr string) matcher {
-		return matcher{prog: referenceProgram{nativeProgram(t, expr, cel.OptimizeRegex(referenceRegex))}}
+		return matcher{prog: referenceProgram{nativeProgram(t, rule.lib, expr, cel.OptimizeRegex(referenceRegex))}}
 	}
 	if rule.Correlation != nil {
 		for i, step := range rule.Correlation.Steps {
@@ -263,15 +267,15 @@ func fastPathAgrees(t *testing.T, r *Rule, big string) (compared int) {
 	}
 	var ps []progs
 	for _, expr := range ruleExpressions(r) {
-		fast, err := CompileMatch(expr)
+		fast, err := r.lib.CompileMatch(expr)
 		if err != nil {
 			t.Fatalf("%s: %v", r.ID, err)
 		}
 		ps = append(ps, progs{
 			expr:        expr,
 			fast:        fast,
-			def:         nativeProgram(t, expr),
-			referenceRx: nativeProgram(t, expr, cel.OptimizeRegex(referenceRegex)),
+			def:         nativeProgram(t, r.lib, expr),
+			referenceRx: nativeProgram(t, r.lib, expr, cel.OptimizeRegex(referenceRegex)),
 		})
 	}
 	var variants []asymptoteobserve.Event
@@ -574,16 +578,12 @@ func FuzzScanAgreesWithReference(f *testing.F) {
 // corpusPatterns returns every constant matches() pattern in the corpus.
 func corpusPatterns(t testing.TB, rules []*Rule) []string {
 	t.Helper()
-	env, err := Env()
-	if err != nil {
-		t.Fatal(err)
-	}
 	var patterns []string
 	for _, r := range rules {
 		for _, expr := range ruleExpressions(r) {
-			ast, iss := env.Compile(expr)
-			if iss != nil && iss.Err() != nil {
-				t.Fatal(iss.Err())
+			_, ast, err := r.lib.compileMatch(expr)
+			if err != nil {
+				t.Fatal(err)
 			}
 			celast.PreOrderVisit(ast.NativeRep().Expr(), celast.NewExprVisitor(func(e celast.Expr) {
 				if e.Kind() != celast.CallKind || e.AsCall().FunctionName() != "matches" {

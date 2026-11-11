@@ -50,12 +50,22 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 		"selections of every kind: the files over a path `p` in CEL and a column `FilePath` in KQL, and\n" +
 		"the commands over a parsed command `c` in CEL, which reads `c.name` and `c.args`. The regular\n" +
 		"expressions are RE2 syntax, which CEL and KQL read the same way. Commands have no KQL form: a\n" +
-		"query over raw events has no parsed command line.\n")
-	if c.Predicates.Path != "" || c.Predicates.Command != "" {
+		"query over raw events has no parsed command line.\n\n" +
+		"Two more forms read a text `s` where there is no path or parsed command to ask. The files a\n" +
+		"text names: a command line that does not parse, a prompt handed to another program. A file\n" +
+		"is named by the characters a name is written with, a word that is also a file name\n" +
+		"(`credentials`) counts only after a directory, and a store that excludes some names is not\n" +
+		"named by a text that also holds one of those. And the commands as a log holds them when\n" +
+		"redaction took the command's name: `TOKEN=$(gh auth token)` is logged as\n" +
+		"`TOKEN=[REDACTED] auth token)`. A command told only by its name, by one plain word or by\n" +
+		"one-letter options has no such form.\n")
+	if c.Predicates != (Predicates{}) {
 		b.WriteString("\nA rule of a pack that ships this catalog calls it by name instead of carrying the\nexpressions:\n\n")
 		for _, p := range []struct{ name, subject, about string }{
 			{c.Predicates.Path, "p", "a path that is a store of files"},
 			{c.Predicates.Command, "c", "a parsed command that reads a store of commands"},
+			{c.Predicates.Mention, "s", "a text that names a store of files"},
+			{c.Predicates.Redacted, "s", "a command line in which redaction took the name of a command that reads a store of commands"},
 		} {
 			if p.name != "" {
 				fmt.Fprintf(&b, "- `%[1]s(%[2]s)` is true for %[3]s, of either tier. `%[1]s(%[2]s, \"definite\")` takes the\n"+
@@ -73,8 +83,10 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 		if tier == TierLikely {
 			title = "`likely` and `definite` stores"
 		}
-		fmt.Fprintf(&b, "\n### %s\n\nFiles, CEL:\n\n```\n%s\n```\n\nFiles, KQL:\n\n```\n%s\n```\n\nCommands, CEL:\n\n```\n%s\n```\n",
-			title, selection.PathCEL("p"), selection.PathKQL("FilePath"), selection.CommandCEL("c"))
+		fmt.Fprintf(&b, "\n### %s\n\nFiles, CEL:\n\n```\n%s\n```\n\nFiles, KQL:\n\n```\n%s\n```\n\nCommands, CEL:\n\n```\n%s\n```\n\n"+
+			"Files named in a text, CEL:\n\n```\n%s\n```\n\nCommands with the name redacted, CEL:\n\n```\n%s\n```\n",
+			title, selection.PathCEL("p"), selection.PathKQL("FilePath"), selection.CommandCEL("c"),
+			selection.MentionCEL("s"), selection.RedactedCEL("s"))
 	}
 	return b.String(), nil
 }

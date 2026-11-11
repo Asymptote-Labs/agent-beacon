@@ -164,7 +164,7 @@ A rule on `spec: threat-rules/v1.3` can call a predicate: a named expression its
 
 ```yaml title="A rule that calls a predicate"
 spec: threat-rules/v1.3
-match: credential_read(e)
+match: credential_file_read(e)
 ```
 
 A predicate is expanded where it is called, before the rule is checked, so the rule is evaluated exactly as if it carried the predicate's body. The pack's **definitions** say what its predicates mean. They are the files beside the rules whose names end in `.predicates.yaml` or `.catalog.yaml`, and they travel with the pack: `beacon rules add` and `beacon rules pull` install them with the rules, and `beacon rules lint` runs their fixtures.
@@ -175,22 +175,25 @@ The rule corpus defines these:
 | --- | --- |
 | `credential_path(path)` | A path that is a credential store: `~/.aws/credentials`, an SSH private key, `.env`, a kubeconfig, a browser's cookie store. `credential_path(path, "definite")` leaves out stores that only often hold a credential, and kinds after the tier take those kinds only: `credential_path(path, "likely", "kubernetes", "gpg")`. |
 | `credential_command(c)` | A parsed command that gets a credential out of a store that is not a file: `security find-generic-password -w`, `gh auth token`, `ssh-add -l`, `gpg --export-secret-keys`. It takes a tier and kinds the same way. |
-| `command_reads_credential(c)` | A parsed command that takes in a credential file, or is a `credential_command`. |
-| `credential_read(e)` | An event that reads a credential: a `file.read` of a credential path, or a command one of whose commands reads one. |
+| `credential_mention(text)` | A text that names a credential file: a command line that does not parse, a prompt handed to another agent. A word that is also a file name, such as `credentials`, counts only after a directory. |
+| `credential_command_redacted(text)` | A command line as a log holds it when redaction took the name of a `credential_command`: `TOKEN=$(gh auth token)` is logged as `TOKEN=[REDACTED] auth token)`. |
+| `credential_file(path)` | A credential file of the kinds `credential-file-read` covers: cloud, SSH, environment files, source control, package registries, `.netrc` and `.pgpass`, infrastructure state, and files named for what they hold. A store with a rule of its own (a kubeconfig, a keyring, a browser profile) is left to that rule. |
+| `command_reads_credential_file(c)` | A parsed command that takes in a `credential_file`: by opening it, on its standard input, or written into its words. |
+| `credential_file_read(e)` | An event that reads a credential file: a `file.read` of one, or a command one of whose commands takes one in. `credential-file-read` and the read step of four correlation rules are this. |
 
-The first two come from a catalog, `rules/concepts/credential-stores.catalog.yaml`: a reviewed list of stores, each with path patterns or commands, a tier, a kind, and examples that are checked. The other two are written over them in `rules/concepts/credentials.predicates.yaml`:
+The first four come from a catalog, `rules/concepts/credential-stores.catalog.yaml`: a reviewed list of stores, each with path patterns or commands, a tier, a kind, and examples that are checked. [`rules/concepts/credential-stores.md`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/rules/concepts/credential-stores.md) lists them. The others are written over the catalog in `rules/concepts/credentials.predicates.yaml`:
 
 ```yaml title="A predicate definition"
 library: credentials
 version: 1
 definitions:
-  - name: command_reads_credential
+  - name: command_reads_credential_file
     params: [c]
-    description: A parsed command reads a credential file or gets one out of a store.
-    body: c.file_reads.exists(f, credential_path(f.path)) || credential_command(c)
+    description: A parsed command takes in a credential file.
+    body: c.file_reads.exists(f, credential_file(f.path))
     tests:
       - name: cat_credentials
-        match: e.command.parsed_commands.exists(c, command_reads_credential(c))
+        match: e.command.parsed_commands.exists(c, command_reads_credential_file(c))
         verdict: match
         events:
           - event: { action: command.executed }
@@ -200,6 +203,8 @@ definitions:
 A body reads only its parameters, so a predicate that needs the event takes it as `e`. It can call other predicates but not itself. Each definition carries at least one fixture; `match` says how the predicate is called and can be left out when the one parameter is `e`.
 
 A rule file loaded on its own has no definitions, so lint or install a rule that calls a predicate through its pack's directory.
+
+A rule of a pack that ships a catalog calls it rather than listing the stores again in a regular expression of its own. `beacon rules lint` fails a rule whose patterns, matched against a path, a command line or a parsed command's `args`, spell out two or more of a catalog's stores: the copy agrees with the catalog only until one of them changes.
 
 ## Related
 

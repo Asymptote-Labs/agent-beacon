@@ -587,6 +587,12 @@ func lintRulesPath(cmd *cobra.Command, path string) error {
 				fmt.Fprintf(out, "FAIL %s\n", res.String())
 			}
 		}
+		// A rule that carries its own copy of what a catalog of its pack says will drift from it.
+		for _, copied := range threatrules.CatalogCopies(rule) {
+			ruleFailed = true
+			failures++
+			fmt.Fprintf(out, "FAIL %s: %s\n", rule.ID, copied)
+		}
 		if !ruleFailed {
 			fmt.Fprintf(out, "ok   %s (%d fixtures)\n", rule.ID, len(results))
 		}

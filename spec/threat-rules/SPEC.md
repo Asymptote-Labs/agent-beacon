@@ -321,7 +321,7 @@ Since v1.3. A predicate is a named expression a rule calls like a function:
 
 ```yaml
 spec: threat-rules/v1.3
-match: credential_read(e)
+match: credential_file_read(e)
 ```
 
 A predicate is not a CEL function. An engine expands it where it is called, before the
@@ -345,13 +345,13 @@ library: credentials
 version: 1
 spec: threat-rules/v1.3
 definitions:
-  - name: command_reads_credential
+  - name: command_reads_credential_file
     params: [c]
-    description: A parsed command reads a credential file or gets one out of a store.
-    body: c.file_reads.exists(f, credential_path(f.path)) || credential_command(c)
+    description: A parsed command takes in a credential file.
+    body: c.file_reads.exists(f, credential_path(f.path, "likely", "cloud", "ssh", "dotenv"))
     tests:
       - name: cat_credentials
-        match: e.command.parsed_commands.exists(c, command_reads_credential(c))
+        match: e.command.parsed_commands.exists(c, command_reads_credential_file(c))
         verdict: match
         events:
           - { event: { action: command.executed }, command: { command: "cat ~/.aws/credentials" } }
@@ -388,6 +388,8 @@ corpus has one, `credential-stores`: where credentials are kept and how they are
 | `version`, `spec`, `description` | | | As for predicate definitions. |
 | `predicates.path` | no | predicate name | The predicate true for a path that is one of the catalog's stores of files. |
 | `predicates.command` | no | predicate name | The predicate true for a parsed command that reads one of the catalog's stores of commands. |
+| `predicates.mention` | no | predicate name | The predicate true for a text that names one of the catalog's stores of files. |
+| `predicates.redacted` | no | predicate name | The predicate true for a command line in which redaction replaced the name of a command that reads one of the catalog's stores of commands. |
 | `kinds` | yes | list of `{id, title}` | The groups a store may belong to. |
 | `stores` | yes | list ≥ 1 | The stores. |
 | `stores[].id`, `title` | yes | string | Identity within the catalog, and a name. |
@@ -405,6 +407,25 @@ each a string literal: `credential_path(e.file.path)` is true for a store of eit
 one of those. A selection of `likely` stores includes the `definite` ones. The predicate
 over commands is asked of one entry of `e.command.parsed_commands` and reads its `name` and
 `args`.
+
+The other two predicates are asked of a text, for where there is no path and no parsed
+command to ask. `mention` is for a command line that does not parse, or a prompt handed to
+another program: it is true when the text names a file a path pattern matches. A name is
+written with letters, digits and `_ . ~ % + -`, so it starts after a character that is none of
+those and ends before one that is none of those and no separator, with a full stop that ends
+a sentence allowed between; a `*` runs over those characters only, and a directory of a `**`
+over anything but whitespace and quotes. A pattern of one component without a `.` (a plain
+word such as `credentials`) counts only directly after a separator. A store with `exclude`
+patterns is not mentioned by a text that also names something those patterns match.
+`redacted` is for a command line as a log holds it. A log's redaction replaces a value that
+looks like a secret, and the value of `TOKEN=$(gh auth token)` begins with the command's
+name, so the log holds `TOKEN=[REDACTED] auth token)`. The predicate is true when the text
+holds `[REDACTED]`, whitespace, and then, within the same command, an entry's `words` in
+order and one of its `flags`. An entry has this form only when what is left tells the
+command from another: two `words` or more, one word with `flags`, one word that is more than
+letters and digits, or no words and a flag that is a whole option word (which then follows
+`[REDACTED]` after other options only). Both are coarser than the predicates over a path and
+a parsed command, and a rule SHOULD use them only beside those.
 
 A **path pattern** names a file by the last components of its path, so it is anchored by
 construction: `.aws/credentials` matches `/home/u/.aws/credentials` and matches neither
@@ -427,7 +448,11 @@ value. `name`, `words` and the longer flags match without regard to case.
 
 The reference implementation is `pkg/asymptoteobserve/concepts`, which also renders a
 catalog's selections as the regular expressions a predicate expands to; `rules/concepts/`
-holds the corpus's definitions and the generated reference of its catalog.
+holds the corpus's definitions and the generated reference of its catalog. A rule of a pack
+that ships a catalog SHOULD call it rather than carry a regular expression that spells out
+its stores, which stops agreeing with the catalog the next time either changes; the
+reference lint (`beacon rules lint`) fails a rule whose own patterns, matched against a
+path, a command line or a parsed command's `args`, name two or more of a catalog's stores.
 
 ## Verdict model
 
