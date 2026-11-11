@@ -1,0 +1,57 @@
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 32000,
+  "stream": true,
+  "system": [
+    {"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude.", "cache_control": {"type": "ephemeral"}},
+    {"type": "text", "text": "You are an interactive CLI tool that helps users with software engineering tasks.", "cache_control": {"type": "ephemeral"}}
+  ],
+  "messages": [
+    {"role": "user", "content": [
+      {"type": "text", "text": "<system-reminder>\nAs you answer, follow CLAUDE.md.\n</system-reminder>"},
+      {"type": "text", "text": "What is in this screenshot? Then list the repo."},
+      {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}}
+    ]},
+    {"role": "assistant", "content": [
+      {"type": "thinking", "thinking": "The user wants a listing.", "signature": "EqQBCkYIBxgCKkB"},
+      {"type": "text", "text": "I'll list the files."},
+      {"type": "tool_use", "id": "toolu_01A", "name": "Bash", "input": {
+        "command": "ls -la",
+        "description": "List files"
+      }}
+    ]},
+    {"role": "user", "content": [
+      {"type": "tool_result", "tool_use_id": "toolu_01A", "content": [
+        {"type": "text", "text": "total 8\nREADME.md"},
+        {"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}}
+      ]},
+      {"type": "tool_result", "tool_use_id": "toolu_01B", "is_error": true, "content": "permission denied"},
+      {"type": "text", "text": "thanks", "cache_control": {"type": "ephemeral"}}
+    ]},
+    {"role": "system", "content": "PostToolUse hook: lint passed"},
+    {"role": "assistant", "content": [
+      {"type": "redacted_thinking", "data": "EmwKAhgBEgy3va3pzix"},
+      {"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search", "input": {"query": "go 1.27 release"}},
+      {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_1", "content": [
+        {"type": "web_search_result", "title": "Go 1.27 Release Notes", "url": "https://go.dev/doc/go1.27", "encrypted_content": "EqgfCioIARgB", "page_age": "1 day ago"}
+      ]}
+    ]},
+    {"role": "user", "content": [
+      {"type": "document", "source": {"type": "text", "media_type": "text/plain", "data": "Meeting notes: ship Friday."}},
+      {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "JVBERi0xLjQ="}},
+      {"type": "document", "source": {"type": "file", "file_id": "file_011CNha8iCJcU1wXNR6q4V8w"}}
+    ]}
+  ],
+  "tools": [
+    {"name": "Bash", "description": "Executes a bash command", "input_schema": {"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}},
+    {"type": "custom", "name": "Read", "description": "Reads a file", "input_schema": {"type":"object"}},
+    {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
+  ],
+  "tool_choice": {"type": "auto"},
+  "metadata": {"user_id": "user_abc_account_123_session_456"},
+  "thinking": {"type": "enabled", "budget_tokens": 31999},
+  "temperature": 1,
+  "context_management": {"edits": [{"type": "clear_tool_uses_20250919"}]},
+  "mcp_servers": [{"type": "url", "url": "https://mcp.example.com/sse", "name": "example"}],
+  "speculative_prefill": true
+}

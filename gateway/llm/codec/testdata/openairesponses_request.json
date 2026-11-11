@@ -1,0 +1,54 @@
+{
+  "model": "gpt-5-codex",
+  "instructions": "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI.",
+  "input": [
+    {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "<permissions instructions>sandbox_mode: workspace-write</permissions instructions>"}]},
+    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>\n  <cwd>/repo</cwd>\n</environment_context>"}]},
+    {"role": "user", "content": "fix the failing test"},
+    {"type": "message", "role": "user", "content": [
+      {"type": "input_text", "text": "see screenshot"},
+      {"type": "input_image", "image_url": "data:image/jpeg;base64,/9j/4AAQ", "detail": "auto"},
+      {"type": "input_file", "file_id": "file-xyz"},
+      {"type": "input_file", "filename": "spec.pdf", "file_data": "JVBERi0="}
+    ]},
+    {"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "**Inspecting tests**"}, {"type": "summary_text", "text": "Running go test."}], "content": null, "encrypted_content": "gAAAAABo"},
+    {"type": "function_call", "id": "fc_1", "call_id": "call_shell1", "name": "shell", "arguments": "{\"command\":[\"bash\",\"-lc\",\"go test ./...\"],\"workdir\":\"/repo\"}"},
+    {"type": "function_call_output", "call_id": "call_shell1", "output": "FAIL: TestX\nexit status 1"},
+    {"type": "custom_tool_call", "id": "ctc_1", "call_id": "call_patch1", "name": "apply_patch", "input": "*** Begin Patch\n*** Update File: x.go\n@@\n-a\n+b\n*** End Patch"},
+    {"type": "custom_tool_call_output", "call_id": "call_patch1", "output": "Success. Updated the following files:\nM x.go"},
+    {"type": "local_shell_call", "id": "lsh_1", "call_id": "call_ls1", "status": "completed", "action": {"type": "exec", "command": ["ls"], "env": {}}},
+    {"type": "local_shell_call_output", "call_id": "call_ls1", "output": "{\"output\":\"x.go\\n\",\"metadata\":{\"exit_code\":0}}"},
+    {"type": "web_search_call", "id": "ws_1", "status": "completed", "action": {"type": "search", "query": "go test flags"}},
+    {"type": "function_call", "call_id": "call_view1", "name": "mcp__github__get_issue", "arguments": "{\"number\":7}"},
+    {"type": "function_call_output", "call_id": "call_view1", "output": [{"type": "input_text", "text": "screenshot:"}, {"type": "input_image", "image_url": "https://example.com/s.png"}]},
+    {"type": "mcp_call", "id": "mcp_1", "server_label": "linear", "name": "get_ticket", "arguments": "{\"id\":\"ENG-1\"}", "output": "ENG-1: flaky test"},
+    {"type": "computer_call_output", "call_id": "call_cu1", "output": {"type": "computer_screenshot", "image_url": "data:image/png;base64,iVBOR"}},
+    {"type": "item_reference", "id": "msg_old"},
+    {"type": "compaction", "encrypted_content": "xyz"},
+    {"type": "compaction", "encrypted_content": "abc"},
+    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Fixed.", "annotations": []}]}
+  ],
+  "tools": [
+    {"type": "function", "name": "shell", "description": "Runs a shell command", "strict": false, "parameters": {"type":"object","properties":{"command":{"type":"array","items":{"type":"string"}}},"required":["command"]}},
+    {"type": "custom", "name": "apply_patch", "description": "Edit files", "format": {
+      "type": "grammar",
+      "syntax": "lark",
+      "definition": "start: begin_patch"
+    }},
+    {"type": "namespace", "name": "mcp__github", "description": "GitHub MCP server", "tools": [
+      {"type": "function", "name": "get_issue", "description": "Get an issue", "parameters": {"type":"object"}},
+      {"type": "function", "name": "list_prs", "description": "List pull requests", "parameters": {"type":"object"}}
+    ]},
+    {"type": "web_search"},
+    {"type": "mcp", "server_label": "linear", "server_url": "https://mcp.linear.app/sse"}
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "reasoning": {"effort": "medium", "summary": "auto"},
+  "store": false,
+  "stream": true,
+  "include": ["reasoning.encrypted_content"],
+  "prompt_cache_key": "019a2b3c-session",
+  "text": {"verbosity": "low"},
+  "client_metadata": {"x-codex-turn": "1"}
+}

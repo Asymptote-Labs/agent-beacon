@@ -836,7 +836,7 @@ func (e Event) Validate() error {
 		return errors.New("event.fidelity must be observed or inferred")
 	}
 	if e.Harness.CollectionMethod != "" && !ValidCollectionMethod(e.Harness.CollectionMethod) {
-		return errors.New("harness.collection_method must be hook, otlp, plugin, or poll")
+		return errors.New("harness.collection_method must be hook, otlp, plugin, poll, or gateway")
 	}
 	if e.Content != nil && e.Content.Retention != "" {
 		switch e.Content.Retention {

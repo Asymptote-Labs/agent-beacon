@@ -29,7 +29,7 @@ func TestValidateFidelityValues(t *testing.T) {
 }
 
 func TestValidateCollectionMethodValues(t *testing.T) {
-	for _, method := range []string{"", CollectionMethodHook, CollectionMethodOTLP, CollectionMethodPlugin, CollectionMethodPoll} {
+	for _, method := range []string{"", CollectionMethodHook, CollectionMethodOTLP, CollectionMethodPlugin, CollectionMethodPoll, CollectionMethodGateway} {
 		t.Run("accepts_"+method, func(t *testing.T) {
 			event := NewEvent(NewEventOptions{
 				Action:  "tool.invoked",
@@ -42,7 +42,7 @@ func TestValidateCollectionMethodValues(t *testing.T) {
 	}
 
 	event := NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "cursor", CollectionMethod: "webhook"}})
-	if err := event.Validate(); err == nil || !strings.Contains(err.Error(), "harness.collection_method must be hook, otlp, plugin, or poll") {
+	if err := event.Validate(); err == nil || !strings.Contains(err.Error(), "harness.collection_method must be hook, otlp, plugin, poll, or gateway") {
 		t.Fatalf("Validate error = %v, want collection_method error", err)
 	}
 }

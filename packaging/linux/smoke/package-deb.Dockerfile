@@ -3,6 +3,8 @@
 # from GHCR (see .github/workflows/smoke-images.yml).
 ARG BASE=ubuntu:24.04
 FROM ${BASE}
-RUN apt-get update -qq && apt-get install -y -qq systemd systemd-sysv dbus libpam-systemd curl ca-certificates iproute2 binutils >/dev/null
+# --error-on=any: a failed index download fails here, naming the mirror, rather than surfacing later
+# as "Unable to locate package".
+RUN apt-get update -qq --error-on=any && apt-get install -y -qq systemd systemd-sysv dbus libpam-systemd curl ca-certificates iproute2 binutils >/dev/null
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]

@@ -47,17 +47,15 @@ func BenchmarkScanEvent(b *testing.B) {
 		}
 		single = append(single, c)
 	}
-	scanner := newEventScanner(single)
+	scanner, err := NewEventScanner(single)
+	if err != nil {
+		b.Fatal(err)
+	}
 	for _, bc := range scanBenchEvents(b) {
 		b.Run(bc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				var findings []Finding
-				e := bc.event
-				err := scanner.scan(&eventInput{event: &e}, func(r int) {
-					findings = append(findings, single[r].newFinding([]asymptoteobserve.Event{e}))
-				})
-				if err != nil {
+				if _, err := scanner.ScanEvent(bc.event); err != nil {
 					b.Fatal(err)
 				}
 			}

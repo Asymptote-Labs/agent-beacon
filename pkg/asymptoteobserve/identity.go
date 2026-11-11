@@ -4,11 +4,11 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // ToolCallIDKeys are the names a runtime uses for the identifier it assigns to
@@ -195,6 +195,98 @@ func EventIDForLine(line []byte) string {
 	return eventUUID("content", string(line))
 }
 
+// EventID is EventIDForLine over event serialized with event.id absent, without the round trip
+// where it can be avoided. EventIDForLine parses the line back into a map to find the action, call
+// id and target, which costs more than writing the line did; most events a call-keyed identity
+// names (tool calls and results) are named by session, action, target and call id alone, and those
+// fields are read from the struct here, as the serialized form would present them: invalid UTF-8
+// replaced by U+FFFD byte by byte, and surrounding space trimmed. Any other event is marshaled
+// and digested as EventIDForLine digests it.
+//
+// An event that does not serialize has no line to name; it gets a call identity when it has one
+// and the empty string otherwise.
+func EventID(event Event) string {
+	action := jsonFieldString(event.Event.Action)
+	var callID, session string
+	if g := event.GenAI; g != nil && g.Tool != nil && g.Tool.Call != nil {
+		callID = jsonFieldString(g.Tool.Call.ID)
+	}
+	if callID != "" {
+		if target := eventDedupeTarget(action, &event); target != "" {
+			if event.Session != nil {
+				session = jsonFieldString(event.Session.ID)
+			}
+			return eventUUID("call", session+"\x00"+strings.ToLower(action)+"\x00"+target+"\x00"+callID)
+		}
+	}
+	event.Event.ID = ""
+	line, err := json.Marshal(event)
+	if err != nil {
+		return ""
+	}
+	return eventUUID("content", string(line))
+}
+
+// jsonFieldString is a string field as EventIDForLine reads it back from the serialized event.
+// encoding/json writes each byte of invalid UTF-8 as U+FFFD, and nestedString trims.
+func jsonFieldString(s string) string {
+	if !utf8.ValidString(s) {
+		var b strings.Builder
+		b.Grow(len(s) + 8)
+		for i := 0; i < len(s); {
+			r, n := utf8.DecodeRuneInString(s[i:])
+			if r == utf8.RuneError && n == 1 {
+				b.WriteRune(utf8.RuneError)
+			} else {
+				b.WriteString(s[i : i+n])
+			}
+			i += n
+		}
+		s = b.String()
+	}
+	return strings.TrimSpace(s)
+}
+
+// eventDedupeTarget is dedupeTarget over the struct. action is already trimmed.
+func eventDedupeTarget(action string, event *Event) string {
+	str := jsonFieldString
+	switch strings.ToLower(action) {
+	case "mcp.tool_invoked":
+		var server, tool, toolName string
+		if event.MCP != nil {
+			server, tool = str(event.MCP.Server), str(event.MCP.Tool)
+		}
+		if event.Tool != nil {
+			toolName = str(event.Tool.Name)
+		}
+		return canonicalTarget("mcp", server, firstNonEmptyString(tool, toolName, str(event.Message)))
+	case "command.executed":
+		var command, toolCommand string
+		if event.Command != nil {
+			command = str(event.Command.Command)
+		}
+		if event.Tool != nil {
+			toolCommand = str(event.Tool.Command)
+		}
+		return canonicalLiteralTarget("command", command, toolCommand)
+	case "file.read", "file.modified":
+		var path string
+		if event.File != nil {
+			path = str(event.File.Path)
+		}
+		return canonicalLiteralTarget("file", path)
+	case "tool.completed":
+		return canonicalTarget("tool.completed", str(event.Model), str(event.Message))
+	case "tool.invoked", "tool.failed":
+		var name, path string
+		if event.Tool != nil {
+			name, path = str(event.Tool.Name), str(event.Tool.Path)
+		}
+		return canonicalTarget("tool", name, path, str(event.Message))
+	}
+	return ""
+}
+
 // eventUUID renders a name under eventIDNamespace as an RFC 4122 version 5
 // UUID. The kind prefix keeps the two identity modes in separate value spaces,
 // so a content digest can never collide with a call identity.
@@ -212,13 +304,21 @@ func eventUUID(kind, name string) string {
 	digest.Write(eventIDNamespace[:])
 	io.WriteString(digest, kind)
 	io.WriteString(digest, name)
-	var id [16]byte
-	copy(id[:], digest.Sum(nil))
+	var sum [sha1.Size]byte
+	id := digest.Sum(sum[:0])[:16]
 	id[6] = (id[6] & 0x0f) | 0x50 // version 5
 	id[8] = (id[8] & 0x3f) | 0x80 // RFC 4122 variant
-	out := make([]byte, 32)
-	hex.Encode(out, id[:])
-	return fmt.Sprintf("%s-%s-%s-%s-%s", out[0:8], out[8:12], out[12:16], out[16:20], out[20:32])
+	var out [36]byte
+	hex.Encode(out[0:8], id[0:4])
+	out[8] = '-'
+	hex.Encode(out[9:13], id[4:6])
+	out[13] = '-'
+	hex.Encode(out[14:18], id[6:8])
+	out[18] = '-'
+	hex.Encode(out[19:23], id[8:10])
+	out[23] = '-'
+	hex.Encode(out[24:36], id[10:16])
+	return string(out[:])
 }
 
 // DerivedTraceIDForSession is the trace identity used by non-OTLP collection paths.

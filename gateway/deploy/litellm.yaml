@@ -1,0 +1,38 @@
+# LiteLLM proxy with beacon-gateway attached as a guardrail on every call, observing.
+#
+#   beacon-gateway -config deploy/beacon-gateway.yaml &
+#   litellm --config deploy/litellm.yaml
+#
+# pre_call sees the whole request (system, tools, history, tool results) before it reaches the
+# provider; post_call sees the model's reply, including its tool calls.
+model_list:
+  - model_name: "anthropic/*"
+    litellm_params:
+      model: "anthropic/*"
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: "openai/*"
+    litellm_params:
+      model: "openai/*"
+      api_key: os.environ/OPENAI_API_KEY
+
+guardrails:
+  - guardrail_name: beacon-gateway-request
+    litellm_params:
+      guardrail: generic_guardrail_api
+      mode: pre_call
+      api_base: http://127.0.0.1:4019
+      default_on: true
+      # Keep the model path up when beacon-gateway is down: the call goes through unrecorded.
+      unreachable_fallback: fail_open
+      # LiteLLM withholds header values ("[present]") unless allowlisted here.
+      extra_headers: [x-claude-code-session-id, session_id]
+  - guardrail_name: beacon-gateway-response
+    litellm_params:
+      guardrail: generic_guardrail_api
+      mode: post_call
+      api_base: http://127.0.0.1:4019
+      default_on: true
+      unreachable_fallback: fail_open
+      extra_headers: [x-claude-code-session-id, session_id]
+      # Streams pass through as they arrive and are recorded at their end.
+      streaming_buffer_until_moderated: false
