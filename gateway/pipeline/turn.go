@@ -24,7 +24,12 @@ import (
 type Turn struct {
 	Call      *gateway.Call
 	SessionID string
-	Harness   harness.Harness
+	// PreviousResponse is the provider response the call's request continues (OpenAI Responses'
+	// previous_response_id): on a request that names one, and on its reply when the reply's
+	// session was named from the request's body. Such a call is its own session unless something
+	// else names its conversation, so this, with each reply's response id, is what links its turns.
+	PreviousResponse string
+	Harness          harness.Harness
 	// New is what this call adds to what the session has reported. Verdicts should still weigh
 	// the whole request: every call puts all of it in front of the model.
 	New Delta

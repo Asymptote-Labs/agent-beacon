@@ -360,12 +360,16 @@ func (b *builder) event(action, category, fidelity string) obs.Event {
 
 // rawBlock is the call's raw block, sanitized as SanitizeEvent sanitizes raw, once per call: every
 // event of the call shares it (events are never modified once built). rawBytes is what it adds
-// to an event's serialized size.
+// to an event's serialized size. It names the gateway and its call id, and the provider response
+// the call continues, when it continues one.
 func (b *builder) rawBlock() (map[string]interface{}, int) {
 	if b.raw == nil {
 		c := b.t.Call
-		b.raw = obs.SanitizeMap(map[string]interface{}{"gateway.name": c.Gateway, "gateway.call_id": c.ID},
-			obs.PrivacyOptions{RedactSecrets: true, StringLimit: obs.DefaultRawStringLimit})
+		raw := map[string]interface{}{"gateway.name": c.Gateway, "gateway.call_id": c.ID}
+		if b.t.PreviousResponse != "" {
+			raw["gateway.previous_response_id"] = b.t.PreviousResponse
+		}
+		b.raw = obs.SanitizeMap(raw, obs.PrivacyOptions{RedactSecrets: true, StringLimit: obs.DefaultRawStringLimit})
 		line, _ := json.Marshal(b.raw)
 		b.rawBytes = len(`,"raw":`) + len(line)
 	}

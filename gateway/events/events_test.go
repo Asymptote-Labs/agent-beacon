@@ -660,3 +660,27 @@ func TestRetryRecordedOnce(t *testing.T) {
 		t.Errorf("analyzers were shown %d events, want every call's (7)", len(shared))
 	}
 }
+
+// A Responses call continuing previous_response_id is its own session; every event of its request
+// and of its reply names the response it continues in raw, beside the reply's response id, so the
+// chain's turns can be put back together.
+func TestPreviousResponseOnEvents(t *testing.T) {
+	p, s := newPipeline(t, Config{})
+	ctx := context.Background()
+	req := `{"model":"m","input":"yes","previous_response_id":"resp_1"}`
+	client := gateway.Client{Identity: gateway.Identity{User: "alice"}}
+	p.Handle(ctx, &gateway.Call{Gateway: "test", ID: "c2", Phase: gateway.PhaseRequest, Protocol: llm.OpenAIResponses, Body: []byte(req), Client: client})
+	p.Handle(ctx, &gateway.Call{Gateway: "test", ID: "c2", Phase: gateway.PhaseResponse, Protocol: llm.OpenAIResponses, RequestBody: []byte(req), Client: client,
+		Body: []byte(`{"id":"resp_2","object":"response","model":"m","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}`)})
+	p.Close()
+	evs := s.events()
+	if got := actions(evs); !slices.Contains(got, "prompt.submitted") || !slices.Contains(got, "agent.message") {
+		t.Fatalf("recorded %v", got)
+	}
+	for _, e := range evs {
+		b := e.Beacon
+		if b.Session.ID != "test:c2" || b.Raw["gateway.previous_response_id"] != "resp_1" || b.Raw["gateway.call_id"] != "c2" {
+			t.Errorf("%s: session %q raw %v", b.Event.Action, b.Session.ID, b.Raw)
+		}
+	}
+}

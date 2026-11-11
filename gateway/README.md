@@ -54,15 +54,17 @@ header. The root is a heuristic: two conversations of one caller in one harness 
 same message are one session. Send a session header, or Portkey `session_id` metadata, where that
 matters.
 
+Naming a session reads no store: a call's two phases are named by the same function from the same
+request body, so they always agree, in any order and on any replica.
+
 An OpenAI Responses request that continues provider-side state carries only its new turn, so it
-has no root. With `conversation` set, the conversation id is the session. With
-`previous_response_id`, the request joins the session of the response it continues: each
-Responses reply records its session under its response id (`resp/<id>` in the store, kept for
-`pipeline.seen_ttl`), written off the call path, and a continuing request without a session
-header reads it back, one store round trip per phase that only such calls pay. A request that
-continues a response the gateway did not see, or sent before that response's record was written,
-is its own session. Such a request's new turn is recorded every time: the same short input twice
-("yes", "go on") is two turns, never a retry.
+has no root. With `conversation` set, the conversation id is the session. A request that continues
+`previous_response_id`, with no session header naming it, is its own session, `<gateway>:<call
+id>`, which its reply shares. Every event of the call names the response it continues in
+`raw["gateway.previous_response_id"]`, and the reply's events carry its own response id in
+`gen_ai.response.id`, so a reader can put such a chain's turns back together. Such a request's
+new turn is recorded every time: the same short input twice ("yes", "go on") is two turns, never
+a retry.
 
 ## Events
 
@@ -92,7 +94,8 @@ System text and tool definitions are resent on every call and recorded once per 
 a request's new tail (its user text and tool results): a client that retries a request sends the
 same tail, which is analyzed again but not recorded again. `model` is the model the client asked
 for on every event of a call; `gen_ai.response.model` is the provider's own name for it. The
-gateway's call id is in `raw["gateway.call_id"]`.
+gateway's call id is in `raw["gateway.call_id"]`, and the response a Responses call continues in
+`raw["gateway.previous_response_id"]` (on a reply, when no session header names it).
 
 ## Extension points
 

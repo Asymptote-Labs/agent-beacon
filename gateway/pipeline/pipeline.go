@@ -224,14 +224,8 @@ func (p *Pipeline) run(ctx context.Context, c *gateway.Call) gateway.Verdict {
 	if err := decode(c); err != nil {
 		errs = append(errs, err)
 	}
-	session, derived, err := p.sessionID(ctx, c)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("store: %w", err))
-	}
-	if derived && c.Phase == gateway.PhaseResponse && c.Protocol == llm.OpenAIResponses && c.Response != nil && c.Response.ID != "" {
-		p.recordResponse(ctx, c, session)
-	}
-	t := &Turn{Call: c, SessionID: session, Harness: harness.Identify(c.Client.UserAgent), Store: p.cfg.Store, wantsResent: p.resent}
+	session, previous := p.sessionID(c)
+	t := &Turn{Call: c, SessionID: session, PreviousResponse: previous, Harness: harness.Identify(c.Client.UserAgent), Store: p.cfg.Store, wantsResent: p.resent}
 
 	var findings, standing []Finding
 	var recs []Record
@@ -326,99 +320,63 @@ func decode(c *gateway.Call) error {
 	return nil
 }
 
-// sessionID names the call's conversation: a session header the client sent, the gateway's own
-// conversation id, or failing both what the request says (callRoot), and failing that the call
-// itself; derived reports that the pipeline named it. A reply carries no conversation, so it is
-// named from the body of the request it answers (Call.RequestBody), by the same function as the
-// request was: it joins its request's session without waiting for the request's analysis.
+// sessionID names the call's conversation, and reads the provider response its request continues
+// (Turn.PreviousResponse). It reads no store: everything it uses is on the call, so both phases of
+// a call reach the same name by the same function, in any order and on any replica.
 //
-// A stateful request (OpenAI Responses continuing a conversation or a previous response) carries
-// only its new turn, so it has no root: the provider's conversation id names its session, or else
-// the session of the response it continues, which that response's reply recorded (respKey). Only
-// the latter costs a store round trip, and only for a call no header names. A response the
-// pipeline did not see, or whose record has not landed yet (the next turn sent before the
-// previous reply's analysis wrote it), leaves the call its own session.
-func (p *Pipeline) sessionID(ctx context.Context, c *gateway.Call) (session string, derived bool, err error) {
+// The session is a session header the client sent, or the gateway's own conversation id; failing
+// both, what the request's body says (callRoot; a reply reads the body of the request it answers,
+// Call.RequestBody): the provider's conversation id, or the conversation's root (rootSession);
+// failing those, the call itself. A request that continues previous_response_id, with nothing
+// else naming its conversation, is its own session: the response it continues is on its events,
+// and on its reply's, for whoever stitches the turns of such a chain together.
+func (p *Pipeline) sessionID(c *gateway.Call) (session, previous string) {
 	for _, h := range p.cfg.SessionHeaders {
 		if v := c.Client.Headers[h]; v != "" {
-			return v, false, nil
+			return v, decodedPrevious(c)
 		}
 	}
 	if c.Client.Session != "" {
-		return c.Client.Session, false, nil
+		return c.Client.Session, decodedPrevious(c)
 	}
 	own := c.Gateway + ":" + c.ID
 	root, ok := callRoot(c)
 	switch {
 	case !ok:
 	case root.Conversation != "":
-		return root.Conversation, true, nil
+		return root.Conversation, root.PreviousResponse
 	case root.PreviousResponse != "":
-		vals, err := p.cfg.Store.Get(ctx, respKey(root.PreviousResponse))
-		if err == nil && vals[0] != nil {
-			return string(vals[0]), true, nil
-		}
-		return own, true, err
+		return own, root.PreviousResponse
 	default:
 		if s, ok := rootSession(c, root.First); ok {
-			return s, true, nil
+			return s, ""
 		}
 	}
-	return own, true, nil
+	return own, ""
 }
 
-// respKey is where a Responses reply records the session it was given, for the request that
-// continues it by previous_response_id.
-func respKey(id string) string { return "resp/" + id }
-
-// recordResponse records the session a Responses reply was given under its response id, for the
-// next turn of a stateful conversation, off the call path: the analysis is already off it when
-// the pipeline answers first; otherwise the write runs on its own, and Close waits for it.
-func (p *Pipeline) recordResponse(ctx context.Context, c *gateway.Call, session string) {
-	e := store.Entry{Key: respKey(c.Response.ID), Value: []byte(session), TTL: p.cfg.SeenTTL}
-	set := func(ctx context.Context) {
-		if err := p.cfg.Store.Set(ctx, e); err != nil {
-			p.log.Warn("response session not recorded", "gateway", c.Gateway, "call_id", c.ID, "err", err)
-		}
+// decodedPrevious is the response a decoded request continues. A reply whose session a header
+// names does not read it: that would mean scanning the request's body, and its session already
+// holds the chain.
+func decodedPrevious(c *gateway.Call) string {
+	if c.Phase == gateway.PhaseRequest && c.Request != nil {
+		return c.Request.PreviousResponse
 	}
-	if p.answerFirst {
-		set(ctx)
-		return
-	}
-	p.pending.Add(1)
-	go func() {
-		defer p.pending.Done()
-		set(context.WithoutCancel(ctx))
-	}()
+	return ""
 }
 
-// callRoot reads what a call's request says about its conversation: from the request's body (a
-// request's Body, a reply's RequestBody), or from a request the adapter decoded itself.
+// callRoot reads what the body of a call's request says about its conversation: a request's
+// Body, a reply's RequestBody. A call without one has no root.
 func callRoot(c *gateway.Call) (codec.Root, bool) {
 	body := c.Body
 	if c.Phase == gateway.PhaseResponse {
 		body = c.RequestBody
 	}
-	if body != nil {
-		r, err := codec.ReadRoot(c.Protocol, body)
-		return r, err == nil
+	if body == nil {
+		return codec.Root{}, false
 	}
-	if c.Phase == gateway.PhaseRequest && c.Request != nil {
-		r := codec.Root{Conversation: c.Request.Conversation, PreviousResponse: c.Request.PreviousResponse}
-		if r.Stateful() {
-			return r, true
-		}
-		for i := range c.Request.Messages {
-			if m := &c.Request.Messages[i]; m.Role != llm.RoleSystem {
-				if !m.Elided {
-					r.First = m
-				}
-				break
-			}
-		}
-		return r, true
-	}
-	return codec.Root{}, false
+	r, err := codec.ReadRoot(c.Protocol, body)
+	return r, err == nil
 }
 
 // rootSession names a conversation no header names by its root, which a client resends unchanged

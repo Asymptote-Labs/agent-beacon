@@ -166,7 +166,7 @@ func TestSessionID(t *testing.T) {
 		{"gateway's conversation id", gateway.Call{Gateway: "g", ID: "c", Client: gateway.Client{Session: "trace"}}, "trace"},
 		{"no session and no conversation: the call is its own", gateway.Call{Gateway: "g", ID: "c", Phase: gateway.PhaseRequest}, "g:c"},
 	} {
-		if got, _, _ := p.sessionID(context.Background(), &tc.c); got != tc.want {
+		if got, _ := p.sessionID(&tc.c); got != tc.want {
 			t.Errorf("%s: sessionID = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -257,67 +257,81 @@ func TestReplySessionDoesNotWaitForRequest(t *testing.T) {
 	}
 }
 
-// A stateful Responses request carries only its new turn, so it has no root: it joins the session
-// of the response it continues, which that response's reply recorded, or the provider's
-// conversation; a response never seen leaves it its own. Its tail is never taken for a retry, so
-// "yes" twice in one chain is recorded twice, and two chains whose turns are both "yes" stay apart.
+// A Responses request that continues previous_response_id, with nothing naming its conversation,
+// is its own session, and so is its reply, read from the request body it carries: the two phases
+// agree whatever the store holds or does, and in either order. Both carry the response the call
+// continues. A provider conversation id names the session. Naming a session reads no store at all,
+// and a stateful turn's tail is never taken for a retry: "yes" twice in one chain is two turns.
 func TestStatefulResponsesSession(t *testing.T) {
+	st := &namingStore{Store: store.NewMemory(1000)}
+	// What an earlier design would have read; nothing reads it now.
+	st.Set(context.Background(), store.Entry{Key: "resp/resp_a1", Value: []byte("root:stale"), TTL: time.Hour})
+	st.gets, st.sets = 0, 0
 	rec := &recorder{}
-	p := New(Config{Analyzers: []Analyzer{rec}})
+	p := New(Config{Analyzers: []Analyzer{rec}, Store: st})
 	defer p.Close()
 	ctx := context.Background()
-	who := gateway.Client{Identity: gateway.Identity{User: "alice"}}
-	request := func(id, body string) {
-		p.Handle(ctx, &gateway.Call{Gateway: "pk", ID: id, Phase: gateway.PhaseRequest, Protocol: llm.OpenAIResponses, Body: []byte(body), Client: who})
-	}
-	reply := func(id, body, respID string) {
-		p.Handle(ctx, &gateway.Call{Gateway: "pk", ID: id, Phase: gateway.PhaseResponse, Protocol: llm.OpenAIResponses, RequestBody: []byte(body), Client: who,
-			Body: []byte(`{"id":"` + respID + `","object":"response","model":"m","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`)})
-		p.pending.Wait() // the reply's record is written off the call path
-	}
-	turn := func(id, body, respID string) {
-		request(id, body)
-		reply(id, body, respID)
+	alice := gateway.Client{Identity: gateway.Identity{User: "alice"}}
+	call := func(id string, phase gateway.Phase, body string, client gateway.Client) {
+		c := &gateway.Call{Gateway: "pk", ID: id, Phase: phase, Protocol: llm.OpenAIResponses, Client: client}
+		if phase == gateway.PhaseRequest {
+			c.Body = []byte(body)
+		} else {
+			c.RequestBody = []byte(body)
+			c.Body = []byte(`{"id":"resp_` + id + `","object":"response","model":"m","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`)
+		}
+		p.Handle(ctx, c)
 	}
 	const instr = `"model":"m","instructions":"be brief",`
-	turn("a1", `{`+instr+`"input":"plan the release"}`, "resp_a1")
-	turn("a2", `{`+instr+`"input":"yes","previous_response_id":"resp_a1"}`, "resp_a2")
-	turn("a3", `{`+instr+`"input":"yes","previous_response_id":"resp_a2"}`, "resp_a3")
-	turn("b1", `{`+instr+`"input":"fix the bug"}`, "resp_b1")
-	turn("b2", `{`+instr+`"input":"yes","previous_response_id":"resp_b1"}`, "resp_b2")
-	request("u1", `{`+instr+`"input":"yes","previous_response_id":"resp_unseen"}`)
-	request("u2", `{`+instr+`"input":"yes","previous_response_id":"resp_unseen"}`)
-	request("c1", `{`+instr+`"input":"yes","conversation":"conv_1"}`)
-	request("c2", `{`+instr+`"input":"yes","conversation":{"id":"conv_1"}}`)
+	a2 := `{` + instr + `"input":"yes","previous_response_id":"resp_a1"}`
+	a3 := `{` + instr + `"input":"yes","previous_response_id":"resp_a2"}`
+	call("a2", gateway.PhaseResponse, a2, alice) // the reply analyzed before its request
+	call("a2", gateway.PhaseRequest, a2, alice)
+	call("a3", gateway.PhaseRequest, a3, alice)
+	call("a3", gateway.PhaseResponse, a3, alice)
+	call("c1", gateway.PhaseRequest, `{`+instr+`"input":"yes","conversation":"conv_1"}`, alice)
+	call("c2", gateway.PhaseRequest, `{`+instr+`"input":"yes","conversation":{"id":"conv_1"}}`, alice)
+	header := gateway.Client{Identity: alice.Identity, Headers: map[string]string{"session_id": "codex-1"}}
+	call("h1", gateway.PhaseRequest, a2, header)
+	call("h2", gateway.PhaseRequest, a2, header) // the same "yes" again in a header-named session
 
-	session := map[string]string{}
+	type seen struct{ session, previous string }
+	got := map[string]seen{}
 	for _, turn := range rec.turns {
-		key := turn.Call.ID + "/" + turn.Call.Phase.String()
-		session[key] = turn.SessionID
+		got[turn.Call.ID+"/"+turn.Call.Phase.String()] = seen{turn.SessionID, turn.PreviousResponse}
 		if turn.Call.Phase == gateway.PhaseRequest && turn.New.TailReported {
 			t.Errorf("%s: a stateful turn's tail was taken for a retry", turn.Call.ID)
 		}
 	}
-	a, b := session["a1/request"], session["b1/request"]
-	if !strings.HasPrefix(a, "root:") || !strings.HasPrefix(b, "root:") || a == b {
-		t.Fatalf("chains' first turns: sessions %q, %q", a, b)
-	}
-	for _, k := range []string{"a1/response", "a2/request", "a2/response", "a3/request", "a3/response"} {
-		if session[k] != a {
-			t.Errorf("%s: session %q, want chain a's %q", k, session[k], a)
+	for k, want := range map[string]seen{
+		"a2/response": {"pk:a2", "resp_a1"}, "a2/request": {"pk:a2", "resp_a1"},
+		"a3/request": {"pk:a3", "resp_a2"}, "a3/response": {"pk:a3", "resp_a2"},
+		"c1/request": {"conv_1", ""}, "c2/request": {"conv_1", ""},
+		"h1/request": {"codex-1", "resp_a1"}, "h2/request": {"codex-1", "resp_a1"},
+	} {
+		if got[k] != want {
+			t.Errorf("%s: session and previous response %+v, want %+v", k, got[k], want)
 		}
 	}
-	for _, k := range []string{"b1/response", "b2/request", "b2/response"} {
-		if session[k] != b {
-			t.Errorf("%s: session %q, want chain b's %q", k, session[k], b)
-		}
+	if st.gets != 0 || st.sets != 0 {
+		t.Errorf("naming sessions read the store %d times and wrote it %d times", st.gets, st.sets)
 	}
-	if session["u1/request"] != "pk:u1" || session["u2/request"] != "pk:u2" {
-		t.Errorf("continuing an unseen response: sessions %q, %q, want each its own", session["u1/request"], session["u2/request"])
-	}
-	if session["c1/request"] != "conv_1" || session["c2/request"] != "conv_1" {
-		t.Errorf("one conversation: sessions %q, %q, want conv_1", session["c1/request"], session["c2/request"])
-	}
+}
+
+// namingStore counts the reads and writes that are not the Add of seen and tail marks.
+type namingStore struct {
+	store.Store
+	gets, sets int
+}
+
+func (s *namingStore) Get(ctx context.Context, keys ...string) ([][]byte, error) {
+	s.gets++
+	return s.Store.Get(ctx, keys...)
+}
+
+func (s *namingStore) Set(ctx context.Context, es ...store.Entry) error {
+	s.sets++
+	return s.Store.Set(ctx, es...)
 }
 
 // blockingAnalyzer reports each turn's session, holding turns of one phase until release closes.
