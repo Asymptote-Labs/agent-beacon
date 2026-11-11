@@ -303,6 +303,27 @@ type endpointSweep struct {
 	ThrottleSnapshots bool
 }
 
+// floor is the not-before time a sweep reads runner from. A runtime recordSkippedBackfill floored
+// keeps its own floor. A runtime it never saw -- one an upgrade added after the backfill was
+// skipped -- has no floor and, until a sweep reads it, no cursors; it takes the earliest recorded
+// floor, because the operator opted out of the window before then for every runtime, not only the
+// ones that existed at the time. A runtime with cursors reads on from them.
+func (s endpointSweep) floor(runner endpointBackfillRunner, userMode bool) time.Time {
+	if floor, ok := s.Floors[runner.Name]; ok {
+		return floor
+	}
+	if len(s.Floors) == 0 || runnerHasCursors(runner, userMode) {
+		return time.Time{}
+	}
+	var earliest time.Time
+	for _, floor := range s.Floors {
+		if earliest.IsZero() || floor.Before(earliest) {
+			earliest = floor
+		}
+	}
+	return earliest
+}
+
 // endpointSnapshotInterval is how often the scheduled system session sync copies a SQLite store
 // (Cursor's state.vscdb, OpenCode, Devin CLI, Hermes Agent) to read it. A copy can approach
 // sessionfs.MaxSnapshotBytes, and those runtimes are captured live by their hooks or plugins, so
@@ -547,7 +568,7 @@ func sweepEndpointBackfill(logPath string, userMode bool, sweep endpointSweep) e
 			copied[runner.Name] = now
 		}
 		since := result.Since
-		if floor := sweep.Floors[runner.Name]; floor.After(since) {
+		if floor := sweep.floor(runner, userMode); floor.After(since) {
 			since = floor
 			if result.Floored.IsZero() || floor.Before(result.Floored) {
 				result.Floored = floor

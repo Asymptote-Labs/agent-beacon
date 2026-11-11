@@ -123,14 +123,14 @@ func CollectOnce(opts CollectOptions) (summary SummaryResult, err error) {
 		opts.StatePath = ""
 	}
 	store := NewStore(opts.BrainDir)
-	refs, err := store.List()
-	if err != nil {
-		return summary, err
+	refs, listErr := store.List()
+	if listErr != nil && len(refs) == 0 {
+		return summary, listErr
 	}
 	refs = sessionwindow.Recent(refs, opts.Since, func(r SessionRef) int64 { return r.ModTimeUnixMS })
 	summary.Sessions = len(refs)
 	if len(refs) == 0 {
-		return summary, nil
+		return summary, listErr
 	}
 	state, err := LoadState(opts.StatePath)
 	if err != nil {
@@ -143,6 +143,10 @@ func CollectOnce(opts CollectOptions) (summary SummaryResult, err error) {
 	}()
 
 	var errs []error
+	if listErr != nil {
+		summary.Errors++
+		errs = append(errs, listErr)
+	}
 	opts.guard = sessionsync.NewRetentionGuard(opts.Print, opts.Write)
 	var stopErr error
 	for _, ref := range refs {

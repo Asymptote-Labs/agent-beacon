@@ -268,6 +268,38 @@ func TestAMissingSummaryMeansNoWorkingDirectoryNotAnError(t *testing.T) {
 	check("no row")
 }
 
+// Antigravity on Windows records workspaces as file:///C:/... URIs, and a share as file://host/...;
+// the working directory is the drive or UNC path, not the URI's path with its leading slash.
+func TestWorkspaceURIsBecomeLocalPaths(t *testing.T) {
+	for raw, want := range map[string]string{
+		`["file:///C:/Users/dev/proj"]`:                filepath.FromSlash("C:/Users/dev/proj"),
+		`["file://server/share/proj"]`:                 filepath.FromSlash("//server/share/proj"),
+		`["file:///tmp/agy%20probe", "file:///other"]`: filepath.FromSlash("/tmp/agy probe"),
+		`["https://example.com/repo"]`:                 "",
+		`not json`:                                     "",
+	} {
+		if got := firstWorkspacePath(raw); got != want {
+			t.Errorf("firstWorkspacePath(%s) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+// A summaries database that exists but cannot be read costs the working directories, not the
+// conversations: the sweep collects every transcript and reports the database error.
+func TestAnUnreadableSummariesDatabaseStillCollectsTheTranscripts(t *testing.T) {
+	f := newFixture(t)
+	f.writeConversation(t, fixtureConversation, fullTranscriptName, fixtureSteps)
+	writeFile(t, filepath.Join(filepath.Dir(f.brainDir), summariesDBName), "this is not a SQLite database, but it is long enough to have a header")
+
+	summary, err := CollectOnce(f.options())
+	if err == nil || summary.Errors != 1 {
+		t.Fatalf("CollectOnce = %+v, %v; want the database error reported", summary, err)
+	}
+	if summary.EventsEmitted != len(fixtureEvents) {
+		t.Fatalf("events emitted = %d, want every transcript event (%d)", summary.EventsEmitted, len(fixtureEvents))
+	}
+}
+
 // A transcript is appended to while the conversation runs and again when it is resumed. Only the
 // steps that were added may be emitted; a planner line written before its GENERIC result is
 // completed by the result alone on the next sweep.

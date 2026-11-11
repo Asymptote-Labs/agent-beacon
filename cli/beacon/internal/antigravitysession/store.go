@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -58,7 +58,9 @@ func (s *Store) Exists() bool {
 //
 // A conversation without a summaries row, or a machine without the database, is listed with no
 // Summary: the row only adds the working directory and title, and the transcript is collectable
-// without them.
+// without them. A database that exists but cannot be read is the same, except that the error is
+// returned alongside the conversations, as Cursor's and OpenCode's stores do with a store they
+// could not read: the sweep reports it and still collects every transcript.
 func (s *Store) List() ([]SessionRef, error) {
 	entries, err := sessionfs.ReadDir(s.BrainDir)
 	if err != nil {
@@ -90,10 +92,7 @@ func (s *Store) List() ([]SessionRef, error) {
 	if len(refs) == 0 {
 		return nil, nil
 	}
-	summaries, err := s.readSummaries()
-	if err != nil {
-		return nil, err
-	}
+	summaries, summariesErr := s.readSummaries()
 	for i := range refs {
 		if summary, ok := summaries[refs[i].ID]; ok {
 			summary := summary
@@ -106,7 +105,7 @@ func (s *Store) List() ([]SessionRef, error) {
 		}
 		return refs[i].ModTimeUnixMS < refs[j].ModTimeUnixMS
 	})
-	return refs, nil
+	return refs, summariesErr
 }
 
 // readSummaries reads the conversation_summaries rows, by conversation id.
@@ -176,11 +175,11 @@ func firstWorkspacePath(raw string) string {
 	if json.Unmarshal([]byte(raw), &uris) != nil || len(uris) == 0 {
 		return ""
 	}
-	u, err := url.Parse(strings.TrimSpace(uris[0]))
-	if err != nil || u.Scheme != "file" || u.Path == "" {
+	path := asymptoteobserve.FilePathFromURI(strings.TrimSpace(uris[0]))
+	if path == "" {
 		return ""
 	}
-	return filepath.FromSlash(u.Path)
+	return filepath.FromSlash(path)
 }
 
 // Read parses the conversation's transcript.

@@ -138,6 +138,9 @@ func watchEndpointDevin(ctx context.Context, cmd *cobra.Command, opts devinsessi
 		interval = 5 * time.Second
 	}
 	for {
+		// Coverage is rebuilt every tick: a session the hooks start recording after the watch began
+		// would otherwise be missing from it, and every tick would record it a second time.
+		opts.LiveCoverage = endpointDevinLiveCoverage(opts.LogPath)
 		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, devinsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Devin CLI sync error: %v\n", err)

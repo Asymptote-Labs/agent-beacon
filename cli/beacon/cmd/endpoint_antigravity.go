@@ -120,6 +120,9 @@ func watchAntigravity(ctx context.Context, cmd *cobra.Command, opts antigravitys
 		interval = 5 * time.Second
 	}
 	for {
+		// Coverage is rebuilt every tick: a conversation the hooks start recording after the watch
+		// began would otherwise be missing from it, and every tick would record it a second time.
+		opts.LiveCoverage = endpointAntigravityLiveCoverage(opts.LogPath)
 		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, antigravitysession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "antigravity sync error: %v\n", err)
@@ -153,9 +156,14 @@ func reportAntigravitySweep(cmd *cobra.Command, summary antigravitysession.Summa
 }
 
 func runEndpointAntigravityStatus(cmd *cobra.Command, args []string) error {
-	refs, err := antigravitysession.NewStore(endpointAntigravityOpts.brainDir).List()
-	if err != nil {
-		return err
+	// The conversations come back even when the summaries database could not be read; the status
+	// is still right about them, so the error is a warning here.
+	refs, listErr := antigravitysession.NewStore(endpointAntigravityOpts.brainDir).List()
+	if listErr != nil && len(refs) == 0 {
+		return listErr
+	}
+	if listErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", listErr)
 	}
 	statePath := resolveAntigravityStatePath(endpointAntigravityOpts.statePath, endpointUserMode())
 	state, err := antigravitysession.LoadState(statePath)
