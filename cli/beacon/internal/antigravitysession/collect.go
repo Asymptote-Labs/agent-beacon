@@ -97,11 +97,10 @@ type CollectOptions struct {
 	// writer.DefaultRotateBytes.
 	RotateBytes int64
 	// LiveCoverage, when set, marks the conversations the live Antigravity hooks have already
-	// reported, by the earliest hook event timestamp per conversationId. The hook payload carries
-	// prompts and tool calls but no assistant text, reasoning or token counts, so for steps at or
-	// after live coverage began the sweep suppresses the actions the hooks would double-count and
-	// keeps the ones they cannot see (see suppressedLive).
-	LiveCoverage map[string]time.Time
+	// reported. The hook payload carries prompts and tool calls but no assistant text, reasoning or
+	// token counts, so the sweep keeps only what hooks cannot see from each covered conversation's
+	// first hook event on (see sessionsync.LiveCoverage.Suppresses).
+	LiveCoverage sessionsync.LiveCoverage
 
 	// guard keeps the sweep from rotating its own output out of the log; CollectOnce sets it.
 	guard *writer.RetentionGuard
@@ -206,7 +205,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	// passed over exactly as if it had been written, so the cursor moves past it.
 	written := 0
 	for _, item := range mapped {
-		if suppressedLive(item, ref.ID, opts) {
+		if opts.LiveCoverage.Suppresses(ref.ID, item.Event.Event.Action, item.TimestampMS) {
 			written++
 			summary.EventsSuppressedLive++
 			continue
@@ -221,26 +220,6 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	commit(cursor, mapped, written)
 	cursor.UpdatedAtMS = ref.ModTimeUnixMS
 	return true, nil
-}
-
-// suppressedLive reports whether an event is one the live hook path already recorded. Antigravity's
-// hooks see the prompt and every tool call as it happens, but their payloads carry no assistant
-// text, reasoning or token counts. So for steps at or after live coverage began -- with the same
-// two-second clock-skew allowance the Devin CLI sweep uses -- the actions the hooks would
-// double-count are skipped, while agent.message, agent.reasoning and token.usage always emit. A
-// step with no timestamp is never suppressed: without one it cannot be placed after the cutover.
-func suppressedLive(item MappedEvent, conversationID string, opts CollectOptions) bool {
-	cutover, ok := opts.LiveCoverage[conversationID]
-	if !ok || item.TimestampMS == 0 || item.TimestampMS < cutover.UnixMilli()-2000 {
-		return false
-	}
-	switch item.Event.Event.Action {
-	case "session.started", "prompt.submitted", "session.handoff",
-		"tool.invoked", "mcp.tool_invoked",
-		"command.executed", "file.read", "file.modified", "tool.completed", "tool.failed":
-		return true
-	}
-	return false
 }
 
 // commit advances the cursor over the events that were actually written.

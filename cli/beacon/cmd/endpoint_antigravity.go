@@ -10,7 +10,9 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/antigravitysession"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	endpointintegrations "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/spf13/cobra"
 )
 
@@ -195,9 +197,8 @@ func resolveAntigravityStatePath(path string, userMode bool) string {
 	return filepath.Join(endpointconfig.BaseDir(false), "state", "antigravity-sessions.json")
 }
 
-// endpointAntigravityLiveCoverage finds, per conversationId, the earliest Antigravity hook event
-// the retained runtime log holds (see endpointHookCoverage). The sweep keeps only what the hook
-// payload cannot carry -- agent messages, reasoning and token usage -- for steps after it.
-func endpointAntigravityLiveCoverage(logPath string) map[string]time.Time {
-	return endpointHookCoverage(logPath, "antigravity", antigravitysession.Harness)
+// endpointAntigravityLiveCoverage is the live hook coverage of each Antigravity conversation in the
+// retained runtime log, for the sync command and the backfill runner alike.
+func endpointAntigravityLiveCoverage(logPath string) sessionsync.LiveCoverage {
+	return endpointintegrations.HookCoverage(logPath, "antigravity", antigravitysession.Harness)
 }

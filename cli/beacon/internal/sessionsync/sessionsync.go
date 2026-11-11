@@ -251,3 +251,23 @@ func OpenSQLite(path string, pragmas ...string) (*sql.DB, error) {
 	}
 	return sql.Open("sqlite", sqliteuri.File(path, url.Values{"mode": {"ro"}, "_pragma": pragmas}))
 }
+
+// TableColumns lists a table's columns, so a collector can select a column when its runtime's
+// schema has it and NULL when it does not, instead of failing every sweep on a column a runtime
+// release renamed or dropped.
+func TableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	return columns, rows.Err()
+}

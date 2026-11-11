@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/devinsession"
+	endpointintegrations "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/spf13/cobra"
 )
 
@@ -170,12 +172,10 @@ func reportEndpointDevinSweep(cmd *cobra.Command, summary devinsession.Summary) 
 	}
 }
 
-// endpointDevinLiveCoverage finds, per Devin session id, the earliest Devin hook event the
-// retained runtime log holds (see endpointHookCoverage). The poll sweep uses it to skip what the
-// hooks already recorded: a session the hooks never saw is collected whole, while a covered one
-// keeps only the events the hook payload cannot carry.
-func endpointDevinLiveCoverage(logPath string) map[string]time.Time {
-	return endpointHookCoverage(logPath, "devin", "devin-cli", "devin")
+// endpointDevinLiveCoverage is the live hook coverage of each Devin session in the retained runtime
+// log, under either platform spelling, for the sync command and the backfill runner alike.
+func endpointDevinLiveCoverage(logPath string) sessionsync.LiveCoverage {
+	return endpointintegrations.HookCoverage(logPath, "devin", "devin-cli", "devin")
 }
 
 type devinSessionStatus struct {

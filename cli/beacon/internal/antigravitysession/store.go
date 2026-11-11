@@ -125,7 +125,7 @@ func (s *Store) readSummaries() (map[string]Summary, error) {
 	}
 	defer db.Close()
 
-	columns, err := tableColumns(db, summariesTable)
+	columns, err := sessionsync.TableColumns(db, summariesTable)
 	if err != nil {
 		return nil, fmt.Errorf("read Antigravity conversation summaries: %w", err)
 	}
@@ -167,23 +167,6 @@ func (s *Store) readSummaries() (map[string]Summary, error) {
 		return nil, fmt.Errorf("read Antigravity conversation summaries: %w", err)
 	}
 	return out, nil
-}
-
-func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
-	rows, err := db.Query("SELECT name FROM pragma_table_info(?)", table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	columns := map[string]bool{}
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		columns[name] = true
-	}
-	return columns, rows.Err()
 }
 
 // firstWorkspacePath is the first entry of workspace_uris, a JSON array of file:// URIs, as a

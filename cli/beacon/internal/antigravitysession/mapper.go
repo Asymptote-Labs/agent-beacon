@@ -59,12 +59,13 @@ func (m *mapper) consume(step Step) {
 	case stepUserInput:
 		// A new turn: a call the last turn never reported a result for has none coming.
 		m.pending = nil
-		text := stripPromptWrappers(step.Content)
+		text := asymptoteobserve.AntigravityPrompt(step.Content)
 		if text == "" {
 			return
 		}
 		ev := m.base(step, "prompt.submitted", "prompt", "Antigravity CLI prompt submitted")
 		ev.Prompt = &schema.PromptInfo{Text: text}
+		ev.GenAI = &schema.GenAIInfo{Input: &schema.GenAIInputInfo{Messages: asymptoteobserve.TextInputMessages(text)}}
 		ev.Content = contentMarker(text)
 		m.append(ev, step)
 		if info, ok := asymptoteobserve.ParseHandoffMarker(text); ok {
@@ -76,16 +77,13 @@ func (m *mapper) consume(step Step) {
 		m.pending = nil
 		if thinking := strings.TrimSpace(step.Thinking); thinking != "" {
 			ev := m.base(step, "agent.reasoning", "agent", "Antigravity CLI agent reasoning")
-			ev.GenAI = &schema.GenAIInfo{Output: &schema.GenAIOutputInfo{Messages: []map[string]interface{}{{
-				"role":    "assistant",
-				"content": []map[string]string{{"type": "reasoning", "text": step.Thinking}},
-			}}}}
+			ev.GenAI = &schema.GenAIInfo{Output: &schema.GenAIOutputInfo{Messages: asymptoteobserve.ReasoningOutputMessages(step.Thinking)}}
 			ev.Content = contentMarker(step.Thinking)
 			m.append(ev, step)
 		}
 		if strings.TrimSpace(step.Content) != "" {
 			ev := m.base(step, "agent.message", "agent", "Antigravity CLI agent message")
-			ev.GenAI = &schema.GenAIInfo{Output: &schema.GenAIOutputInfo{Messages: []map[string]interface{}{{"role": "assistant", "content": step.Content}}}}
+			ev.GenAI = &schema.GenAIInfo{Output: &schema.GenAIOutputInfo{Messages: asymptoteobserve.TextOutputMessages(step.Content)}}
 			ev.Content = contentMarker(step.Content)
 			m.append(ev, step)
 		}
@@ -178,11 +176,11 @@ func (m *mapper) applyTool(ev *schema.Event, call ToolCall, action string) {
 		ev.Tool.Command = command
 		ev.Command = &schema.CommandInfo{Command: command}
 		// The working directory the command ran in, when the conversation has none recorded.
-		if ev.Session.WorkingDirectory == "" {
-			ev.Session.WorkingDirectory = stringArg(call.Arguments, "Cwd")
+		if cwd, ok := call.Arguments["Cwd"].(string); ok && ev.Session.WorkingDirectory == "" {
+			ev.Session.WorkingDirectory = strings.TrimSpace(cwd)
 		}
 	}
-	if path := pathArg(call.Arguments); path != "" {
+	if path := asymptoteobserve.AntigravityToolPath(call.Arguments); path != "" {
 		ev.Tool.Path = path
 		if strings.HasPrefix(action, "file.") {
 			ev.File = &schema.FileInfo{Path: path, Operation: fileOperation(call.Name)}
@@ -244,19 +242,6 @@ func (m *mapper) eventID(ev schema.Event, step Step) string {
 	return antigravityEventID(fmt.Sprintf("%s:%s:%d:%s", m.data.Ref.ID, key, m.ordinal, ev.Event.Action))
 }
 
-// stripPromptWrappers keeps the text inside <USER_REQUEST>, dropping the ADDITIONAL_METADATA and
-// USER_SETTINGS_CHANGE blocks Antigravity wraps around it. Same rule as the hook adapter's
-// stripAntigravityPromptWrappers, so a prompt reads the same on either path.
-func stripPromptWrappers(content string) string {
-	if start := strings.Index(content, "<USER_REQUEST>"); start >= 0 {
-		content = content[start+len("<USER_REQUEST>"):]
-		if end := strings.Index(content, "</USER_REQUEST>"); end >= 0 {
-			content = content[:end]
-		}
-	}
-	return strings.TrimSpace(content)
-}
-
 var exitCodePattern = regexp.MustCompile(`Command exited with code (-?\d+)`)
 
 // parseCommandResult reads a run_command result: the exit code from "Command exited with code N"
@@ -313,27 +298,13 @@ func value(p *int64) int64 {
 	return *p
 }
 
-// actionForTool classifies a call by Antigravity's tool name, matching what the live hook adapter
-// records for the same names (cli/beacon-hooks/cmd/endpoint_events.go and post_tool.go), plus the
-// replace_file_content family, whose names the hook's edit/write/create/patch rule misses.
+// actionForTool classifies a call by Antigravity's tool name, from the vocabulary the live hook
+// adapter reads too; a call that is no command, file or MCP activity completes as a tool.
 func actionForTool(name string) string {
-	lower := strings.ToLower(strings.TrimSpace(name))
-	switch lower {
-	case "run_command":
-		return "command.executed"
-	case "view_file", "list_dir", "grep_search", "find_by_name":
-		return "file.read"
-	case "write_to_file", "replace_file_content", "multi_replace_file_content", "edit_file", "write_file", "apply_patch":
-		return "file.modified"
+	if action := asymptoteobserve.AntigravityToolAction(name); action != "" {
+		return action
 	}
-	switch {
-	case strings.Contains(lower, "mcp"):
-		return "mcp.tool_invoked"
-	case strings.Contains(lower, "edit") || strings.Contains(lower, "write") || strings.Contains(lower, "create") || strings.Contains(lower, "patch"):
-		return "file.modified"
-	default:
-		return "tool.completed"
-	}
+	return "tool.completed"
 }
 
 func categoryForAction(action string) string {
@@ -360,21 +331,6 @@ func fileOperation(tool string) string {
 	}
 }
 
-// pathArg is the file or directory a call names. The keys are Antigravity's own argument names,
-// the same ones the hook adapter reads, plus TargetFile and SearchDirectory.
-func pathArg(args map[string]interface{}) string {
-	return stringArg(args, "TargetFile", "AbsolutePath", "DirectoryPath", "SearchPath", "SearchDirectory", "file_path", "path")
-}
-
-func stringArg(args map[string]interface{}, keys ...string) string {
-	for _, key := range keys {
-		if v, ok := args[key].(string); ok && strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 func contentMarker(text string) *schema.ContentInfo {
 	return asymptoteobserve.RetainedContent(text, 0)
 }
@@ -388,10 +344,7 @@ func normalizeTimestamp(ts string) string {
 }
 
 func parseTime(ts string) time.Time {
-	if ts == "" {
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339Nano, ts)
+	t, err := asymptoteobserve.ParseTimestamp(ts)
 	if err != nil {
 		return time.Time{}
 	}

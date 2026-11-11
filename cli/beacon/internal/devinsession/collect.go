@@ -108,13 +108,11 @@ type CollectOptions struct {
 	// Budget, when set, caps the bytes this sweep may append. The sweep stops at the first event
 	// that does not fit and returns writer.ErrBudgetSpent, with cursors past only what was written.
 	Budget *writer.Budget
-	// LiveCoverage, when set, marks the sessions the live Devin hooks have already reported, by
-	// the earliest hook event timestamp per session id. The hook payload carries prompts and tool
-	// calls but no assistant text, reasoning, token metrics or model, so for rows at or after
-	// live coverage began the sweep suppresses the actions hooks would double-count (prompts,
-	// tool invocations and tool results, session.started and handoffs) and keeps the ones hooks
-	// cannot see.
-	LiveCoverage map[string]time.Time
+	// LiveCoverage, when set, marks the sessions the live Devin hooks have already reported. The
+	// hook payload carries prompts and tool calls but no assistant text, reasoning, token metrics
+	// or model, so the sweep keeps only what hooks cannot see from each covered session's first
+	// hook event on (see sessionsync.LiveCoverage.Suppresses).
+	LiveCoverage sessionsync.LiveCoverage
 }
 
 type Summary struct {
@@ -327,7 +325,7 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 			}
 		}
 		started := m.mapSessionStarted(startTS)
-		if suppressedLive(started.Event.Event.Action, started.TimestampMS, session, opts) {
+		if opts.LiveCoverage.Suppresses(session.ID, started.Event.Event.Action, started.TimestampMS) {
 			summary.EventsSuppressedLive++
 		} else if err := sink.Emit(started.Event); err != nil {
 			return true, err
@@ -358,7 +356,7 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 		for _, row := range rows {
 			journal := m.beginRow()
 			for _, item := range m.mapRow(row, priorIDs) {
-				if suppressedLive(item.Event.Event.Action, item.TimestampMS, session, opts) {
+				if opts.LiveCoverage.Suppresses(session.ID, item.Event.Event.Action, item.TimestampMS) {
 					summary.EventsSuppressedLive++
 					continue
 				}
@@ -372,29 +370,6 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 			changed = true
 		}
 	}
-}
-
-// suppressedLive reports whether this event is one the live hook path already recorded. Devin
-// hooks see the prompt and every tool call as it happens but the payload carries no assistant
-// text, reasoning, token metrics or model, so actions hooks would double-count are skipped for
-// rows at or after live coverage began (with a small clock-skew allowance), while agent.message,
-// agent.reasoning, token.usage, session.context, session.compacted and approval.denied always
-// emit -- the hook never saw them.
-func suppressedLive(action string, timestampMS int64, session Session, opts CollectOptions) bool {
-	cutover, ok := opts.LiveCoverage[session.ID]
-	if !ok {
-		return false
-	}
-	if timestampMS < cutover.UnixMilli()-2000 {
-		return false
-	}
-	switch action {
-	case "session.started", "prompt.submitted", "session.handoff",
-		"tool.invoked", "mcp.tool_invoked",
-		"command.executed", "file.read", "file.modified", "tool.completed", "tool.failed":
-		return true
-	}
-	return false
 }
 
 func (o CollectOptions) sink() sessionsync.Sink {
@@ -420,7 +395,7 @@ func OpenStore(path string) (*Store, error) {
 	}
 	store := &Store{path: path, db: db}
 	for _, table := range []string{"sessions", "message_nodes"} {
-		columns, err := tableColumns(db, table)
+		columns, err := sessionsync.TableColumns(db, table)
 		if err != nil {
 			_ = db.Close()
 			return nil, err
@@ -454,30 +429,6 @@ func OpenStore(path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) Path() string { return s.path }
-
-// tableColumns lists a table's columns, so the queries below can select optional columns when
-// they exist and NULL when they do not. Columns or JSON keys this collector does not know are
-// ignored either way.
-func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
-	rows, err := db.Query(fmt.Sprintf(`SELECT name FROM pragma_table_info(%s)`, quoteIdent(table)))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	columns := map[string]bool{}
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		columns[name] = true
-	}
-	return columns, rows.Err()
-}
-
-func quoteIdent(name string) string {
-	return `'` + strings.ReplaceAll(name, `'`, `''`) + `'`
-}
 
 // pick renders a column name for SELECT when it exists and NULL aliased to it when it does not.
 func pick(columns map[string]bool, name string) string {

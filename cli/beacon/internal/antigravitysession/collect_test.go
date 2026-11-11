@@ -226,12 +226,20 @@ func callArgs(ev schema.Event) map[string]interface{} {
 	return args
 }
 
+// messageContent is the text of an event's first output message part, in the gen_ai.output.messages
+// shape the dashboard and trace readers expect.
 func messageContent(ev schema.Event) interface{} {
-	messages, _ := ev.GenAI.Output.Messages.([]map[string]interface{})
+	messages, _ := ev.GenAI.Output.Messages.([]interface{})
 	if len(messages) == 0 {
 		return nil
 	}
-	return messages[0]["content"]
+	message, _ := messages[0].(map[string]interface{})
+	parts, _ := message["parts"].([]interface{})
+	if len(parts) == 0 {
+		return nil
+	}
+	part, _ := parts[0].(map[string]interface{})
+	return part["content"]
 }
 
 // Without the summaries database, or without the conversation's row in it, there is no working

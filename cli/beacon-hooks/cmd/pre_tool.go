@@ -332,7 +332,7 @@ func antigravityPromptFromTranscript(input map[string]interface{}, sessionID str
 			continue
 		}
 		if content := getFirstStr(entry, "content"); content != "" {
-			return stripAntigravityPromptWrappers(content)
+			return asymptoteobserve.AntigravityPrompt(content)
 		}
 	}
 	return ""
@@ -344,14 +344,4 @@ func defaultAntigravityTranscriptPath(sessionID string) string {
 		return ""
 	}
 	return filepath.Join(home, ".gemini", "antigravity-cli", "brain", sessionID, ".system_generated", "logs", "transcript.jsonl")
-}
-
-func stripAntigravityPromptWrappers(content string) string {
-	if start := strings.Index(content, "<USER_REQUEST>"); start >= 0 {
-		content = content[start+len("<USER_REQUEST>"):]
-		if end := strings.Index(content, "</USER_REQUEST>"); end >= 0 {
-			content = content[:end]
-		}
-	}
-	return strings.TrimSpace(content)
 }
