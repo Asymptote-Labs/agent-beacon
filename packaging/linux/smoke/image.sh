@@ -39,7 +39,13 @@ if [ "$publish" = 1 ]; then
   [ -n "$registry" ] || { echo "image.sh: --publish needs BEACON_SMOKE_REGISTRY" >&2; exit 1; }
   ref="$registry/$repo:$digest"
   # --pull so the weekly rebuild picks up the base image's security updates under the same tag.
-  docker build --pull -t "$ref" -f "$dockerfile" "$dir" >&2
+  # linux/amd64 is what the CI runners are, whatever machine publishes. The source label links the
+  # GHCR package to the repository, which is what lets a workflow's job token pull a private one;
+  # GHCR reads it only from a single image manifest, so no provenance index is pushed around it.
+  # Publishing needs BuildKit (buildx), which GitHub's runners have.
+  source="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-asymptote-labs/agent-beacon}"
+  docker build --pull --platform "${BEACON_SMOKE_PLATFORM:-linux/amd64}" --provenance=false \
+    --label "org.opencontainers.image.source=$source" -t "$ref" -f "$dockerfile" "$dir" >&2
   docker push "$ref" >&2
   echo "$ref"
   exit 0
