@@ -42,18 +42,13 @@ done
 command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
 
 CONTAINER="${BEACON_SMOKE_CONTAINER:-beacon-systemd-smoke}"
-IMAGE="${BEACON_SMOKE_IMAGE:-beacon-systemd-smoke}"
 cleanup() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 cleanup
 
-echo "building $IMAGE ($ARCH)"
-docker build -q -t "$IMAGE" - >/dev/null <<'DOCKERFILE'
-FROM ubuntu:24.04
-RUN apt-get update -qq && apt-get install -y -qq systemd systemd-sysv dbus curl ca-certificates iproute2 >/dev/null
-STOPSIGNAL SIGRTMIN+3
-CMD ["/sbin/init"]
-DOCKERFILE
+# Pulled prebuilt when BEACON_SMOKE_REGISTRY is set, built from smoke/systemd.Dockerfile otherwise.
+IMAGE="$(sh "$ROOT_DIR/packaging/linux/smoke/image.sh" systemd)"
+echo "image: $IMAGE ($ARCH)"
 
 echo "starting systemd container"
 docker run -d --name "$CONTAINER" --privileged --cgroupns=host \

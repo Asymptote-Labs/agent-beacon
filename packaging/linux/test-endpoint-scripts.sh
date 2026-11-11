@@ -10,7 +10,7 @@ INSTALL_SCRIPT="$ROOT_DIR/packaging/linux/install-endpoint.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
-for script in "$ROOT_DIR"/packaging/linux/*.sh "$ROOT_DIR"/packaging/linux/nfpm/*.sh; do
+for script in "$ROOT_DIR"/packaging/linux/*.sh "$ROOT_DIR"/packaging/linux/nfpm/*.sh "$ROOT_DIR"/packaging/linux/smoke/*.sh; do
   case "$(head -n 1 "$script")" in
     *bash*) bash -n "$script" ;;
     *) sh -n "$script" ;;
