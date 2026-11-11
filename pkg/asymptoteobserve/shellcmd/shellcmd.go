@@ -90,6 +90,9 @@ type Command struct {
 	within int32
 	outer  int32
 	refs   []wordRef
+	// subshell identifies the innermost ( .. ) the statement is inside, or is 0: what an exec
+	// there leaves open is closed when the subshell ends.
+	subshell int32
 }
 
 // wordRef is one thing a word of a command takes its value from: a command substitution or an
@@ -185,6 +188,7 @@ type parser struct {
 	redirected []redirected          // compound statements with redirections of their own
 	pipelines  int
 	nested     []substitution
+	subshells  []substitution // id is the subshell's start offset + 1
 	substIDs   map[syntax.Node]int
 	declared   []declaration // not yet carried by a statement
 	moved      bool
@@ -204,6 +208,8 @@ func (p *parser) visit(node syntax.Node) bool {
 		p.nested = append(p.nested, substitution{n.Left.Offset(), n.Right.Offset(), p.substID(n)})
 	case *syntax.ProcSubst:
 		p.nested = append(p.nested, substitution{n.OpPos.Offset(), n.Rparen.Offset(), p.substID(n)})
+	case *syntax.Subshell:
+		p.subshells = append(p.subshells, substitution{n.Lparen.Offset(), n.Rparen.Offset(), int(n.Lparen.Offset()) + 1})
 	case *syntax.Stmt:
 		p.stmt(n)
 	}
@@ -279,6 +285,11 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 	for _, r := range p.redirected {
 		if offset > r.start && offset < r.end && r.start >= around && (!c.Nested || innermost < r.start) {
 			around, c.outer = r.start, int32(r.index+1)
+		}
+	}
+	for _, s := range p.subshells {
+		if offset > s.start && offset < s.end && int32(s.id) > c.subshell {
+			c.subshell = int32(s.id)
 		}
 	}
 	// The statement carries the declarations that ended before it: not one it is inside.

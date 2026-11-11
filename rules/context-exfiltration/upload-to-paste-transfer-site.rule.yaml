@@ -23,20 +23,20 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
-# Who sends and a /dev/tcp redirect are the egress rules' shared predicates
-# (rules/concepts/egress.predicates.yaml).
+# Who sends is the egress rules' shared predicate (rules/concepts/egress.predicates.yaml). A
+# redirection to /dev/tcp or /dev/udp is the command's socket_redirects.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(s,
       egress_sender(s) &&
       s.argv_raw.exists(a, a.matches("(?i)(^|[/@.:=\\x27\"])(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)([/:,?\\x27\"]|$)")) ||
-      s.name == "gh" && s.argv.exists(a, a == "gist") && s.argv.exists(a, a == "create")) ||
-    egress_dev_tcp(e) &&
-      e.command.command.matches("(?i)/dev/(tcp|udp)/(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)/") ||
+      s.name == "gh" && s.argv.exists(a, a == "gist") && s.argv.exists(a, a == "create") ||
+      s.socket_redirects.exists(r, r.path.matches("(?i)^/dev/(tcp|udp)/(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)/"))) ||
     (size(e.command.parsed_commands) == 0 && (
       e.command.command.matches("(?i)\\b(curl|wget|http|httpie)\\b") &&
         e.command.command.matches("(?i)\\b(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)\\b") ||
-      e.command.command.matches("(?i)\\bgh\\s+gist\\s+create\\b")))
+      e.command.command.matches("(?i)\\bgh\\s+gist\\s+create\\b") ||
+      e.command.command.matches("(?i)[<>][&|]?\\s*/dev/(tcp|udp)/(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)/")))
   )
 emit:
   reason: "Outbound upload to an anonymous paste/transfer/tunnel host"

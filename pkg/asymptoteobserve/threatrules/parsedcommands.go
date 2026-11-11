@@ -12,7 +12,7 @@ import (
 const ParsedCommandsPath = "command.parsed_commands"
 
 // v1_3Fields are the fields of a parsed command that spec v1.3 added.
-var v1_3Fields = []string{"args", "file_reads", "script_sends"}
+var v1_3Fields = []string{"args", "file_reads", "script_sends", "socket_redirects"}
 
 // ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
 // to the retained command line, so a longer value (from an in-process caller) is cut there too.
@@ -38,6 +38,7 @@ const maxShellDepth = 2
 //   - file_effects are shellcmd's file effects of the command: {path, op}.
 //   - file_reads are shellcmd's file reads of the command: {path, via}, each path as written.
 //     script_sends are the paths of those an inline script opens inside a call that sends them.
+//   - socket_redirects are shellcmd's socket redirections of the command: {path, op}.
 //   - pipeline, stage and nested are shellcmd's.
 //   - The script a shell (sh, bash, zsh, dash, ksh) runs with -c, when it is a known word, is
 //     read the same way, depth-limited, and its commands follow the shell's with nested true and
@@ -76,12 +77,19 @@ func (p *parsedCommands) add(cmds []shellcmd.Command, nested bool, depth int) {
 		p.pipelines = max(p.pipelines, base+c.Pipeline)
 	}
 	reads := shellcmd.FileReads(cmds)
+	sockets := shellcmd.SocketRedirects(cmds)
 	for i, c := range cmds {
 		var taken []shellcmd.FileRead
 		if reads != nil {
 			taken = reads[i]
 		}
-		p.out = append(p.out, parsedCommand(c, taken, base, nested))
+		pc := parsedCommand(c, taken, base, nested)
+		if sockets != nil {
+			for _, s := range sockets[i] {
+				pc.SocketRedirects = append(pc.SocketRedirects, asymptoteobserve.ParsedSocketRedirect{Path: s.Path, Op: string(s.Op)})
+			}
+		}
+		p.out = append(p.out, pc)
 		if depth >= maxShellDepth {
 			continue
 		}
