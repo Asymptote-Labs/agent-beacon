@@ -19,6 +19,14 @@ func ownerUID(info fs.FileInfo) (int, bool) {
 	return int(st.Uid), true
 }
 
+func ownerGID(info fs.FileInfo) (int, bool) {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, false
+	}
+	return int(st.Gid), true
+}
+
 // OwnerUID reports the uid that owns path, following symlinks. The system backfill confines reads
 // to files owned by whoever owns the console user's home.
 func OwnerUID(path string) (int, error) {

@@ -38,8 +38,10 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -57,6 +59,9 @@ type Confinement struct {
 	root     *os.Root
 	// uid is the owner every file read must have; negative skips the check (Windows).
 	uid int
+	// groups are the console user's groups, nil when they could not be looked up; see memberOf.
+	groupsOnce sync.Once
+	groups     map[int]bool
 
 	mu       sync.Mutex
 	refused  int
@@ -252,22 +257,25 @@ func Confined(path string) bool {
 // OpenOutside opens a file for a reader that follows paths the console user may have chosen, in or
 // out of the home, such as the launcher config a home's .npmrc or an agent's project list names.
 // Unconfined it is os.Open. While a confinement is active, any path, inside the home or not, is
+// first resolved the way the console user's own lookup would resolve it (see resolve), then
 // opened only if it is
 //
 //   - a regular file, checked before it is opened (opening a device can act on it) and reached
 //     through no symlink once resolved, then opened non-blocking;
-//   - a file the console user could read without root: one they own, or one others may read with
-//     every directory on its resolved path, including /, enterable by others (/etc/npmrc, a
-//     root-installed node's npmrc, a Nix store file a home-manager .npmrc links to).
+//   - a file the console user could read without root, by the permission bits the kernel would
+//     apply to them (/etc/npmrc, a root-installed node's npmrc, a Nix store file a home-manager
+//     .npmrc links to, their own files).
 //
 // Where the path leads through symlinks does not matter: it is the file reached that must be one
 // the console user could read, so root reading it discloses nothing. A file found but declined
 // (anything else, or a path that is not absolute) is an *fs.PathError wrapping ErrRefused, which
 // does not read as absent, and is counted as a refusal. A path that cannot be looked up (missing,
-// unreachable, a symlink loop) reads as absent, as with Open, and so does one in a directory the
-// console user could not enter on the way to it or once resolved: whether a declined file is
-// there must not tell them anything about a directory they cannot list (/root/.ssh, another
-// user's 0700 home).
+// a symlink loop) reads as absent, as with Open.
+//
+// What lies past a directory the console user may not enter must tell them nothing, not even
+// whether it is there (/root/.ssh, another user's 0700 home): such a path reads as absent whatever
+// it names. One past a directory only a group may enter, when Beacon cannot tell whether they are
+// in it, is declined whatever it names, so the caller can neither trust it nor learn from it.
 func OpenOutside(path string) (*os.File, error) {
 	c := active.Load()
 	if c == nil {
@@ -276,89 +284,174 @@ func OpenOutside(path string) (*os.File, error) {
 	if !filepath.IsAbs(path) {
 		return nil, c.decline(path, "not an absolute path")
 	}
-	clean := filepath.Clean(path)
-	real, err := filepath.EvalSymlinks(clean)
-	if err != nil {
+	real, entry, err := c.resolve(path)
+	switch {
+	case entry == denied:
+		return nil, c.refuse("open", path, "past a directory the console user cannot enter")
+	case entry == unsure:
+		return nil, c.decline(path, "past a directory only a group may enter, and the console user's groups are not known")
+	case err != nil:
 		return nil, c.failed("open", path, err)
 	}
-	f, reach, err := openRegular(real, c.uid)
-	reachable := reach.user && c.reachesDir(filepath.Dir(clean))
+	f, err := openRegular(real)
 	if errors.Is(err, errNotRegular) {
-		if !reachable {
-			return nil, c.refuse("open", path, unreachable)
-		}
 		return nil, c.decline(path, "not a regular file")
 	}
 	if err != nil {
 		return nil, c.failed("open", path, err)
-	}
-	if !reachable {
-		_ = f.Close()
-		return nil, c.refuse("open", path, unreachable)
 	}
 	info, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
 		return nil, c.failed("open", path, err)
 	}
-	owner, owned := c.ownedByUser(info)
-	if !owned && (!reach.others || info.Mode().Perm()&0o004 == 0) {
+	if c.uid >= 0 && c.permits(info, 0o4) != allowed {
 		_ = f.Close()
-		return nil, c.decline(path, fmt.Sprintf("owned by uid %d and not readable by the console user (uid %d) without root", owner, c.uid))
+		return nil, c.decline(path, fmt.Sprintf("not readable by the console user (uid %d) without root", c.uid))
 	}
 	return f, nil
 }
 
-const unreachable = "in a directory the console user cannot enter"
-
 // errNotRegular is a path that names something other than a regular file.
 var errNotRegular = errors.New("not a regular file")
 
-// reach is who may enter every directory on a path: others, and the console user.
-type reach struct{ others, user bool }
+// access is whether the console user may enter a directory, as far as Beacon can tell.
+type access int
 
-var (
-	allReach = reach{others: true, user: true}
-	noReach  reach
+const (
+	denied access = iota
+	// unsure: only a group may enter, and Beacon cannot tell whether the console user is in it.
+	unsure
+	allowed
 )
 
-// and narrows reach by one directory, owned by owner with permission bits mode. The console user
-// uid enters it by its owner bits when they own it, else by its others bits: Beacon does not know
-// their groups, so a directory only a group may enter counts as closed to them. A negative uid is
-// anyone.
-func (r reach) and(owner int, mode uint32, uid int) reach {
-	r.others = r.others && mode&0o001 != 0
-	switch {
-	case uid < 0:
-	case owner == uid:
-		r.user = r.user && mode&0o100 != 0
-	default:
-		r.user = r.user && mode&0o001 != 0
+// maxSymlinkHops bounds the links one resolve follows, as the kernel bounds a lookup's.
+const maxSymlinkHops = 40
+
+var errSymlinkLoop = errors.New("too many levels of symbolic links")
+
+// resolve follows path the way the console user's own lookup would: one name and one symlink at a
+// time, a link target's names and ".." included, from /. It reports the least access the console
+// user has to a directory a lookup happened in, and stops at one they may not enter, since root
+// looking past it would learn what they could not (filepath.EvalSymlinks would look up
+// /root/.ssh to apply the ".." in a target /root/.ssh/../../home/u/x). A negative uid checks no
+// access.
+func (c *Confinement) resolve(path string) (string, access, error) {
+	if c.uid < 0 {
+		real, err := filepath.EvalSymlinks(filepath.Clean(path))
+		return real, allowed, err
 	}
-	return r
+	pending := strings.Split(path, "/")
+	cur, worst, hops := "/", allowed, 0
+	entered := map[string]access{}
+	for len(pending) > 0 {
+		name := pending[0]
+		pending = pending[1:]
+		if name == "" || name == "." {
+			continue
+		}
+		a, ok := entered[cur]
+		if !ok {
+			a = c.enter(cur)
+			entered[cur] = a
+		}
+		worst = min(worst, a)
+		if worst == denied {
+			return "", denied, nil
+		}
+		if name == ".." {
+			cur = filepath.Dir(cur)
+			continue
+		}
+		next := filepath.Join(cur, name)
+		info, err := os.Lstat(next)
+		if err != nil {
+			return "", worst, err
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			cur = next
+			continue
+		}
+		if hops++; hops > maxSymlinkHops {
+			return "", worst, &fs.PathError{Op: "open", Path: path, Err: errSymlinkLoop}
+		}
+		target, err := os.Readlink(next)
+		if err != nil {
+			return "", worst, err
+		}
+		if strings.HasPrefix(target, "/") {
+			cur = "/"
+		}
+		pending = append(strings.Split(target, "/"), pending...)
+	}
+	return cur, worst, nil
 }
 
-// reachesDir reports whether the console user could enter dir and every directory above it, as
-// named: the path a user chose may pass through a directory its resolved form does not.
-func (c *Confinement) reachesDir(dir string) bool {
-	if c.uid < 0 {
-		return true
+// enter is whether the console user may enter dir, a path with no symlinks in it.
+func (c *Confinement) enter(dir string) access {
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() {
+		return denied
 	}
-	for {
-		info, err := os.Stat(dir)
+	return c.permits(info, 0o1)
+}
+
+// permits is whether the console user has permission perm (0o4 read, 0o1 execute or enter) on a
+// file, by its owner bits if they own it, else its group bits if they are in its group, else its
+// others bits, as the kernel decides.
+func (c *Confinement) permits(info fs.FileInfo, perm fs.FileMode) access {
+	owner, ok := ownerUID(info)
+	group, gok := ownerGID(info)
+	if !ok || !gok {
+		return denied
+	}
+	mode := info.Mode().Perm()
+	allowedIf := func(x bool) access {
+		if x {
+			return allowed
+		}
+		return denied
+	}
+	if owner == c.uid {
+		return allowedIf(mode&(perm<<6) != 0)
+	}
+	byGroup, byOthers := mode&(perm<<3) != 0, mode&perm != 0
+	member, known := c.memberOf(group)
+	switch {
+	case known && member:
+		return allowedIf(byGroup)
+	case known || byGroup == byOthers:
+		return allowedIf(byOthers)
+	default:
+		return unsure
+	}
+}
+
+// memberOf reports whether the console user is in group gid, and whether Beacon could tell. Their
+// groups are looked up once per confinement; a lookup that fails (a directory-service account
+// this build cannot query) leaves every group unknown.
+func (c *Confinement) memberOf(gid int) (member, known bool) {
+	c.groupsOnce.Do(func() {
+		u, err := user.LookupId(strconv.Itoa(c.uid))
 		if err != nil {
-			return false
+			return
 		}
-		owner, ok := ownerUID(info)
-		if !ok || !allReach.and(owner, uint32(info.Mode().Perm()), c.uid).user {
-			return false
+		ids, err := u.GroupIds()
+		if err != nil {
+			return
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return true
+		groups := map[int]bool{}
+		for _, id := range append(ids, u.Gid) {
+			if n, err := strconv.Atoi(id); err == nil {
+				groups[n] = true
+			}
 		}
-		dir = parent
+		c.groups = groups
+	})
+	if c.groups == nil {
+		return false, false
 	}
+	return c.groups[gid], true
 }
 
 // Open opens a file or directory for reading.

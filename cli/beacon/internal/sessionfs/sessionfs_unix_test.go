@@ -429,6 +429,99 @@ func TestOpenOutsideHidesWhatTheUserCannotReach(t *testing.T) {
 	}
 }
 
+// A link's target is looked up as the console user would look it up, ".." included, so a target
+// that passes through a directory they cannot enter tells them nothing, even when it ends at a
+// file of their own: /root/.ssh/../../home/u/probe resolves only if /root/.ssh is there.
+func TestOpenOutsideFollowsLinksOnlyWhereTheUserCould(t *testing.T) {
+	home, outside, secret := reachableFixture(t)
+	private := filepath.Join(outside, "private")
+	if err := os.Mkdir(private, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Written by hand: filepath.Join would clean the ".." away.
+	viaPrivate := private + "/../" + filepath.Base(secret)
+	viaMissing := outside + "/no-such-dir/../" + filepath.Base(secret)
+	through := filepath.Join(home, "through")
+	if err := os.Symlink(viaPrivate, through); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(home, "missing")
+	if err := os.Symlink(viaMissing, missing); err != nil {
+		t.Fatal(err)
+	}
+	confine(t, home, os.Getuid()+1)
+	for _, path := range []string{through, missing, viaPrivate} {
+		_, err := OpenOutside(path)
+		requireRefusedAsAbsent(t, path, err)
+		if errors.Is(err, ErrRefused) {
+			t.Fatalf("%s was declined, which tells the console user the directory on the way is there: %v", path, err)
+		}
+	}
+	// The same file named directly is reachable, and someone else's, so it is declined.
+	_, err := OpenOutside(secret)
+	requireDeclined(t, "the file itself", err)
+}
+
+// A directory only its group may enter is one the console user enters only if they are in the
+// group. When Beacon cannot tell, it declines whatever lies past it, there or not: reading it as
+// absent could record a private registry's package as public, and reading what is there would
+// tell a user outside the group what it holds.
+func TestOpenOutsideJudgesGroupDirectoriesByTheUsersGroups(t *testing.T) {
+	home, outside, _ := reachableFixture(t)
+	shared := filepath.Join(outside, "shared")
+	if err := os.Mkdir(shared, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shared, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	present, absent := filepath.Join(shared, "npmrc"), filepath.Join(shared, "missing")
+	if err := os.WriteFile(present, []byte("registry=https://npm.acme.internal/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gid, ok := ownerGID(info)
+	if !ok {
+		t.Skip("no group owner")
+	}
+	for _, tc := range []struct {
+		name   string
+		groups map[int]bool
+		check  func(t *testing.T, path string, err error)
+	}{
+		{"groups unknown", nil, func(t *testing.T, path string, err error) { requireDeclined(t, path, err) }},
+		{"not in the group", map[int]bool{gid + 1: true}, func(t *testing.T, path string, err error) {
+			requireRefusedAsAbsent(t, path, err)
+			if errors.Is(err, ErrRefused) {
+				t.Fatalf("%s was declined past a directory the console user cannot enter", path)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := confine(t, home, os.Getuid()+1)
+			c.groupsOnce.Do(func() { c.groups = tc.groups })
+			for _, path := range []string{present, absent} {
+				_, err := OpenOutside(path)
+				tc.check(t, path, err)
+			}
+		})
+	}
+	t.Run("in the group", func(t *testing.T) {
+		c := confine(t, home, os.Getuid()+1)
+		c.groupsOnce.Do(func() { c.groups = map[int]bool{gid: true} })
+		file, err := OpenOutside(present)
+		if err != nil {
+			t.Fatalf("a world-readable file past a group directory the console user is in: %v", err)
+		}
+		_ = file.Close()
+		_, err = OpenOutside(absent)
+		requireRefusedAsAbsent(t, "a missing file past a group directory the console user is in", err)
+	})
+}
+
 func TestOpenOutsideReadsAnUnreachablePathAsAbsent(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root can enter any directory")
@@ -497,7 +590,7 @@ func TestOpenOutsideRefusesDevicesBeforeOpeningThem(t *testing.T) {
 	if info, err := os.Stat(device); err != nil || info.Mode()&fs.ModeCharDevice == 0 {
 		t.Skipf("%s is not a character device here", device)
 	}
-	_, _, err := openRegular(device, os.Getuid())
+	_, err := openRegular(device)
 	if !errors.Is(err, errNotRegular) {
 		t.Fatalf("openRegular(%s) = %v, want it refused as not a regular file before opening", device, err)
 	}
@@ -521,44 +614,19 @@ func TestOpenRegularFollowsNoSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	file, r, err := openRegular(real, os.Getuid())
+	file, err := openRegular(real)
 	if err != nil {
 		t.Fatalf("openRegular of a resolved regular file: %v", err)
 	}
 	_ = file.Close()
-	if r.others || !r.user {
-		t.Fatalf("openRegular(%s) reach = %+v, want the owner alone in its 0700 directories", real, r)
-	}
-	if _, r, _ := openRegular(real, os.Getuid()+1); r.user {
-		t.Fatalf("openRegular(%s) lets another user reach a file in 0700 directories they do not own", real)
-	}
 	dirLink := filepath.Join(filepath.Dir(filepath.Dir(real)), "swapped")
 	if err := os.Symlink(filepath.Dir(real), dirLink); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := openRegular(filepath.Join(dirLink, filepath.Base(real)), os.Getuid()); err == nil {
+	if _, err := openRegular(filepath.Join(dirLink, filepath.Base(real))); err == nil {
 		t.Fatal("openRegular followed a directory symlink")
 	}
-	if _, _, err := openRegular(filepath.Join(filepath.Dir(real), "missing"), os.Getuid()); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := openRegular(filepath.Join(filepath.Dir(real), "missing")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("openRegular of a missing file = %v, want not-exist", err)
-	}
-}
-
-// openRegular reports whether every directory on the path may be entered by others.
-func TestOpenRegularReportsWhetherOthersCanEnter(t *testing.T) {
-	system, err := filepath.EvalSymlinks("/etc/hosts")
-	if err != nil {
-		t.Skipf("/etc/hosts: %v", err)
-	}
-	if info, err := os.Stat(system); err != nil || info.Mode().Perm()&0o004 == 0 {
-		t.Skipf("%s is not a world-readable file here", system)
-	}
-	file, r, err := openRegular(system, os.Getuid()+1)
-	if err != nil {
-		t.Fatalf("openRegular(%s): %v", system, err)
-	}
-	_ = file.Close()
-	if !r.others || !r.user {
-		t.Fatalf("openRegular(%s) reach = %+v, want anyone", system, r)
 	}
 }
