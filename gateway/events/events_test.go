@@ -632,8 +632,8 @@ func TestArgumentsCompletedAtWrite(t *testing.T) {
 	}
 }
 
-// A client's retry resends the same request: its prompt and tool results are analyzed again but
-// recorded once. The next turn, and a later turn with the same words, are new and recorded.
+// In a session the client names, a retry resends the same request: its prompt and tool results are
+// analyzed again but recorded once. The next turn, and a later turn with the same words, are new.
 func TestRetryRecordedOnce(t *testing.T) {
 	var shared []*pipeline.Event
 	p, s := newPipeline(t, Config{}, reader{seen: &shared})
@@ -658,6 +658,45 @@ func TestRetryRecordedOnce(t *testing.T) {
 	}
 	if len(shared) != 7 {
 		t.Errorf("analyzers were shown %d events, want every call's (7)", len(shared))
+	}
+}
+
+// Only a session the client or the gateway named takes a resent tail for a retry. In a session the
+// pipeline named (a root, or the call itself) a retry is recorded again, and two conversations of
+// one caller that open alike, with the same system text, share a root but never lose either one's
+// opening prompt or later turns.
+func TestHeaderlessRetryRecordedAgain(t *testing.T) {
+	p, s := newPipeline(t, Config{})
+	ctx := context.Background()
+	client := gateway.Client{UserAgent: "claude-cli/2.1.306", Identity: gateway.Identity{User: "alice", Email: "alice@example.com"}}
+	send := func(id, body string) {
+		p.Handle(ctx, &gateway.Call{Gateway: "test", ID: id, Phase: gateway.PhaseRequest, Protocol: llm.AnthropicMessages, Body: []byte(body), Client: client})
+	}
+	open := `{"model":"m","system":"You are a coding agent.","messages":[{"role":"user","content":"fix the tests"}]}`
+	next := func(reply, ask string) string {
+		return `{"model":"m","system":"You are a coding agent.","messages":[{"role":"user","content":"fix the tests"},` +
+			`{"role":"assistant","content":"` + reply + `"},{"role":"user","content":"` + ask + `"}]}`
+	}
+	send("a1", open)                                // conversation A opens
+	send("a1-retry", open)                          // and is retried
+	send("b1", open)                                // conversation B opens alike
+	send("a2", next("Two fail.", "fix the first"))  // A goes on
+	send("b2", next("All pass.", "write the docs")) // B goes on
+	p.Close()
+	var prompts []string
+	sessions := map[string]bool{}
+	for _, e := range s.events() {
+		if e.Beacon.Event.Action == "prompt.submitted" {
+			prompts = append(prompts, e.Beacon.Prompt.Text)
+			sessions[e.Beacon.Session.ID] = true
+		}
+	}
+	want := []string{"fix the tests", "fix the tests", "fix the tests", "fix the first", "write the docs"}
+	if !slices.Equal(prompts, want) {
+		t.Errorf("recorded prompts %q, want %q", prompts, want)
+	}
+	if len(sessions) != 1 {
+		t.Errorf("sessions %v, want the one root the conversations share", sessions)
 	}
 }
 

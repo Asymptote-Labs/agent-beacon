@@ -57,6 +57,11 @@ matters.
 Naming a session reads no store: a call's two phases are named by the same function from the same
 request body, so they always agree, in any order and on any replica.
 
+A resent tail is taken for a client's retry, analyzed but not recorded again, only in a session
+the client or the gateway named: a session header, the gateway's conversation id, a provider
+conversation id. In a root session or a call's own session a retry is recorded twice, and two
+conversations that share a root never lose either one's prompts, only share its `session.id`.
+
 An OpenAI Responses request that continues provider-side state carries only its new turn, so it
 has no root. With `conversation` set, the conversation id is the session. A request that continues
 `previous_response_id`, with no session header naming it, is its own session, `<gateway>:<call
@@ -91,8 +96,9 @@ tool): a rule on the target fires once, on the call, and a call and its result n
 `gen_ai.tool.call.arguments`, so a reader can still see what it answers.
 
 System text and tool definitions are resent on every call and recorded once per session, and so is
-a request's new tail (its user text and tool results): a client that retries a request sends the
-same tail, which is analyzed again but not recorded again. `model` is the model the client asked
+a request's new tail (its user text and tool results) in a session the client or the gateway
+named: a client that retries a request sends the same tail, which is analyzed again but not
+recorded again (see Sessions). `model` is the model the client asked
 for on every event of a call; `gen_ai.response.model` is the provider's own name for it. The
 gateway's call id is in `raw["gateway.call_id"]`, and the response a Responses call continues in
 `raw["gateway.previous_response_id"]` (on a reply, when no session header names it).

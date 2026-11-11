@@ -166,7 +166,7 @@ func TestSessionID(t *testing.T) {
 		{"gateway's conversation id", gateway.Call{Gateway: "g", ID: "c", Client: gateway.Client{Session: "trace"}}, "trace"},
 		{"no session and no conversation: the call is its own", gateway.Call{Gateway: "g", ID: "c", Phase: gateway.PhaseRequest}, "g:c"},
 	} {
-		if got, _ := p.sessionID(&tc.c); got != tc.want {
+		if got, _, _ := p.sessionID(&tc.c); got != tc.want {
 			t.Errorf("%s: sessionID = %q, want %q", tc.name, got, tc.want)
 		}
 	}

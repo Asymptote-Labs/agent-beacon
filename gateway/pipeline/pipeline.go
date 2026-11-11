@@ -224,7 +224,7 @@ func (p *Pipeline) run(ctx context.Context, c *gateway.Call) gateway.Verdict {
 	if err := decode(c); err != nil {
 		errs = append(errs, err)
 	}
-	session, previous := p.sessionID(c)
+	session, named, previous := p.sessionID(c)
 	t := &Turn{Call: c, SessionID: session, PreviousResponse: previous, Harness: harness.Identify(c.Client.UserAgent), Store: p.cfg.Store, wantsResent: p.resent}
 
 	var findings, standing []Finding
@@ -232,8 +232,12 @@ func (p *Pipeline) run(ctx context.Context, c *gateway.Call) gateway.Verdict {
 	if len(errs) == 0 {
 		switch c.Phase {
 		case gateway.PhaseRequest:
+			// A resent tail is taken for a retry only in a session the client or the gateway
+			// named, and never for a stateful request, whose tail is only its new turn: a root
+			// shared by two conversations, or a repeated "yes", must never lose a prompt.
+			retries := named && !c.Request.Stateful()
 			var err error
-			if t.New, err = requestDelta(ctx, p.cfg.Store, p.seen, t.SessionID, c.Request, p.cfg.SeenTTL); err != nil {
+			if t.New, err = requestDelta(ctx, p.cfg.Store, p.seen, t.SessionID, c.Request, p.cfg.SeenTTL, retries); err != nil {
 				errs = append(errs, fmt.Errorf("store: %w", err))
 			}
 		case gateway.PhaseResponse:
@@ -327,32 +331,34 @@ func decode(c *gateway.Call) error {
 // The session is a session header the client sent, or the gateway's own conversation id; failing
 // both, what the request's body says (callRoot; a reply reads the body of the request it answers,
 // Call.RequestBody): the provider's conversation id, or the conversation's root (rootSession);
-// failing those, the call itself. A request that continues previous_response_id, with nothing
-// else naming its conversation, is its own session: the response it continues is on its events,
-// and on its reply's, for whoever stitches the turns of such a chain together.
-func (p *Pipeline) sessionID(c *gateway.Call) (session, previous string) {
+// failing those, the call itself. named reports that the client, the gateway or the provider named
+// it (a header, the gateway's conversation id, the provider's conversation id), not the pipeline:
+// only there is a resent tail taken for a retry. A request that continues previous_response_id,
+// with nothing else naming its conversation, is its own session: the response it continues is on
+// its events, and on its reply's, for whoever stitches the turns of such a chain together.
+func (p *Pipeline) sessionID(c *gateway.Call) (session string, named bool, previous string) {
 	for _, h := range p.cfg.SessionHeaders {
 		if v := c.Client.Headers[h]; v != "" {
-			return v, decodedPrevious(c)
+			return v, true, decodedPrevious(c)
 		}
 	}
 	if c.Client.Session != "" {
-		return c.Client.Session, decodedPrevious(c)
+		return c.Client.Session, true, decodedPrevious(c)
 	}
 	own := c.Gateway + ":" + c.ID
 	root, ok := callRoot(c)
 	switch {
 	case !ok:
 	case root.Conversation != "":
-		return root.Conversation, root.PreviousResponse
+		return root.Conversation, true, root.PreviousResponse
 	case root.PreviousResponse != "":
-		return own, root.PreviousResponse
+		return own, false, root.PreviousResponse
 	default:
 		if s, ok := rootSession(c, root.First); ok {
-			return s, ""
+			return s, false, ""
 		}
 	}
-	return own, ""
+	return own, false, ""
 }
 
 // decodedPrevious is the response a decoded request continues. A reply whose session a header
