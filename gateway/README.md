@@ -62,9 +62,11 @@ tool): a rule on the target fires once, on the call, and a call and its result n
 `event.id`, whichever replica saw the call. The call's arguments are on the result's
 `gen_ai.tool.call.arguments`, so a reader can still see what it answers.
 
-System text and tool definitions are resent on every call and recorded once per session. `model`
-is the model the client asked for on every event of a call; `gen_ai.response.model` is the
-provider's own name for it. The gateway's call id is in `raw["gateway.call_id"]`.
+System text and tool definitions are resent on every call and recorded once per session, and so is
+a request's new tail (its user text and tool results): a client that retries a request sends the
+same tail, which is analyzed again but not recorded again. `model` is the model the client asked
+for on every event of a call; `gen_ai.response.model` is the provider's own name for it. The
+gateway's call id is in `raw["gateway.call_id"]`.
 
 ## Extension points
 

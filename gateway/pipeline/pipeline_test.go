@@ -104,7 +104,8 @@ func (s *flakyStore) Add(ctx context.Context, es ...store.Entry) ([]bool, error)
 
 // A session resending the same system prompt and tools is answered from memory, but a tool that
 // is added or changed is still reported as new, and a store failure (everything counts as new) is
-// not remembered as having reported anything.
+// not remembered as having reported anything. The tail ("hi") is the same in every step, a retry
+// of the first call: it is new once, and again only while the store is down.
 func TestSeenContentAcrossCalls(t *testing.T) {
 	st := &flakyStore{Store: store.NewMemory(1000)}
 	rec := &recorder{}
@@ -119,20 +120,21 @@ func TestSeenContentAcrossCalls(t *testing.T) {
 		return out
 	}
 	steps := []struct {
-		name      string
-		tools     []llm.Tool
-		down      bool
-		wantSys   int
-		wantTools []string
+		name         string
+		tools        []llm.Tool
+		down         bool
+		wantSys      int
+		wantTools    []string
+		tailReported bool
 	}{
-		{"first call reports everything", tools("a", "b"), false, 1, []string{"a", "b"}},
-		{"resent unchanged", tools("a", "b"), false, 0, nil},
-		{"resent unchanged again", tools("a", "b"), false, 0, nil},
-		{"a description changes", tools("a", "B"), false, 0, []string{"B"}},
-		{"a tool is added", tools("a", "B", "c"), false, 0, []string{"c"}},
-		{"store down: all new", tools("a", "B", "c", "d"), true, 1, []string{"a", "B", "c", "d"}},
-		{"store back: only the unreported tool", tools("a", "B", "c", "d"), false, 0, []string{"d"}},
-		{"then remembered", tools("a", "B", "c", "d"), false, 0, nil},
+		{"first call reports everything", tools("a", "b"), false, 1, []string{"a", "b"}, false},
+		{"resent unchanged", tools("a", "b"), false, 0, nil, true},
+		{"resent unchanged again", tools("a", "b"), false, 0, nil, true},
+		{"a description changes", tools("a", "B"), false, 0, []string{"B"}, true},
+		{"a tool is added", tools("a", "B", "c"), false, 0, []string{"c"}, true},
+		{"store down: all new", tools("a", "B", "c", "d"), true, 1, []string{"a", "B", "c", "d"}, false},
+		{"store back: only the unreported tool", tools("a", "B", "c", "d"), false, 0, []string{"d"}, true},
+		{"then remembered", tools("a", "B", "c", "d"), false, 0, nil, true},
 	}
 	for i, s := range steps {
 		st.down = s.down
@@ -142,8 +144,8 @@ func TestSeenContentAcrossCalls(t *testing.T) {
 		for _, tl := range d.Tools {
 			got = append(got, tl.Description)
 		}
-		if len(d.System) != s.wantSys || !slices.Equal(got, s.wantTools) {
-			t.Errorf("%s: %d system, tools %v; want %d, %v", s.name, len(d.System), got, s.wantSys, s.wantTools)
+		if len(d.System) != s.wantSys || !slices.Equal(got, s.wantTools) || d.TailReported != s.tailReported {
+			t.Errorf("%s: %d system, tools %v, tail reported %v; want %d, %v, %v", s.name, len(d.System), got, d.TailReported, s.wantSys, s.wantTools, s.tailReported)
 		}
 	}
 }

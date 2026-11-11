@@ -166,12 +166,14 @@ func (b *builder) request() {
 			}))
 		}
 	}
+	// A tail the session already reported (a client's retry) is analyzed again but not recorded.
+	record := !b.t.New.TailReported
 	var prompt []string
 	for _, m := range b.t.New.Tail {
 		for _, part := range m.Parts {
 			switch {
 			case part.Kind == llm.PartToolResult:
-				b.result(part.Result)
+				b.result(part.Result, record)
 			case m.Role == llm.RoleUser && part.Kind == llm.PartText && part.Text != "":
 				prompt = append(prompt, part.Text)
 			}
@@ -181,7 +183,7 @@ func (b *builder) request() {
 		text := strings.Join(prompt, "\n")
 		e := b.event("prompt.submitted", "prompt", obs.FidelityObserved)
 		e.Prompt = &obs.PromptInfo{Text: text}
-		b.addCompleted(e, retained(text, true))
+		b.addCompleted(e, record, retained(text, true))
 	}
 }
 
@@ -204,7 +206,7 @@ func (b *builder) toolListed(tool *llm.Tool, bound harness.Call) obs.Event {
 // suppression key on (dedupeTarget). Its call's arguments go on the written record instead. Every
 // other result completes its call as tool.completed (tool.failed for an error), a different
 // action from any call's, keeping the call's target so the result says what it answers.
-func (b *builder) result(r *llm.ToolResult) {
+func (b *builder) result(r *llm.ToolResult, record bool) {
 	tc, found := b.t.ToolCall(r.CallID)
 	call := harness.Bind(tc.Name, tc.Arguments)
 	text := llm.JoinText(r.Parts)
@@ -232,10 +234,10 @@ func (b *builder) result(r *llm.ToolResult) {
 	}
 	e.GenAI.Tool = &obs.GenAIToolInfo{Name: call.Name, Call: &obs.GenAIToolCallInfo{ID: r.CallID, Result: text}}
 	if targetless && found {
-		b.addCompleted(e, arguments(tc.Arguments))
+		b.addCompleted(e, record, arguments(tc.Arguments))
 		return
 	}
-	b.add(e, true)
+	b.add(e, record)
 }
 
 // response records the model's reply: its text, its token counts, and the tool calls it made. A
@@ -253,7 +255,7 @@ func (b *builder) response() {
 	if text := llm.JoinText(resp.Parts); text != "" {
 		e := b.event("agent.message", "agent", obs.FidelityObserved)
 		e.GenAI.Response = info
-		b.addCompleted(e, retained(text, false))
+		b.addCompleted(e, true, retained(text, false))
 	}
 	if usage := b.usage(resp.Usage); usage != nil {
 		e := b.event("token.usage", "metric", obs.FidelityObserved)
@@ -279,7 +281,7 @@ func (b *builder) response() {
 		}
 		e.Tool = target(call)
 		e.GenAI.Tool = &obs.GenAIToolInfo{Name: call.Name, Call: &obs.GenAIToolCallInfo{ID: tc.ID}}
-		b.addCompleted(e, arguments(tc.Arguments))
+		b.addCompleted(e, true, arguments(tc.Arguments))
 	}
 }
 
@@ -387,9 +389,9 @@ func (b *builder) add(e obs.Event, record bool) {
 	b.events = append(b.events, b.finish(e, record))
 }
 
-// addCompleted records an event whose written form complete finishes (pipeline.Event.Complete).
-func (b *builder) addCompleted(e obs.Event, complete func(*obs.Event)) {
-	ev := b.finish(e, true)
+// addCompleted adds an event whose written form complete finishes (pipeline.Event.Complete).
+func (b *builder) addCompleted(e obs.Event, record bool, complete func(*obs.Event)) {
+	ev := b.finish(e, record)
 	ev.Complete = complete
 	b.events = append(b.events, ev)
 }

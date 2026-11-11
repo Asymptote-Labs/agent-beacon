@@ -3,7 +3,9 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
+	"hash"
 	"time"
 	"unsafe"
 
@@ -52,6 +54,9 @@ type Delta struct {
 	// Tail is the conversation after the model's last turn, system messages excluded: the user
 	// turns and tool results this request adds. It needs no memory to compute.
 	Tail []llm.Message
+	// TailReported reports that the session already reported this tail: the request is a
+	// client's retry of one it sent before. Its tail is still analyzed, but not recorded again.
+	TailReported bool
 	// Output is the model's reply, on the response phase.
 	Output *llm.Response
 }
@@ -76,17 +81,24 @@ func (t *Turn) ToolCall(id string) (llm.ToolCall, bool) {
 
 // requestDelta computes what a request adds. The tail is stateless; system text and tool
 // definitions are resent on every call, so whether the session reported them before is asked of
-// the store, in one batch, unless the memo says this process already confirmed the same set. When
-// the store fails, everything counts as new: a record reported twice is better than one never
-// reported.
+// the store, unless the memo says this process already confirmed the same set; and so is whether
+// it reported this very tail, which a client's retry sends again. Both are asked in one batch.
+// When the store fails, everything counts as new: a record reported twice is better than one
+// never reported.
 func requestDelta(ctx context.Context, s store.Store, memo *seenMemo, session string, r *llm.Request, ttl time.Duration) (Delta, error) {
 	var d Delta
-	var err error
 	now := time.Now()
+	start := llm.TailStart(r.Messages)
+	for _, m := range r.Messages[start:] {
+		if m.Role != llm.RoleSystem {
+			d.Tail = append(d.Tail, m)
+		}
+	}
 	fp := memo.fingerprint(r)
-	if !memo.known(session, fp, now) {
-		var systems []llm.Message
-		var entries []store.Entry
+	known := memo.known(session, fp, now)
+	var systems []llm.Message
+	var entries []store.Entry
+	if !known {
 		for _, m := range r.Messages {
 			if m.Role == llm.RoleSystem {
 				systems = append(systems, m)
@@ -96,8 +108,15 @@ func requestDelta(ctx context.Context, s store.Store, memo *seenMemo, session st
 		for _, t := range r.Tools {
 			entries = append(entries, seenEntry(session, ttl, "tool", t.Name, t.Description, unsafe.String(unsafe.SliceData(t.Parameters), len(t.Parameters))))
 		}
-		var added []bool
-		added, err = s.Add(ctx, entries...)
+	}
+	if len(d.Tail) > 0 {
+		entries = append(entries, tailEntry(session, ttl, r.Messages, start, d.Tail))
+	}
+	if len(entries) == 0 {
+		return d, nil
+	}
+	added, err := s.Add(ctx, entries...)
+	if !known {
 		for i, m := range systems {
 			if err != nil || added[i] {
 				d.System = append(d.System, m)
@@ -112,12 +131,87 @@ func requestDelta(ctx context.Context, s store.Store, memo *seenMemo, session st
 			memo.confirm(session, fp, now.Add(ttl))
 		}
 	}
-	for _, m := range r.Messages[llm.TailStart(r.Messages):] {
-		if m.Role != llm.RoleSystem {
-			d.Tail = append(d.Tail, m)
-		}
+	if len(d.Tail) > 0 && err == nil && !added[len(entries)-1] {
+		d.TailReported = true
 	}
 	return d, err
+}
+
+// tailEntry is the store entry marking a request's tail as reported in a session: a digest of
+// where the tail starts, the model turn it answers and its content, so a retry of the request
+// finds it and a later turn with the same words (another "continue") does not.
+func tailEntry(session string, ttl time.Duration, msgs []llm.Message, start int, tail []llm.Message) store.Entry {
+	d := newDigest()
+	d.int(start)
+	if start > 0 {
+		d.message(&msgs[start-1])
+	}
+	for i := range tail {
+		d.message(&tail[i])
+	}
+	return store.Entry{Key: "tail/" + session + "/" + d.hex(), Value: seenValue, TTL: ttl}
+}
+
+// digest hashes content stably across processes and replicas (SHA-256, truncated to 128 bits when
+// rendered), each field length-prefixed so no two sequences of fields hash alike.
+type digest struct {
+	h   hash.Hash
+	buf [sha256.Size]byte
+}
+
+func newDigest() *digest { return &digest{h: sha256.New()} }
+
+func (d *digest) int(n int) {
+	binary.BigEndian.PutUint64(d.buf[:8], uint64(n))
+	d.h.Write(d.buf[:8])
+}
+
+// field writes s after its length, hashed in place.
+func (d *digest) field(s string) {
+	d.int(len(s))
+	d.h.Write(unsafe.Slice(unsafe.StringData(s), len(s))) // Write neither keeps nor modifies it
+}
+
+// message writes a message's role and parts.
+func (d *digest) message(m *llm.Message) {
+	d.field(string(m.Role))
+	for i := range m.Parts {
+		d.part(&m.Parts[i])
+	}
+}
+
+func (d *digest) part(p *llm.Part) {
+	d.int(int(p.Kind))
+	switch {
+	case p.Call != nil:
+		d.field(p.Call.ID)
+		d.field(p.Call.Name)
+		d.field(p.Call.Arguments)
+	case p.Result != nil:
+		d.field(p.Result.CallID)
+		isError := 0
+		if p.Result.IsError {
+			isError = 1
+		}
+		d.int(isError)
+		for i := range p.Result.Parts {
+			d.part(&p.Result.Parts[i])
+		}
+	case p.Media != nil:
+		d.field(p.Media.Type)
+		d.field(p.Media.MIME)
+		d.field(p.Media.URL)
+		d.field(p.Media.Data)
+	default:
+		d.field(p.Text)
+	}
+}
+
+// hex renders the digest's first 128 bits in hex.
+func (d *digest) hex() string {
+	var hexed [32]byte
+	hex.Encode(hexed[:], d.h.Sum(d.buf[:0])[:16])
+	return string(hexed[:])
 }
 
 // seenEntry is the store entry marking content as reported in a session: a digest of its parts,

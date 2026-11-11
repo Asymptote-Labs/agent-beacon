@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -628,5 +629,34 @@ func TestArgumentsCompletedAtWrite(t *testing.T) {
 		if got, want := string(mustJSON(t, e.Written())), string(mustJSON(t, eager)); got != want {
 			t.Errorf("written\n%.300s\nwant\n%.300s", got, want)
 		}
+	}
+}
+
+// A client's retry resends the same request: its prompt and tool results are analyzed again but
+// recorded once. The next turn, and a later turn with the same words, are new and recorded.
+func TestRetryRecordedOnce(t *testing.T) {
+	var shared []*pipeline.Event
+	p, s := newPipeline(t, Config{}, reader{seen: &shared})
+	ctx := context.Background()
+	turn1 := `{"model":"m","messages":[{"role":"user","content":"continue"}]}`
+	turn2 := `{"model":"m","messages":[
+	  {"role":"user","content":"continue"},
+	  {"role":"assistant","content":[{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"/a"}}]},
+	  {"role":"user","content":[{"type":"tool_result","tool_use_id":"r1","content":"A"}]}]}`
+	turn3 := `{"model":"m","messages":[
+	  {"role":"user","content":"continue"},
+	  {"role":"assistant","content":[{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"/a"}}]},
+	  {"role":"user","content":[{"type":"tool_result","tool_use_id":"r1","content":"A"}]},
+	  {"role":"assistant","content":"Done."},
+	  {"role":"user","content":"continue"}]}`
+	for i, body := range []string{turn1, turn1, turn2, turn2, turn2, turn3, turn3} {
+		p.Handle(ctx, anthropic(fmt.Sprintf("c%d", i), gateway.PhaseRequest, "m", body))
+	}
+	p.Close()
+	if got := actions(s.events()); !slices.Equal(got, []string{"prompt.submitted", "file.read", "prompt.submitted"}) {
+		t.Errorf("recorded %v, want each turn's prompt or result once", got)
+	}
+	if len(shared) != 7 {
+		t.Errorf("analyzers were shown %d events, want every call's (7)", len(shared))
 	}
 }
