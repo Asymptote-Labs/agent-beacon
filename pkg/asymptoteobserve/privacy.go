@@ -548,6 +548,35 @@ func isLiteralOrAuthScheme(value string) bool {
 	return isAuthScheme(value)
 }
 
+// isSubstitutionOpening reports whether an unquoted value is where a command substitution opens
+// with the name of the command it runs, or with the file it reads: `$(cat`, `$(gh`,
+// `$(/usr/bin/security`, `$(pwgen)`, `$(<~/.netrc)`. The secret is what the command prints when
+// the line runs, and is not in the text. An unquoted value ends at the first blank, so replacing
+// it took the command's name and nothing else: `TOKEN=$(cat ~/.aws/credentials)` was logged as
+// `TOKEN=[REDACTED] ~/.aws/credentials)`, which hid no secret, no longer parsed as a command
+// line, and no longer said which command read the file. Only a plain name or path is kept: with
+// any other character in it (`$((`, `$(a;b`, `$(a=b`) the value is replaced as before.
+func isSubstitutionOpening(value string) bool {
+	word, ok := strings.CutPrefix(value, "$(")
+	if !ok {
+		return false
+	}
+	word = strings.TrimRight(strings.TrimPrefix(word, "<"), ")")
+	for i := 0; i < len(word); i++ {
+		c := word[i]
+		if !(c|0x20 >= 'a' && c|0x20 <= 'z' || c >= '0' && c <= '9' || strings.IndexByte("_./~+-", c) >= 0) {
+			return false
+		}
+	}
+	return word != ""
+}
+
+// isAuthSchemeOrSubstitution is what an unquoted labeled value keeps: isAuthScheme and
+// isSubstitutionOpening.
+func isAuthSchemeOrSubstitution(value string) bool {
+	return isAuthScheme(value) || isSubstitutionOpening(value)
+}
+
 var redactionRules = concatRules([]redactionRule{
 	// A private key block. The header must be followed by key material, so source code, a diff or
 	// grep output that only names the header keeps the text after it. Without an END line (the
@@ -558,7 +587,7 @@ var redactionRules = concatRules([]redactionRule{
 	// keeps its public `eyJ` prefix, as the shape rules below keep theirs, so `Bearer eyJ[REDACTED]`
 	// still says a token was there where `Bearer [REDACTED]` may only have been the word "token" or
 	// a `$VARIABLE`. Digest's parameters go together (redactAuthCredentials).
-	foldedRule(`(?i)(`+redactAuthorizationLabel+`(?:`+redactListedAuthSchemes+`)[ \t]+(?-i:eyJ)?)(`+redactAuthCredentials+`)()`, "${1}"+redactedValue, nil, "authorization"),
+	foldedRule(`(?i)(`+redactAuthorizationLabel+`(?:`+redactListedAuthSchemes+`)[ \t]+(?-i:eyJ)?)(`+redactAuthCredentials+`)()`, "${1}"+redactedValue, isSubstitutionOpening, "authorization"),
 	foldedRule(`(?i)(\bbearer[ \t]+(?-i:eyJ)?)(?P<value>[a-z0-9._~+/=-]+)`, "${1}"+redactedValue, isRedactedJWTPrefix, "bearer"),
 	// An Authorization header with any other scheme: `ApiKey` (Elasticsearch), `SSWS` (Okta), `Bot`
 	// (Discord), `Splunk`, `Negotiate`, Hawk and AWS Signature V4's parameter lists, and whatever a
@@ -592,7 +621,7 @@ var redactionRules = concatRules([]redactionRule{
 	{
 		expr: `(?i)(?:([?&]` + redactLabel + `=)(?P<value>` + redactParamValue + `)|` +
 			`(\b` + redactLabel + `\s*[:=]\s*)(?P<value>` + redactUnquoted + `))`,
-		replacement: "${1}${3}" + redactedValue, keep: isAuthScheme, needles: redactLabelNeedles, start: startParam,
+		replacement: "${1}${3}" + redactedValue, keep: isAuthSchemeOrSubstitution, needles: redactLabelNeedles, start: startParam,
 		runsOn: awsPairRunsOn,
 	},
 	// A command-line flag: `--password x`, `--token=x`, `--api-key x`, and quoted, the way agents
@@ -600,7 +629,7 @@ var redactionRules = concatRules([]redactionRule{
 	// with `=` or `:`, which is an assignment's separator after a word that only looks like a flag:
 	// a diff's removed line `-SECRET_KEY = 'x'`.
 }, quotedRules(quotedFlag, nil), []redactionRule{
-	{expr: `(?i)(` + redactFlag + `)([^\s"'=:-][^\s"']*)`, replacement: "${1}" + redactedValue, needles: redactFlagNeedles, start: startFlag, runsOn: awsPairRunsOn},
+	{expr: `(?i)(` + redactFlag + `)([^\s"'=:-][^\s"']*)`, replacement: "${1}" + redactedValue, keep: isSubstitutionOpening, needles: redactFlagNeedles, start: startFlag, runsOn: awsPairRunsOn},
 	// A flag and its value as two quoted items of an argument list, the way an MCP server's args
 	// are written in JSON, TOML and YAML: `"args": ["--api-key", "x"]`.
 	{
@@ -1235,8 +1264,10 @@ func keptLabel(t string, end int) bool {
 // that a later rule can change it, or make it long enough to remove.
 func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string]struct{}) (_ map[string]struct{}, kept bool) {
 	value := text.value
+	// A substitution's opening is a command's name, not a value: its copies elsewhere in the
+	// text are other commands, and stay (isSubstitutionOpening).
 	add := func(s string) {
-		if len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) {
+		if len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) && !isSubstitutionOpening(s) {
 			if assigned == nil {
 				assigned = map[string]struct{}{}
 			}

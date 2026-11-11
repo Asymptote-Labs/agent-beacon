@@ -474,8 +474,12 @@ over anything but whitespace and quotes. A pattern of one component without a `.
 word such as `credentials`) counts only directly after a separator. A store with `exclude`
 patterns is not mentioned by a text that also names something those patterns match.
 `redacted` is for a command line as a log holds it. A log's redaction replaces a value that
-looks like a secret, and the value of `TOKEN=$(gh auth token)` begins with the command's
-name, so the log holds `TOKEN=[REDACTED] auth token)`. The predicate is true when the text
+looks like a secret, and where a command substitution is put in a secret's place the value
+can begin with the command's name: of `curl -u "ci:$(gh auth token)"` the log holds
+`curl -u "ci:[REDACTED] auth token)"`. (A Beacon before the release that introduced v1.3
+also wrote `TOKEN=[REDACTED] auth token)` for `TOKEN=$(gh auth token)`; redaction now keeps
+the opening of a substitution after a label, and that line is logged as written.) The
+predicate is true when the text
 holds `[REDACTED]`, whitespace, and then, within the same command, an entry's `words` in
 order and one of its `flags`. An entry has this form only when what is left tells the
 command from another: two `words` or more, one word with `flags`, one word that is more than

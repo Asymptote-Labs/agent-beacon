@@ -222,11 +222,13 @@ func (p *commandPattern) term() CommandTerm {
 }
 
 // A log does not always hold a command line as it ran. Redaction replaces a value that looks
-// like a secret, and the value of TOKEN=$(gh auth token) or of "Bearer $(gcloud auth
-// print-access-token)" starts with the command's name: what the log holds is
-// "TOKEN=[REDACTED] auth token)", which no longer reads as bash and names no command. The
-// redacted form of a command match finds what is left: the redaction mark, then the match's
-// words and one of its options within the same command.
+// like a secret, and where a command substitution stands in a secret's place the value can
+// start with the command's name: of curl -u "ci:$(gh auth token)" the log holds
+// "ci:[REDACTED] auth token)", and a log written before redaction kept the opening of a
+// substitution after a label holds "TOKEN=[REDACTED] auth token)" for TOKEN=$(gh auth token).
+// Neither reads as bash or names a command. The redacted form of a command match finds what is
+// left: the redaction mark, then the match's words and one of its options within the same
+// command.
 const (
 	redactionMark = `\[REDACTED\]`
 	// textWordChar is a character of a word in a command text, and textWordEnd what ends one.
