@@ -61,7 +61,7 @@ content:
 | The reply's token counts | `token.usage` (`gen_ai.usage`) |
 | A shell, read or MCP tool call | `command.executed`, `file.read`, `mcp.tool_invoked` |
 | A fetch or any other tool call | `tool.invoked` |
-| A read's or MCP tool's result | `file.read`, `mcp.tool_invoked`, with the result |
+| A read's or MCP tool's result | `file.read`, `mcp.tool_invoked`, with the result and the call's arguments but not its path or MCP server, which the call carries |
 | Any other tool result | `tool.completed`, or `tool.failed` for an error |
 
 Tool calls are recorded when the model makes them, before the agent acts on them. Replies carry

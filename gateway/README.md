@@ -51,16 +51,16 @@ arguments or results.
 | A read tool call | `file.read`, with `file.path` |
 | An MCP tool call | `mcp.tool_invoked`, with `mcp.server` and `mcp.tool` |
 | A fetch or any other tool call | `tool.invoked` (`tool.path` is a fetch's URL) |
-| A read's or an MCP tool's result | `file.read` / `mcp.tool_invoked`, with `gen_ai.tool.call.result` |
+| A read's or an MCP tool's result | `file.read` / `mcp.tool_invoked`, with `gen_ai.tool.call.result` and the call's arguments |
 | Any other result | `tool.completed` (`tool.failed` for an error), keeping the call's target |
 
 A gateway sees a tool call before the harness acts on it, so a call is recorded as the action it
 asks for, and a rule can judge a read or a command before it happens. A read's or an MCP tool's
 result repeats its call's action, which is where Beacon's rules read content from outside the
-agent. When the gateway recorded the call, the result leaves out the target the call carried (the
-path, or the MCP server and tool), so the two have different `event.id`s and a rule on the target
-fires once; a result whose call it never saw keeps the target. Which calls it recorded is kept in
-the store.
+agent. The result never carries the target the call carried (the path, or the MCP server and
+tool): a rule on the target fires once, on the call, and a call and its result never share an
+`event.id`, whichever replica saw the call. The call's arguments are on the result's
+`gen_ai.tool.call.arguments`, so a reader can still see what it answers.
 
 System text and tool definitions are resent on every call and recorded once per session. `model`
 is the model the client asked for on every event of a call; `gen_ai.response.model` is the

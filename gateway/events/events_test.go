@@ -167,8 +167,7 @@ func TestRequestEvents(t *testing.T) {
 	p.Handle(context.Background(), anthropic("c1", gateway.PhaseRequest, "", request))
 	p.Close()
 	evs := s.events()
-	// The gateway never saw these calls (history from before it saw the session), so read and
-	// MCP results carry their targets.
+	// Read and MCP results repeat their call's action, without its target.
 	want := []string{"session.context", "mcp.tool_listed", "file.read", "mcp.tool_invoked", "tool.completed", "tool.completed", "tool.failed", "prompt.submitted"}
 	if got := actions(evs); !slices.Equal(got, want) {
 		t.Fatalf("actions %v, want %v", got, want)
@@ -177,10 +176,10 @@ func TestRequestEvents(t *testing.T) {
 		checkCommon(t, e)
 	}
 	read, mcp, shell, fetch, failed, prompt := evs[2].Beacon, evs[3].Beacon, evs[4].Beacon, evs[5].Beacon, evs[6].Beacon, *evs[7].Written()
-	if read.File == nil || read.File.Path != "/repo/README.md" || read.GenAI.Tool.Call.Result != "# readme" || read.GenAI.Tool.Call.ID != "t_read" {
+	if read.File != nil || read.GenAI.Tool.Call.Result != "# readme" || read.GenAI.Tool.Call.ID != "t_read" {
 		t.Errorf("read result: file %+v tool %+v", read.File, read.GenAI.Tool)
 	}
-	if mcp.MCP == nil || mcp.MCP.Server != "notes" || mcp.MCP.Tool != "get" || mcp.GenAI.Tool.Call.Result != "note seven" {
+	if mcp.MCP != nil || mcp.Tool != nil || mcp.GenAI.Tool.Name != "mcp__notes__get" || mcp.GenAI.Tool.Call.Result != "note seven" {
 		t.Errorf("mcp result: mcp %+v tool %+v", mcp.MCP, mcp.GenAI.Tool)
 	}
 	if shell.Command == nil || shell.Command.Command != "go test ./..." || shell.Command.Output != "ok" || shell.Event.Category != "command" {
@@ -268,42 +267,73 @@ func mustJSON(t *testing.T, v any) []byte {
 	return b
 }
 
-// A read or MCP call and its result never share an event id: when the gateway recorded the call,
-// the result repeats its action without its target (path, MCP server and tool), so a rule on the
-// target fires once.
+// A call and its result never share an event id, whichever process recorded the call: here the
+// calls are recorded by one pipeline and the results by another with a store of its own, as a
+// second replica or a restarted gateway would. A read's and an MCP tool's result repeat the call's
+// action without its target (no path, no MCP server, tool or tool name), so a rule on the target
+// fires once, and the call's arguments are on the written result.
 func TestCallAndResultAreDistinct(t *testing.T) {
-	p, s := newPipeline(t, Config{})
 	ctx := context.Background()
-	p.Handle(ctx, anthropic("c1", gateway.PhaseResponse, "claude-sonnet-4-5", response))
-	p.Handle(ctx, anthropic("c2", gateway.PhaseRequest, "claude-sonnet-4-5", `{"model":"claude-sonnet-4-5","messages":[
-	  {"role":"user","content":"go"},
-	  {"role":"assistant","content":[
+	calls := `{"id":"msg_1","model":"m","content":[
 	   {"type":"tool_use","id":"c_sh","name":"Bash","input":{"command":"go test ./..."}},
 	   {"type":"tool_use","id":"c_mcp","name":"mcp__notes__get","input":{"id":"7"}},
-	   {"type":"tool_use","id":"c_read","name":"Read","input":{"file_path":"/repo/.env"}}]},
+	   {"type":"tool_use","id":"c_read","name":"Read","input":{"file_path":"/repo/.env"}},
+	   {"type":"tool_use","id":"c_web","name":"WebFetch","input":{"url":"https://example.com/d"}},
+	   {"type":"tool_use","id":"c_other","name":"TodoWrite","input":{"todos":[]}},
+	   {"type":"tool_use","id":"c_fail","name":"Read","input":{"file_path":"/repo/missing"}}]}`
+	callsHolder, callSink := newPipeline(t, Config{})
+	callsHolder.Handle(ctx, anthropic("c1", gateway.PhaseResponse, "m", calls))
+	callsHolder.Close()
+	resultsHolder, resultSink := newPipeline(t, Config{})
+	resultsHolder.Handle(ctx, anthropic("c2", gateway.PhaseRequest, "m", `{"model":"m","messages":[
+	  {"role":"user","content":"go"},
+	  {"role":"assistant","content":`+calls[strings.Index(calls, "["):strings.LastIndex(calls, "]")+1]+`},
 	  {"role":"user","content":[
 	   {"type":"tool_result","tool_use_id":"c_sh","content":"ok"},
 	   {"type":"tool_result","tool_use_id":"c_mcp","content":"seven"},
-	   {"type":"tool_result","tool_use_id":"c_read","content":"A=1"}]}]}`))
-	p.Close()
-	ids := map[string]string{}
-	byCall := map[string][]obs.Event{}
-	for _, e := range s.events() {
-		if prev, dup := ids[e.ID()]; dup {
-			t.Errorf("%s and %s share id %s", prev, e.Beacon.Event.Action, e.ID())
-		}
-		ids[e.ID()] = e.Beacon.Event.Action
-		if obs.ToolCallID(&e.Beacon) != "" {
-			byCall[obs.ToolCallID(&e.Beacon)] = append(byCall[obs.ToolCallID(&e.Beacon)], e.Beacon)
+	   {"type":"tool_result","tool_use_id":"c_read","content":"A=1"},
+	   {"type":"tool_result","tool_use_id":"c_web","content":"page"},
+	   {"type":"tool_result","tool_use_id":"c_other","content":"done"},
+	   {"type":"tool_result","tool_use_id":"c_fail","content":"no such file","is_error":true}]}]}`))
+	resultsHolder.Close()
+	byCall := map[string]*pipeline.Event{}
+	for _, e := range callSink.events() {
+		if id := obs.ToolCallID(&e.Beacon); id != "" {
+			byCall[id] = e
 		}
 	}
-	read, mcp := byCall["c_read"], byCall["c_mcp"]
-	if len(read) != 2 || read[0].Event.Action != "file.read" || read[1].Event.Action != "file.read" ||
-		read[0].File == nil || read[0].File.Path != "/repo/.env" || read[1].File != nil || read[1].GenAI.Tool.Call.Result != "A=1" {
-		t.Errorf("read call and result: %s", mustJSON(t, read))
+	results := 0
+	for _, r := range resultSink.events() {
+		id := obs.ToolCallID(&r.Beacon)
+		if id == "" {
+			continue
+		}
+		results++
+		c := byCall[id]
+		if c == nil {
+			t.Fatalf("no call recorded for %s", id)
+		}
+		if c.ID() == r.ID() {
+			t.Errorf("%s: call (%s) and result (%s) share id %s", id, c.Beacon.Event.Action, r.Beacon.Event.Action, c.ID())
+		}
 	}
-	if len(mcp) != 2 || mcp[1].Event.Action != "mcp.tool_invoked" || mcp[0].MCP == nil || mcp[1].MCP != nil || mcp[1].Tool != nil {
-		t.Errorf("MCP call and result: %s", mustJSON(t, mcp))
+	if results != 6 {
+		t.Fatalf("%d results recorded, want 6", results)
+	}
+	for _, e := range resultSink.events() {
+		w := e.Written()
+		switch obs.ToolCallID(w) {
+		case "c_read":
+			if w.Event.Action != "file.read" || w.File != nil || (w.Tool != nil && w.Tool.Path != "") || w.GenAI.Tool.Call.Result != "A=1" ||
+				!strings.Contains(string(mustJSON(t, w.GenAI.Tool.Call.Arguments)), "/repo/.env") {
+				t.Errorf("read result: %s", mustJSON(t, w))
+			}
+		case "c_mcp":
+			if w.Event.Action != "mcp.tool_invoked" || w.MCP != nil || w.Tool != nil || w.Message != "" || w.GenAI.Tool.Call.Result != "seven" ||
+				!strings.Contains(string(mustJSON(t, w.GenAI.Tool.Call.Arguments)), `\"id\":\"7\"`) {
+				t.Errorf("MCP result: %s", mustJSON(t, w))
+			}
+		}
 	}
 }
 
@@ -375,8 +405,8 @@ func TestRulesSeeCallsAndResults(t *testing.T) {
 		}
 	}
 	for _, e := range evs {
-		if obs.ToolCallID(&e) == "k4" && (e.File == nil || e.File.Path != "/repo/NOTES.md") {
-			t.Errorf("result of a call the gateway never saw lacks its target: %+v", e.File)
+		if obs.ToolCallID(&e) == "k4" && e.File != nil {
+			t.Errorf("a read result carries its call's path: %+v", e.File)
 		}
 	}
 }
