@@ -45,11 +45,14 @@ arguments or results.
 conversation id (LiteLLM's trace id, Portkey's `session_id` metadata); or, failing both, a digest
 of the conversation's root, `root:<hex>`: the gateway, the caller's identity, the system text and
 the first user message, which a client resends unchanged on every call. A call's reply joins the
-session its request was given. The root is a heuristic: two conversations with the same caller,
-system text and opening message are one session, a conversation whose system text changes part-way
-is split there, and a request that carries no history (OpenAI Responses continuing
-`previous_response_id`) is its own session. Send a session header, or Portkey `session_id`
-metadata, where that matters.
+session its request was given. A root needs an identity: without one (Envoy without
+`identity_headers`, Portkey without identity metadata) different people's conversations that open
+alike would be one session, so each call is its own session instead. Set identity headers to get
+conversation-level sessions without a session header. The root is a heuristic: two conversations
+with the same caller, system text and opening message are one session, a conversation whose system
+text changes part-way is split there, and a request that carries no history (OpenAI Responses
+continuing `previous_response_id`) is its own session. Send a session header, or Portkey
+`session_id` metadata, where that matters.
 
 ## Events
 

@@ -189,18 +189,26 @@ func TestRootSession(t *testing.T) {
 		}
 		return []byte(b.String() + "]}")
 	}
-	call := func(id string, phase gateway.Phase, b []byte, user string) {
+	call := func(id string, phase gateway.Phase, b []byte, who gateway.Identity) {
 		p.Handle(ctx, &gateway.Call{Gateway: "pk", ID: id, Phase: phase, Protocol: llm.AnthropicMessages, Body: b,
-			Client: gateway.Client{Identity: gateway.Identity{User: user}}})
+			Client: gateway.Client{Identity: who}})
 	}
+	alice, bob := gateway.Identity{User: "alice"}, gateway.Identity{User: "bob"}
 	reply := []byte(`{"id":"msg","model":"m","content":[{"type":"text","text":"ok"}]}`)
-	call("c1", gateway.PhaseRequest, body("fix the tests", 0), "alice")
-	call("c1", gateway.PhaseResponse, reply, "alice")
-	call("c2", gateway.PhaseRequest, body("fix the tests", 1), "alice")
-	call("c3", gateway.PhaseRequest, body("fix the tests", 40), "alice")
-	call("c4", gateway.PhaseRequest, body("write the docs", 1), "alice")
-	call("c5", gateway.PhaseRequest, body("fix the tests", 1), "bob")
-	call("c6", gateway.PhaseResponse, reply, "alice") // a reply whose request was never seen
+	call("c1", gateway.PhaseRequest, body("fix the tests", 0), alice)
+	call("c1", gateway.PhaseResponse, reply, alice)
+	call("c2", gateway.PhaseRequest, body("fix the tests", 1), alice)
+	call("c3", gateway.PhaseRequest, body("fix the tests", 40), alice)
+	call("c4", gateway.PhaseRequest, body("write the docs", 1), alice)
+	call("c5", gateway.PhaseRequest, body("fix the tests", 1), bob)
+	call("c6", gateway.PhaseResponse, reply, alice) // a reply whose request was never seen
+	// Identities that differ only in a field other than the user are other callers.
+	call("c7", gateway.PhaseRequest, body("fix the tests", 1), gateway.Identity{Email: "carol@example.com"})
+	call("c8", gateway.PhaseRequest, body("fix the tests", 1), gateway.Identity{Email: "dave@example.com"})
+	call("c9", gateway.PhaseRequest, body("fix the tests", 1), gateway.Identity{Team: "red", Key: "k1"})
+	// Without any identity there is no root: each call is its own session.
+	call("c10", gateway.PhaseRequest, body("fix the tests", 1), gateway.Identity{})
+	call("c11", gateway.PhaseRequest, body("fix the tests", 1), gateway.Identity{})
 	got := make([]string, len(rec.turns))
 	for i, turn := range rec.turns {
 		got[i] = turn.SessionID
@@ -213,6 +221,12 @@ func TestRootSession(t *testing.T) {
 	}
 	if got[6] != "pk:c6" {
 		t.Errorf("a reply with no request seen: session %q, want the call's own", got[6])
+	}
+	if got[7] == got[8] || got[7] == got[2] || got[9] == got[2] || !strings.HasPrefix(got[7], "root:") || !strings.HasPrefix(got[9], "root:") {
+		t.Errorf("callers named by email, team or key: sessions %v", got[7:10])
+	}
+	if got[10] != "pk:c10" || got[11] != "pk:c11" {
+		t.Errorf("calls with no identity: sessions %v, want each its own", got[10:])
 	}
 	// Messages[0] is the system text; the root is the first user message, and the history after it
 	// is still elided.

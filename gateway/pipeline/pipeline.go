@@ -361,16 +361,23 @@ func (p *Pipeline) sessionID(ctx context.Context, c *gateway.Call) (session stri
 }
 
 // rootSession names a conversation no header names by its root, which a client resends unchanged
-// with every call: a digest of the gateway, the caller's identity (user and key), the system text
-// and the first non-system message, as "root:<hex>". The skim always decodes that message.
+// with every call: a digest of the gateway, the caller's identity (every field the gateway
+// resolved), the system text and the first non-system message, as "root:<hex>". The skim always
+// decodes that message. A call with no identity at all gets no root: the root would then merge
+// different people's conversations that open alike, and the second person's prompts would be taken
+// for retries of the first's.
 //
 // It is a heuristic, with two known limits. Two conversations with the same identity, system text
-// and first message (a scripted agent sending the same opening prompt twice) are one session, so
-// their resent system text and tools are recorded once and a retried tail of one hides the other's
+// and first message (one person sending the same opening prompt twice) are one session, so their
+// resent system text and tools are recorded once and a retried tail of one hides the other's
 // identical tail. A conversation whose system text changes part-way (a client that puts the date or
 // a changing status in it) is split where it changes. A request that carries no history (OpenAI
 // Responses continuing previous_response_id) has no root to read and stays its own session.
 func rootSession(c *gateway.Call) (string, bool) {
+	id := c.Client.Identity
+	if id == (gateway.Identity{}) {
+		return "", false
+	}
 	msgs := c.Request.Messages
 	first := -1
 	for i := range msgs {
@@ -384,8 +391,9 @@ func rootSession(c *gateway.Call) (string, bool) {
 	}
 	d := newDigest()
 	d.field(c.Gateway)
-	d.field(c.Client.Identity.User)
-	d.field(c.Client.Identity.Key)
+	for _, f := range [...]string{id.User, id.Email, id.Team, id.Org, id.Key} {
+		d.field(f)
+	}
 	for i := range msgs {
 		if msgs[i].Role == llm.RoleSystem {
 			d.message(&msgs[i])
