@@ -1088,9 +1088,9 @@ func (c *redactChain) followerCrossing(m []int) (int, int) {
 }
 
 // schemeEnd returns the end of the run of URL scheme bytes from p: exactly what the URL pattern's
-// case-insensitive `[a-z0-9+.-]*` takes, the ASCII class and the two other characters that fold
-// into it, `K` (U+212A, k) and `ſ` (U+017F, s). schemeFollowerAt shares one answer across the run,
-// so a byte the pattern stops at must end it.
+// case-insensitive `[a-z0-9_+.-]*?[a-z][a-z0-9+.-]*` reads, the ASCII class and the two other
+// characters that fold into it, `K` (U+212A, k) and `ſ` (U+017F, s). schemeFollowerAt shares one
+// answer across the run, so a byte the pattern stops at must end it.
 func (c *redactChain) schemeEnd(p int) int {
 	if c.schemeFrom <= p && p <= c.schemeTo {
 		return c.schemeTo
