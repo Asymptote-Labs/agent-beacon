@@ -23,7 +23,8 @@ Use this command while authoring rules or before installing or publishing a rule
 - compiles CEL expressions against the Beacon endpoint event schema
 - enforces maturity gates for `experimental`, `stable`, and `deprecated` rules
 - runs every embedded fixture and checks the declared verdict
-- fails a rule that lists a catalog's stores again in a regular expression of its own, matched against a path, a command line or a parsed command's `args`, instead of calling the catalog's predicates
+- fails a rule that lists a catalog's stores again in a regular expression of its own, matched against a path, a command line or a parsed command's `args`, instead of calling the catalog's predicates: two or more stores spelled out, or one pattern that names a store and accepts every example the store gives
+- fails a rule that writes out the body of a predicate its pack defines instead of calling it
 
 Stable rules must include at least one `match` fixture and at least one `no_match` fixture.
 

@@ -8,9 +8,10 @@ import (
 )
 
 // CatalogCopy says that a rule's own regular expressions say again what a catalog of the
-// rule's pack says: between them they spell out two or more of the catalog's stores. The copy
-// is what a catalog exists to prevent. It starts out equal to the catalog and stops being so
-// the next time either is changed, and nothing says which of the two is right.
+// rule's pack says: between them they spell out two or more of the catalog's stores, or one of
+// them defines a store on its own (it names the store and accepts every example the store
+// gives). The copy is what a catalog exists to prevent. It starts out equal to the catalog and
+// stops being so the next time either is changed, and nothing says which of the two is right.
 type CatalogCopy struct {
 	// Catalog is the catalog's name, and Stores the stores of it the rule spells out, in the
 	// catalog's order.
@@ -77,7 +78,7 @@ func CatalogCopies(rule *Rule) []CatalogCopy {
 	var copies []CatalogCopy
 	for _, catalog := range rule.lib.catalogs {
 		copied := CatalogCopy{Catalog: catalog.Name}
-		named := map[string]bool{}
+		named, defined := map[string]bool{}, map[string]bool{}
 		for _, pattern := range patterns {
 			stores := catalog.Named(pattern)
 			if len(stores) == 0 {
@@ -87,8 +88,15 @@ func CatalogCopies(rule *Rule) []CatalogCopy {
 			for _, store := range stores {
 				named[store] = true
 			}
+			for _, store := range catalog.Defined(pattern) {
+				defined[store] = true
+			}
 		}
+		// One store named is the rule's own business unless the rule also says what it is.
 		if len(named) < 2 {
+			named = defined
+		}
+		if len(named) == 0 {
 			continue
 		}
 		for _, store := range catalog.Stores {

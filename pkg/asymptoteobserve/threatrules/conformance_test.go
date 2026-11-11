@@ -127,16 +127,73 @@ func TestPackCopiesNoCatalog(t *testing.T) {
 	if len(copies) != 1 || copies[0].Catalog != "credential-stores" || !slices.Equal(copies[0].Stores, []string{"aws-shared-credentials", "netrc", "pgpass"}) || len(copies[0].Patterns) != 2 {
 		t.Errorf("a rule with its own list of credential files: got %+v, want one copy of aws-shared-credentials, netrc and pgpass in two patterns", copies)
 	}
+	// One store is copied when the rule says what it is: the expression a rule carried for the
+	// SSH agent before the catalog, and a rule about another event that says again which file
+	// is the .netrc.
+	for match, store := range map[string]string{
+		`e.event.action == "command.executed" && e.command.command.matches("(?i)\\bssh-add\\b[^;&|\\n]*\\s-[A-Za-z]*[lL]")`: "ssh-agent-keys",
+		`e.event.action == "file.modified" && e.file.path.matches("(?i)(^|/)\\.netrc$")`:                                    "netrc",
+	} {
+		if copies := CatalogCopies(decode(match)); len(copies) != 1 || !slices.Equal(copies[0].Stores, []string{store}) {
+			t.Errorf("%s: got %+v, want one copy of %s", match, copies, store)
+		}
+	}
 	for _, match := range []string{
-		// One store, named for the rule's own reason.
-		`e.event.action == "file.modified" && e.file.path.matches("(?i)(^|/)\\.netrc$")`,
-		// The catalog, called.
-		`e.event.action == "file.read" && credential_path(e.file.path, "definite")`,
+		// One store named, and something else said about it.
+		`e.event.action == "file.modified" && e.file.path.matches("(?i)(^|/)\\.netrc\\.bak$")`,
+		// The catalog, called, and narrowed by the rule.
+		`e.event.action == "file.modified" && credential_path(e.file.path, "definite", "network") && e.file.path.endsWith(".netrc")`,
 		// Names in a text no predicate is asked about.
 		`e.gen_ai.tool.description.matches("(?i)read .{0,60}(\\.aws/credentials|\\.netrc)")`,
 	} {
 		if copies := CatalogCopies(decode(match)); len(copies) != 0 {
 			t.Errorf("%s: reported as a copy: %v", match, copies)
+		}
+	}
+}
+
+// TestPackWritesOutNoPredicate holds the corpus to its predicates: no rule writes out the body
+// of a predicate its pack defines. The cases show what counts: the body with the rule's own
+// variable names, alone or as an operand of something longer, and not an expression that only
+// resembles it.
+func TestPackWritesOutNoPredicate(t *testing.T) {
+	for _, rule := range corpusRules(t) {
+		for _, name := range PredicateCopies(rule) {
+			t.Errorf("%s: writes out the body of %s", rule.ID, name)
+		}
+	}
+
+	lib, _, err := LoadLibraryDir(rulesDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const names = `"(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"`
+	const wrapped = `"(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$"`
+	sender := func(v, w string) string {
+		return v + `.name.matches(` + names + `) || ` + v + `.name.matches(` + wrapped + `) && ` + v + `.argv.exists(` + w + `, ` + w + `.matches(` + names + `))`
+	}
+	for match, want := range map[string][]string{
+		// The eight copies, as the egress rules carried them.
+		`e.event.action == "command.executed" && e.command.parsed_commands.exists(s, (` + sender("s", "a") + `) && s.argv_raw.exists(a, a.matches("x")))`: {"egress_sender"},
+		// Under other names, and as operands of a longer ||.
+		`e.command.parsed_commands.exists(cmd, cmd.name == "gh" || ` + sender("cmd", "word") + `)`: {"egress_sender"},
+		// A predicate whose body calls another.
+		`e.command.parsed_commands.exists(c, c.name == "scp" && c.file_reads.exists(x, credential_file(x.path)))`: {"command_reads_credential_file"},
+		// Called, not written out.
+		`e.command.parsed_commands.exists(s, egress_sender(s) && egress_reads_stdin(s))`: nil,
+		// The sender list without the wrappers is another question (TestPackListsNoSenderOfItsOwn asks it).
+		`e.command.parsed_commands.exists(s, s.name.matches(` + names + `))`: nil,
+		// The same shape about two different commands is not one predicate's body.
+		`e.command.parsed_commands.exists(s, e.command.parsed_commands.exists(t, s.name.matches(` + names + `) || t.name.matches(` + wrapped + `) && t.argv.exists(a, a.matches(` + names + `))))`: nil,
+		// More than the body allows inside it.
+		`e.command.parsed_commands.exists(c, c.file_reads.exists(x, credential_file(x.path) && x.via == "direct"))`: nil,
+	} {
+		rule, err := lib.DecodeRule([]byte("id: copy\nversion: 1\ntitle: t\nseverity: low\nmatch: >\n  " + match + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := PredicateCopies(rule); !slices.Equal(got, want) {
+			t.Errorf("%s:\n  PredicateCopies = %q, want %q", match, got, want)
 		}
 	}
 }

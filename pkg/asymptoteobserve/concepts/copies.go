@@ -29,6 +29,30 @@ func (c *Catalog) Named(expression string) []string {
 	return named
 }
 
+// Defined returns the IDs of the stores a regular expression defines on its own: it spells out
+// the store's name and accepts every example the store gives, each as the catalog writes it (a
+// path, or a command line). Naming one store is not copying it: a rule may name ".netrc" to
+// say something else about it. Accepting everything the store is shown to be is saying what
+// the store is. An expression that does not compile defines nothing.
+func (c *Catalog) Defined(expression string) []string {
+	named := c.Named(expression)
+	if len(named) == 0 {
+		return nil
+	}
+	re, err := regexp.Compile(expression)
+	if err != nil {
+		return nil
+	}
+	var defined []string
+	for i := range c.Stores {
+		s := &c.Stores[i]
+		if slices.Contains(named, s.ID) && !slices.ContainsFunc(s.Examples, func(example string) bool { return !re.MatchString(example) }) {
+			defined = append(defined, s.ID)
+		}
+	}
+	return defined
+}
+
 var (
 	// expressionSeparator is how a regular expression writes a path separator of either kind,
 	// and expressionSpace how it writes the space between two words.

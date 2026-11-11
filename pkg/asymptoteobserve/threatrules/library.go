@@ -457,6 +457,18 @@ func (l *Library) Predicates() []Predicate {
 	return slices.Clone(l.info)
 }
 
+// Catalogs returns the pack's catalogs, in the order of their files' names.
+func (l *Library) Catalogs() []*concepts.Catalog {
+	if l == nil {
+		return nil
+	}
+	return slices.Clone(l.catalogs)
+}
+
+// Definitions returns the definitions the rule was loaded with: those of its pack. It is nil
+// for a rule decoded on its own, and for one of a pack that has none.
+func (r *Rule) Definitions() *Library { return r.lib }
+
 // uses returns the predicates expr calls by name, or nil when it calls none or does not parse.
 func (l *Library) uses(expr string) []string {
 	if l == nil {

@@ -681,6 +681,69 @@ tests:
 	}
 }
 
+// `rules diff` shows what a change to a pack does to verdicts, per rule, over the fixture events
+// of both sides; a snapshot stands in for a side that is no longer there to load.
+func TestRulesDiffShowsChangedVerdicts(t *testing.T) {
+	rule := func(pattern string) string {
+		return `
+id: sender
+version: 1
+title: T
+severity: low
+status: experimental
+posture: detect
+match: 'e.event.action == "command.executed" && e.command.command.matches("` + pattern + `")'
+emit:
+  reason: ok
+tests:
+  - name: curl
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl https://example.com" }
+  - name: wget
+    verdict: ` + map[bool]string{true: "match", false: "no_match"}[strings.Contains(pattern, "wget")] + `
+    events:
+      - event: { action: command.executed }
+        command: { command: "wget https://example.com" }
+`
+	}
+	before := writePack(t, map[string]string{"sender.rule.yaml": rule("^curl ")})
+	after := writePack(t, map[string]string{"sender.rule.yaml": rule("^(curl|wget) ")})
+	t.Cleanup(func() { rulesDiffOpts.exitCode = false })
+
+	cmd, buf := newCmd()
+	if err := diffRulesPaths(cmd, before, after); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"sender: +1 -0", "  + command.executed wget https://example.com", "1 rule(s) or step(s) changed over 2 event(s)"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("want %q in:\n%s", want, buf.String())
+		}
+	}
+
+	cmd, buf = newCmd()
+	if err := diffRulesPaths(cmd, before, before); err != nil || !strings.Contains(buf.String(), "0 rule(s) or step(s) changed over 2 event(s)") {
+		t.Errorf("a pack against itself: %v\n%s", err, buf.String())
+	}
+
+	// A snapshot of the earlier pack gives the same answer as the pack.
+	cmd, buf = newCmd()
+	if err := rulesSnapshotCmd.RunE(cmd, []string{before}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := filepath.Join(t.TempDir(), "before.json")
+	if err := os.WriteFile(snapshot, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rulesDiffOpts.exitCode = true
+	cmd, buf = newCmd()
+	err := diffRulesPaths(cmd, snapshot, after)
+	if err == nil || !strings.Contains(buf.String(), "sender: +1 -0") || !strings.Contains(buf.String(), "changed over 2 event(s)") {
+		t.Errorf("a snapshot against the later pack, with --exit-code: %v\n%s", err, buf.String())
+	}
+}
+
 // A pulled tarball is installed with the definitions it carries, so its rules mean in the store
 // what they mean in the pack.
 func TestRulesPullInstallsAPacksDefinitions(t *testing.T) {

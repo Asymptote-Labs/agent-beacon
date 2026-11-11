@@ -719,3 +719,31 @@ func TestNamedTellsACopyFromAWord(t *testing.T) {
 		}
 	}
 }
+
+// A candidate is a file that is read, named like a credential's and in no store: what the
+// catalog's reviewers have not seen. A store, source code, documentation and a template are not.
+func TestCandidatesAreCredentialLikeFilesTheCatalogLacks(t *testing.T) {
+	c := credentialStores(t)
+	got := c.Candidates([]string{
+		"/srv/app/config/master.key",
+		"/home/u/work/client_secret.json",
+		"/home/u/other/client_secret.json",
+		"/home/u/work/client_secret.json", // the same path again
+		"/home/u/.config/app/auth-token:1-20",
+		"/home/u/.aws/credentials",       // a store
+		"/repo/.env",                     // a store
+		"/repo/src/auth/credentials.go",  // source code
+		"/repo/docs/token-usage.mdx:26",  // documentation, with a line selector
+		"/repo/config/secrets.yaml.tmpl", // a template
+		"/repo/rules/x/credentials-in-curl-data.rule.yaml",
+		"/repo/README.md",
+	})
+	want := []Candidate{
+		{Name: "client_secret.json", Reads: 2, Example: "/home/u/work/client_secret.json"},
+		{Name: "auth-token", Reads: 1, Example: "/home/u/.config/app/auth-token"},
+		{Name: "master.key", Reads: 1, Example: "/srv/app/config/master.key"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Candidates =\n%+v\nwant\n%+v", got, want)
+	}
+}
