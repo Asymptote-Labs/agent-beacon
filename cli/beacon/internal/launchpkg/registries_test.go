@@ -1,13 +1,10 @@
-package intel
+package launchpkg
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 )
 
 func writeConfig(t *testing.T, path, content string) {
@@ -201,9 +198,8 @@ func TestRegistriesForAServerOnItsOwnNode(t *testing.T) {
 		"whole launch line": {"command": npx + " -y @acme/billing-mcp"},
 		"cmd /c wrapper":    {"command": "cmd", "args": []interface{}{"/c", npx, "-y", "@acme/billing-mcp"}},
 	} {
-		res := inventory.Result{MCPServers: []inventory.MCPServer{server("claude_desktop", "billing", "user", def)}}
-		if items, skipped := FromInventory(res, FromInventoryOptions{Registries: base}); len(items) != 0 || len(skipped) != 1 || skipped[0].Reason != ReasonPrivatePackage {
-			t.Errorf("%s: a server on its own nvm node was not held back: %+v %+v", name, items, skipped)
+		if p, ok := Resolve(def, nil, base); !ok || !p.Private {
+			t.Errorf("%s: a server on its own nvm node was not held back: %+v", name, p)
 		}
 	}
 }
@@ -225,17 +221,17 @@ func TestRegistriesForAServerRunInAnotherDirectory(t *testing.T) {
 		{"cwd below the project", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/tools"}, "cwd": filepath.Join(acme, "sub")}, "npm:@acme/tools"},
 		{"unresolvable cwd", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@playwright/mcp"}, "cwd": "${workspaceFolder}"}, "npm:@playwright/mcp"},
 	} {
-		res := inventory.Result{MCPServers: []inventory.MCPServer{server("vscode", "srv", "user", tc.def)}}
-		items, skipped := FromInventory(res, FromInventoryOptions{Registries: base})
-		if len(items) != 0 || len(skipped) != 1 || skipped[0].Reason != ReasonPrivatePackage {
-			t.Errorf("%s: %s was not held back: %+v %+v", tc.name, tc.q, items, skipped)
+		if p, ok := Resolve(tc.def, nil, base); !ok || !p.Private {
+			t.Errorf("%s: %s was not held back: %+v", tc.name, tc.q, p)
 		}
 	}
 	// A cwd with nothing private in it leaves a public package public.
-	res := inventory.Result{MCPServers: []inventory.MCPServer{server("vscode", "srv", "user",
-		map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@playwright/mcp"}, "cwd": work})}}
-	if items, _ := FromInventory(res, FromInventoryOptions{Registries: base}); len(items) != 1 || items[0].Basis != BasisNPM {
-		t.Fatalf("a plain cwd held a public package back: %+v", items)
+	if p, ok := Resolve(map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@playwright/mcp"}, "cwd": work}, nil, base); !ok || p.Private {
+		t.Fatalf("a plain cwd held a public package back: %+v", p)
+	}
+	// The project a runtime starts the server in is read too (Claude Code's local scope).
+	if p, _ := Resolve(map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/tools"}}, []string{acme}, base); !p.Private {
+		t.Errorf("the project the server runs in was not read: %+v", p)
 	}
 }
 
@@ -307,57 +303,5 @@ func TestLocalRegistriesSkipsProjectFilesWithoutAWorkingDirectory(t *testing.T) 
 	writeConfig(t, filepath.Join(home, "uv.toml"), "index-url = \"https://pypi.acme.internal/simple\"\n")
 	if reg := LocalRegistries(RegistryEnv{Home: home}); reg.private("pypi:x") {
 		t.Fatalf("a file outside every config location counted: %+v", reg)
-	}
-}
-
-func TestFromInventoryHoldsBackLauncherConfigAndEnvFiles(t *testing.T) {
-	res := inventory.Result{MCPServers: []inventory.MCPServer{
-		server("cursor", "billing", "user", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/billing-mcp"}}),
-		server("cursor", "pw", "user", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@playwright/mcp"}}),
-		server("vscode", "fetch", "user", map[string]interface{}{"command": "uvx", "args": []interface{}{"mcp-server-fetch"}, "envFile": "${workspaceFolder}/.env"}),
-	}}
-	reg := Registries{NPMScopes: map[string]bool{"@acme": true}}
-	items, skipped := FromInventory(res, FromInventoryOptions{Registries: reg})
-	if len(items) != 1 || items[0].Q != "npm:@playwright/mcp" || items[0].Basis != BasisNPM {
-		t.Fatalf("items = %+v", items)
-	}
-	if len(skipped) != 2 || skipped[0].Reason != ReasonPrivatePackage || skipped[1].Reason != ReasonPrivatePackage {
-		t.Fatalf("skipped = %+v", skipped)
-	}
-	items, _ = FromInventory(res, FromInventoryOptions{Registries: reg, IncludePrivateNames: true})
-	if len(items) != 3 {
-		t.Fatalf("with consent = %+v", items)
-	}
-}
-
-// Claude Code starts a local-scope server in its project, so npx there reads the project's
-// npmrc whatever directory the agent asking runs in.
-func TestFromInventoryReadsTheProjectAClaudeLocalServerRunsIn(t *testing.T) {
-	home := t.TempDir()
-	project := filepath.Join(home, "work", "acme")
-	writeConfig(t, filepath.Join(project, ".npmrc"), "@acme:registry=https://npm.acme.internal/\n")
-	config, err := json.Marshal(map[string]interface{}{"projects": map[string]interface{}{
-		project: map[string]interface{}{"mcpServers": map[string]interface{}{
-			"tool":   map[string]interface{}{"command": "npx", "args": []string{"-y", "@acme/secret-tool"}},
-			"public": map[string]interface{}{"command": "npx", "args": []string{"-y", "@playwright/mcp"}},
-		}},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeConfig(t, filepath.Join(home, ".claude.json"), string(config))
-	inv := inventory.Scan(inventory.Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, IncludeContents: true})
-	// The agent asks from somewhere else entirely.
-	reg := LocalRegistries(RegistryEnv{Home: home, WorkingDir: t.TempDir()})
-	items, skipped := FromInventory(inv, FromInventoryOptions{Registries: reg})
-	var sent []string
-	for _, item := range items {
-		sent = append(sent, item.Q)
-	}
-	if strings.Join(sent, ",") != "npm:@playwright/mcp" {
-		t.Fatalf("sent = %v, skipped = %+v", sent, skipped)
-	}
-	if len(skipped) != 1 || skipped[0].Name != "tool" || skipped[0].Reason != ReasonPrivatePackage {
-		t.Fatalf("skipped = %+v", skipped)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/agentskills"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/launchpkg"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/intelapi"
 )
 
@@ -52,12 +53,19 @@ func newIntelServer(t *testing.T, answer func(path, body string) (int, string)) 
 	s.newIntel = func() (*intelapi.Client, error) {
 		return &intelapi.Client{BaseURL: srv.URL, HTTPClient: srv.Client(), UserAgent: "beacon-mcp/test"}, nil
 	}
-	s.registryEnv = noRegistryEnv
 	return s, f
 }
 
-// noRegistryEnv keeps a test from reading the machine's own npm, pip and uv configuration.
-func noRegistryEnv() intel.RegistryEnv { return intel.RegistryEnv{} }
+// scannedServer is a configured server as the inventory scan leaves it, resolved with no launcher
+// configuration of the machine's own.
+func scannedServer(runtime, name string, def map[string]interface{}) inventory.MCPServer {
+	_, hasCommand := def["command"]
+	s := inventory.MCPServer{Runtime: runtime, ServerName: name, SourceScope: "user", CommandPresent: hasCommand, Launch: def}
+	if p, ok := launchpkg.Resolve(def, nil, launchpkg.Registries{}); ok {
+		s.RecordPackage(p)
+	}
+	return s
+}
 
 func call(t *testing.T, s *Server, name string, args map[string]interface{}) (string, bool) {
 	t.Helper()
@@ -163,7 +171,6 @@ func TestIntelCheckSendsStringsAndObjects(t *testing.T) {
 func TestIntelToolsAreOffWithBeaconIntel0(t *testing.T) {
 	t.Setenv(intel.EnvDisabled, "0")
 	s := New(Options{LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
-	s.registryEnv = noRegistryEnv
 	s.inventory = func(bool) inventory.Result {
 		return inventory.Result{Skills: []inventory.Skill{{Runtime: "claude_code", SkillName: "pdf", Exists: true}}}
 	}
@@ -195,16 +202,12 @@ func fakeInventory(nServers int) inventory.Result {
 		},
 	}
 	res.MCPServers = append(res.MCPServers,
-		inventory.MCPServer{Runtime: "claude_code", ServerName: "private-db", SourceScope: "user", CommandPresent: true,
-			Definition: map[string]interface{}{"command": "node", "args": []interface{}{"/Users/me/acme/db.js"}, "env": map[string]interface{}{"DB_PASSWORD": "hunter2"}}},
-		inventory.MCPServer{Runtime: "cursor", ServerName: "beacon", SourceScope: "user", CommandPresent: true,
-			Definition: map[string]interface{}{"command": "beacon", "args": []interface{}{"mcp", "serve"}}},
+		scannedServer("claude_code", "private-db", map[string]interface{}{"command": "node", "args": []interface{}{"/Users/me/acme/db.js"}, "env": map[string]interface{}{"DB_PASSWORD": "hunter2"}}),
+		scannedServer("cursor", "beacon", map[string]interface{}{"command": "beacon", "args": []interface{}{"mcp", "serve"}}),
 	)
 	for i := 0; i < nServers; i++ {
-		res.MCPServers = append(res.MCPServers, inventory.MCPServer{
-			Runtime: "claude_code", ServerName: fmt.Sprintf("s%d", i), SourceScope: "user", CommandPresent: true,
-			Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"-y", fmt.Sprintf("pkg-%02d@latest", i), "--api-key", "sk-live-secret"}},
-		})
+		res.MCPServers = append(res.MCPServers,
+			scannedServer("claude_code", fmt.Sprintf("s%d", i), map[string]interface{}{"command": "npx", "args": []interface{}{"-y", fmt.Sprintf("pkg-%02d@latest", i), "--api-key", "sk-live-secret"}}))
 	}
 	return res
 }
@@ -410,19 +413,20 @@ func TestIntelCheckInstalledRefusesMalformedArguments(t *testing.T) {
 func TestIntelCheckInstalledHoldsBackAScopeFromTheUsersNpmrc(t *testing.T) {
 	s, f := newIntelServer(t, func(string, string) (int, string) { return 500, "" })
 	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, ".npmrc"), []byte("@acme:registry=https://npm.acme.internal/\n"), 0o600); err != nil {
-		t.Fatal(err)
+	for path, content := range map[string]string{
+		".npmrc":           "@acme:registry=https://npm.acme.internal/\n",
+		".cursor/mcp.json": `{"mcpServers": {"billing": {"command": "npx", "args": ["-y", "@acme/billing-mcp"]}, "playwright": {"command": "npx", "args": ["-y", "@playwright/mcp"]}}}`,
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(home, path)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, path), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	s.registryEnv = func() intel.RegistryEnv { return intel.RegistryEnv{Home: home} }
 	s.inventory = func(bool) inventory.Result {
-		return inventory.Result{MCPServers: []inventory.MCPServer{
-			{Runtime: "cursor", ServerName: "billing", SourceScope: "user", CommandPresent: true,
-				Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/billing-mcp"}}},
-			{Runtime: "cursor", ServerName: "playwright", SourceScope: "user", CommandPresent: true,
-				Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@playwright/mcp"}}},
-		}}
+		return inventory.Scan(inventory.Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"cursor"}, LauncherEnv: &launchpkg.RegistryEnv{}})
 	}
-	// include_project only picks which servers are listed: the scope still applies.
 	text, isErr := call(t, s, "intel_check_installed", map[string]interface{}{"dry_run": true, "include_project": false})
 	if isErr {
 		t.Fatal(text)
@@ -452,11 +456,11 @@ func TestIntelCheckInstalledMarksNameMatches(t *testing.T) {
 	})
 	s.inventory = func(bool) inventory.Result {
 		return inventory.Result{
-			MCPServers: []inventory.MCPServer{{Runtime: "cursor", ServerName: "x", SourceScope: "user", CommandPresent: true,
-				Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "some-mcp"}}},
+			MCPServers: []inventory.MCPServer{
+				scannedServer("cursor", "x", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "some-mcp"}}),
 				// A package from a private registry matched the public package of the same name.
-				{Runtime: "cursor", ServerName: "y", SourceScope: "user", CommandPresent: true,
-					Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"--registry", "https://npm.corp.example", "-y", "internal-tool"}}}},
+				scannedServer("cursor", "y", map[string]interface{}{"command": "npx", "args": []interface{}{"--registry", "https://npm.corp.example", "-y", "internal-tool"}}),
+			},
 			Skills: []inventory.Skill{{Runtime: "claude_code", SkillName: "pdf", SourceScope: "user", Exists: true}},
 		}
 	}
