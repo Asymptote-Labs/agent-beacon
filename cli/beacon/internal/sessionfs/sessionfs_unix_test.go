@@ -410,3 +410,51 @@ func TestOpenOutsideIsOSOpenUnconfined(t *testing.T) {
 	}
 	_ = file.Close()
 }
+
+// Opening a device can act on it (opening /dev/watchdog arms the timer), so a device the user
+// names must be turned down before it is opened, not after.
+func TestOpenOutsideRefusesDevicesBeforeOpeningThem(t *testing.T) {
+	const device = "/dev/null"
+	if info, err := os.Stat(device); err != nil || info.Mode()&fs.ModeCharDevice == 0 {
+		t.Skipf("%s is not a character device here", device)
+	}
+	_, err := openRegular(device)
+	if !errors.Is(err, errNotRegular) {
+		t.Fatalf("openRegular(%s) = %v, want it refused as not a regular file before opening", device, err)
+	}
+	f := newFixture(t)
+	link := filepath.Join(f.outside, "npmrc")
+	if err := os.Symlink(device, link); err != nil {
+		t.Fatal(err)
+	}
+	confine(t, f.home, os.Getuid())
+	for _, path := range []string{device, link} {
+		_, err := OpenOutside(path)
+		requireRefusedAsAbsent(t, "a device outside the home", err)
+	}
+}
+
+// openRegular walks the resolved path itself, so a directory that turns into a symlink after
+// the path was resolved cannot redirect it.
+func TestOpenRegularFollowsNoSymlink(t *testing.T) {
+	f := newFixture(t)
+	real, err := filepath.EvalSymlinks(f.secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := openRegular(real)
+	if err != nil {
+		t.Fatalf("openRegular of a resolved regular file: %v", err)
+	}
+	_ = file.Close()
+	dirLink := filepath.Join(filepath.Dir(filepath.Dir(real)), "swapped")
+	if err := os.Symlink(filepath.Dir(real), dirLink); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openRegular(filepath.Join(dirLink, filepath.Base(real))); err == nil {
+		t.Fatal("openRegular followed a directory symlink")
+	}
+	if _, err := openRegular(filepath.Join(filepath.Dir(real), "missing")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("openRegular of a missing file = %v, want not-exist", err)
+	}
+}

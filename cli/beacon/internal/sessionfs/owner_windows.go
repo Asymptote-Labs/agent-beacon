@@ -4,10 +4,7 @@ package sessionfs
 
 import "io/fs"
 
-const (
-	openNonblock = 0
-	openNofollow = 0
-)
+const openNonblock = 0
 
 func ownerUID(fs.FileInfo) (int, bool) { return 0, false }
 

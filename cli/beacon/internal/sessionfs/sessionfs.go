@@ -224,7 +224,8 @@ func Active() bool { return active.Load() != nil }
 // and a path inside the home is opened as Open does. A path outside it is one the console user
 // may have chosen, so while a confinement is active it opens only
 //
-//   - non-blocking, and only a regular file, never a FIFO, socket or device;
+//   - only a regular file, checked before it is opened (opening a device can act on it) and
+//     reached through no symlink once resolved, then opened non-blocking;
 //   - a file the console user could read without root: one they own, or one anyone may read in
 //     directories anyone may enter (/etc/npmrc, a root- or other-admin-installed node's npmrc).
 //
@@ -246,7 +247,7 @@ func OpenOutside(path string) (*os.File, error) {
 	if err != nil {
 		return nil, c.failed("open", path, err)
 	}
-	f, err := os.OpenFile(real, os.O_RDONLY|openNonblock|openNofollow, 0)
+	f, err := openRegular(real)
 	if err != nil {
 		return nil, c.failed("open", path, err)
 	}
@@ -254,10 +255,6 @@ func OpenOutside(path string) (*os.File, error) {
 	if err != nil {
 		_ = f.Close()
 		return nil, c.failed("open", path, err)
-	}
-	if !info.Mode().IsRegular() {
-		_ = f.Close()
-		return nil, c.refuse("open", path, "not a regular file ("+info.Mode().Type().String()+")")
 	}
 	if c.uid >= 0 {
 		if owner, ok := ownerUID(info); !ok || (owner != c.uid && !anyoneCanRead(real, info)) {
@@ -267,6 +264,9 @@ func OpenOutside(path string) (*os.File, error) {
 	}
 	return f, nil
 }
+
+// errNotRegular is a path that names something other than a regular file.
+var errNotRegular = errors.New("not a regular file")
 
 // anyoneCanRead reports whether any user may read the file at a resolved path: it is readable
 // by others and every directory above it may be entered by others.
