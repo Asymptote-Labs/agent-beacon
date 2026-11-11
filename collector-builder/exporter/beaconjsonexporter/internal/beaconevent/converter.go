@@ -595,37 +595,45 @@ func CodexLogEventName(attrs map[string]interface{}) string {
 	return strings.ToLower(FirstString(attrs, "event.name"))
 }
 
+// NormalizeCodexToolResult applies asymptoteobserve.NormalizeCodexToolResult to a
+// `codex.tool_result` record, the definition `beacon endpoint codex sync` applies to the same call
+// read from the rollout.
+//
+// `output` is read verbatim rather than through FirstString, which trims: it is the text Codex gave
+// the model, and the content hash describes it exactly as the rollout's copy does.
 func NormalizeCodexToolResult(event *Event, attrs map[string]interface{}) {
-	toolName := FirstString(attrs, "tool.name", "tool_name", "function_name", "tool", "mcp_server")
-	args := FirstString(attrs, "arguments", "function_args", "tool.command", "command")
-	event.Event.Action = "tool.invoked"
-	event.Event.Category = "tool"
-	if event.Tool == nil {
-		event.Tool = &ToolInfo{}
+	output, _ := attrs["output"].(string)
+	truncated, _ := BoolAttr(attrs, "output_truncated")
+	success, reported := BoolAttr(attrs, "success")
+	duration, _ := Int64Attr(attrs, "duration_ms")
+	var args interface{}
+	if text := FirstString(attrs, "arguments", "function_args"); text != "" {
+		args = text
 	}
-	event.Tool.Name = toolName
-	event.Tool.Command = args
-	if command := codexShellCommand(toolName, args); command != "" {
-		event.Event.Action = "command.executed"
-		event.Event.Category = "command"
-		event.Command = &CommandInfo{Command: command}
+	fields := asymptoteobserve.NormalizeCodexToolResult(asymptoteobserve.CodexToolResult{
+		Name:            FirstString(attrs, "tool_name", "tool.name", "function_name", "tool"),
+		Namespace:       FirstString(attrs, "tool_namespace"),
+		CallID:          ToolCallID(attrs),
+		Arguments:       args,
+		Output:          output,
+		OutputTruncated: truncated,
+		Failed:          reported && !success,
+		DurationMS:      duration,
+	})
+	event.Event.Action = fields.Action
+	event.Event.Category = fields.Category
+	event.Message = fields.Message
+	event.Severity = string(fields.Severity)
+	event.Tool = fields.Tool
+	event.Command = fields.Command
+	if fields.MCP != nil {
+		event.MCP = fields.MCP
 	}
-	event.Message = FirstNonEmpty(toolName, "Codex tool result")
-}
-
-// codexShellCommand is the command line of a Codex shell tool call, or "" for any other tool, so an
-// MCP tool that takes a `command` argument stays a tool call.
-func codexShellCommand(toolName, args string) string {
-	if !asymptoteobserve.IsShellCommandTool(toolName) {
-		return ""
+	event.Content = fields.Content
+	if event.GenAI == nil {
+		event.GenAI = &GenAIInfo{}
 	}
-	if cmd := asymptoteobserve.ToolCommandLine(toolName, args); cmd != "" {
-		return cmd
-	}
-	if strings.EqualFold(toolName, "shell") {
-		return args
-	}
-	return ""
+	event.GenAI.Tool = fields.GenAITool
 }
 
 func isClaudeOTelLogHarness(name string) bool {
