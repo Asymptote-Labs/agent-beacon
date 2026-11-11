@@ -1,10 +1,3 @@
-// Package threatrules implements the Beacon "Threat Rules" detection-rule standard: a
-// YAML rule format whose match conditions are CEL expressions over the Beacon endpoint
-// event, plus a reference evaluator and an embedded-fixture conformance harness.
-//
-// This package is the open reference implementation of the spec under
-// spec/threat-rules. A separate (possibly closed) engine conforms if it produces the
-// same Verdict each rule's fixtures declare.
 package threatrules
 
 import (

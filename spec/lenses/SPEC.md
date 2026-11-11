@@ -113,7 +113,9 @@ trace view uses. Its main parts:
   `model`, `usage`, `tool_call_id`, `prompt_id` (the turn the event belongs to,
   where the runtime names one) and `trace` (span IDs). `error.type` is set
   when the runtime reported the action as failed, which can happen on an event
-  whose `type` is not `error` (a failed MCP call keeps type `mcp`).
+  whose `type` is not `error` (a failed MCP call keeps type `mcp`). Every
+  `tool.failed` carries one: it is a `tool_result`, with `error.type`
+  `tool_execution_failed` when the runtime named no type of its own.
 - `type` is one of `user_message`, `agent_message`, `agent_reasoning`,
   `tool_call`, `tool_result`, `command`, `file`, `mcp`, `approval`,
   `token_usage`, `session`, `error` or `other`. The list may grow (see
@@ -308,3 +310,4 @@ warns on the features above.
   `<link>` elements, speculation rules and `document.write`, and turns off DNS
   prefetching. A lens that follows this spec uses none of them; the
   [trust model](#trust-model) says what this does and does not guarantee.
+- `lenses/v1` (clarification): every `tool.failed` event carries `error.type`.
