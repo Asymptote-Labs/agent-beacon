@@ -664,6 +664,7 @@ jobs:
             ./internal/groksession/... `
             ./internal/hermessession/... `
             ./internal/intel/... `
+            ./internal/launchpkg/... `
             ./internal/learning/... `
             ./internal/managedprivacy/... `
             ./internal/mcpconnect/... `

@@ -1,20 +1,24 @@
-package intel
+package launchpkg
 
 import (
 	"bufio"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"syscall"
 )
 
 // Registries is what the machine's own launcher configuration says about where packages come
 // from. A launcher reads more than its command line: npm reads .npmrc and npm_config_*, yarn and
 // bun their own files, pip pip.conf and PIP_*, uv uv.toml and UV_*. When any of them points npm
 // or PyPI at a registry or index other than the public one, a package of that ecosystem (or of
-// that npm scope) may be private, so FromInventory holds it back like a --registry on the
-// command line.
+// that npm scope) may be private, so Resolve marks it private like a --registry on the command
+// line.
 type Registries struct {
 	// NPM is set when every npm package may come from another registry.
 	NPM bool
@@ -33,10 +37,10 @@ type Registries struct {
 // would run in (empty to skip project files), the environment the launcher inherits, and
 // whether to read the system-wide files under /etc and the package managers' prefixes.
 type RegistryEnv struct {
-	Home       string
-	WorkingDir string
-	Environ    []string
-	System     bool
+	Home       string   `json:"home"`
+	WorkingDir string   `json:"working_dir,omitempty"`
+	Environ    []string `json:"environ,omitempty"`
+	System     bool     `json:"system"`
 }
 
 // CurrentRegistryEnv is this process's home, environment and working directory. An agent
@@ -69,7 +73,8 @@ func projectDirs(wd string) []string {
 const maxRegistryConfigBytes = 1 << 20
 
 // LocalRegistries reads the registry and index settings npm, yarn, bun, pip and uv would read.
-// A file it cannot read counts as absent. Settings that name the public registry do not count.
+// A file that is not there counts as absent; one that is there but cannot be read holds its
+// ecosystem back (see unreadable). Settings that name the public registry do not count.
 func LocalRegistries(env RegistryEnv) Registries {
 	vars, lower := map[string]string{}, map[string]string{}
 	reg := Registries{NPMScopes: map[string]bool{}, home: env.Home, vars: lower, read: map[string]bool{}}
@@ -98,12 +103,26 @@ func LocalRegistries(env RegistryEnv) Registries {
 	if xdg == "" {
 		xdg = join(home, ".config")
 	}
-	appData := getenv("APPDATA")
+	// Windows' per-user and machine config locations. A launcher reads them whatever environment
+	// Beacon's own job has, and a snapshot is scanned with none, so they are derived as Windows
+	// lays them out when the environment does not name them.
+	appData, localAppData, programData := getenv("APPDATA"), getenv("LOCALAPPDATA"), getenv("ProgramData")
 	system := func(path string) string {
 		if !env.System {
 			return ""
 		}
 		return path
+	}
+	if runtime.GOOS == "windows" {
+		if appData == "" {
+			appData = join(home, "AppData", "Roaming")
+		}
+		if localAppData == "" {
+			localAppData = join(home, "AppData", "Local")
+		}
+		if programData == "" {
+			programData = system(os.Getenv("ProgramData"))
+		}
 	}
 
 	// A config file or prefix the environment names is resolved as npm, pip and uv resolve it
@@ -131,10 +150,14 @@ func LocalRegistries(env RegistryEnv) Registries {
 	// ships; npm derives both from the node it runs on (nvm, fnm, Volta and system installs each
 	// have their own).
 	npmrcs = append(npmrcs, join(envPath("npm_config_prefix", &reg.NPM), "etc", "npmrc"))
-	npmrcs = append(npmrcs, nodeNpmrcs(filepath.SplitList(getenv("PATH")))...)
+	nodePaths, nodeUnsure := nodeNpmrcs(filepath.SplitList(getenv("PATH")))
+	npmrcs = append(npmrcs, nodePaths...)
+	if nodeUnsure {
+		reg.NPM = true
+	}
 	for _, path := range append(npmrcs, system("/etc/npmrc"),
 		// pnpm's global config (pnpm config set --location=global), npmrc format.
-		join(xdg, "pnpm", "rc"), join(home, "Library", "Preferences", "pnpm", "rc"), join(getenv("LOCALAPPDATA"), "pnpm", "config", "rc"),
+		join(xdg, "pnpm", "rc"), join(home, "Library", "Preferences", "pnpm", "rc"), join(localAppData, "pnpm", "config", "rc"),
 		system("/usr/local/etc/npmrc"), system("/opt/homebrew/etc/npmrc"), join(appData, "npm", "etc", "npmrc")) {
 		reg.readNpmrc(path)
 	}
@@ -153,14 +176,14 @@ func LocalRegistries(env RegistryEnv) Registries {
 	for _, path := range []string{envPath("PIP_CONFIG_FILE", &reg.PyPI), join(home, ".pip", "pip.conf"), join(xdg, "pip", "pip.conf"),
 		join(home, "Library", "Application Support", "pip", "pip.conf"), join(appData, "pip", "pip.ini"), join(home, "pip", "pip.ini"),
 		system("/etc/pip.conf"), system("/etc/xdg/pip/pip.conf"), system("/Library/Application Support/pip/pip.conf"),
-		join(getenv("ProgramData"), "pip", "pip.ini"), join(getenv("VIRTUAL_ENV"), "pip.conf")} {
+		join(programData, "pip", "pip.ini"), join(getenv("VIRTUAL_ENV"), "pip.conf")} {
 		if registryLine(path, isPyPIIndexLine) {
 			reg.PyPI = true
 		}
 	}
 	// uv: user, system and project configuration.
 	for _, path := range []string{envPath("UV_CONFIG_FILE", &reg.PyPI), join(xdg, "uv", "uv.toml"), join(appData, "uv", "uv.toml"),
-		system("/etc/uv/uv.toml"), system("/etc/xdg/uv/uv.toml"), join(getenv("ProgramData"), "uv", "uv.toml")} {
+		system("/etc/uv/uv.toml"), system("/etc/xdg/uv/uv.toml"), join(programData, "uv", "uv.toml")} {
 		if registryLine(path, isPyPIIndexLine) {
 			reg.PyPI = true
 		}
@@ -178,30 +201,38 @@ func LocalRegistries(env RegistryEnv) Registries {
 
 // nodeNpmrcs are the global and builtin npmrc files of the first node in dirs: its install
 // prefix is its directory's parent on Unix and its own directory on Windows, both as found and
-// with symlinks resolved.
-func nodeNpmrcs(dirs []string) []string {
+// with symlinks resolved. unsure reports a node Beacon could not look up (see unreadable), whose
+// npm config it then cannot vouch for.
+func nodeNpmrcs(dirs []string) (paths []string, unsure bool) {
 	for _, dir := range dirs {
 		if dir == "" {
 			continue
 		}
 		for _, name := range []string{"node", "node.exe"} {
 			node := filepath.Join(dir, name)
-			if info, err := os.Stat(node); err != nil || info.IsDir() {
+			info, err := os.Stat(node)
+			if unreadable(err) {
+				return nil, true
+			}
+			if err != nil || info.IsDir() {
 				continue
 			}
+			real, err := filepath.EvalSymlinks(node)
+			if err != nil {
+				return nil, true
+			}
 			prefixes := []string{filepath.Dir(dir), dir}
-			if real, err := filepath.EvalSymlinks(node); err == nil && real != node {
+			if real != node {
 				prefixes = append(prefixes, filepath.Dir(filepath.Dir(real)), filepath.Dir(real))
 			}
-			var paths []string
 			for _, prefix := range prefixes {
 				paths = append(paths, filepath.Join(prefix, "etc", "npmrc"), filepath.Join(prefix, "lib", "node_modules", "npm", "npmrc"),
 					filepath.Join(prefix, "node_modules", "npm", "npmrc"))
 			}
-			return paths
+			return paths, false
 		}
 	}
-	return nil
+	return nil, false
 }
 
 // readProject reads the project config npm, yarn, bun and uv find by walking up from dir.
@@ -271,11 +302,11 @@ func (r Registries) forServer(command string, args []string, def map[string]inte
 			unresolved = true
 		}
 	}
-	npmrcs := nodeNpmrcs(nodeDirs)
-	if len(npmrcs) == 0 && len(projects) == 0 && !unresolved {
+	npmrcs, nodeUnsure := nodeNpmrcs(nodeDirs)
+	if len(npmrcs) == 0 && len(projects) == 0 && !unresolved && !nodeUnsure {
 		return r
 	}
-	out := Registries{NPM: r.NPM || unresolved, PyPI: r.PyPI || unresolved, NPMScopes: map[string]bool{}, home: r.home,
+	out := Registries{NPM: r.NPM || unresolved || nodeUnsure, PyPI: r.PyPI || unresolved, NPMScopes: map[string]bool{}, home: r.home,
 		yarnrc: r.yarnrc, vars: r.vars, read: map[string]bool{}}
 	for scope := range r.NPMScopes {
 		out.NPMScopes[scope] = true
@@ -342,8 +373,11 @@ func (r *Registries) readNpmrc(path string) {
 		r.NPMScopes = map[string]bool{}
 	}
 	r.read[path] = true
-	lines, ok := readConfigLines(path)
-	if !ok {
+	lines, err := readConfigLines(path)
+	if unreadable(err) {
+		r.NPM = true
+	}
+	if err != nil {
 		return
 	}
 	for _, line := range lines {
@@ -488,9 +522,9 @@ func cutKeyValue(line string) (key, value string, ok bool) {
 }
 
 func registryLine(path string, match func(string) bool) bool {
-	lines, ok := readConfigLines(path)
-	if !ok {
-		return false
+	lines, err := readConfigLines(path)
+	if unreadable(err) {
+		return true
 	}
 	for _, line := range lines {
 		if match(line) {
@@ -500,18 +534,20 @@ func registryLine(path string, match func(string) bool) bool {
 	return false
 }
 
-// readConfigLines returns a config file's lines without blanks or comments.
-func readConfigLines(path string) ([]string, bool) {
+// readConfigLines returns a config file's lines without blanks or comments. It reads with this
+// process's own rights, which are the launcher user's (see ResolveAll).
+func readConfigLines(path string) ([]string, error) {
 	if path == "" {
-		return nil, false
+		return nil, os.ErrNotExist
 	}
-	f, err := os.Open(path)
+	// Non-blocking, so a FIFO is opened and turned down rather than waited on for a writer.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
 	defer f.Close()
 	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
-		return nil, false
+		return nil, &fs.PathError{Op: "read", Path: path, Err: errNotConfig}
 	}
 	var lines []string
 	scanner := bufio.NewScanner(io.LimitReader(f, maxRegistryConfigBytes))
@@ -523,5 +559,16 @@ func readConfigLines(path string) ([]string, bool) {
 		}
 		lines = append(lines, line)
 	}
-	return lines, true
+	return lines, nil
+}
+
+var errNotConfig = errors.New("not a regular file")
+
+// unreadable reports a config lookup that failed for any reason but the file not being there. A
+// missing file is missing for the launcher too; anything else (a file the user may not read, a
+// directory a group they are in may enter but Beacon's lookup of their groups missed, macOS privacy
+// protection, a FIFO or a directory where a file should be) leaves Beacon unable to tell what the
+// launcher reads, so its ecosystem is held back as private.
+func unreadable(err error) bool {
+	return err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR)
 }
