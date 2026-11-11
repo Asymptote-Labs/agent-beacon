@@ -342,6 +342,14 @@ func TestExchange(t *testing.T) {
 				if c.Gateway != "envoy" || c.ID != "req-1" || c.Protocol != llm.AnthropicMessages {
 					t.Errorf("call %d: gateway %q id %q protocol %q", i, c.Gateway, c.ID, c.Protocol)
 				}
+				// A reply carries the body of the request analyzed before it, if any.
+				wantReq := ""
+				if want.phase == gateway.PhaseResponse && i > 0 {
+					wantReq = string(rec.calls[0].Body)
+				}
+				if string(c.RequestBody) != wantReq {
+					t.Errorf("call %d: RequestBody %q, want %q", i, c.RequestBody, wantReq)
+				}
 			}
 		})
 	}

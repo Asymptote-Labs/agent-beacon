@@ -201,9 +201,10 @@ func (p *Pipeline) Handle(ctx context.Context, c *gateway.Call) gateway.Verdict 
 		return p.run(ctx, c)
 	}
 	// The adapter releases its reservation for the body when Handle returns; the analysis
-	// still reading it holds the bytes again until it ends. The two overlap, so the budget is
-	// briefly counted twice rather than ever not at all.
-	held := p.bodies.hold(int64(len(c.Body)))
+	// still reading it holds the bytes again until it ends, with the request body a reply
+	// carries. The two overlap, so the budget is briefly counted twice rather than ever not at
+	// all.
+	held := p.bodies.hold(int64(len(c.Body) + len(c.RequestBody)))
 	p.pending.Add(1)
 	go func() {
 		defer p.pending.Done()
@@ -223,11 +224,7 @@ func (p *Pipeline) run(ctx context.Context, c *gateway.Call) gateway.Verdict {
 	if err := decode(c); err != nil {
 		errs = append(errs, err)
 	}
-	session, rootEntry, err := p.sessionID(ctx, c)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("store: %w", err))
-	}
-	t := &Turn{Call: c, SessionID: session, Harness: harness.Identify(c.Client.UserAgent), Store: p.cfg.Store, wantsResent: p.resent}
+	t := &Turn{Call: c, SessionID: p.sessionID(c), Harness: harness.Identify(c.Client.UserAgent), Store: p.cfg.Store, wantsResent: p.resent}
 
 	var findings, standing []Finding
 	var recs []Record
@@ -235,7 +232,7 @@ func (p *Pipeline) run(ctx context.Context, c *gateway.Call) gateway.Verdict {
 		switch c.Phase {
 		case gateway.PhaseRequest:
 			var err error
-			if t.New, err = requestDelta(ctx, p.cfg.Store, p.seen, t.SessionID, c.Request, p.cfg.SeenTTL, rootEntry); err != nil {
+			if t.New, err = requestDelta(ctx, p.cfg.Store, p.seen, t.SessionID, c.Request, p.cfg.SeenTTL); err != nil {
 				errs = append(errs, fmt.Errorf("store: %w", err))
 			}
 		case gateway.PhaseResponse:
@@ -322,83 +319,79 @@ func decode(c *gateway.Call) error {
 	return nil
 }
 
-// rootTTL bounds how long a call's request remembers the session its root named, for the call's
-// reply, which normally follows within minutes.
-const rootTTL = time.Hour
-
 // sessionID names the call's conversation: a session header the client sent, the gateway's own
 // conversation id, or failing both the conversation's root (rootSession), and failing that the
-// call itself. A reply carries no conversation, so its call's request leaves the session its root
-// named in the store, under the call's id, for the reply to find: root is that entry, which the
-// request adds in the batch requestDelta sends anyway. Only a reply whose session is named by a
-// root costs a store round trip.
-func (p *Pipeline) sessionID(ctx context.Context, c *gateway.Call) (session string, root *store.Entry, err error) {
+// call itself. A reply carries no conversation, so it is named from the body of the request it
+// answers (Call.RequestBody), by the same function as the request was: it joins its request's
+// session without waiting for the request's analysis, and with no store round trip.
+func (p *Pipeline) sessionID(c *gateway.Call) string {
 	for _, h := range p.cfg.SessionHeaders {
 		if v := c.Client.Headers[h]; v != "" {
-			return v, nil, nil
+			return v
 		}
 	}
 	if c.Client.Session != "" {
-		return c.Client.Session, nil, nil
+		return c.Client.Session
 	}
-	key := "root/" + c.Gateway + "/" + c.ID
-	switch c.Phase {
-	case gateway.PhaseRequest:
-		if c.Request != nil {
-			if s, ok := rootSession(c); ok {
-				return s, &store.Entry{Key: key, Value: []byte(s), TTL: rootTTL}, nil
+	if root, ok := callRoot(c); ok {
+		if s, ok := rootSession(c, root.First); ok {
+			return s
+		}
+	}
+	return c.Gateway + ":" + c.ID
+}
+
+// callRoot reads the root of the conversation a call belongs to: from the request's body (a
+// request's Body, a reply's RequestBody), or from a request the adapter decoded itself.
+func callRoot(c *gateway.Call) (codec.Root, bool) {
+	body := c.Body
+	if c.Phase == gateway.PhaseResponse {
+		body = c.RequestBody
+	}
+	if body != nil {
+		r, err := codec.ReadRoot(c.Protocol, body)
+		return r, err == nil
+	}
+	if c.Phase == gateway.PhaseRequest && c.Request != nil {
+		var r codec.Root
+		for i := range c.Request.Messages {
+			if m := &c.Request.Messages[i]; m.Role != llm.RoleSystem {
+				if !m.Elided {
+					r.First = m
+				}
+				break
 			}
 		}
-	case gateway.PhaseResponse:
-		vals, gerr := p.cfg.Store.Get(ctx, key)
-		if gerr != nil {
-			err = gerr
-		} else if vals[0] != nil {
-			return string(vals[0]), nil, nil
-		}
+		return r, true
 	}
-	return c.Gateway + ":" + c.ID, nil, err
+	return codec.Root{}, false
 }
 
 // rootSession names a conversation no header names by its root, which a client resends unchanged
-// with every call: a digest of the gateway, the caller's identity (every field the gateway
-// resolved), the system text and the first non-system message, as "root:<hex>". The skim always
-// decodes that message. A call with no identity at all gets no root: the root would then merge
-// different people's conversations that open alike, and the second person's prompts would be taken
-// for retries of the first's.
+// with every call: a digest of the gateway, the client's harness, the caller's identity (every
+// field the gateway resolved) and the conversation's first non-system message, as "root:<hex>".
+// A call with no identity at all gets no root: the root would then merge different people's
+// conversations that open alike, and the second person's prompts would be taken for retries of
+// the first's. The system text is left out: reading it can mean reading past the whole history
+// (Anthropic bodies often send it after the messages), and it changes in some clients part-way
+// through a conversation.
 //
-// It is a heuristic, with two known limits. Two conversations with the same identity, system text
-// and first message (one person sending the same opening prompt twice) are one session, so their
-// resent system text and tools are recorded once and a retried tail of one hides the other's
-// identical tail. A conversation whose system text changes part-way (a client that puts the date or
-// a changing status in it) is split where it changes. A request that carries no history (OpenAI
-// Responses continuing previous_response_id) has no root to read and stays its own session.
-func rootSession(c *gateway.Call) (string, bool) {
+// It is a heuristic: two conversations of one caller in one harness that open with the same
+// message (one person sending the same opening prompt twice) are one session, so their resent
+// system text and tools are recorded once and a retried tail of one hides the other's identical
+// tail. A request that carries no history (OpenAI Responses continuing previous_response_id) has
+// no root to read and stays its own session.
+func rootSession(c *gateway.Call, first *llm.Message) (string, bool) {
 	id := c.Client.Identity
-	if id == (gateway.Identity{}) {
-		return "", false
-	}
-	msgs := c.Request.Messages
-	first := -1
-	for i := range msgs {
-		if msgs[i].Role != llm.RoleSystem {
-			first = i
-			break
-		}
-	}
-	if first < 0 || msgs[first].Elided {
+	if id == (gateway.Identity{}) || first == nil {
 		return "", false
 	}
 	d := newDigest()
 	d.field(c.Gateway)
+	d.field(harness.Identify(c.Client.UserAgent).Name)
 	for _, f := range [...]string{id.User, id.Email, id.Team, id.Org, id.Key} {
 		d.field(f)
 	}
-	for i := range msgs {
-		if msgs[i].Role == llm.RoleSystem {
-			d.message(&msgs[i])
-		}
-	}
-	d.message(&msgs[first])
+	d.message(first)
 	return "root:" + d.hex(), true
 }

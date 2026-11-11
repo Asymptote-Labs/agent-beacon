@@ -284,10 +284,9 @@ func (sk *skimmer) remember(key uint64, raw []byte, lo int) {
 }
 
 // rememberParts adds to the cached entry of a measured element the parts its system messages
-// decoded to, sk.msgs[lo:hi], or, for the conversation's root (all), the parts of all of its
-// messages, so that the next request hitting it need not decode it. Only elements of at most
-// memoMaxValue bytes are charged with their parts.
-func (sk *skimmer) rememberParts(raw []byte, lo, hi int, all bool) {
+// decoded to, sk.msgs[lo:hi], so that the next request hitting it need not decode it. Only
+// elements of at most memoMaxValue bytes are charged with their parts.
+func (sk *skimmer) rememberParts(raw []byte, lo, hi int) {
 	if len(raw) > memoMaxValue {
 		return
 	}
@@ -305,7 +304,7 @@ func (sk *skimmer) rememberParts(raw []byte, lo, hi int, all bool) {
 		if k == 1 {
 			m = e.second
 		}
-		if all || memoRoles[m.role] == llm.RoleSystem {
+		if memoRoles[m.role] == llm.RoleSystem {
 			m.parts, m.hasParts = sk.parts[sk.msgs[lo+k].parts-1], true
 		}
 	}

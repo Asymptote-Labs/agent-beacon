@@ -195,10 +195,11 @@ type exchange struct {
 	client   gateway.Client
 	protocol llm.Protocol
 	encoding string
-	// model is the model the request named.
-	model    string
-	request  body
-	response body
+	// model is the model the request named, and requestBody the request's body, for the reply.
+	model       string
+	requestBody []byte
+	request     body
+	response    body
 }
 
 // body accumulates one direction's body.
@@ -402,28 +403,33 @@ func (x *exchange) finish(ctx context.Context, phase gateway.Phase, b *body) (v 
 		}
 	}
 	data := b.buf
+	var requestBody []byte
 	if phase == gateway.PhaseResponse {
 		if data, ok = x.decode(data); !ok {
 			return v, false
 		}
+		requestBody = x.requestBody
 	} else {
 		// The model the client asked for names both phases' events; the reply names the
-		// provider's own model separately.
+		// provider's own model separately. The body goes to the reply too, which the pipeline
+		// names a session from as it named the request's. Neither is modified or reused.
 		x.model = jsonscan.FirstString(data, "model")
+		x.requestBody = data
 	}
 	// A request is held until its last chunk is answered, so a block still stops it; a streamed
 	// reply has already reached the client.
 	enforce := phase == gateway.PhaseRequest || !b.streamed
 	v = x.h.Handle(ctx, &gateway.Call{
-		Gateway:  x.a.cfg.Name,
-		ID:       x.id,
-		Phase:    phase,
-		Enforce:  enforce,
-		Time:     time.Now(),
-		Client:   x.client,
-		Model:    x.model,
-		Protocol: x.protocol,
-		Body:     data,
+		Gateway:     x.a.cfg.Name,
+		ID:          x.id,
+		Phase:       phase,
+		Enforce:     enforce,
+		Time:        time.Now(),
+		Client:      x.client,
+		Model:       x.model,
+		Protocol:    x.protocol,
+		Body:        data,
+		RequestBody: requestBody,
 	})
 	if v.Action == gateway.Block {
 		x.a.log.Warn("call blocked", "gateway", x.a.cfg.Name, "call", x.id, "phase", phase.String(), "rules", v.Rules, "enforced", enforce)

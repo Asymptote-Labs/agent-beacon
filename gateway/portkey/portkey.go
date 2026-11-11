@@ -275,8 +275,12 @@ func (a *adapter) call(env *envelope) (*gateway.Call, bool) {
 		c.Phase = gateway.PhaseResponse
 		c.Body = env.Response.JSON
 		// The reply's events carry the model the client asked for, as the request's do; the
-		// reply names the provider's own model separately.
+		// reply names the provider's own model separately. The request it answers comes along,
+		// so the reply's session is named from it as the request's was.
 		c.Model = jsonscan.FirstString(env.Request.JSON, "model")
+		if !isNull(env.Request.JSON) {
+			c.RequestBody = env.Request.JSON
+		}
 	default:
 		a.log.Warn("portkey: unknown eventType", "event_type", env.EventType)
 		return nil, false

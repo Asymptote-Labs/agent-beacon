@@ -151,6 +151,22 @@ func TestResponseAndBlock(t *testing.T) {
 	if len(calls) != 1 || calls[0].ID != "t9" || calls[0].Name != "Bash" {
 		t.Errorf("tool calls = %+v", calls)
 	}
+	if h.calls[0].RequestBody != nil {
+		t.Errorf("a reply without structured messages carries a request: %s", h.calls[0].RequestBody)
+	}
+}
+
+// A reply payload that carries the request's messages hands them on as the request body.
+func TestResponseCarriesRequest(t *testing.T) {
+	h := &fakeHandler{}
+	post(t, h, `{"input_type":"response","litellm_call_id":"c1","model":"m","texts":["ok"],"structured_messages":[{"role":"user","content":"fix it"}]}`)
+	req, err := codec.DecodeRequest(h.calls[0].Protocol, h.calls[0].RequestBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || req.Messages[0].Text() != "fix it" {
+		t.Errorf("request = %+v", req)
+	}
 }
 
 // Through a real pipeline, a decider that blocks a marker blocks a request whose prompt carries

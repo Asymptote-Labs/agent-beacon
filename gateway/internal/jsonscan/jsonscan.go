@@ -62,6 +62,82 @@ func FirstString(b []byte, name string) string {
 	return out
 }
 
+// MemberStart is the offset in b of the value of the first top-level member of the object b whose
+// name match accepts, and false when there is none. It reads only as far as that value's start,
+// skipping the members before it unvalidated, as Object does.
+func MemberStart(b []byte, match func(name string) bool) (int, bool) {
+	i := ws(b, 0)
+	if i >= len(b) || b[i] != '{' {
+		return 0, false
+	}
+	i = ws(b, i+1)
+	var name []byte
+	for i < len(b) && b[i] == '"' {
+		end, err := skipString(b, i)
+		if err != nil {
+			return 0, false
+		}
+		if name, err = jsontext.AppendUnquote(name[:0], b[i:end]); err != nil {
+			name = append(name[:0], b[i:end]...)
+		}
+		i = ws(b, end)
+		if i >= len(b) || b[i] != ':' {
+			return 0, false
+		}
+		start := ws(b, i+1)
+		if match(string(name)) {
+			return start, start < len(b)
+		}
+		if i, err = skipValue(b, start); err != nil {
+			return 0, false
+		}
+		i = ws(b, i)
+		if i >= len(b) || b[i] != ',' {
+			return 0, false
+		}
+		i = ws(b, i+1)
+	}
+	return 0, false
+}
+
+// Elements calls yield with each element of the array starting at b[i] == '[', in order, until
+// yield returns false. It reads only as far as the element yield stops at; elements are bracket-
+// matched, not validated.
+func Elements(b []byte, i int, yield func(elem []byte) bool) error {
+	if i >= len(b) || b[i] != '[' {
+		return errSyntax
+	}
+	i = ws(b, i+1)
+	if i < len(b) && b[i] == ']' {
+		return nil
+	}
+	for {
+		end, err := skipValue(b, i)
+		if err != nil {
+			return err
+		}
+		if !yield(b[i:end]) {
+			return nil
+		}
+		i = ws(b, end)
+		if i >= len(b) {
+			return errSyntax
+		}
+		switch b[i] {
+		case ',':
+			i = ws(b, i+1)
+		case ']':
+			return nil
+		default:
+			return errSyntax
+		}
+	}
+}
+
+// ValueEnd is the offset just past the value starting at b[i]: a string, an object or array with
+// matched brackets, or a literal. It does not validate what is inside.
+func ValueEnd(b []byte, i int) (int, error) { return skipValue(b, i) }
+
 // object walks the object starting at b[i] == '{', yielding its members under parent, and returns
 // the index just past it. Only the top level (parent "") enters members.
 func object(b []byte, i int, parent string, enter func(string) bool, yield func(parent, name string, value []byte) error) (int, error) {

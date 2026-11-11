@@ -109,10 +109,13 @@ func TestWebhookCalls(t *testing.T) {
 			if c.Client.Identity != identity || c.Client.Session != "s-1" || len(c.Client.Headers) != 0 {
 				t.Errorf("client = %+v", c.Client)
 			}
-			// The reply's call names the model the request asked for; the request's is read
-			// from its body by the pipeline.
+			// The reply's call names the model the request asked for, and carries the request;
+			// the request's model is read from its body by the pipeline.
 			if want := map[gateway.Phase]string{gateway.PhaseRequest: "", gateway.PhaseResponse: "gpt-4o"}[tt.phase]; c.Model != want {
 				t.Errorf("Model = %q, want %q", c.Model, want)
+			}
+			if want := map[gateway.Phase]string{gateway.PhaseRequest: "", gateway.PhaseResponse: chatRequest}[tt.phase]; string(c.RequestBody) != want {
+				t.Errorf("RequestBody = %s, want %s", c.RequestBody, want)
 			}
 			if c.ID != callID([]byte(chatRequest)) {
 				t.Errorf("ID = %q, want hash of request.json", c.ID)

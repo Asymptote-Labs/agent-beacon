@@ -71,6 +71,12 @@ type Call struct {
 	// Normalized reports that the content is the gateway's translation of what the client sent,
 	// not the bytes themselves: fields the gateway does not translate are absent.
 	Normalized bool
+	// RequestBody is, on a response-phase call, the body of the request it answers, in Protocol,
+	// when the adapter has it (Envoy holds both on one stream; Portkey's reply payload carries the
+	// request). When nothing else names the call's session, the pipeline names the reply's from
+	// it exactly as it named the request's, so the reply joins its request's session without
+	// waiting for the request's analysis or asking the store.
+	RequestBody []byte
 }
 
 // Client is what the gateway knows about who made the call.

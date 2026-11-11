@@ -156,3 +156,42 @@ func TestFirstString(t *testing.T) {
 		}
 	}
 }
+
+// MemberStart finds the first top-level member of the name, unescaped, and reads no further;
+// Elements yields an array's elements in order and stops where yield does, so what follows need
+// not even be valid.
+func TestMemberStartElements(t *testing.T) {
+	for body, want := range map[string][]string{
+		`{"model":"m","messages":[{"a":1}, "x" ,[2,3],null]}`: {`{"a":1}`, `"x"`, `[2,3]`, `null`},
+		`{"system":{"messages":[9]},"m\u0065ssages":[]}`:      {},
+		`{"messages":[{"a":"]"}],"messages":[7]}`:             {`{"a":"]"}`},
+		`{"messages":7}`: nil,
+		`{"model":"m"}`:  nil,
+		`not json`:       nil,
+		`{"messages": [ {"a":1} , {"b":2}, this is not json`:          {`{"a":1}`, `{"b":2}`},
+		`{"model": "unterminated, "messages":[1]}`:                    nil,
+		`{"model":[1,2],"stream":true,"messages":["m"] , "tools":[]}`: {`"m"`},
+	} {
+		at, ok := MemberStart([]byte(body), func(n string) bool { return n == "messages" })
+		if !ok {
+			if want != nil {
+				t.Errorf("MemberStart(%s) found nothing", body)
+			}
+			continue
+		}
+		got := []string{}
+		err := Elements([]byte(body), at, func(elem []byte) bool {
+			got = append(got, string(elem))
+			return len(got) < len(want)
+		})
+		if want == nil {
+			if err == nil {
+				t.Errorf("Elements(%s) = %q, want an error", body, got)
+			}
+			continue
+		}
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("Elements(%s) = %q, %v, want %q", body, got, err, want)
+		}
+	}
+}

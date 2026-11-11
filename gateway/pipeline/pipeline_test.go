@@ -166,7 +166,7 @@ func TestSessionID(t *testing.T) {
 		{"gateway's conversation id", gateway.Call{Gateway: "g", ID: "c", Client: gateway.Client{Session: "trace"}}, "trace"},
 		{"no session and no conversation: the call is its own", gateway.Call{Gateway: "g", ID: "c", Phase: gateway.PhaseRequest}, "g:c"},
 	} {
-		if got, _, _ := p.sessionID(context.Background(), &tc.c); got != tc.want {
+		if got := p.sessionID(&tc.c); got != tc.want {
 			t.Errorf("%s: sessionID = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -174,8 +174,9 @@ func TestSessionID(t *testing.T) {
 
 // With no session header or gateway session (Portkey without session metadata, Envoy without
 // session headers), a conversation is named by its root: every call of one conversation, and each
-// call's reply, share a session, and conversations that open differently, or are another caller's,
-// do not. The first message is read even where the skim elides the rest of the history.
+// call's reply (named from the request body it carries), share a session, and conversations that
+// open differently, or are another caller's, do not. The root is read from the body, however long
+// the history after it.
 func TestRootSession(t *testing.T) {
 	rec := &recorder{}
 	p := New(Config{Analyzers: []Analyzer{rec}})
@@ -189,26 +190,30 @@ func TestRootSession(t *testing.T) {
 		}
 		return []byte(b.String() + "]}")
 	}
-	call := func(id string, phase gateway.Phase, b []byte, who gateway.Identity) {
-		p.Handle(ctx, &gateway.Call{Gateway: "pk", ID: id, Phase: phase, Protocol: llm.AnthropicMessages, Body: b,
+	call := func(id string, b []byte, who gateway.Identity) {
+		p.Handle(ctx, &gateway.Call{Gateway: "pk", ID: id, Phase: gateway.PhaseRequest, Protocol: llm.AnthropicMessages, Body: b,
+			Client: gateway.Client{Identity: who}})
+	}
+	reply := func(id string, request []byte, who gateway.Identity) {
+		p.Handle(ctx, &gateway.Call{Gateway: "pk", ID: id, Phase: gateway.PhaseResponse, Protocol: llm.AnthropicMessages,
+			Body: []byte(`{"id":"msg","model":"m","content":[{"type":"text","text":"ok"}]}`), RequestBody: request,
 			Client: gateway.Client{Identity: who}})
 	}
 	alice, bob := gateway.Identity{User: "alice"}, gateway.Identity{User: "bob"}
-	reply := []byte(`{"id":"msg","model":"m","content":[{"type":"text","text":"ok"}]}`)
-	call("c1", gateway.PhaseRequest, body("fix the tests", 0), alice)
-	call("c1", gateway.PhaseResponse, reply, alice)
-	call("c2", gateway.PhaseRequest, body("fix the tests", 1), alice)
-	call("c3", gateway.PhaseRequest, body("fix the tests", 40), alice)
-	call("c4", gateway.PhaseRequest, body("write the docs", 1), alice)
-	call("c5", gateway.PhaseRequest, body("fix the tests", 1), bob)
-	call("c6", gateway.PhaseResponse, reply, alice) // a reply whose request was never seen
+	call("c1", body("fix the tests", 0), alice)
+	reply("c1", body("fix the tests", 0), alice)
+	call("c2", body("fix the tests", 1), alice)
+	call("c3", body("fix the tests", 40), alice)
+	call("c4", body("write the docs", 1), alice)
+	call("c5", body("fix the tests", 1), bob)
+	reply("c6", nil, alice) // a reply that does not carry its request
 	// Identities that differ only in a field other than the user are other callers.
-	call("c7", gateway.PhaseRequest, body("fix the tests", 1), gateway.Identity{Email: "carol@example.com"})
-	call("c8", gateway.PhaseRequest, body("fix the tests", 1), gateway.Identity{Email: "dave@example.com"})
-	call("c9", gateway.PhaseRequest, body("fix the tests", 1), gateway.Identity{Team: "red", Key: "k1"})
+	call("c7", body("fix the tests", 1), gateway.Identity{Email: "carol@example.com"})
+	call("c8", body("fix the tests", 1), gateway.Identity{Email: "dave@example.com"})
+	call("c9", body("fix the tests", 1), gateway.Identity{Team: "red", Key: "k1"})
 	// Without any identity there is no root: each call is its own session.
-	call("c10", gateway.PhaseRequest, body("fix the tests", 1), gateway.Identity{})
-	call("c11", gateway.PhaseRequest, body("fix the tests", 1), gateway.Identity{})
+	call("c10", body("fix the tests", 1), gateway.Identity{})
+	call("c11", body("fix the tests", 1), gateway.Identity{})
 	got := make([]string, len(rec.turns))
 	for i, turn := range rec.turns {
 		got[i] = turn.SessionID
@@ -220,7 +225,7 @@ func TestRootSession(t *testing.T) {
 		t.Errorf("another opening or another caller shared a session: %v", got)
 	}
 	if got[6] != "pk:c6" {
-		t.Errorf("a reply with no request seen: session %q, want the call's own", got[6])
+		t.Errorf("a reply without its request: session %q, want the call's own", got[6])
 	}
 	if got[7] == got[8] || got[7] == got[2] || got[9] == got[2] || !strings.HasPrefix(got[7], "root:") || !strings.HasPrefix(got[9], "root:") {
 		t.Errorf("callers named by email, team or key: sessions %v", got[7:10])
@@ -228,12 +233,45 @@ func TestRootSession(t *testing.T) {
 	if got[10] != "pk:c10" || got[11] != "pk:c11" {
 		t.Errorf("calls with no identity: sessions %v, want each its own", got[10:])
 	}
-	// Messages[0] is the system text; the root is the first user message, and the history after it
-	// is still elided.
-	msgs := rec.turns[3].Call.Request.Messages
-	if first := msgs[1]; first.Elided || first.Text() != "fix the tests" || !msgs[5].Elided {
-		t.Errorf("long conversation's root %+v, a middle message elided %v", first, msgs[5].Elided)
+}
+
+// A reply is named from the request body it carries, so it joins its request's session even while
+// the request's analysis is still running (an analyzer that is slow, or a store that is): the two
+// phases of an answer-first call are analyzed concurrently.
+func TestReplySessionDoesNotWaitForRequest(t *testing.T) {
+	release := make(chan struct{})
+	slow := &blockingAnalyzer{phase: gateway.PhaseRequest, release: release, sessions: make(chan string, 2)}
+	p := New(Config{Analyzers: []Analyzer{slow}}) // no policy and no inline analyzer: answer first
+	ctx := context.Background()
+	req := []byte(`{"model":"m","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"fix the tests"}]}`)
+	who := gateway.Client{Identity: gateway.Identity{User: "alice"}}
+	p.Handle(ctx, &gateway.Call{Gateway: "pk", ID: "c1", Phase: gateway.PhaseRequest, Protocol: llm.OpenAIChat, Body: req, Client: who})
+	p.Handle(ctx, &gateway.Call{Gateway: "pk", ID: "c1", Phase: gateway.PhaseResponse, Protocol: llm.OpenAIChat,
+		Body: []byte(`{"id":"r","model":"m","choices":[{"message":{"role":"assistant","content":"ok"}}]}`), RequestBody: req, Client: who})
+	replySession := <-slow.sessions // the reply's analysis ran while the request's is held
+	close(release)
+	requestSession := <-slow.sessions
+	p.Close()
+	if !strings.HasPrefix(requestSession, "root:") || replySession != requestSession {
+		t.Errorf("request session %q, reply session %q: want one root session", requestSession, replySession)
 	}
+}
+
+// blockingAnalyzer reports each turn's session, holding turns of one phase until release closes.
+type blockingAnalyzer struct {
+	phase    gateway.Phase
+	release  chan struct{}
+	sessions chan string
+}
+
+func (*blockingAnalyzer) Name() string { return "blocking" }
+
+func (a *blockingAnalyzer) Analyze(_ context.Context, t *Turn) (Report, error) {
+	if t.Call.Phase == a.phase {
+		<-a.release
+	}
+	a.sessions <- t.SessionID
+	return Report{}, nil
 }
 
 // Bodies are admitted against a byte budget: a body that does not fit is refused after the queue
