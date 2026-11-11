@@ -18,6 +18,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -58,9 +59,12 @@ const (
 	maxAgents      = 100_000
 	maxTurns       = 100_000
 	maxResultBytes = 16 << 20
-	// maxBody bounds a replayed request body; a session that would grow past it ends early.
+	// maxBody bounds a replayed request body's parts; a session that would grow past it ends early.
 	maxBody = 512 << 20
 )
+
+// bodyEnd closes a request body after its messages.
+var bodyEnd = []byte("]}")
 
 func run(cfg config) error {
 	if cfg.agents < 1 || cfg.turns < 1 || cfg.resultBytes < 1 {
@@ -172,12 +176,11 @@ func runAgent(cfg config, p *pipeline.Pipeline, prefix []byte, pl plan) agentRes
 
 	for k := 1; k <= cfg.turns; k++ {
 		t0 = time.Now()
-		if len(msgs) > maxBody-len(prefix)-2 {
+		if len(prefix) > maxBody || len(msgs) > maxBody {
 			fmt.Fprintf(os.Stderr, "load: session %s ends at turn %d: its body would exceed %d bytes\n", pl.session, k, maxBody)
 			break
 		}
-		body := make([]byte, 0, len(prefix)+len(msgs)+2)
-		body = append(append(append(body, prefix...), msgs...), "]}"...)
+		body := slices.Concat(prefix, msgs, bodyEnd)
 		tu := synth.RandomTool(r, synth.ToolID(r))
 		res.build += time.Since(t0)
 		res.lastReq = len(body)
