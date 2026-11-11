@@ -292,6 +292,7 @@ func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration
 		_ = os.Remove(sessionSyncFloorPath(userMode))
 	} else {
 		sweep.Floors = readSessionSyncFloors(userMode)
+		floorRuntimesAddedSinceTheSkip(userMode, sweep.Floors)
 	}
 	return runEndpointBackfillUnlocked(logPath, userMode, sweep)
 }
@@ -303,25 +304,59 @@ type endpointSweep struct {
 	ThrottleSnapshots bool
 }
 
-// floor is the not-before time a sweep reads runner from. A runtime recordSkippedBackfill floored
-// keeps its own floor. A runtime it never saw -- one an upgrade added after the backfill was
-// skipped -- has no floor and, until a sweep reads it, no cursors; it takes the earliest recorded
-// floor, because the operator opted out of the window before then for every runtime, not only the
-// ones that existed at the time. A runtime with cursors reads on from them.
-func (s endpointSweep) floor(runner endpointBackfillRunner, userMode bool) time.Time {
-	if floor, ok := s.Floors[runner.Name]; ok {
-		return floor
-	}
-	if len(s.Floors) == 0 || runnerHasCursors(runner, userMode) {
-		return time.Time{}
-	}
+// floorRuntimesAddedSinceTheSkip gives every runtime a skipped backfill did not floor, because an
+// upgrade added it later, the earliest recorded floor, and records it. The operator opted out of
+// the window before then for every runtime, not only the ones that existed at the time. The floor
+// is persisted rather than derived per sweep: the first floored sweep saves the runtime's cursors,
+// and a derived floor would then lapse and let the next sweep read the window the skip excluded.
+// A runtime with cursors reads on from them and gets none, as in recordSkippedBackfill. Without
+// recorded floors, nothing was skipped and nothing changes.
+func floorRuntimesAddedSinceTheSkip(userMode bool, floors map[string]time.Time) {
 	var earliest time.Time
-	for _, floor := range s.Floors {
+	for _, floor := range floors {
 		if earliest.IsZero() || floor.Before(earliest) {
 			earliest = floor
 		}
 	}
-	return earliest
+	if earliest.IsZero() || !floorUnreadRuntimes(userMode, floors, earliest) {
+		return
+	}
+	// Unwritten, the floor still holds for this sweep; the next one derives it again only while
+	// the runtime has no cursors, which is the best a sweep that cannot write its state can do.
+	_ = writeSessionSyncFloors(userMode, floors)
+}
+
+// floorUnreadRuntimes sets at as the floor of every runtime with neither a floor nor cursors, and
+// reports whether it set any.
+func floorUnreadRuntimes(userMode bool, floors map[string]time.Time, at time.Time) bool {
+	changed := false
+	withSweepHome(userMode, func() {
+		for _, runner := range endpointBackfillRunners() {
+			if _, ok := floors[runner.Name]; ok || runnerHasCursors(runner, userMode) {
+				continue
+			}
+			floors[runner.Name] = at
+			changed = true
+		}
+	})
+	return changed
+}
+
+func writeSessionSyncFloors(userMode bool, floors map[string]time.Time) error {
+	path := sessionSyncFloorPath(userMode)
+	data, _ := json.Marshal(sessionSyncFloors{NotBefore: floors})
+	tmp := path + ".tmp"
+	err := os.MkdirAll(filepath.Dir(path), 0o700)
+	if err == nil {
+		err = os.WriteFile(tmp, append(data, '\n'), 0o600)
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
 }
 
 // endpointSnapshotInterval is how often the scheduled system session sync copies a SQLite store
@@ -382,32 +417,10 @@ func recordSkippedBackfill(out io.Writer, userMode bool) {
 		return
 	}
 	floors := readSessionSyncFloors(userMode)
-	now := endpointBackfillNow().UTC()
-	changed := false
-	withSweepHome(userMode, func() {
-		for _, runner := range endpointBackfillRunners() {
-			if _, ok := floors[runner.Name]; ok || runnerHasCursors(runner, userMode) {
-				continue
-			}
-			floors[runner.Name] = now
-			changed = true
-		}
-	})
-	if !changed {
+	if !floorUnreadRuntimes(userMode, floors, endpointBackfillNow().UTC()) {
 		return
 	}
-	path := sessionSyncFloorPath(userMode)
-	data, _ := json.Marshal(sessionSyncFloors{NotBefore: floors})
-	tmp := path + ".tmp"
-	err := os.MkdirAll(filepath.Dir(path), 0o700)
-	if err == nil {
-		err = os.WriteFile(tmp, append(data, '\n'), 0o600)
-	}
-	if err == nil {
-		err = os.Rename(tmp, path)
-	}
-	if err != nil {
-		_ = os.Remove(tmp)
+	if err := writeSessionSyncFloors(userMode, floors); err != nil {
 		fmt.Fprintf(out, "Warning: could not record the skipped session backfill (%v); a scheduled session sync may read the last %d days.\n", err, int(endpointBackfillWindow/(24*time.Hour)))
 	}
 }
@@ -568,7 +581,7 @@ func sweepEndpointBackfill(logPath string, userMode bool, sweep endpointSweep) e
 			copied[runner.Name] = now
 		}
 		since := result.Since
-		if floor := sweep.floor(runner, userMode); floor.After(since) {
+		if floor := sweep.Floors[runner.Name]; floor.After(since) {
 			since = floor
 			if result.Floored.IsZero() || floor.Before(result.Floored) {
 				result.Floored = floor
