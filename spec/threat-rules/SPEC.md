@@ -268,18 +268,40 @@ the steps in both orders still fires once. A single event never satisfies two st
       `IO.read|readlines|binread|foreach` (ruby), and `file_get_contents`, `fopen`, `readfile`
       and `file` (php). A call whose mode argument holds `w`, `a` or `x` is not a read.
       `script_sends` (since v1.3, with the same declaration rule) lists the paths of those the
-      script opens inside the parentheses of a call that sends its arguments over the network,
-      at any depth: `.env` for `requests.post(url, data=open(".env").read())`. The calls are,
-      by their last name, `post`, `put`, `patch`, `request`, `urlopen`, `Request`, `send`,
-      `sendall` and `sendto` (python); `fetch`, `axios`, `post`, `put`, `patch`, `request`,
-      `send`, `sendBeacon`, `connect` and `createConnection`, and `.end(..)` or `.write(..)`
-      called directly on what one of them returns (JavaScript); `post`, `post_form`, `put`,
-      `patch`, and `.write`, `.puts`, `.print` or `.send` called directly on `TCPSocket.new(..)`
-      or `TCPSocket.open(..)` (ruby); `curl_setopt`, `curl_setopt_array`,
-      `stream_context_create`, `socket_write`, `socket_send` and `mail` (php). A file read into
-      a variable that is sent later is a read and not a send. For a command that is not such
-      an interpreter the list is empty: whether `curl` or `nc` sends what it takes in is for
-      the rule to say.
+      script sends over the network: a file it opens inside the parentheses of a call that
+      sends its arguments, at any depth (`.env` for
+      `requests.post(url, data=open(".env").read())`), or one whose content a name holds when
+      the name is used there (`d = open(".env").read(); requests.post(url, data=d)`). The
+      calls are, by their last name, `post`, `put`, `patch`, `request`, `urlopen`, `Request`,
+      `send`, `sendall` and `sendto` (python); `fetch`, `axios`, `post`, `put`, `patch`,
+      `request`, `send`, `sendBeacon`, `connect` and `createConnection`, and `.end(..)` or
+      `.write(..)` called on what one of them returns (JavaScript); `post`, `post_form`, `put`,
+      `patch`, and `.write`, `.puts`, `.print` or `.send` called on what `TCPSocket.new(..)` or
+      `TCPSocket.open(..)` returns (ruby); `curl_setopt`, `curl_setopt_array`,
+      `stream_context_create`, `socket_write`, `socket_send` and `mail` (php). "What one of
+      them returns" is the call itself (`https.request(url).end(data)`) or a name assigned it
+      (`r = https.request(url); r.write(data)`).
+
+      A name holds a file's content when it is assigned a value that opens the file or uses a
+      name that holds it (`name = value`, to the end of the statement: a newline or `;`
+      outside parentheses), until it is assigned again; when it follows `as` in a statement
+      that opened the file (python `with open(..) as f`); when it is a parameter of a callback
+      in a statement that opened it (JavaScript `(err, data) =>`, `data =>`,
+      `function (err, data)`); or when it is a parameter of a block there (ruby `{ |f|`,
+      `do |f|`). A use of `name.member` is a use of `name`. In python `name=value` inside a
+      call's parentheses is an argument and assigns nothing. A name directly before `:` is a
+      key and not a use. Scopes, what a function returns, a loop variable, and a value inside
+      a string (an f-string, a template literal) are not followed.
+
+      As for `curl`, a call's headers, credentials and URL parameters are not data. Inside a
+      call that sends, nothing counts from the name `headers`, `auth`, `params` or `cert`
+      (python), `headers`, `auth` or `params` (JavaScript), `headers`, `basic_auth` or `query`
+      (ruby), written as `name=` or `name:`, to the next comma at the same depth of
+      parentheses, braces and brackets; nor from `CURLOPT_HTTPHEADER`, `CURLOPT_USERPWD`,
+      `CURLOPT_URL` or `CURLOPT_XOAUTH2_BEARER` (php) to the end of the call.
+
+      For a command that is not such an interpreter the list is empty: whether `curl` or `nc`
+      sends what it takes in is for the rule to say.
 
     The value of an option is never an operand (`head -n 5`, `scp -i key`, `tar --exclude x`,
     `gh gist create -d text`).

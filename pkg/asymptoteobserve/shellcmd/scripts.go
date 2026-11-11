@@ -6,9 +6,10 @@ import (
 )
 
 // language is how FileReads reads a script an interpreter is given on its command line or its
-// standard input: where the script is, and which calls in it open a file for reading. It follows
-// a call whose path is a string literal, outside strings and comments, and nothing else: not a
-// path a script computes, and not what the script does with the file.
+// standard input: where the script is, which calls in it open a file for reading, and how it
+// names what it read. It follows a call whose path is a string literal, outside strings and
+// comments, and the names the script gives the file's content on its way to a call that sends
+// it (scriptVars). It does not follow a path a script computes.
 type language struct {
 	// eval are the short options whose value is the script (python -c, node -e), values the ones
 	// that take some other value, and module the ones that make the interpreter run something
@@ -27,8 +28,9 @@ type language struct {
 	calls []string
 	// sends are the calls that send what they are given over the network, matched as calls are.
 	// chain are the methods that do when called on what such a call returns: the end of
-	// https.request(..).end(data).
-	sends, chain []string
+	// https.request(..).end(data). quiet are the names in such a call after which an argument is
+	// not data: its headers, its credentials and its URL parameters, as for curl.
+	sends, chain, quiet []string
 	// then, for a call it is set for, is what must follow the call for it to read the file:
 	// Path("x") alone only names one.
 	then map[string][]string
@@ -41,6 +43,11 @@ type language struct {
 	// backtick, triple, hash and slashes say which strings and comments the language has beyond
 	// '..' and "..": `..`, '''..''' and """..""", # to the end of the line, and // to it.
 	backtick, triple, hash, slashes bool
+	// How the language names a value, beyond name = value. keywords: inside a call's
+	// parentheses name=value is an argument, not an assignment (python). as: `with .. as name`
+	// (python). arrows: the parameters of a callback, (a, b) => and function (a, b)
+	// (javascript). blocks: the parameters of a block, { |a| and do |a| (ruby).
+	keywords, as, arrows, blocks bool
 }
 
 var (
@@ -48,11 +55,14 @@ var (
 		eval: "c", values: "WXQ", module: "m",
 		calls:    []string{"open", "Path"},
 		sends:    []string{"post", "put", "patch", "request", "urlopen", "Request", "send", "sendall", "sendto"},
+		quiet:    []string{"headers", "auth", "params", "cert"},
 		then:     map[string][]string{"Path": {".read_text", ".read_bytes", ".open"}},
 		modes:    true,
 		prefixes: "rbuRBU",
 		triple:   true,
 		hash:     true,
+		keywords: true,
+		as:       true,
 	}
 	javascript = language{
 		eval: "ep", values: "r", evalLong: []string{"--eval", "--print"}, wordValues: true,
@@ -62,8 +72,10 @@ var (
 		},
 		sends:    []string{"fetch", "axios", "post", "put", "patch", "request", "send", "sendBeacon", "connect", "createConnection"},
 		chain:    []string{"end", "write"},
+		quiet:    []string{"headers", "auth", "params"},
 		backtick: true,
 		slashes:  true,
+		arrows:   true,
 	}
 	deno = func() language {
 		l := javascript
@@ -76,16 +88,19 @@ var (
 			"File.read", "File.readlines", "File.binread", "File.foreach", "File.open",
 			"IO.read", "IO.readlines", "IO.binread", "IO.foreach",
 		},
-		sends: []string{"post", "post_form", "put", "patch", "TCPSocket.new", "TCPSocket.open"},
-		chain: []string{"write", "puts", "print", "send"},
-		modes: true,
-		bare:  true,
-		hash:  true,
+		sends:  []string{"post", "post_form", "put", "patch", "TCPSocket.new", "TCPSocket.open"},
+		chain:  []string{"write", "puts", "print", "send"},
+		quiet:  []string{"headers", "basic_auth", "query"},
+		modes:  true,
+		bare:   true,
+		hash:   true,
+		blocks: true,
 	}
 	php = language{
 		eval: "r", values: "dcz",
 		calls:   []string{"file_get_contents", "fopen", "readfile", "file"},
 		sends:   []string{"curl_setopt", "curl_setopt_array", "stream_context_create", "socket_write", "socket_send", "mail"},
+		quiet:   []string{"CURLOPT_HTTPHEADER", "CURLOPT_USERPWD", "CURLOPT_URL", "CURLOPT_XOAUTH2_BEARER"},
 		modes:   true,
 		hash:    true,
 		slashes: true,
@@ -201,15 +216,30 @@ func stdinScript(c *Command) string {
 }
 
 // scriptReads returns the files a script opens for reading by a literal path, and those of them
-// it opens inside the arguments of a call that sends them over the network:
-// requests.post(url, data=open(".env")), but not a file opened into a variable that is sent later.
+// it sends over the network: opened inside the arguments of a call that sends
+// (requests.post(url, data=open(".env"))), or held by a name that is used there
+// (d = open(".env").read(); requests.post(url, data=d)).
 func scriptReads(l *language, script string) (files, sent []string) {
 	var (
 		open      callStack
-		nameEnd   = -1 // where the last name ends
+		nameStart = -1 // where the last name starts and ends
+		nameEnd   = -1
 		nameSends bool // whether calling it sends
 		afterSend = -1 // just after the ) of the last call that sends
+		vars      scriptVars
+		nest      int // the braces and brackets open
+		quiet     quietArgs
 	)
+	// take records that the script has a file's content in hand at this point.
+	take := func(path string) {
+		vars.statement = addPath(vars.statement, path)
+		if vars.target != "" {
+			vars.assigned = addPath(vars.assigned, path)
+		}
+		if open.sends != 0 && !quiet.on {
+			sent = addPath(sent, path)
+		}
+	}
 	for i := 0; i < len(script); {
 		c := script[i]
 		switch {
@@ -221,14 +251,73 @@ func scriptReads(l *language, script string) (files, sent []string) {
 			} else {
 				i = len(script)
 			}
+		case c == '\n' || c == ';':
+			if open.depth <= vars.depth {
+				vars.assign()
+			}
+			if open.depth == 0 {
+				vars.statement = nil
+				quiet.on = false
+			}
+			i++
 		case c == '(':
 			open.push(nameSends && nameEnd >= 0 && skipSpaces(script, nameEnd) == i)
+			if l.arrows {
+				vars.groups = append(vars.groups, i)
+			}
 			i++
 		case c == ')':
 			if open.pop() {
 				afterSend = i + 1
 			}
+			if n := len(vars.groups); n > 0 {
+				vars.group, vars.groupEnd = vars.groups[n-1], i
+				vars.groups = vars.groups[:n-1]
+			}
+			if open.depth < vars.depth {
+				vars.assign()
+			}
+			if open.depth < quiet.depth {
+				quiet.on = false
+			}
 			i++
+		case c == '{' || c == '[':
+			nest++
+			i++
+		case c == '}' || c == ']':
+			nest--
+			if nest < quiet.nest {
+				quiet.on = false
+			}
+			i++
+		case c == ',':
+			if !quiet.rest && open.depth == quiet.depth && nest == quiet.nest {
+				quiet.on = false
+			}
+			i++
+		case c == '=' && l.arrows && strings.HasPrefix(script[i:], "=>"):
+			// The parameters of a callback are given what the statement has in hand:
+			// fs.readFile(".env", (err, data) => ..), readFile(".env").then(data => ..).
+			before := i - 1
+			for before >= 0 && (script[before] == ' ' || script[before] == '\t') {
+				before--
+			}
+			switch {
+			case before >= 0 && script[before] == ')' && vars.groupEnd == before:
+				vars.bindAll(script[vars.group+1 : before])
+			case before+1 == nameEnd:
+				vars.bind(script[nameStart:nameEnd])
+			}
+			i += 2
+		case c == '|' && l.blocks && opensBlock(script, i):
+			// The parameters of a block: File.open(".env") { |f| .. }, .. do |f|.
+			end := strings.IndexAny(script[i+1:], "|\n")
+			if end < 0 || script[i+1+end] == '\n' {
+				i++
+				break
+			}
+			vars.bindAll(script[i+1 : i+1+end])
+			i += end + 2
 		case isNameByte(c) && (i == 0 || !isNameByte(script[i-1])):
 			// A name with the names it is qualified by: fs.promises.readFile, Path, .read.
 			end := i
@@ -236,21 +325,213 @@ func scriptReads(l *language, script string) (files, sent []string) {
 				end++
 			}
 			name := script[i:end]
-			nameEnd = end
+			nameStart, nameEnd = i, end
 			nameSends = slices.ContainsFunc(l.sends, func(call string) bool { return isCall(name, call) }) ||
-				afterSend >= 0 && name[0] == '.' && slices.Contains(l.chain, name[1:]) && strings.TrimSpace(script[afterSend:i]) == ""
-			if path, ok := l.opens(script, i, end); ok {
-				files = append(files, path)
-				if open.sends != 0 {
-					sent = append(sent, path)
-				}
+				afterSend >= 0 && name[0] == '.' && slices.Contains(l.chain, name[1:]) && strings.TrimSpace(script[afterSend:i]) == "" ||
+				vars.sends(name, l.chain)
+			if nameSends && vars.target != "" {
+				vars.sender = true
 			}
 			i = end
+			after := skipSpaces(script, end)
+			switch path, opens := l.opens(script, nameStart, end); {
+			case opens:
+				files = append(files, path)
+				take(path)
+			case vars.binds:
+				// with open(".env") as f
+				vars.binds = false
+				vars.bind(name)
+			case l.as && name == "as":
+				vars.binds = true
+			case l.arrows && name == "function":
+				// function (err, data) { .. }, as a callback
+				if params, length, ok := parameters(script[end:]); ok {
+					vars.bindAll(params)
+					i = end + length
+				}
+			case open.sends != 0 && slices.Contains(l.quiet, name):
+				// The call's headers, credentials or URL parameters: not what it sends as data,
+				// up to the next argument (headers=.., headers: ..), or to the end of the call
+				// for an option that says what the argument after it is (CURLOPT_HTTPHEADER, ..).
+				switch {
+				case isAssignment(script, after), after < len(script) && script[after] == ':':
+					quiet = quietArgs{on: true, depth: open.depth, nest: nest}
+				case after < len(script) && script[after] == ',':
+					quiet = quietArgs{on: true, rest: true, depth: open.depth, nest: nest}
+				}
+			case isAssignment(script, after):
+				// name = value. Inside a call's parentheses python means an argument by it.
+				if name[0] != '.' && (!l.keywords || open.depth == 0) {
+					vars.assign()
+					vars.target, vars.depth = name, open.depth
+				}
+			case after < len(script) && script[after] == ':' && !strings.HasPrefix(script[after:], "::"):
+				// A key (body: data) names what is sent; it is not the value.
+			default:
+				for _, path := range vars.held(name) {
+					take(path)
+				}
+			}
 		default:
 			i++
 		}
 	}
 	return files, sent
+}
+
+// quietArgs is the part of a call that sends in which nothing is data: from one of the
+// language's quiet names to the next comma at the same depth of parentheses and of braces and
+// brackets, or, with rest, to the end of the call.
+type quietArgs struct {
+	on, rest    bool
+	depth, nest int
+}
+
+// scriptVars are the names a script gives the content of the files it opens, as far as its text
+// shows without running it: an assignment whose value opens a file or uses a name that holds
+// one (d = open(".env").read(), body = d.encode()), and a name bound to what a statement opened
+// (python's `with open(..) as f`, the parameters of a javascript callback, of a ruby block). A
+// name holds the files until it is assigned again. A name assigned what a call that sends
+// returns (r = https.request(url)) sends by the methods that do on such a value (r.write(..)).
+// Nothing is known of scopes, of what a function returns, or of a value a string is built
+// around (an f-string, a template literal).
+type scriptVars struct {
+	holds   map[string][]string
+	senders map[string]bool
+	// target is the name the statement at hand assigns, depth the parentheses open where it
+	// does, assigned the files its value has so far, and sender whether a call that sends is
+	// in it.
+	target   string
+	depth    int
+	assigned []string
+	sender   bool
+	// statement are the files the statement at hand opened or used a name of. binds is set
+	// when the next name is bound to them.
+	statement []string
+	binds     bool
+	// groups are the parentheses open, by where they open, and group and groupEnd the last pair
+	// that closed: the parameter list, when => follows it.
+	groups          []int
+	group, groupEnd int
+}
+
+// assign ends the assignment at hand: its name holds what its value had, or nothing.
+func (v *scriptVars) assign() {
+	if v.target == "" {
+		return
+	}
+	if len(v.assigned) == 0 {
+		delete(v.holds, v.target)
+	} else {
+		v.hold(v.target, v.assigned)
+	}
+	if v.sender {
+		if v.senders == nil {
+			v.senders = map[string]bool{}
+		}
+		v.senders[v.target] = true
+	} else {
+		delete(v.senders, v.target)
+	}
+	v.target, v.assigned, v.sender = "", nil, false
+}
+
+// sends reports whether name is one of the chain methods of a name that was assigned what a
+// call that sends returns.
+func (v *scriptVars) sends(name string, chain []string) bool {
+	dot := strings.LastIndexByte(name, '.')
+	return dot > 0 && v.senders[name[:dot]] && slices.Contains(chain, name[dot+1:])
+}
+
+// bind gives a name the files the statement at hand has.
+func (v *scriptVars) bind(name string) {
+	if len(v.statement) > 0 && name != "" && name[0] != '.' {
+		v.hold(name, slices.Clone(v.statement))
+	}
+}
+
+// bindAll binds each name in a parameter list.
+func (v *scriptVars) bindAll(params string) {
+	if len(v.statement) == 0 {
+		return
+	}
+	for i := 0; i < len(params); {
+		if !isNameByte(params[i]) {
+			i++
+			continue
+		}
+		end := i
+		for end < len(params) && isNameByte(params[end]) {
+			end++
+		}
+		v.bind(params[i:end])
+		i = end
+	}
+}
+
+func (v *scriptVars) hold(name string, files []string) {
+	if v.holds == nil {
+		v.holds = map[string][]string{}
+	}
+	v.holds[name] = files
+}
+
+// held returns the files a name holds: the name itself, or what it is a member of (f.read of f,
+// self.body.encode of self.body).
+func (v *scriptVars) held(name string) []string {
+	for v.holds != nil {
+		if files := v.holds[name]; files != nil {
+			return files
+		}
+		dot := strings.LastIndexByte(name, '.')
+		if dot <= 0 {
+			break
+		}
+		name = name[:dot]
+	}
+	return nil
+}
+
+// isAssignment reports whether the = of an assignment is at i: not ==, => or =~.
+func isAssignment(script string, i int) bool {
+	if i >= len(script) || script[i] != '=' {
+		return false
+	}
+	return i+1 >= len(script) || !strings.ContainsRune("=>~", rune(script[i+1]))
+}
+
+// opensBlock reports whether the | at i follows the { or the do that opens a ruby block.
+func opensBlock(script string, i int) bool {
+	i--
+	for i >= 0 && (script[i] == ' ' || script[i] == '\t') {
+		i--
+	}
+	if i < 0 {
+		return false
+	}
+	return script[i] == '{' || strings.HasSuffix(script[:i+1], "do") && (i < 2 || !isNameByte(script[i-2]))
+}
+
+// parameters returns the parameter list that follows the function keyword, after its name if it
+// has one, and the length of the text up to the list's closing parenthesis.
+func parameters(after string) (params string, length int, ok bool) {
+	open := strings.IndexByte(after, '(')
+	if open < 0 || strings.ContainsFunc(strings.TrimSpace(after[:open]), func(r rune) bool { return r > 0x7f || !isNameByte(byte(r)) }) {
+		return "", 0, false
+	}
+	end := strings.IndexByte(after[open:], ')')
+	if end < 0 {
+		return "", 0, false
+	}
+	return after[open+1 : open+end], open + end + 1, true
+}
+
+func addPath(paths []string, path string) []string {
+	if slices.Contains(paths, path) {
+		return paths
+	}
+	return append(paths, path)
 }
 
 // callStack is the parentheses open at a point of a script, and which of them are the arguments
