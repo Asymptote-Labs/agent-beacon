@@ -227,7 +227,12 @@ func TestRedactStringRedactsProviderTokenShapes(t *testing.T) {
 		{"sendgrid", "SG." + alnum(22) + "." + alnum(43), "SG.[REDACTED]"},
 		{"postman api key", "found PMAK-" + hex(24) + "-" + hex(34), "found PMAK-[REDACTED]"},
 		{"docker hub personal access token", "found dckr_pat_" + alnum(27), "found dckr_pat_[REDACTED]"},
+		{"docker hub organization access token", "docker login -p dckr_oat_" + alnum(32), "docker login -p dckr_oat_[REDACTED]"},
 		{"supabase personal access token", "found sbp_" + hex(40), "found sbp_[REDACTED]"},
+		{"supabase versioned personal access token", "sbp_v0_" + hex(40), "sbp_v0_[REDACTED]"},
+		{"supabase oauth token", "sbp_oauth_" + hex(40), "sbp_oauth_[REDACTED]"},
+		{"supabase secret key", `createClient(url, "sb_secret_` + alnum(10) + "-" + alnum(11) + "_" + alnum(8) + `")`, `createClient(url, "sb_secret_[REDACTED]")`},
+		{"netlify personal access token", "netlify deploy --auth nfp_" + alnum(36), "netlify deploy --auth nfp_[REDACTED]"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,12 +254,17 @@ func TestRedactStringLeavesProviderTokenLookalikes(t *testing.T) {
 		"lsv2_pt_notahexvalue_atall",
 		"pcsk_abc",
 		"dop_v1_0123abcd",
+		"api_v1_" + strings.Repeat("0", 64),
 		"dapi_reference and dapiVersion",
 		"pip install pypi-simple",
 		"shpat_ZZZZ",
 		"lin_api_key",
 		"dp.pt.short",
 		"SG.aaaa.bbbb",
+		"dckr_pat_short",
+		"sbp_" + strings.Repeat("z", 40),
+		"sb_publishable_" + strings.Repeat("A", 22) + "_" + strings.Repeat("B", 8),
+		"nfp_short",
 		"hvs.short",
 		"rapidapi" + strings.Repeat("0", 32),
 	} {

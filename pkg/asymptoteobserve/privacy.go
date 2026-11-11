@@ -494,23 +494,27 @@ var redactionRules = concatRules([]redactionRule{
 	shapeRule(`\b(hf_)[A-Za-z0-9]{30,}`, "${1}"+redactedValue, "hf_"),                                           // Hugging Face
 	// Model providers and developer platforms whose keys agents handle all day. Each length and
 	// alphabet is gitleaks' rule of the same name, or trufflehog's detector where gitleaks has none.
-	shapeRule(`\b(hv[sbr]\.)[A-Za-z0-9_-]{24,}`, "${1}"+redactedValue, "hvs.", "hvb.", "hvr."),                          // HashiCorp Vault
-	shapeRule(`\b(gsk_)[A-Za-z0-9]{52}\b`, "${1}"+redactedValue, "gsk_"),                                                // Groq
-	shapeRule(`\b(pplx-)[A-Za-z0-9]{48}\b`, "${1}"+redactedValue, "pplx-"),                                              // Perplexity
-	shapeRule(`\b(r8_)[A-Za-z0-9_-]{37}`, "${1}"+redactedValue, "r8_"),                                                  // Replicate
-	shapeRule(`\b(xai-)[A-Za-z0-9_]{80}\b`, "${1}"+redactedValue, "xai-"),                                               // xAI
-	shapeRule(`\b(lsv2_(?:pt|sk)_)[0-9a-f]{32}_[0-9a-f]{10}\b`, "${1}"+redactedValue, "lsv2_pt_", "lsv2_sk_"),           // LangSmith
-	shapeRule(`\b(pcsk_)[A-Za-z0-9]{5,6}_[A-Za-z0-9]{63}\b`, "${1}"+redactedValue, "pcsk_"),                             // Pinecone
-	shapeRule(`\b(do[por]_v1_)[0-9a-f]{64}\b`, "${1}"+redactedValue, "dop_v1_", "doo_v1_", "dor_v1_"),                   // DigitalOcean
-	shapeRule(`\b(dapi)[0-9a-f]{32}(?:-\d)?\b`, "${1}"+redactedValue, "dapi"),                                           // Databricks
-	shapeRule(`\b(pypi-)AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}`, "${1}"+redactedValue, "pypi-AgEIcHlwaS5vcmc"),               // PyPI upload token
-	shapeRule(`\b(shp(?:at|ca|pa|ss)_)[a-fA-F0-9]{32}\b`, "${1}"+redactedValue, "shpat_", "shpca_", "shppa_", "shpss_"), // Shopify
-	shapeRule(`\b(lin_api_)[A-Za-z0-9]{40}\b`, "${1}"+redactedValue, "lin_api_"),                                        // Linear
-	shapeRule(`\b(dp\.pt\.)[A-Za-z0-9]{43}\b`, "${1}"+redactedValue, "dp.pt."),                                          // Doppler
-	shapeRule(`\b(SG\.)[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}`, "${1}"+redactedValue, "SG."),                              // SendGrid
-	shapeRule(`\b(PMAK-)[a-fA-F0-9]{24}-[a-fA-F0-9]{34}\b`, "${1}"+redactedValue, "PMAK-"),                              // Postman
-	shapeRule(`\b(dckr_pat_)[A-Za-z0-9_-]{27,}`, "${1}"+redactedValue, "dckr_pat_"),                                     // Docker Hub personal access token
-	shapeRule(`\b(sbp_(?:oauth_|v0_)?)[a-f0-9]{40}\b`, "${1}"+redactedValue, "sbp_"),                                    // Supabase personal access token
+	// Where prefixes differ in a letter or two, the rules share one needle (shp, lsv2_, _v1_): the
+	// engine tracks at most 64 distinct needles, and each new one spends a slot.
+	shapeRule(`\b(hv[sbr]\.)[A-Za-z0-9_-]{24,}`, "${1}"+redactedValue, "hvs.", "hvb.", "hvr."),            // HashiCorp Vault
+	shapeRule(`\b(gsk_)[A-Za-z0-9]{52}\b`, "${1}"+redactedValue, "gsk_"),                                  // Groq
+	shapeRule(`\b(pplx-)[A-Za-z0-9]{48}\b`, "${1}"+redactedValue, "pplx-"),                                // Perplexity
+	shapeRule(`\b(r8_)[A-Za-z0-9_-]{37}`, "${1}"+redactedValue, "r8_"),                                    // Replicate
+	shapeRule(`\b(xai-)[A-Za-z0-9_]{80}\b`, "${1}"+redactedValue, "xai-"),                                 // xAI
+	shapeRule(`\b(lsv2_(?:pt|sk)_)[0-9a-f]{32}_[0-9a-f]{10}\b`, "${1}"+redactedValue, "lsv2_"),            // LangSmith
+	shapeRule(`\b(pcsk_)[A-Za-z0-9]{5,6}_[A-Za-z0-9]{63}\b`, "${1}"+redactedValue, "pcsk_"),               // Pinecone
+	shapeRule(`\b(do[por]_v1_)[0-9a-f]{64}\b`, "${1}"+redactedValue, "_v1_").before(3),                    // DigitalOcean
+	shapeRule(`\b(dapi)[0-9a-f]{32}(?:-\d)?\b`, "${1}"+redactedValue, "dapi"),                             // Databricks
+	shapeRule(`\b(pypi-)AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}`, "${1}"+redactedValue, "pypi-AgEIcHlwaS5vcmc"), // PyPI upload token
+	shapeRule(`\b(shp(?:at|ca|pa|ss)_)[a-fA-F0-9]{32}\b`, "${1}"+redactedValue, "shp"),                    // Shopify
+	shapeRule(`\b(lin_api_)[A-Za-z0-9]{40}\b`, "${1}"+redactedValue, "lin_api_"),                          // Linear
+	shapeRule(`\b(dp\.pt\.)[A-Za-z0-9]{43}\b`, "${1}"+redactedValue, "dp.pt."),                            // Doppler
+	shapeRule(`\b(SG\.)[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}`, "${1}"+redactedValue, "SG."),                // SendGrid
+	shapeRule(`\b(PMAK-)[a-fA-F0-9]{24}-[a-fA-F0-9]{34}\b`, "${1}"+redactedValue, "PMAK-"),                // Postman
+	shapeRule(`\b(dckr_(?:pat|oat)_)[A-Za-z0-9_-]{27,}`, "${1}"+redactedValue, "dckr_"),                   // Docker Hub personal and organization access tokens
+	shapeRule(`\b(sbp_(?:oauth_|v0_)?)[a-f0-9]{40}\b`, "${1}"+redactedValue, "sbp_"),                      // Supabase personal access token
+	shapeRule(`\b(sb_secret_)[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{8,}`, "${1}"+redactedValue, "sb_secret_"),    // Supabase secret API key, as Supabase documents it; not the publishable key, which is public
+	shapeRule(`\b(nfp_)[A-Za-z0-9_]{36}\b`, "${1}"+redactedValue, "nfp_"),                                 // Netlify personal access token
 	// Beacon's own keys and tokens: API keys, device and enforcement keys, MCP tokens and their refresh
 	// tokens, and the CLI sign-in's access token, authorization code, client and exchange values.
 	shapeRule(`\b(bcn_(?:api|device|mcprt|mcp|enfdev|cli|code|client|exchange)_)[A-Za-z0-9_-]{8,}`, "${1}"+redactedValue, "bcn_"),
