@@ -298,15 +298,8 @@ func emitAntigravityPromptFromTranscript(logger *logging.Logger, input map[strin
 		return
 	}
 	fields := sessionFields(sessionID, input)
-	fields["prompt"] = map[string]interface{}{"text": prompt}
-	fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
-		"input": map[string]interface{}{"messages": asymptoteobserve.TextInputMessages(prompt)},
-	})
-	fields["content"] = retainedContentFields(prompt)
-	emitHookEvent(logger, "prompt.submitted", "prompt", "info", "Prompt submitted to agent", input, fields)
-	if link, ok := handoffLinkEvent(fields, prompt); ok {
-		emitHookEvent(logger, link.action, link.category, link.severity, link.message, input, link.fields)
-	}
+	setPromptFields(fields, prompt)
+	emitPromptSubmitted(logger, input, fields, prompt)
 }
 
 func antigravityPromptFromTranscript(input map[string]interface{}, sessionID string) string {
@@ -326,9 +319,7 @@ func antigravityPromptFromTranscript(input map[string]interface{}, sessionID str
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 			continue
 		}
-		source := strings.ToUpper(getFirstStr(entry, "source"))
-		entryType := strings.ToUpper(getFirstStr(entry, "type"))
-		if source != "USER_EXPLICIT" && entryType != "USER_INPUT" {
+		if !asymptoteobserve.IsAntigravityUserInput(getFirstStr(entry, "source"), getFirstStr(entry, "type")) {
 			continue
 		}
 		if content := getFirstStr(entry, "content"); content != "" {

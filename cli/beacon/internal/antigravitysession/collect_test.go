@@ -607,7 +607,7 @@ func TestGenericStepsPairWithCallsInOrder(t *testing.T) {
 		{Type: stepGeneric, Line: 2, Content: "package a"},
 		{Type: stepGeneric, Line: 3, Content: "Created file"},
 		{Type: stepPlannerResponse, Line: 4, ToolCalls: []ToolCall{{Name: "replace_file_content", Arguments: map[string]interface{}{"TargetFile": "/w/c.go"}}}},
-		{Type: stepUserInput, Line: 5, Content: "<USER_REQUEST>next</USER_REQUEST>"},
+		{Type: "USER_INPUT", Line: 5, Content: "<USER_REQUEST>next</USER_REQUEST>"},
 		{Type: stepGeneric, Line: 6, Content: "unpaired"},
 		{Type: stepPlannerResponse, Line: 7, ToolCalls: []ToolCall{{Name: "mcp_github_search", Arguments: map[string]interface{}{"q": "x"}}}},
 		{Type: stepGeneric, Line: 8, Content: "results"},

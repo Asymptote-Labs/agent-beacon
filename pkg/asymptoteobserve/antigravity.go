@@ -5,9 +5,19 @@ import "strings"
 // Antigravity CLI's own vocabulary, shared by the live hook adapter and the session-store
 // collector so a prompt, a tool call and its path read the same whichever path recorded them.
 
-// AntigravityPrompt returns the user's text from an Antigravity USER_INPUT step: the text inside
-// <USER_REQUEST>, without the ADDITIONAL_METADATA and USER_SETTINGS_CHANGE blocks Antigravity
-// writes around it. Content with no <USER_REQUEST> is returned trimmed.
+// IsAntigravityUserInput reports whether an Antigravity transcript step is something the user
+// typed: a USER_INPUT step, or any step whose source is USER_EXPLICIT. The hook adapter's
+// first-prompt fallback and the session-store collector both read prompts by this rule, so they
+// agree on which steps are prompts.
+func IsAntigravityUserInput(source, stepType string) bool {
+	return strings.EqualFold(stepType, "USER_INPUT") || strings.EqualFold(source, "USER_EXPLICIT")
+}
+
+// AntigravityPrompt returns the user's text from an Antigravity prompt, wherever it was read: a
+// USER_INPUT step's content, or a hook payload's lastUserInput. It is the text inside
+// <USER_REQUEST>, without the ADDITIONAL_METADATA and USER_SETTINGS_CHANGE blocks Antigravity writes
+// around it, trimmed; text with no <USER_REQUEST> is returned trimmed. Every path normalizes a
+// prompt through it, so the same prompt has the same content hash on the hook and the sync path.
 func AntigravityPrompt(content string) string {
 	if start := strings.Index(content, "<USER_REQUEST>"); start >= 0 {
 		content = content[start+len("<USER_REQUEST>"):]

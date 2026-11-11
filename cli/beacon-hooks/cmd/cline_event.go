@@ -208,11 +208,7 @@ func clinePromptEvents(fields map[string]interface{}, prompt string) []normalize
 }
 
 func clinePromptEvent(fields map[string]interface{}, prompt string) normalizedEvent {
-	fields["prompt"] = map[string]interface{}{"text": prompt}
-	fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
-		"input": map[string]interface{}{"messages": asymptoteobserve.TextInputMessages(prompt)},
-	})
-	fields["content"] = retainedContentFields(prompt)
+	setPromptFields(fields, prompt)
 	return normalizedEvent{
 		action: "prompt.submitted", category: "prompt", severity: "info",
 		message: "Prompt submitted to Cline", fields: fields,

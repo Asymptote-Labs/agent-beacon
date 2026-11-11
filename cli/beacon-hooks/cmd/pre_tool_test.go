@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	hookconfig "github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Cursor reads the pre-tool answer as the call's permission; a payload with no session must still
@@ -289,7 +290,8 @@ func TestRunPromptSubmitEmitsFactoryPromptEvent(t *testing.T) {
 // `lastUserInput` each time; `invocationNum` restarts at 0 on every turn. The sequence below is
 // what agy 1.5.3 sent for a two-turn conversation whose first turn ran one tool. Each turn's
 // prompt is recorded once, and the first tool call does not replay the first prompt from the
-// transcript.
+// transcript. A prompt is normalized the way the session-store sync normalizes the transcript's
+// copy, so both hash alike and the sync recognizes it as recorded.
 func TestRunPromptSubmitRecordsEachAntigravityTurnOnce(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "antigravity"
@@ -320,7 +322,7 @@ func TestRunPromptSubmitRecordsEachAntigravityTurnOnce(t *testing.T) {
 	if out := runHookWithInput(t, runPromptSubmit, invocation(1, "summarize token=ag-secret")); len(out) != 0 {
 		t.Fatalf("antigravity prompt response = %#v, want empty response", out)
 	}
-	runHookWithInput(t, runPromptSubmit, invocation(0, "now say done"))
+	runHookWithInput(t, runPromptSubmit, invocation(0, "\n  now say done  \n"))
 
 	var prompts []map[string]interface{}
 	for _, event := range endpointEvents(t, logPath) {
@@ -341,6 +343,9 @@ func TestRunPromptSubmitRecordsEachAntigravityTurnOnce(t *testing.T) {
 		if got := prompts[i]["repository"]; got != "/repo" {
 			t.Errorf("turn %d repository = %q, want /repo", i+1, got)
 		}
+	}
+	if got, want := prompts[1]["content"].(map[string]interface{})["hash"], asymptoteobserve.RetainedContent(asymptoteobserve.AntigravityPrompt("<USER_REQUEST>\nnow say done\n</USER_REQUEST>"), 0).Hash; got != want {
+		t.Errorf("turn 2 content.hash = %v, want the hash the sync gives the transcript's copy (%s)", got, want)
 	}
 }
 

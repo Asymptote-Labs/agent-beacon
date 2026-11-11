@@ -14,10 +14,9 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-// Step types Antigravity writes. Anything else is skipped by name, so a type a later agy adds is
-// not mistaken for one Beacon maps.
+// Step types Antigravity writes beyond the user's own input (asymptoteobserve.IsAntigravityUserInput).
+// Anything else is skipped by name, so a type a later agy adds is not mistaken for one Beacon maps.
 const (
-	stepUserInput       = "USER_INPUT"
 	stepPlannerResponse = "PLANNER_RESPONSE"
 	stepGeneric         = "GENERIC"
 )
@@ -55,8 +54,8 @@ type mapper struct {
 }
 
 func (m *mapper) consume(step Step) {
-	switch step.Type {
-	case stepUserInput:
+	switch {
+	case asymptoteobserve.IsAntigravityUserInput(step.Source, step.Type):
 		// A new turn: a call the last turn never reported a result for has none coming.
 		m.pending = nil
 		text := asymptoteobserve.AntigravityPrompt(step.Content)
@@ -73,7 +72,7 @@ func (m *mapper) consume(step Step) {
 			link.Handoff = &info
 			m.append(link, step)
 		}
-	case stepPlannerResponse:
+	case step.Type == stepPlannerResponse:
 		m.pending = nil
 		if thinking := strings.TrimSpace(step.Thinking); thinking != "" {
 			ev := m.base(step, "agent.reasoning", "agent", "Antigravity CLI agent reasoning")
@@ -96,7 +95,7 @@ func (m *mapper) consume(step Step) {
 			ev.GenAI = &schema.GenAIInfo{Usage: usage}
 			m.append(ev, step)
 		}
-	case stepGeneric:
+	case step.Type == stepGeneric:
 		if len(m.pending) == 0 {
 			return
 		}

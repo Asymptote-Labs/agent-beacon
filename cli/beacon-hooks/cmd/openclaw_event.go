@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	hookdiff "github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/spf13/cobra"
 )
 
@@ -336,11 +335,7 @@ func openClawPromptEvents(input, event, fields map[string]interface{}) []normali
 	if prompt == "" {
 		return nil
 	}
-	fields["prompt"] = map[string]interface{}{"text": prompt}
-	fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
-		"input": map[string]interface{}{"messages": asymptoteobserve.TextInputMessages(prompt)},
-	})
-	fields["content"] = retainedContentFields(prompt)
+	setPromptFields(fields, prompt)
 
 	// Who sent it, and over which chat app. On a single-user coding CLI this is implied; on a
 	// gateway that fans several people's chat accounts into one agent it is the difference between
