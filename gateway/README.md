@@ -51,9 +51,18 @@ an identity: without one (Envoy without `identity_headers`, Portkey without iden
 different people's conversations that open alike would be one session, so each call is its own
 session instead. Set identity headers to get conversation-level sessions without a session
 header. The root is a heuristic: two conversations of one caller in one harness that open with the
-same message are one session, and a request that carries no history (OpenAI Responses continuing
-`previous_response_id`) is its own session. Send a session header, or Portkey `session_id`
-metadata, where that matters.
+same message are one session. Send a session header, or Portkey `session_id` metadata, where that
+matters.
+
+An OpenAI Responses request that continues provider-side state carries only its new turn, so it
+has no root. With `conversation` set, the conversation id is the session. With
+`previous_response_id`, the request joins the session of the response it continues: each
+Responses reply records its session under its response id (`resp/<id>` in the store, kept for
+`pipeline.seen_ttl`), written off the call path, and a continuing request without a session
+header reads it back, one store round trip per phase that only such calls pay. A request that
+continues a response the gateway did not see, or sent before that response's record was written,
+is its own session. Such a request's new turn is recorded every time: the same short input twice
+("yes", "go on") is two turns, never a retry.
 
 ## Events
 

@@ -99,6 +99,14 @@ func decodeResponsesRequest(body []byte, skim *skimInput) (*llm.Request, error) 
 				})
 			}
 			return true, fmt.Errorf("input is neither a string nor an array")
+		case "previous_response_id":
+			s, err := readString(dec)
+			req.PreviousResponse = s
+			return true, err
+		case "conversation":
+			id, err := readConversation(dec)
+			req.Conversation = id
+			return true, err
 		case "tools":
 			if v, ok, err := skim.member(dec, "tools"); ok {
 				tools, _ = v.([]llm.Tool)
@@ -133,6 +141,19 @@ func decodeResponsesRequest(body []byte, skim *skimInput) (*llm.Request, error) 
 	req.Messages = slices.Insert(input, 0, lead...)
 	req.Tools = tools
 	return req, nil
+}
+
+// readConversation reads Responses' conversation parameter: an id, or an object naming one, or
+// null.
+func readConversation(dec *jsontext.Decoder) (string, error) {
+	if dec.PeekKind() != '{' {
+		return readString(dec)
+	}
+	var c struct {
+		ID string `json:"id"`
+	}
+	err := json.UnmarshalDecode(dec, &c)
+	return c.ID, err
 }
 
 // decodeResponsesTools decodes a tools value alone, as decodeResponsesRequest decodes it.

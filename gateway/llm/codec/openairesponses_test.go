@@ -61,6 +61,31 @@ func TestResponsesRequestStringInput(t *testing.T) {
 	if req.Unknown != nil {
 		t.Errorf("unknown = %q, want none", req.Unknown)
 	}
+	if req.PreviousResponse != "resp_9" || req.Conversation != "" || !req.Stateful() {
+		t.Errorf("previous %q conversation %q stateful %v", req.PreviousResponse, req.Conversation, req.Stateful())
+	}
+}
+
+// The conversation a request continues is an id or an object naming one; null is none.
+func TestResponsesRequestConversation(t *testing.T) {
+	for body, want := range map[string]string{
+		`{"input":"hi","conversation":"conv_1"}`:                   "conv_1",
+		`{"input":"hi","conversation":{"id":"conv_2"}}`:            "conv_2",
+		`{"input":"hi","conversation":null}`:                       "",
+		`{"input":"hi","previous_response_id":null,"store":false}`: "",
+	} {
+		req, err := openAIResponses{}.DecodeRequest([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req.Conversation != want || req.Stateful() != (want != "") {
+			t.Errorf("%s: conversation %q stateful %v, want %q", body, req.Conversation, req.Stateful(), want)
+		}
+		root, err := ReadRoot(llm.OpenAIResponses, []byte(body))
+		if err != nil || root.Conversation != want || root.Stateful() != req.Stateful() || (root.First == nil) != req.Stateful() {
+			t.Errorf("%s: ReadRoot = %+v, %v", body, root, err)
+		}
+	}
 }
 
 func TestResponsesResponse(t *testing.T) {

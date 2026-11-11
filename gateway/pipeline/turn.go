@@ -83,8 +83,9 @@ func (t *Turn) ToolCall(id string) (llm.ToolCall, bool) {
 // definitions are resent on every call, so whether the session reported them before is asked of
 // the store, unless the memo says this process already confirmed the same set; and so is whether
 // it reported this very tail, which a client's retry sends again. Both are asked in one batch.
-// When the store fails, everything counts as new: a record reported twice is better than one
-// never reported.
+// A stateful request's tail is never taken for a retry: it carries only its new turn, so the
+// same input twice ("yes", "go on") is two turns. When the store fails, everything counts as new:
+// a record reported twice is better than one never reported.
 func requestDelta(ctx context.Context, s store.Store, memo *seenMemo, session string, r *llm.Request, ttl time.Duration) (Delta, error) {
 	var d Delta
 	now := time.Now()
@@ -110,7 +111,7 @@ func requestDelta(ctx context.Context, s store.Store, memo *seenMemo, session st
 		}
 	}
 	tail := -1
-	if len(d.Tail) > 0 {
+	if len(d.Tail) > 0 && !r.Stateful() {
 		tail = len(entries)
 		entries = append(entries, tailEntry(session, ttl, r.Messages, start, d.Tail))
 	}

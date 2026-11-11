@@ -39,6 +39,7 @@ type Request struct {
 	Model  string
 	Stream bool
 	// Messages is the conversation in order, system instructions included as RoleSystem messages.
+	// A stateful request (Stateful) carries only what is new.
 	Messages []Message
 	Tools    []Tool
 	// Format is the text of response-shaping fields: tool_choice, response_format, a JSON schema.
@@ -49,7 +50,16 @@ type Request struct {
 	// Elided is the volume of the content of the Elided messages, by channel, as counting their
 	// parts would have measured it; nil when no message was elided.
 	Elided Inventory
+	// Conversation and PreviousResponse name the provider-side state a stateful request continues
+	// (OpenAI Responses' conversation and previous_response_id).
+	Conversation     string
+	PreviousResponse string
 }
+
+// Stateful reports that the provider holds the conversation's earlier turns, so the request
+// carries only its new turn: its first message is not the conversation's, and a repeated input
+// ("yes") is a new turn, not a retry.
+func (r *Request) Stateful() bool { return r.Conversation != "" || r.PreviousResponse != "" }
 
 // Response is a model reply: text, reasoning and tool calls.
 type Response struct {

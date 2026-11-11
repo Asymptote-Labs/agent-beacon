@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -25,6 +26,9 @@ func TestReadRoot(t *testing.T) {
 		{"responses input string", llm.OpenAIResponses, `{"model":"m","instructions":"sys","input":"fix it"}`, "fix it"},
 		{"responses input items", llm.OpenAIResponses,
 			`{"model":"m","input":[{"role":"developer","content":"dev"},{"type":"message","role":"user","content":[{"type":"input_text","text":"fix it"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`,
+			"fix it"},
+		{"responses naming the state members below the top level", llm.OpenAIResponses,
+			`{"model":"m","metadata":{"conversation":"c","previous_response_id":"r"},"input":[{"role":"user","content":"fix it"}],"store":false}`,
 			"fix it"},
 		{"no messages", llm.OpenAIChat, `{"model":"m","messages":[{"role":"system","content":"sys"}]}`, ""},
 		{"no messages member", llm.AnthropicMessages, `{"model":"m"}`, ""},
@@ -65,22 +69,32 @@ func TestReadRoot(t *testing.T) {
 	}
 }
 
-// Reading the root costs the same however long the history after it.
+// Reading a Chat or Anthropic root costs the same however long the history after it; a Responses
+// body that names no provider-side state costs one IndexByte pass more.
 func BenchmarkReadRoot(b *testing.B) {
 	for _, turns := range []int{10, 300} {
-		body := chatBody(turns)
-		b.Run(map[int]string{10: "turn10", 300: "turn300"}[turns], func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				if r, err := ReadRoot(llm.OpenAIChat, body); err != nil || r.First == nil {
-					b.Fatal(r, err)
+		for _, p := range []llm.Protocol{llm.OpenAIChat, llm.OpenAIResponses} {
+			body := rootBody(p, turns)
+			b.Run(fmt.Sprintf("%s/turn%d", p, turns), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					if r, err := ReadRoot(p, body); err != nil || r.First == nil {
+						b.Fatal(r, err)
+					}
 				}
-			}
-		})
+			})
+		}
 	}
 }
 
-func chatBody(turns int) []byte {
+func rootBody(p llm.Protocol, turns int) []byte {
+	if p == llm.OpenAIResponses {
+		b := []byte(`{"model":"m","instructions":"You are a coding agent.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"fix the tests"}]}`)
+		for range turns {
+			b = append(b, `,{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I ran the tests; two fail in the parser. Fixing the first now."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"go on"}]}`...)
+		}
+		return append(b, `],"store":false}`...)
+	}
 	b := []byte(`{"model":"m","messages":[{"role":"system","content":"You are a coding agent."},{"role":"user","content":"fix the tests"}`)
 	for range turns {
 		b = append(b, `,{"role":"assistant","content":"I ran the tests; two fail in the parser. Fixing the first now."},{"role":"user","content":"go on"}`...)
