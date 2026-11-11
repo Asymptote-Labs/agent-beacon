@@ -13,8 +13,8 @@ name: Smoke images
 # themselves, as on a developer machine, so a pull request that changes a Dockerfile still tests it.
 #
 # Cost: the packages are public and so is this repository, so GHCR storage and transfer and these
-# Actions minutes are free. The prune job keeps each package to its newest few versions anyway, so
-# that a change of visibility could not leave a year of weekly images to bill for.
+# Actions minutes are free. The prune job bounds each package anyway (smoke/prune.sh), so that a
+# change of visibility could not leave a year of weekly images to bill for.
 on:
   push:
     branches:
@@ -58,45 +58,35 @@ jobs:
           BEACON_SMOKE_REGISTRY="ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')" \
             sh packaging/linux/smoke/image.sh --publish "${{ matrix.image }}"
 
-  # Keeps the newest versions of each package and deletes the rest: the current image and three
-  # weekly ones to roll back to. The newest version is always the one CI pulls, because a version is
-  # only ever pushed after it boots. Runs after a failed publish too, since what it keeps does not
-  # depend on what was just pushed.
+  # Deletes versions CI and a rollback no longer need; see smoke/prune.sh for what is kept. Only on
+  # main: what it keeps is decided by the Dockerfiles in the checkout, and a branch's are not the ones
+  # main's CI pulls. Runs after a failed publish too, since what it keeps does not depend on what
+  # was just pushed. A version it cannot delete is a warning, not a failure.
   prune:
     needs: publish
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read
       packages: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      KEEP: 4
     steps:
-      - name: Delete all but the newest ${{ env.KEEP }} versions
+      - uses: actions/checkout@v7
+      - name: Delete versions no longer needed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Word splitting of $IMAGES is the point: one argument per image.
         run: |
-          set -eu
-          owner="$GITHUB_REPOSITORY_OWNER"
-          for name in $IMAGES; do
-            pkg="beacon-smoke-$name"
-            if ! versions="$(gh api --paginate "orgs/$owner/packages/container/$pkg/versions" \
-                --jq '.[] | "\(.created_at) \(.id)"')"; then
-              echo "::warning::$pkg: cannot list versions; skipped"
-              continue
-            fi
-            echo "$versions" | sort -r | tail -n +"$((KEEP + 1))" | while read -r created id; do
-              [ -n "$id" ] || continue
-              echo "$pkg: deleting version $id ($created)"
-              gh api -X DELETE "orgs/$owner/packages/container/$pkg/versions/$id"
-            done
-          done
+          # shellcheck disable=SC2086
+          sh packaging/linux/smoke/prune.sh "$GITHUB_REPOSITORY_OWNER" $IMAGES
 
-  # A failed run outside a pull request has no reviewer watching, and GitHub mails a failed scheduled
-  # run only to whoever last edited the cron line. One open issue tracks it instead: opened or
-  # commented on when a run fails, closed by the next run that succeeds.
+  # A failed publish on main has no reviewer watching, and GitHub mails a failed scheduled run only
+  # to whoever last edited the cron line. One open issue tracks it instead: opened or commented on
+  # when a publish fails, closed by the next run that publishes. A run dispatched from a branch
+  # reports nothing, since what it publishes is the branch's business.
   report:
     needs: [publish, prune]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -106,7 +96,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
       TITLE: "Smoke images: publish failing"
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      FAILED: ${{ needs.publish.result != 'success' || needs.prune.result != 'success' }}
+      FAILED: ${{ needs.publish.result != 'success' }}
     steps:
       - name: Open, update or close the tracking issue
         run: |

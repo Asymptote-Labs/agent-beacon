@@ -3,6 +3,7 @@
 #
 #   sh packaging/linux/smoke/image.sh NAME            # NAME is a Dockerfile here: systemd, package-deb, package-rpm
 #   sh packaging/linux/smoke/image.sh --publish NAME  # build with a fresh base, boot-check, push to the registry
+#   sh packaging/linux/smoke/image.sh --digest NAME   # print the tag NAME's Dockerfile is published under
 #
 # The tag is a digest of the Dockerfile, so an image is only ever reused for the recipe it was built
 # from. With BEACON_SMOKE_REGISTRY set (CI sets ghcr.io/<owner>), the prebuilt image is pulled from
@@ -24,12 +25,14 @@
 # `exit code: 100`.
 set -eu
 
+mode=resolve
+case "${1:-}" in
+  --publish) mode=publish; shift ;;
+  --digest) mode=digest; shift ;;
+esac
 publish=0
-if [ "${1:-}" = "--publish" ]; then
-  publish=1
-  shift
-fi
-name="${1:?usage: image.sh [--publish] NAME}"
+[ "$mode" = publish ] && publish=1
+name="${1:?usage: image.sh [--publish|--digest] NAME}"
 dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 dockerfile="$dir/$name.Dockerfile"
 [ -f "$dockerfile" ] || { echo "image.sh: no $dockerfile" >&2; exit 1; }
@@ -38,6 +41,10 @@ if command -v sha256sum >/dev/null 2>&1; then
   digest="$(sha256sum "$dockerfile" | cut -c1-16)"
 else
   digest="$(shasum -a 256 "$dockerfile" | cut -c1-16)"
+fi
+if [ "$mode" = digest ]; then
+  echo "$digest"
+  exit 0
 fi
 repo="beacon-smoke-$name"
 registry="${BEACON_SMOKE_REGISTRY:-}"
