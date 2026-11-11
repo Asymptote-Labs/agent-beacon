@@ -125,9 +125,9 @@ func (c *CompiledRule) newFinding(evidence []asymptoteobserve.Event) Finding {
 // ScanEvents runs every compiled rule over the events and returns all findings, in rule
 // order. It is the aggregator backing the `beacon scan` command.
 //
-// Single-event rules run event by event through an event scanner (scan.go): only the rules that
-// can match an event's action are evaluated, and an event's derived fields (a parsed command line,
-// a tool result's text) are computed once for every rule that references them, not once per rule,
+// Single-event rules run event by event, as an EventScanner runs them: only the rules that can
+// match an event's action are evaluated, and an event's derived fields (a parsed command line, a
+// tool result's text) are computed once for every rule that references them, not once per rule,
 // and dropped before the next event. Correlation rules run after, each over the whole sequence.
 func ScanEvents(rules []*CompiledRule, events []asymptoteobserve.Event) ([]Finding, error) {
 	found := make([][]Finding, len(rules))
