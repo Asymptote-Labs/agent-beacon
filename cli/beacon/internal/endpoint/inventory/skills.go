@@ -1,12 +1,16 @@
 package inventory
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -29,6 +33,10 @@ type Skill struct {
 	ModifiedAt       string           `json:"modified_at,omitempty"`
 	Redaction        string           `json:"redaction"`
 	Content          *CapturedContent `json:"content,omitempty"`
+	// Source is the GitHub repository (<owner>/<repo>) the skill was installed from, as the
+	// skills CLI (npx skills add) records it in its lock file; with the skill's name it is the
+	// skill's Beacon Intel key, skill:<owner>/<repo>#<name>. Empty when nothing records one.
+	Source string `json:"source,omitempty"`
 }
 
 type skillRoot struct {
@@ -49,8 +57,9 @@ func scanSkills(home, wd, redaction string, runtimes []string, co contentOptions
 		}
 		roots = kept
 	}
+	locks := skillLocks{}
 	for _, root := range filterSkillRoots(roots, runtimes) {
-		skills = append(skills, inspectSkillRoot(root, redaction, co)...)
+		skills = append(skills, inspectSkillRoot(root, redaction, co, locks)...)
 	}
 	return dedupeSkills(skills)
 }
@@ -96,7 +105,7 @@ func skillRoots(home, wd string) []skillRoot {
 	return out
 }
 
-func inspectSkillRoot(root skillRoot, redaction string, co contentOptions) []Skill {
+func inspectSkillRoot(root skillRoot, redaction string, co contentOptions, locks skillLocks) []Skill {
 	base := Skill{
 		Runtime:      root.runtime,
 		RootPath:     valueForPath(root.path, redaction),
@@ -137,7 +146,11 @@ func inspectSkillRoot(root skillRoot, redaction string, co contentOptions) []Ski
 		if _, err := statPath(manifestPath); os.IsNotExist(err) {
 			continue
 		}
-		skills = append(skills, inspectSkillManifest(root, entry.Name(), manifestPath, redaction, co))
+		skill := inspectSkillManifest(root, entry.Name(), manifestPath, redaction, co)
+		if skill.Exists {
+			skill.Source = locks.source(filepath.Join(root.path, entry.Name()))
+		}
+		skills = append(skills, skill)
 	}
 	if len(skills) == 0 {
 		return nil
@@ -212,4 +225,62 @@ func dedupeSkills(skills []Skill) []Skill {
 		return out[i].Runtime < out[j].Runtime
 	})
 	return out
+}
+
+// skillLockFile is where the skills CLI records what it installed into <dir>/skills, beside
+// that directory (~/.agents/.skill-lock.json for ~/.agents/skills).
+const skillLockFile = ".skill-lock.json"
+
+var githubRepo = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$`)
+
+// skillLocks caches each lock file's GitHub sources by skill name, nil for one that is absent
+// or unreadable.
+type skillLocks map[string]map[string]string
+
+// source is the repository the skills CLI installed the skill in dir from. Runtimes' own skill
+// directories usually link each skill to the CLI's copy, so the link is followed to it; a
+// confined scan does not follow one out of the home.
+func (l skillLocks) source(dir string) string {
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return ""
+	}
+	parent := filepath.Dir(real)
+	if filepath.Base(parent) != "skills" {
+		return ""
+	}
+	path := filepath.Join(filepath.Dir(parent), skillLockFile)
+	if sessionfs.Confined(dir) && !sessionfs.Confined(path) {
+		// A confined scan reads only inside the home; a link out of it names no lock it may read.
+		return ""
+	}
+	sources, ok := l[path]
+	if !ok {
+		sources = readSkillLock(path)
+		l[path] = sources
+	}
+	return sources[filepath.Base(real)]
+}
+
+func readSkillLock(path string) map[string]string {
+	data, err := readFilePath(path)
+	if err != nil {
+		return nil
+	}
+	var lock struct {
+		Skills map[string]struct {
+			Source     string `json:"source"`
+			SourceType string `json:"sourceType"`
+		} `json:"skills"`
+	}
+	if json.Unmarshal(data, &lock) != nil {
+		return nil
+	}
+	sources := map[string]string{}
+	for name, entry := range lock.Skills {
+		if entry.SourceType == "github" && githubRepo.MatchString(entry.Source) && !strings.Contains(entry.Source, "..") {
+			sources[name] = entry.Source
+		}
+	}
+	return sources
 }

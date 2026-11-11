@@ -139,6 +139,17 @@ type MCPServer struct {
 	ParserStatus    string                 `json:"parser_status"`
 	Redaction       string                 `json:"redaction"`
 	Definition      map[string]interface{} `json:"definition,omitempty"`
+	// Package is the npm or PyPI package the server's launch command runs, as Beacon Intel
+	// knows it (npm:<name> or pypi:<name>, no version), and PackageRegistry where it comes
+	// from: "public", or "private" when the command, its env or the machine's launcher config
+	// points that ecosystem at another registry or index, so the name may be private too. Set
+	// by intel.AnnotatePackages; empty for anything else (a binary, a script, a remote URL).
+	Package         string `json:"package,omitempty"`
+	PackageRegistry string `json:"package_registry,omitempty"`
+	// Launch is the redacted definition, kept whether or not contents are captured, so a reader
+	// such as intel.AnnotatePackages can name the package a server runs without the inventory
+	// record carrying its arguments. In memory only; never serialized.
+	Launch map[string]interface{} `json:"-"`
 	// ProjectDirs are the directories of the projects whose entry in a runtime's own config
 	// declares the server (Claude Code's ~/.claude.json projects.<path>.mcpServers), which the
 	// runtime starts it in. In memory only, for readers such as Beacon Intel that must read the
@@ -981,6 +992,7 @@ func serverFromDefinition(item candidate, name string, def map[string]interface{
 	if command != "" {
 		server.CommandNameHash = hashString(filepath.Base(command))
 	}
+	server.Launch = redactedDef
 	if co.include {
 		server.Definition = redactedDef
 	}

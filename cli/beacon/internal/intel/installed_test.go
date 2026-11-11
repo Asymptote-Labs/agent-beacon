@@ -405,3 +405,44 @@ func TestFromInventoryIsStable(t *testing.T) {
 		t.Fatalf("order = %+v", first)
 	}
 }
+
+func TestAnnotatePackages(t *testing.T) {
+	launch := func(command string, args ...string) map[string]interface{} {
+		raw := make([]interface{}, len(args))
+		for i, a := range args {
+			raw[i] = a
+		}
+		return map[string]interface{}{"command": command, "args": raw}
+	}
+	withEnv := launch("npx", "-y", "env-pkg")
+	withEnv["env"] = map[string]interface{}{"NPM_CONFIG_REGISTRY": "[REDACTED]"}
+	res := inventory.Result{MCPServers: []inventory.MCPServer{
+		// Launch alone, as a scan without captured contents leaves it.
+		{ServerName: "supabase", Launch: launch("npx", "-y", "@supabase/mcp-server-supabase@latest", "--project-ref=abc")},
+		{ServerName: "fetch", Definition: launch("uvx", "mcp-server-fetch")},
+		{ServerName: "flagged", Launch: launch("npx", "--registry", "https://r.example", "-y", "flag-pkg")},
+		{ServerName: "env", Launch: withEnv},
+		{ServerName: "scoped", Launch: launch("npx", "-y", "@corp/tool")},
+		{ServerName: "binary", Launch: launch("/opt/homebrew/bin/beacon", "mcp", "serve")},
+		{ServerName: "remote", URLPresent: true, Launch: map[string]interface{}{"url": "https://mcp.example"}},
+		{ServerName: "stale", Package: "npm:old", PackageRegistry: "public"},
+	}}
+
+	AnnotatePackages(&res, Registries{NPMScopes: map[string]bool{"@corp": true}})
+
+	want := map[string][2]string{
+		"supabase": {"npm:@supabase/mcp-server-supabase", "public"},
+		"fetch":    {"pypi:mcp-server-fetch", "public"},
+		"flagged":  {"npm:flag-pkg", "private"},
+		"env":      {"npm:env-pkg", "private"},
+		"scoped":   {"npm:@corp/tool", "private"},
+		"binary":   {"", ""},
+		"remote":   {"", ""},
+		"stale":    {"", ""},
+	}
+	for _, s := range res.MCPServers {
+		if got := [2]string{s.Package, s.PackageRegistry}; got != want[s.ServerName] {
+			t.Errorf("%s = %q, want %q", s.ServerName, got, want[s.ServerName])
+		}
+	}
+}

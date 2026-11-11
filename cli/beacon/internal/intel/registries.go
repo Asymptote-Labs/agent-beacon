@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 )
 
 // Registries is what the machine's own launcher configuration says about where packages come
@@ -505,7 +507,13 @@ func readConfigLines(path string) ([]string, bool) {
 	if path == "" {
 		return nil, false
 	}
-	f, err := os.Open(path)
+	open := os.Open
+	if sessionfs.Confined(path) {
+		// The system inventory job reads the console user's home as root: a file there opens
+		// only as the scan's own reads do, never through a symlink out of the home.
+		open = sessionfs.Open
+	}
+	f, err := open(path)
 	if err != nil {
 		return nil, false
 	}

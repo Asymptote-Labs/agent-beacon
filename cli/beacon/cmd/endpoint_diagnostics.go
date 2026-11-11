@@ -33,6 +33,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -260,6 +261,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		IncludeContents: endpointOpts.inventoryContents || inventorySettings.IncludeContents,
 		MaxContentBytes: inventorySettings.MaxContentBytes,
 	})
+	intel.AnnotatePackages(&configInventory, intel.LocalRegistries(intel.CurrentRegistryEnv()))
 	result := inventoryResult{
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
 		RuntimeLog:        status.RuntimeLog,
@@ -608,6 +610,9 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 			IncludeContents:  settings.IncludeContents,
 			MaxContentBytes:  settings.MaxContentBytes,
 		})
+		// The job's environment is not the user's shell, so only the files in their home and the
+		// system's say where packages come from. Read while the scan is still confined.
+		intel.AnnotatePackages(&inventoryResult, intel.LocalRegistries(intel.RegistryEnv{Home: scope.HomeDir, System: true}))
 		release()
 		digest = endpointinventory.SnapshotDigest(inventoryResult)
 		// Compare against the last digest for *this* home: a multi-user machine alternates

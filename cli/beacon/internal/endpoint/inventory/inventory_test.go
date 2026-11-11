@@ -881,6 +881,70 @@ func TestSkillScanFollowsSymlinkedSkillDirectories(t *testing.T) {
 	}
 }
 
+func TestSkillSourceComesFromTheSkillsCLILock(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	agents := filepath.Join(home, ".agents", "skills")
+	for _, name := range []string{"frontend-design", "local-skill", "from-git", "sneaky"} {
+		writeFile(t, filepath.Join(agents, name, "SKILL.md"), "# "+name)
+	}
+	writeFile(t, filepath.Join(home, ".agents", ".skill-lock.json"), `{"version": 3, "skills": {
+		"frontend-design": {"source": "anthropics/skills", "sourceType": "github"},
+		"from-git": {"source": "https://git.example/x.git", "sourceType": "git"},
+		"sneaky": {"source": "../../etc/passwd", "sourceType": "github"}
+	}}`)
+	linkRoot := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(linkRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(agents, "frontend-design"), filepath.Join(linkRoot, "frontend-design")); err != nil {
+		t.Fatal(err)
+	}
+
+	result := Scan(Options{HomeDir: home, WorkingDir: work, Runtimes: []string{"agent_skills", "claude_code"}, Now: fixedNow})
+
+	for _, tc := range []struct{ runtime, name, manifest, want string }{
+		{"agent_skills", "frontend-design", filepath.Join(agents, "frontend-design", "SKILL.md"), "anthropics/skills"},
+		// Claude's copy links to the CLI's, so it carries the same source.
+		{"claude_code", "frontend-design", filepath.Join(linkRoot, "frontend-design", "SKILL.md"), "anthropics/skills"},
+		{"agent_skills", "local-skill", filepath.Join(agents, "local-skill", "SKILL.md"), ""},
+		{"agent_skills", "from-git", filepath.Join(agents, "from-git", "SKILL.md"), ""},
+		{"agent_skills", "sneaky", filepath.Join(agents, "sneaky", "SKILL.md"), ""},
+	} {
+		skill := findSkill(result.Skills, tc.runtime, tc.name, tc.manifest)
+		if skill == nil {
+			t.Fatalf("%s %s not found in %#v", tc.runtime, tc.name, result.Skills)
+		}
+		if skill.Source != tc.want {
+			t.Errorf("%s %s source = %q, want %q", tc.runtime, tc.name, skill.Source, tc.want)
+		}
+	}
+}
+
+func TestMCPServerKeepsItsLaunchOutOfTheRecord(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers": {"supabase": {"command": "npx", "args": ["-y", "@supabase/mcp-server-supabase@latest", "--project-ref=abc"], "env": {"SUPABASE_ACCESS_TOKEN": "secret"}}}}`)
+
+	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow})
+
+	if len(result.MCPServers) != 1 {
+		t.Fatalf("servers = %#v", result.MCPServers)
+	}
+	server := result.MCPServers[0]
+	if server.Definition != nil || server.Launch["command"] != "npx" {
+		t.Fatalf("definition = %#v, launch = %#v", server.Definition, server.Launch)
+	}
+	data, err := json.Marshal(server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leaked := range []string{"project-ref", "mcp-server-supabase", "secret"} {
+		if strings.Contains(string(data), leaked) {
+			t.Fatalf("record carries %q: %s", leaked, data)
+		}
+	}
+}
+
 func TestInventoryLogAndStatePathsFollowRuntimeLog(t *testing.T) {
 	runtimeLog := filepath.Join("/tmp", "beacon", "runtime.jsonl")
 	if got, want := LogPath(runtimeLog, true), filepath.Join("/tmp", "beacon", "inventory_state.jsonl"); got != want {

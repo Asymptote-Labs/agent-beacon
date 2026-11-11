@@ -116,16 +116,12 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 	for _, s := range res.MCPServers {
 		name := strings.TrimSpace(s.ServerName)
 		src := InstalledSource{Runtime: s.Runtime, Name: name, Scope: s.SourceScope}
-		command, args := commandOf(s.Definition)
+		command, args := commandOf(launchOf(s))
 		if beaconServer(name, command, args, s) {
 			skipped = append(skipped, Skipped{Kind: "mcp", Runtime: s.Runtime, Name: name, Reason: ReasonBeacon})
 			continue
 		}
-		if q, basis, ok := PackageFromCommand(command, args); ok {
-			program, programArgs := launcher(command, args)
-			if registryFromEnv(s.Definition) || opts.Registries.forServer(program, programArgs, s.Definition, s.ProjectDirs).private(q) {
-				basis = privateBasis(basis)
-			}
+		if q, basis, ok := serverPackage(s, opts.Registries); ok {
 			if (basis == BasisPrivateNPM || basis == BasisPrivatePyPI) && !opts.IncludePrivateNames {
 				skipped = append(skipped, Skipped{Kind: "mcp", Runtime: s.Runtime, Name: name, Reason: ReasonPrivatePackage})
 				continue
@@ -195,6 +191,50 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 		return skipped[i].Name < skipped[j].Name
 	})
 	return out, skipped
+}
+
+// AnnotatePackages records on each MCP server the package its launch command runs and whether
+// it comes from the public registry, so an inventory snapshot names a server the way Beacon
+// Intel does without carrying its arguments. Run it while the scan's confinement, if any, still
+// holds: the registry config it reads is in the scanned home.
+func AnnotatePackages(res *inventory.Result, registries Registries) {
+	for i := range res.MCPServers {
+		s := &res.MCPServers[i]
+		s.Package, s.PackageRegistry = "", ""
+		q, basis, ok := serverPackage(*s, registries)
+		if !ok {
+			continue
+		}
+		s.Package, s.PackageRegistry = q, "public"
+		if basis == BasisPrivateNPM || basis == BasisPrivatePyPI {
+			s.PackageRegistry = "private"
+		}
+	}
+}
+
+// serverPackage names the npm or PyPI package a server's launch command runs and its basis,
+// private when the command, its env or the launcher config may fetch it from elsewhere.
+func serverPackage(s inventory.MCPServer, registries Registries) (q, basis string, ok bool) {
+	def := launchOf(s)
+	command, args := commandOf(def)
+	q, basis, ok = PackageFromCommand(command, args)
+	if !ok {
+		return "", "", false
+	}
+	program, programArgs := launcher(command, args)
+	if registryFromEnv(def) || registries.forServer(program, programArgs, def, s.ProjectDirs).private(q) {
+		basis = privateBasis(basis)
+	}
+	return q, basis, true
+}
+
+// launchOf is a server's redacted definition: the captured one, or the one the scan keeps in
+// memory when contents are not captured.
+func launchOf(s inventory.MCPServer) map[string]interface{} {
+	if s.Definition != nil {
+		return s.Definition
+	}
+	return s.Launch
 }
 
 func commandOf(def map[string]interface{}) (string, []string) {
