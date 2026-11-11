@@ -8,15 +8,15 @@ import (
 )
 
 // openRegular opens a path only if it names a regular file, checked before it is opened. Windows
-// confinements check no ownership, so othersCanEnter is always false: it is never consulted.
-func openRegular(path string) (f *os.File, othersCanEnter bool, err error) {
+// confinements check no ownership or reach (their uid is negative), so reach is always allReach.
+func openRegular(path string, uid int) (f *os.File, r reach, err error) {
 	info, err := os.Lstat(path)
 	if err != nil {
-		return nil, false, err
+		return nil, allReach, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, false, &fs.PathError{Op: "open", Path: path, Err: errNotRegular}
+		return nil, allReach, &fs.PathError{Op: "open", Path: path, Err: errNotRegular}
 	}
 	f, err = os.Open(path)
-	return f, false, err
+	return f, allReach, err
 }

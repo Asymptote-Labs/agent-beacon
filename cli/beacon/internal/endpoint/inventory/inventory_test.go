@@ -901,6 +901,16 @@ func TestSkillIntelKeyComesFromTheSkillsCLILock(t *testing.T) {
 	if err := os.Symlink(filepath.Join(agents, "frontend-design"), filepath.Join(linkRoot, "frontend-design")); err != nil {
 		t.Fatal(err)
 	}
+	// A repository's own skills, beside a lock it wrote claiming a known repository for them,
+	// directly and through a link from the home.
+	forged := `{"skills": {"frontend-design": {"source": "anthropics/skills", "sourceType": "github"}, "pdf": {"source": "anthropics/skills", "sourceType": "github"}}}`
+	writeFile(t, filepath.Join(work, ".claude", "skills", "frontend-design", "SKILL.md"), "# not the real one")
+	writeFile(t, filepath.Join(work, ".claude", ".skill-lock.json"), forged)
+	writeFile(t, filepath.Join(work, "vendor", "skills", "pdf", "SKILL.md"), "# not the real one")
+	writeFile(t, filepath.Join(work, "vendor", ".skill-lock.json"), forged)
+	if err := os.Symlink(filepath.Join(work, "vendor", "skills", "pdf"), filepath.Join(linkRoot, "pdf")); err != nil {
+		t.Fatal(err)
+	}
 
 	result := Scan(Options{HomeDir: home, WorkingDir: work, Runtimes: []string{"agent_skills", "claude_code"}, Now: fixedNow})
 
@@ -911,6 +921,8 @@ func TestSkillIntelKeyComesFromTheSkillsCLILock(t *testing.T) {
 		{"agent_skills", "local-skill", filepath.Join(agents, "local-skill", "SKILL.md"), ""},
 		{"agent_skills", "from-git", filepath.Join(agents, "from-git", "SKILL.md"), ""},
 		{"agent_skills", "sneaky", filepath.Join(agents, "sneaky", "SKILL.md"), ""},
+		{"claude_code", "frontend-design", filepath.Join(work, ".claude", "skills", "frontend-design", "SKILL.md"), ""},
+		{"claude_code", "pdf", filepath.Join(linkRoot, "pdf", "SKILL.md"), ""},
 	} {
 		skill := findSkill(result.Skills, tc.runtime, tc.name, tc.manifest)
 		if skill == nil {
@@ -1571,5 +1583,20 @@ func TestScanResolvesPackagesWithTheProjectAServerRunsIn(t *testing.T) {
 	if got["public"] != [3]string{"npm:@playwright/mcp", PackageRegistryPublic, ""} ||
 		got["tool"] != [3]string{"", PackageRegistryPrivate, "npm:@acme/secret-tool"} {
 		t.Fatalf("packages = %v", got)
+	}
+}
+
+// A server a project's own config declares is started in that project, so its npmrc counts
+// however the scan was started.
+func TestScanResolvesProjectScopeServersWithTheProjectsConfig(t *testing.T) {
+	home, work := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(work, ".npmrc"), "@acme:registry=https://npm.acme.internal/\n")
+	writeFile(t, filepath.Join(work, ".cursor", "mcp.json"), `{"mcpServers": {"billing": {"command": "npx", "args": ["-y", "@acme/billing-mcp"]}}}`)
+	result := Scan(Options{HomeDir: home, WorkingDir: work, Runtimes: []string{"cursor"}, Now: fixedNow, LauncherEnv: &launchpkg.RegistryEnv{}})
+	if len(result.MCPServers) != 1 {
+		t.Fatalf("servers = %+v", result.MCPServers)
+	}
+	if s := result.MCPServers[0]; s.Package != "" || s.PackageRegistry != PackageRegistryPrivate || s.PrivatePackage != "npm:@acme/billing-mcp" {
+		t.Fatalf("billing = %+v", s)
 	}
 }

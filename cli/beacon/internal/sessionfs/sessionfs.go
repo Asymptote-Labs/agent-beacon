@@ -264,7 +264,10 @@ func Confined(path string) bool {
 // the console user could read, so root reading it discloses nothing. A file found but declined
 // (anything else, or a path that is not absolute) is an *fs.PathError wrapping ErrRefused, which
 // does not read as absent, and is counted as a refusal. A path that cannot be looked up (missing,
-// unreachable, a symlink loop) reads as absent, as with Open.
+// unreachable, a symlink loop) reads as absent, as with Open, and so does one in a directory the
+// console user could not enter on the way to it or once resolved: whether a declined file is
+// there must not tell them anything about a directory they cannot list (/root/.ssh, another
+// user's 0700 home).
 func OpenOutside(path string) (*os.File, error) {
 	c := active.Load()
 	if c == nil {
@@ -273,16 +276,25 @@ func OpenOutside(path string) (*os.File, error) {
 	if !filepath.IsAbs(path) {
 		return nil, c.decline(path, "not an absolute path")
 	}
-	real, err := filepath.EvalSymlinks(filepath.Clean(path))
+	clean := filepath.Clean(path)
+	real, err := filepath.EvalSymlinks(clean)
 	if err != nil {
 		return nil, c.failed("open", path, err)
 	}
-	f, othersCanEnter, err := openRegular(real)
+	f, reach, err := openRegular(real, c.uid)
+	reachable := reach.user && c.reachesDir(filepath.Dir(clean))
 	if errors.Is(err, errNotRegular) {
+		if !reachable {
+			return nil, c.refuse("open", path, unreachable)
+		}
 		return nil, c.decline(path, "not a regular file")
 	}
 	if err != nil {
 		return nil, c.failed("open", path, err)
+	}
+	if !reachable {
+		_ = f.Close()
+		return nil, c.refuse("open", path, unreachable)
 	}
 	info, err := f.Stat()
 	if err != nil {
@@ -290,15 +302,64 @@ func OpenOutside(path string) (*os.File, error) {
 		return nil, c.failed("open", path, err)
 	}
 	owner, owned := c.ownedByUser(info)
-	if !owned && (!othersCanEnter || info.Mode().Perm()&0o004 == 0) {
+	if !owned && (!reach.others || info.Mode().Perm()&0o004 == 0) {
 		_ = f.Close()
 		return nil, c.decline(path, fmt.Sprintf("owned by uid %d and not readable by the console user (uid %d) without root", owner, c.uid))
 	}
 	return f, nil
 }
 
+const unreachable = "in a directory the console user cannot enter"
+
 // errNotRegular is a path that names something other than a regular file.
 var errNotRegular = errors.New("not a regular file")
+
+// reach is who may enter every directory on a path: others, and the console user.
+type reach struct{ others, user bool }
+
+var (
+	allReach = reach{others: true, user: true}
+	noReach  reach
+)
+
+// and narrows reach by one directory, owned by owner with permission bits mode. The console user
+// uid enters it by its owner bits when they own it, else by its others bits: Beacon does not know
+// their groups, so a directory only a group may enter counts as closed to them. A negative uid is
+// anyone.
+func (r reach) and(owner int, mode uint32, uid int) reach {
+	r.others = r.others && mode&0o001 != 0
+	switch {
+	case uid < 0:
+	case owner == uid:
+		r.user = r.user && mode&0o100 != 0
+	default:
+		r.user = r.user && mode&0o001 != 0
+	}
+	return r
+}
+
+// reachesDir reports whether the console user could enter dir and every directory above it, as
+// named: the path a user chose may pass through a directory its resolved form does not.
+func (c *Confinement) reachesDir(dir string) bool {
+	if c.uid < 0 {
+		return true
+	}
+	for {
+		info, err := os.Stat(dir)
+		if err != nil {
+			return false
+		}
+		owner, ok := ownerUID(info)
+		if !ok || !allReach.and(owner, uint32(info.Mode().Perm()), c.uid).user {
+			return false
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return true
+		}
+		dir = parent
+	}
+}
 
 // Open opens a file or directory for reading.
 func Open(path string) (*os.File, error) {

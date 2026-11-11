@@ -213,6 +213,15 @@ func Scan(opts Options) Result {
 	co := contentOptions{include: opts.IncludeContents, maxBytes: opts.MaxContentBytes}
 	for _, item := range filterCandidates(withoutProjectScope(candidates(home, wd), wd), opts.Runtimes) {
 		config, servers := inspectCandidate(item, redaction, co)
+		if item.scope == ScopeProject {
+			// The runtime starts a server its project's config declares in that project, so the
+			// launcher reads the project's own registry config.
+			for i := range servers {
+				if len(servers[i].projectDirs) == 0 {
+					servers[i].projectDirs = []string{wd}
+				}
+			}
+		}
 		result.Configs = append(result.Configs, config)
 		result.MCPServers = append(result.MCPServers, servers...)
 	}

@@ -56,9 +56,9 @@ func scanSkills(home, wd, redaction string, runtimes []string, co contentOptions
 		}
 		roots = kept
 	}
-	locks := skillLocks{}
+	sources := newSkillSources(home)
 	for _, root := range filterSkillRoots(roots, runtimes) {
-		skills = append(skills, inspectSkillRoot(root, redaction, co, locks)...)
+		skills = append(skills, inspectSkillRoot(root, redaction, co, sources)...)
 	}
 	return dedupeSkills(skills)
 }
@@ -104,7 +104,7 @@ func skillRoots(home, wd string) []skillRoot {
 	return out
 }
 
-func inspectSkillRoot(root skillRoot, redaction string, co contentOptions, locks skillLocks) []Skill {
+func inspectSkillRoot(root skillRoot, redaction string, co contentOptions, sources *skillSources) []Skill {
 	base := Skill{
 		Runtime:      root.runtime,
 		RootPath:     valueForPath(root.path, redaction),
@@ -147,7 +147,7 @@ func inspectSkillRoot(root skillRoot, redaction string, co contentOptions, locks
 		}
 		skill := inspectSkillManifest(root, entry.Name(), manifestPath, redaction, co)
 		if skill.Exists {
-			skill.IntelKey = locks.intelKey(filepath.Join(root.path, entry.Name()))
+			skill.IntelKey = sources.intelKey(filepath.Join(root.path, entry.Name()))
 		}
 		skills = append(skills, skill)
 	}
@@ -226,44 +226,55 @@ func dedupeSkills(skills []Skill) []Skill {
 	return out
 }
 
-// skillLockFile is where the skills CLI records what it installed into <dir>/skills, beside
-// that directory (~/.agents/.skill-lock.json for ~/.agents/skills).
+// skillLockFile is where the skills CLI records what it installed into ~/.agents/skills.
 const skillLockFile = ".skill-lock.json"
 
 var githubRepo = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$`)
 
-// skillLocks caches each lock file's GitHub sources by skill name, nil for one that is absent
-// or unreadable.
-type skillLocks map[string]map[string]string
+// skillSources is what the skills CLI recorded about the skills it installed into
+// ~/.agents/skills: the GitHub repository of each, by name, in ~/.agents/.skill-lock.json.
+//
+// Only that lock counts. A lock beside any other skills directory (<repo>/.claude/.skill-lock.json
+// for <repo>/.claude/skills, say) may be written by whoever wrote the skills, a cloned repository
+// included, and could name a known artifact's repository for a skill of its own, so Beacon Intel's
+// verdict for that artifact would be shown for it.
+type skillSources struct {
+	// dir is ~/.agents/skills with symlinks resolved, as a skill directory resolves.
+	dir    string
+	lock   string
+	loaded bool
+	repos  map[string]string
+}
 
-// intelKey is the Beacon Intel key of the skill in dir, when the skills CLI recorded the GitHub
-// repository it installed it from. Runtimes' own skill directories usually link each skill to
-// the CLI's copy, so the link is followed to it, and the lock beside that copy is a path the user
-// chose (see readChosenPath).
-func (l skillLocks) intelKey(dir string) string {
+func newSkillSources(home string) *skillSources {
+	agents := filepath.Join(home, ".agents")
+	dir := filepath.Join(agents, "skills")
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	return &skillSources{dir: dir, lock: filepath.Join(agents, skillLockFile)}
+}
+
+// intelKey is the Beacon Intel key of the skill in dir, when it is the skills CLI's copy in
+// ~/.agents/skills and the CLI recorded the GitHub repository it installed it from. Runtimes'
+// own skill directories usually link each skill to that copy, so the link is followed to it.
+func (s *skillSources) intelKey(dir string) string {
 	real, err := filepath.EvalSymlinks(dir)
-	if err != nil {
+	if err != nil || filepath.Dir(real) != s.dir {
 		return ""
 	}
-	parent := filepath.Dir(real)
-	if filepath.Base(parent) != "skills" {
-		return ""
-	}
-	path := filepath.Join(filepath.Dir(parent), skillLockFile)
-	sources, ok := l[path]
-	if !ok {
-		sources = readSkillLock(path)
-		l[path] = sources
+	if !s.loaded {
+		s.repos, s.loaded = readSkillLock(s.lock), true
 	}
 	name := filepath.Base(real)
-	if repo := sources[name]; repo != "" {
+	if repo := s.repos[name]; repo != "" {
 		return "skill:" + repo + "#" + name
 	}
 	return ""
 }
 
 func readSkillLock(path string) map[string]string {
-	data, err := readChosenPath(path)
+	data, err := readFilePath(path)
 	if err != nil {
 		return nil
 	}
@@ -276,11 +287,11 @@ func readSkillLock(path string) map[string]string {
 	if json.Unmarshal(data, &lock) != nil {
 		return nil
 	}
-	sources := map[string]string{}
+	repos := map[string]string{}
 	for name, entry := range lock.Skills {
 		if entry.SourceType == "github" && githubRepo.MatchString(entry.Source) && !strings.Contains(entry.Source, "..") {
-			sources[name] = entry.Source
+			repos[name] = entry.Source
 		}
 	}
-	return sources
+	return repos
 }
