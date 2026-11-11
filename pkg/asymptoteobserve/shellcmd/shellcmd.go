@@ -1,9 +1,9 @@
 // Package shellcmd reads a captured shell command line as bash does: the simple commands it runs,
 // their words, environment prefixes and redirections, and the files those commands evidently
-// write. It is deliberately shallow. A word whose value depends on something it does not evaluate
-// -- a parameter, a command or arithmetic substitution, a glob, a leading tilde -- is marked
-// unknown rather than guessed, and a command line that does not parse is an error, because it was
-// most likely captured incomplete.
+// write and read. It is deliberately shallow. A word whose value depends on something it does not
+// evaluate -- a parameter, a command or arithmetic substitution, a glob, a leading tilde -- is
+// marked unknown rather than guessed, and a command line that does not parse is an error, because
+// it was most likely captured incomplete.
 //
 // It lives apart from the root package so that the binaries that import only the root package do
 // not link the shell parser.
@@ -31,6 +31,10 @@ type Word struct {
 	// Known is false when the value depends on a parameter, a command or arithmetic substitution,
 	// an ANSI-C ($'..') or locale ($"..") string, an unquoted glob character, or a leading tilde.
 	Known bool
+	// Unquoted is the word with its quotes and escaping backslashes removed and everything else as
+	// written. It is Text when Known; otherwise each part the parse does not evaluate stays as its
+	// source, so "$HOME/.aws/credentials" is $HOME/.aws/credentials and ~/.ssh/id_* is itself.
+	Unquoted string
 }
 
 // Assign is an environment assignment before a command (NAME=value cmd).
@@ -294,48 +298,60 @@ func (p *parser) callArgs(call *syntax.CallExpr) []Word {
 // word reads word's value; source is the word as written, for Raw.
 func (p *parser) word(word, source *syntax.Word) Word {
 	w := Word{Raw: p.raw(source)}
-	w.Text, w.Known = wordText(word)
+	w.Unquoted, w.Known = p.unquote(word)
+	if w.Known {
+		w.Text = w.Unquoted
+	}
 	return w
 }
 
-func wordText(word *syntax.Word) (string, bool) {
+// unquote returns word without its quotes and escaping backslashes, and whether that is its
+// value: it is not when a part depends on something the parse does not evaluate, and such a part
+// is written as its source.
+func (p *parser) unquote(word *syntax.Word) (string, bool) {
 	var b strings.Builder
+	known := true
 	for i, part := range word.Parts {
-		switch p := part.(type) {
+		switch part := part.(type) {
 		case *syntax.Lit:
-			if i == 0 && strings.HasPrefix(p.Value, "~") {
-				return "", false
+			if i == 0 && strings.HasPrefix(part.Value, "~") {
+				known = false
 			}
-			if !unescape(&b, p.Value, false) {
-				return "", false
+			if !unescape(&b, part.Value, false) {
+				known = false
 			}
 		case *syntax.SglQuoted:
-			if p.Dollar {
-				return "", false
+			if part.Dollar {
+				known = false
+				b.WriteString(p.raw(part))
+				continue
 			}
-			b.WriteString(p.Value)
+			b.WriteString(part.Value)
 		case *syntax.DblQuoted:
-			if p.Dollar {
-				return "", false
+			if part.Dollar {
+				known = false
 			}
-			for _, inner := range p.Parts {
-				lit, ok := inner.(*syntax.Lit)
-				if !ok {
-					return "", false
+			for _, inner := range part.Parts {
+				if lit, ok := inner.(*syntax.Lit); ok {
+					unescape(&b, lit.Value, true)
+					continue
 				}
-				unescape(&b, lit.Value, true)
+				known = false
+				b.WriteString(p.raw(inner))
 			}
 		default:
-			return "", false
+			known = false
+			b.WriteString(p.raw(part))
 		}
 	}
-	return b.String(), true
+	return b.String(), known
 }
 
 // unescape writes a literal's value as the shell passes it on, removing the backslashes it
 // removes. Outside quotes it reports false for an unescaped glob character, whose value depends on
-// the file system.
+// the file system; the character is written as it is.
 func unescape(b *strings.Builder, s string, quoted bool) bool {
+	plain := true
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c == '\\' && i+1 < len(s) && (!quoted || strings.IndexByte("$`\"\\\n", s[i+1]) >= 0) {
@@ -346,9 +362,9 @@ func unescape(b *strings.Builder, s string, quoted bool) bool {
 			continue
 		}
 		if !quoted && (c == '*' || c == '?' || c == '[') {
-			return false
+			plain = false
 		}
 		b.WriteByte(c)
 	}
-	return true
+	return plain
 }

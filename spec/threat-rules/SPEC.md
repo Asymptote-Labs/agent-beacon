@@ -1,4 +1,4 @@
-# Threat Rules — Specification (v1.2)
+# Threat Rules — Specification (v1.3)
 
 An open detection-rule format for AI-agent security threats, native to the Beacon
 endpoint event schema. A rule is a YAML document whose match conditions are
@@ -9,7 +9,7 @@ This is the "Sigma for agent telemetry" layer: the rule format and corpus are op
 evaluation engine that consumes them may be separate (and closed). Any engine that
 produces the same `verdict` for a rule's fixtures conforms to this spec.
 
-- Spec version: `threat-rules/v1.2` (see `VERSION` and [Versioning](#versioning)).
+- Spec version: `threat-rules/v1.3` (see `VERSION` and [Versioning](#versioning)).
 - Canonical event schema: the Beacon endpoint event
   (`pkg/asymptoteobserve` `Event`, `schema_version: "1.0"`).
 - Machine-readable structural schema: `schema.json` (JSON Schema, draft 2020-12).
@@ -79,7 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`. See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `file_reads`. See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -189,7 +189,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   arithmetic substitution, an ANSI-C or locale string, an unquoted glob character, or a
   leading tilde), `argv_raw` (the same words as written), `env` (the `NAME=value`
   assignments before the command, `""` for an unknown value), `file_effects` (the files the
-  command evidently writes, `{path, op}`), `pipeline` (shared by the stages of one
+  command evidently writes, `{path, op}`), `file_reads` (the files it evidently takes as
+  input, below), `pipeline` (shared by the stages of one
   pipeline), `stage` (0-based position in it; a command inside a compound stage such as
   `{ a; b; } | c` or `(a) | c` carries that stage unless it is a stage of an inner pipeline
   or inside a substitution) and `nested` (inside a command or process
@@ -203,6 +204,35 @@ the steps in both orders still fires once. A single event never satisfies two st
   rule that must not miss such captures keeps a `command.command` fallback for it. The
   reference derivation is `threatrules.ParsedCommands` over `shellcmd.Parse`, and the file
   effects are `shellcmd.FileEffects`.
+- `file_reads` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
+  later) is a field of each `parsed_commands` entry: the files the command evidently takes as
+  input, a list of strings. Each is the word as written with its quotes and escaping
+  backslashes removed and everything the parse does not evaluate left as written, so
+  `"$HOME/.netrc"` is `$HOME/.netrc` and `~/.ssh/id_*` is itself. That differs from
+  `file_effects`, which leaves out a path it cannot evaluate: a rule asks what a read names,
+  and `~/.ssh/id_rsa` names a private key whatever the home directory is. The list holds the
+  targets of the command's `<` and `<>` redirections, then, by the command's `name`:
+  - `cat`, `tac`, `head`, `tail`, `less`, `more`, `bat`, `nl`, `strings`, `od`, `hexdump`,
+    `base64`: every operand; `xxd`: the first. A word that begins with `+` is not an operand
+    of `less`, `more` or `tail`.
+  - `grep`, `egrep`, `fgrep`, `rg`, `awk`, `jq`, and `sed` or `gsed` unless it edits in place
+    (`-i`, which is a `file_effects` edit): the operands after the pattern, program or filter,
+    or every operand when an option supplies it (`-e`, `-f`, `rg --files`). awk's `var=value`
+    operands and the values after jq's `--args` and `--jsonargs` are not files.
+  - `cp`, `install`: every operand but the last, or every operand with `-t`. `scp`, `rsync`:
+    every operand but the last that is not on another host (`host:path`).
+  - `tar`: its operands when it creates, appends or updates (`c`, `r`, `u`), none when it
+    extracts or lists. `zip`: the operands after the archive's name and the names after `-i`,
+    not the names after `-x`.
+  - `curl`: the `@file` of `-d`, `--data`, `--data-binary`, `--data-ascii` and `--json`, the
+    `@file` or `name@file` of `--data-urlencode`, the `name=@file` or `name=<file` of `-F`,
+    and the file of `-T`. `wget`: `--post-file` and `--body-file`. `gh gist create`: its
+    operands. `socat`: the path of an `OPEN:`, `FILE:` or `GOPEN:` address.
+
+  The value of an option is never an operand (`head -n 5`, `scp -i key`, `tar --exclude x`,
+  `gh gist create -d text`). Standard input (`-`) and paths under `/dev/` are left out. A
+  command not listed contributes only its redirections, and so does one whose `name` is `""`.
+  The reference derivation is `shellcmd.FileReads`.
 - `e.system_context` is on the wire, not derived: on `session.context` it names what the
   runtime gave the model. `kind` is `skill_listing` for a skill index, `source` is where
   Beacon read it (`system_prompt`, `transcript`), and `skills` names each listed skill as
@@ -250,6 +280,7 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
+- **v1.3**: `file_reads` on each entry of `e.command.parsed_commands`.
 - **v1.2**: the derived field `e.command.parsed_commands`.
 - **v1.1**: `correlation.order` (`sequence` default, or `any` for order-insensitive steps),
   and the per-rule `spec` field with the engine rules above.

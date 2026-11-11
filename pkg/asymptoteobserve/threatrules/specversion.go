@@ -8,13 +8,15 @@ import (
 
 // SupportedSpec is the newest Threat Rules spec version this engine implements. It must
 // equal spec/threat-rules/VERSION (a test pins the two together).
-const SupportedSpec = "threat-rules/v1.2"
+const SupportedSpec = "threat-rules/v1.3"
 
 var (
 	// specV1_1 is the version that added correlation.order.
 	specV1_1 = specVersion{major: 1, minor: 1}
 	// specV1_2 is the version that added e.command.parsed_commands.
 	specV1_2 = specVersion{major: 1, minor: 2}
+	// specV1_3 is the version that added file_reads to each parsed command.
+	specV1_3 = specVersion{major: 1, minor: 3}
 )
 
 // specPattern is the grammar of a spec version: threat-rules/v<major>[.<minor>].

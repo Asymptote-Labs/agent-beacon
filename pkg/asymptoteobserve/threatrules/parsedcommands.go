@@ -11,6 +11,9 @@ import (
 // ParsedCommandsPath is the CEL path of the derived parsed command line, after the "e." prefix.
 const ParsedCommandsPath = "command.parsed_commands"
 
+// fileReadsField is the field of a parsed command that spec v1.3 added.
+const fileReadsField = "file_reads"
+
 // ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
 // to the retained command line, so a longer value (from an in-process caller) is cut there too.
 const ParsedCommandsLimit = asymptoteobserve.DefaultStringLimit
@@ -31,6 +34,7 @@ const maxShellDepth = 2
 //     for a word whose value depends on an expansion, glob or leading tilde; argv_raw as written.
 //   - env maps each NAME=value assignment before the command to its value ("" when unknown).
 //   - file_effects are shellcmd's file effects of the command: {path, op}.
+//   - file_reads are shellcmd's file reads of the command: each path as written.
 //   - pipeline, stage and nested are shellcmd's.
 //   - The script a shell (sh, bash, zsh, dash, ksh) runs with -c, when it is a known word, is
 //     read the same way, depth-limited, and its commands follow the shell's with nested true and
@@ -103,6 +107,7 @@ func parsedCommand(c shellcmd.Command, pipelineBase int, nested bool) asymptoteo
 			pc.FileEffects[i] = asymptoteobserve.ParsedFileEffect{Path: e.Path, Op: string(e.Op)}
 		}
 	}
+	pc.FileReads = c.FileReads()
 	return pc
 }
 

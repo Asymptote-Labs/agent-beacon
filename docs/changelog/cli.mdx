@@ -13,6 +13,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 Changes on `main` since v1.3.61. They ship in the next release.
 
+- **Threat rules can match the files a shell command reads** · Rules on spec `threat-rules/v1.3` can read `file_reads` on each entry of `e.command.parsed_commands`: the files that command takes as input. A rule can now ask whether a command read `~/.aws/credentials` without re-reading shell syntax in a regular expression. It covers what `cat`, `head`, `base64` and the other printers print, what `grep`, `rg`, `awk`, `sed` and `jq` search, the sources of `cp`, `scp` and `rsync`, what `tar` and `zip` archive, what `curl`, `wget`, `gh gist create` and `socat` send, and input redirections. A search pattern, an archive exclusion, an identity file, a here-document body and the file being written are not reads. A path is reported as written, so `~/.ssh/id_rsa` and `$HOME/.ssh/id_rsa` are both matched by their ending. No shipped rule uses the field yet, and a Beacon older than this release skips a rule that declares v1.3. See [Rule YAML schema](/detections/yaml-schema).
+
 ## November 2026
 
 ### v1.3.61 · November 13, 2026

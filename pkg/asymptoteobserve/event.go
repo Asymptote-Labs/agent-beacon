@@ -211,6 +211,10 @@ type ParsedCommand struct {
 	Env map[string]string `cel:"env"`
 	// FileEffects are the files the command evidently writes, and how.
 	FileEffects []ParsedFileEffect `cel:"file_effects"`
+	// FileReads are the files the command evidently takes as input: what it prints, searches,
+	// copies, archives or sends, and the targets of its input redirections. Each is as written
+	// without its quotes, also where the value depends on an expansion ($HOME/.netrc, ~/.ssh/id_*).
+	FileReads []string `cel:"file_reads"`
 	// Pipeline identifies the command's pipeline: the stages of one pipeline share it. Stage
 	// is the 0-based position in it (curl ... | sh: sh is stage 1).
 	Pipeline int `cel:"pipeline"`

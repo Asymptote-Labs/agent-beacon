@@ -149,36 +149,54 @@ type parsedOptions struct {
 	flags    map[string]bool
 }
 
+// optionTable is what a command's words are split by: its options that take a value, its
+// value-less options the caller asks about, and every long option it has, so that an abbreviation
+// resolves to the one option it begins.
+type optionTable struct {
+	values optionSpec
+	flags  optionSpec
+	long   []string
+}
+
 // parseOptions splits a command's words into operands, the values of its valueOptions and its
 // flagOptions. Everything after `--` is an operand, and so is an unknown word. A long option may
 // be abbreviated to a prefix of one of its longOptions; an abbreviation of several fails the
 // command, which then has no operands.
 func parseOptions(command string, words []Word) parsedOptions {
-	spec, flags := valueOptions[command], flagOptions[command]
+	return optionTable{valueOptions[command], flagOptions[command], longOptions[command]}.parse(words, false)
+}
+
+// parse splits words by the table. An unknown word is an operand, unless written is set: then a
+// word is read as it is written (Word.Unquoted), so `-n"$N"` and `--file=$F` are still options.
+func (t optionTable) parse(words []Word, written bool) parsedOptions {
 	p := parsedOptions{values: map[string]Word{}, flags: map[string]bool{}}
 	for i := 0; i < len(words); i++ {
 		w := words[i]
+		text, known := w.Text, w.Known
+		if written {
+			text, known = w.Unquoted, true
+		}
 		switch {
-		case !w.Known || w.Text == "-" || !strings.HasPrefix(w.Text, "-"):
+		case !known || text == "-" || !strings.HasPrefix(text, "-"):
 			p.operands = append(p.operands, w)
-		case w.Text == "--":
+		case text == "--":
 			p.operands = append(p.operands, words[i+1:]...)
 			return p
-		case strings.HasPrefix(w.Text, "--"):
-			name, value, attached := strings.Cut(w.Text, "=")
-			name, ok := longOption(command, name)
+		case strings.HasPrefix(text, "--"):
+			name, value, attached := strings.Cut(text, "=")
+			name, ok := longOption(t.long, name)
 			if !ok {
 				return parsedOptions{}
 			}
-			if slices.Contains(flags.long, name) {
+			if slices.Contains(t.flags.long, name) {
 				p.flags[name] = true
 			}
-			if !slices.Contains(spec.long, name) {
+			if !slices.Contains(t.values.long, name) {
 				continue
 			}
 			switch {
 			case attached:
-				p.values[name] = Word{Text: value, Known: true}
+				p.values[name] = attachedValue(w, value)
 			case i+1 < len(words):
 				i++
 				p.values[name] = words[i]
@@ -186,17 +204,20 @@ func parseOptions(command string, words []Word) parsedOptions {
 				p.values[name] = Word{}
 			}
 		default:
-			for j := 1; j < len(w.Text); j++ {
-				c := w.Text[j]
-				if strings.IndexByte(flags.short, c) >= 0 {
+			for j := 1; j < len(text); j++ {
+				c := text[j]
+				if !w.Known && (c == '$' || c == '`') {
+					break // what follows in an unknown word is not option letters
+				}
+				if strings.IndexByte(t.flags.short, c) >= 0 {
 					p.flags[string(c)] = true
 				}
-				if strings.IndexByte(spec.short, c) < 0 {
+				if strings.IndexByte(t.values.short, c) < 0 {
 					continue
 				}
 				switch {
-				case j+1 < len(w.Text):
-					p.values[string(c)] = Word{Text: w.Text[j+1:], Known: true}
+				case j+1 < len(text):
+					p.values[string(c)] = attachedValue(w, text[j+1:])
 				case i+1 < len(words):
 					i++
 					p.values[string(c)] = words[i]
@@ -210,11 +231,19 @@ func parseOptions(command string, words []Word) parsedOptions {
 	return p
 }
 
+// attachedValue is the value an option carries in its own word w (--suffix=.bak, -S.bak).
+func attachedValue(w Word, value string) Word {
+	v := Word{Unquoted: value, Known: w.Known}
+	if v.Known {
+		v.Text = value
+	}
+	return v
+}
+
 // longOption resolves a long option name the way getopt_long and git do: the name itself, or the
-// one long option of command it is a prefix of. A prefix of several is ambiguous (not ok); a name
-// command does not have stays as written.
-func longOption(command, name string) (string, bool) {
-	all := longOptions[command]
+// one long option of all it is a prefix of. A prefix of several is ambiguous (not ok); a name that
+// is none of them stays as written.
+func longOption(all []string, name string) (string, bool) {
 	if slices.Contains(all, name) {
 		return name, true
 	}
@@ -348,9 +377,18 @@ func (c Command) commandTargets() []FileEffect {
 }
 
 // inPlaceFiles returns the files sed or perl edits in place, and nothing without -i/--in-place.
-// They are every operand when the script came in with -e/-f (attached, separate, or
-// --expression/--file), and every operand after the first, the script, otherwise.
 func inPlaceFiles(name string, args []Word) []Word {
+	files, inPlace := scriptFiles(name, args)
+	if !inPlace {
+		return nil
+	}
+	return files
+}
+
+// scriptFiles returns the files sed or perl works on, and whether it edits them in place
+// (-i/--in-place). They are every operand when the script came in with -e/-f (attached, separate,
+// or --expression/--file), and every operand after the first, the script, otherwise.
+func scriptFiles(name string, args []Word) (files []Word, inPlace bool) {
 	// A script switch brings the script, attached or as the next word. -i and a valued switch take
 	// the rest of the cluster as their value, so an i or e after one (-i.bak, perl -Mwarnings,
 	// -Ilib) is part of that value.
@@ -358,7 +396,7 @@ func inPlaceFiles(name string, args []Word) []Word {
 	if name == "perl" {
 		script, valued = "eE", "CDFIMdmx0"
 	}
-	inPlace, scripted := false, false
+	scripted := false
 	var operands []Word
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -405,16 +443,10 @@ func inPlaceFiles(name string, args []Word) []Word {
 			}
 		}
 	}
-	if !inPlace {
-		return nil
-	}
-	if !scripted {
-		if len(operands) < 2 {
-			return nil
-		}
+	if !scripted && len(operands) > 0 {
 		operands = operands[1:]
 	}
-	return operands
+	return operands, inPlace
 }
 
 // effectsOf are the known words of words, each with op.

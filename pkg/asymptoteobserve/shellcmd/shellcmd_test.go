@@ -235,6 +235,9 @@ func TestParseIncomplete(t *testing.T) {
 	}
 }
 
+// plain is a word that is written as its value: no quotes, no escapes, nothing to expand.
+func plain(s string) Word { return Word{Text: s, Raw: s, Known: true, Unquoted: s} }
+
 func TestParse(t *testing.T) {
 	commands, err := Parse("FOO=1 BAR=\"$X\" sudo -u deploy /opt/bin/beacon share 2>&1 | tee -a out.log | sh\ncd sub; echo `rm x` > {a,b}.txt")
 	if err != nil {
@@ -243,49 +246,39 @@ func TestParse(t *testing.T) {
 	want := []Command{
 		{
 			Env: []Assign{
-				{Name: "FOO", Value: Word{Text: "1", Raw: "1", Known: true}},
-				{Name: "BAR", Value: Word{Raw: `"$X"`}},
+				{Name: "FOO", Value: plain("1")},
+				{Name: "BAR", Value: Word{Raw: `"$X"`, Unquoted: "$X"}},
 			},
-			Argv: []Word{
-				{Text: "sudo", Raw: "sudo", Known: true},
-				{Text: "-u", Raw: "-u", Known: true},
-				{Text: "deploy", Raw: "deploy", Known: true},
-				{Text: "/opt/bin/beacon", Raw: "/opt/bin/beacon", Known: true},
-				{Text: "share", Raw: "share", Known: true},
-			},
-			Redirects: []Redirect{{Op: ">&", Fd: "2", Target: Word{Text: "1", Raw: "1", Known: true}}},
+			Argv:      []Word{plain("sudo"), plain("-u"), plain("deploy"), plain("/opt/bin/beacon"), plain("share")},
+			Redirects: []Redirect{{Op: ">&", Fd: "2", Target: plain("1")}},
 			Pipeline:  1,
 		},
 		{
-			Argv: []Word{
-				{Text: "tee", Raw: "tee", Known: true},
-				{Text: "-a", Raw: "-a", Known: true},
-				{Text: "out.log", Raw: "out.log", Known: true},
-			},
+			Argv:     []Word{plain("tee"), plain("-a"), plain("out.log")},
 			Offset:   59,
 			Pipeline: 1,
 			Stage:    1,
 		},
 		{
-			Argv:     []Word{{Text: "sh", Raw: "sh", Known: true}},
+			Argv:     []Word{plain("sh")},
 			Offset:   76,
 			Pipeline: 1,
 			Stage:    2,
 		},
 		{
-			Argv:     []Word{{Text: "cd", Raw: "cd", Known: true}, {Text: "sub", Raw: "sub", Known: true}},
+			Argv:     []Word{plain("cd"), plain("sub")},
 			Offset:   79,
 			Pipeline: 2,
 		},
 		{
-			Argv:      []Word{{Text: "echo", Raw: "echo", Known: true}, {Raw: "`rm x`"}},
-			Redirects: []Redirect{{Op: ">", Target: Word{Raw: "{a,b}.txt", Text: "{a,b}.txt", Known: true}}},
+			Argv:      []Word{plain("echo"), {Raw: "`rm x`", Unquoted: "`rm x`"}},
+			Redirects: []Redirect{{Op: ">", Target: plain("{a,b}.txt")}},
 			Offset:    87,
 			Pipeline:  3,
 			AfterCD:   true,
 		},
 		{
-			Argv:     []Word{{Text: "rm", Raw: "rm", Known: true}, {Text: "x", Raw: "x", Known: true}},
+			Argv:     []Word{plain("rm"), plain("x")},
 			Offset:   93,
 			Pipeline: 4,
 			Nested:   true,
@@ -336,23 +329,38 @@ func TestCompoundStages(t *testing.T) {
 }
 
 func TestWords(t *testing.T) {
-	commands, err := Parse(`rm {a,b}.txt ~/x 'q t' "d $v" C:\Tools\x.exe file\ two *.log`)
+	commands, err := Parse(`rm {a,b}.txt ~/x 'q t' "d $v" C:\Tools\x.exe file\ two *.log ` +
+		`"$HOME/.aws/credentials" ~/.ssh/{id_rsa,id_*} $(pwd)/.env '$lit' $'a\tb' "a\"b"`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []Word{
-		{Text: "rm", Raw: "rm", Known: true},
-		{Text: "a.txt", Raw: "{a,b}.txt", Known: true},
-		{Text: "b.txt", Raw: "{a,b}.txt", Known: true},
-		{Raw: "~/x"},
-		{Text: "q t", Raw: "'q t'", Known: true},
-		{Raw: `"d $v"`},
-		{Text: "C:Toolsx.exe", Raw: `C:\Tools\x.exe`, Known: true},
-		{Text: "file two", Raw: `file\ two`, Known: true},
-		{Raw: "*.log"},
+		plain("rm"),
+		{Text: "a.txt", Raw: "{a,b}.txt", Known: true, Unquoted: "a.txt"},
+		{Text: "b.txt", Raw: "{a,b}.txt", Known: true, Unquoted: "b.txt"},
+		{Raw: "~/x", Unquoted: "~/x"},
+		{Text: "q t", Raw: "'q t'", Known: true, Unquoted: "q t"},
+		{Raw: `"d $v"`, Unquoted: "d $v"},
+		{Text: "C:Toolsx.exe", Raw: `C:\Tools\x.exe`, Known: true, Unquoted: "C:Toolsx.exe"},
+		{Text: "file two", Raw: `file\ two`, Known: true, Unquoted: "file two"},
+		{Raw: "*.log", Unquoted: "*.log"},
+		// What the parse does not evaluate stays as written, without the quotes around it.
+		{Raw: `"$HOME/.aws/credentials"`, Unquoted: "$HOME/.aws/credentials"},
+		{Raw: "~/.ssh/{id_rsa,id_*}", Unquoted: "~/.ssh/id_rsa"},
+		{Raw: "~/.ssh/{id_rsa,id_*}", Unquoted: "~/.ssh/id_*"},
+		{Raw: "$(pwd)/.env", Unquoted: "$(pwd)/.env"},
+		{Text: "$lit", Raw: "'$lit'", Known: true, Unquoted: "$lit"},
+		{Raw: `$'a\tb'`, Unquoted: `$'a\tb'`},
+		{Text: `a"b`, Raw: `"a\"b"`, Known: true, Unquoted: `a"b`},
 	}
-	if len(commands) != 1 || !reflect.DeepEqual(commands[0].Argv, want) {
-		t.Fatalf("Argv = %+v, want %+v", commands, want)
+	// The $(pwd) inside one word is a second command; the words are the first's.
+	if len(commands) != 2 || len(commands[0].Argv) != len(want) {
+		t.Fatalf("Parse = %+v, want words %+v", commands, want)
+	}
+	for i, w := range commands[0].Argv {
+		if w != want[i] {
+			t.Errorf("word %d = %#v, want %#v", i, w, want[i])
+		}
 	}
 }
 

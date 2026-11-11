@@ -50,7 +50,7 @@ func TestDecodeRuleAcceptsSupportedSpecs(t *testing.T) {
 }
 
 func TestDecodeRuleRejectsNewerSpecClearly(t *testing.T) {
-	for _, spec := range []string{"threat-rules/v1.3", "threat-rules/v2"} {
+	for _, spec := range []string{"threat-rules/v1.9", "threat-rules/v2"} {
 		// A future rule also carries the fields its version added; the spec check must
 		// come first so the error names the version rather than the unknown field.
 		_, err := DecodeRule([]byte(specRule("future-rule", "spec: "+spec, "future_field: true\n")))
@@ -117,6 +117,28 @@ func TestParsedCommandsRequiresSpecV1_2(t *testing.T) {
 	}
 	if err := rule.Validate(); err != nil {
 		t.Errorf("v1.2: %v", err)
+	}
+}
+
+func TestFileReadsRequiresSpecV1_3(t *testing.T) {
+	const uses = "match: 'e.command.parsed_commands.exists(c, c.file_reads.exists(f, f == \".env\"))'\n"
+	withSpec := func(spec string) *Rule {
+		t.Helper()
+		rule, err := DecodeRule([]byte(strings.Replace(specRule("r", spec, ""), "match: 'e.event.action == \"file.read\"'\n", uses, 1)))
+		if err != nil {
+			t.Fatalf("%q: decode: %v", spec, err)
+		}
+		return rule
+	}
+	// A rule that names an older spec, or none, is told the version it needs, not the older one
+	// parsed_commands needs.
+	for _, spec := range []string{"", "spec: threat-rules/v1.1", "spec: threat-rules/v1.2"} {
+		if err := withSpec(spec).Validate(); err == nil || !strings.Contains(err.Error(), "e.command.parsed_commands[].file_reads requires spec: threat-rules/v1.3") {
+			t.Errorf("%q: want the file_reads/spec error, got %v", spec, err)
+		}
+	}
+	if err := withSpec("spec: threat-rules/v1.3").Validate(); err != nil {
+		t.Errorf("v1.3: %v", err)
 	}
 }
 

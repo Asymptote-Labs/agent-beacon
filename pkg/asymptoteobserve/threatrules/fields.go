@@ -141,10 +141,12 @@ var derivedFieldDocs = map[string]string{
 		"  entry per command it runs, each with `name` (base name after sudo/env/exec/... wrappers,\n" +
 		"  \"\" when unknown), `argv` and `argv_raw` (every word, wrappers included: as passed, \"\"\n" +
 		"  when it depends on an expansion, glob or `~`; and as written), `env` (NAME=value prefixes),\n" +
-		"  `file_effects` (`{path, op}`), `pipeline`, `stage` (0-based) and `nested` (inside `$(...)`,\n" +
-		"  `<(...)` or a shell's `-c` script, which is read too). Here-document bodies and other\n" +
-		fmt.Sprintf("  strings are not commands. The first %d bytes are read; a cut capture yields the\n", ParsedCommandsLimit) +
-		"  commands before the cut, and one that does not parse yields an empty list.",
+		"  `file_effects` (`{path, op}`), `file_reads` (spec v1.3: the files it takes as input, each\n" +
+		"  as written without its quotes, so `~/.aws/credentials` and `$HOME/.netrc` stay as they are),\n" +
+		"  `pipeline`, `stage` (0-based) and `nested` (inside `$(...)`, `<(...)` or a shell's `-c`\n" +
+		"  script, which is read too). Here-document bodies and other strings are not commands.\n" +
+		fmt.Sprintf("  The first %d bytes are read; a cut capture yields the commands before the cut, and\n", ParsedCommandsLimit) +
+		"  one that does not parse yields an empty list.",
 	ToolResultTextPath: "`gen_ai.tool.call.result` as text, only on read-type tool\n" +
 		"  results (`file.read`, `mcp.tool_invoked`, MCP-named tools, web fetch/search tools, a\n" +
 		"  `tool.path` that is an http(s) URL) whose content was retained. String leaves of an\n" +
