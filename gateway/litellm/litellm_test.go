@@ -107,6 +107,22 @@ func TestRequest(t *testing.T) {
 	}
 }
 
+// The user agent comes from the filtered headers: a value LiteLLM withheld is no user agent, and a
+// capitalised header name is read.
+func TestUserAgent(t *testing.T) {
+	for headers, want := range map[string]string{
+		`{"user-agent":"[present]"}`:          "",
+		`{"User-Agent":"claude-cli/2.1.306"}`: "claude-cli/2.1.306",
+		`{"user-agent":"codex_exec/0.1"}`:     "codex_exec/0.1",
+	} {
+		h := &fakeHandler{}
+		post(t, h, `{"input_type":"request","litellm_call_id":"c","texts":["hi"],"request_headers":`+headers+`}`)
+		if got := h.calls[0].Client.UserAgent; got != want {
+			t.Errorf("%s: user agent %q, want %q", headers, got, want)
+		}
+	}
+}
+
 // A payload without structured messages becomes user turns of its texts.
 func TestRequestTextsOnly(t *testing.T) {
 	h := &fakeHandler{}

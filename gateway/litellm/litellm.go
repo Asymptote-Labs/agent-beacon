@@ -176,9 +176,8 @@ func (a *adapter) call(req request) (*gateway.Call, error) {
 		Protocol:   llm.OpenAIChat,
 		Normalized: true,
 		Client: gateway.Client{
-			UserAgent: req.RequestHeaders["user-agent"],
-			Headers:   gateway.ClientHeaders(req.RequestHeaders, withheld),
-			Session:   req.TraceID,
+			Headers: gateway.ClientHeaders(req.RequestHeaders, withheld),
+			Session: req.TraceID,
 			Identity: gateway.Identity{
 				User:  rd.UserID,
 				Email: rd.UserEmail,
@@ -188,6 +187,9 @@ func (a *adapter) call(req request) (*gateway.Call, error) {
 			},
 		},
 	}
+	// From the filtered headers: names lowercased, and a value LiteLLM withheld ("[present]") is
+	// not taken for the user agent.
+	c.Client.UserAgent = c.Client.Headers["user-agent"]
 	var err error
 	switch req.InputType {
 	case "request":
