@@ -207,6 +207,11 @@ type ParsedCommand struct {
 	Argv []string `cel:"argv"`
 	// ArgvRaw are the same words as written, quotes and expansions included ($HOME, /*).
 	ArgvRaw []string `cel:"argv_raw"`
+	// Args are the words after the command's name as text, one per line, as Argv has them: for
+	// one regular expression to ask for whole words that follow each other, as in
+	// args.matches("(?m)^auth\ntoken$") for `sudo gh auth token`. A newline inside a word is a
+	// space here.
+	Args string `cel:"args"`
 	// Env are the NAME=value assignments before the command; an unknown value is "".
 	Env map[string]string `cel:"env"`
 	// FileEffects are the files the command evidently writes, and how.

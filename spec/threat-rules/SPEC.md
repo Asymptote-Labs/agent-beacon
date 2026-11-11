@@ -79,7 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `file_reads` and `script_sends`. See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads` and `script_sends`. See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -190,7 +190,12 @@ the steps in both orders still fires once. A single event never satisfies two st
   `argv` (every word after brace expansion, wrappers included,
   as the shell passes it on, or `""` when its value depends on a parameter, command or
   arithmetic substitution, an ANSI-C or locale string, an unquoted glob character, or a
-  leading tilde), `argv_raw` (the same words as written), `env` (the `NAME=value`
+  leading tilde), `argv_raw` (the same words as written), `args` (since v1.3, with the
+  declaration rule of `file_reads`: the words of `argv` after the one `name` is taken from,
+  as one string with a newline between words, `""` when there are none; a newline inside a
+  word is written as a space, so a line is always one whole word and
+  `c.args.matches("(?m)^auth\ntoken$")` is true exactly when the words `auth` and `token`
+  follow each other), `env` (the `NAME=value`
   assignments before the command, `""` for an unknown value), `file_effects` (the files the
   command evidently writes, `{path, op}`, of the command `name` names), `file_reads` and
   `script_sends` (the files it evidently takes as input and the ones its inline script
@@ -348,7 +353,7 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
-- **v1.3**: `file_reads` and `script_sends` on each entry of `e.command.parsed_commands`.
+- **v1.3**: `args`, `file_reads` and `script_sends` on each entry of `e.command.parsed_commands`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
   `doas`, `torsocks` and `proxychains`, and a shell's here-document or here-string script is
   read as commands the way its `-c` script is.

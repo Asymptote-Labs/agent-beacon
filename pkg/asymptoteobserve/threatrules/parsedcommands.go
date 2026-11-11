@@ -13,7 +13,7 @@ import (
 const ParsedCommandsPath = "command.parsed_commands"
 
 // v1_3Fields are the fields of a parsed command that spec v1.3 added.
-var v1_3Fields = []string{"file_reads", "script_sends"}
+var v1_3Fields = []string{"args", "file_reads", "script_sends"}
 
 // ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
 // to the retained command line, so a longer value (from an in-process caller) is cut there too.
@@ -34,6 +34,7 @@ const maxShellDepth = 2
 //     or a wrapper option hides it (sudo -i, env -C).
 //   - argv and argv_raw are every word, wrappers included: argv as the shell passes it on, ""
 //     for a word whose value depends on an expansion, glob or leading tilde; argv_raw as written.
+//   - args is shellcmd's ArgsText: the words of argv after name, one per line.
 //   - env maps each NAME=value assignment before the command to its value ("" when unknown).
 //   - file_effects are shellcmd's file effects of the command: {path, op}.
 //   - file_reads are shellcmd's file reads of the command: {path, via}, each path as written.
@@ -96,6 +97,7 @@ func (p *parsedCommands) add(cmds []shellcmd.Command, nested bool, depth int) {
 func parsedCommand(c shellcmd.Command, reads []shellcmd.FileRead, pipelineBase int, nested bool) asymptoteobserve.ParsedCommand {
 	pc := asymptoteobserve.ParsedCommand{
 		Name:     c.Name(),
+		Args:     c.ArgsText(),
 		Argv:     make([]string, len(c.Argv)),
 		ArgvRaw:  make([]string, len(c.Argv)),
 		Pipeline: pipelineBase + c.Pipeline,

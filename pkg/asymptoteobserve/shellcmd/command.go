@@ -73,6 +73,35 @@ func (c Command) Name() string {
 	return name
 }
 
+// ArgsText returns the words after the unwrapped command's name as text, one word per line, so
+// that one regular expression can ask for whole words that follow each other: "auth\ntoken" for
+// `sudo gh auth token`. A word whose value is unknown is an empty line, and a newline inside a
+// word is written as a space, so a line is always one whole word. It is "" when the command has
+// no known name or nothing follows it.
+func (c Command) ArgsText() string {
+	_, args := c.run()
+	if len(args) == 0 {
+		return ""
+	}
+	size := len(args) - 1
+	for _, w := range args {
+		size += len(w.Text)
+	}
+	var b strings.Builder
+	b.Grow(size)
+	for i, w := range args {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if strings.IndexByte(w.Text, '\n') < 0 {
+			b.WriteString(w.Text)
+		} else {
+			b.WriteString(strings.ReplaceAll(w.Text, "\n", " "))
+		}
+	}
+	return b.String()
+}
+
 // Is reports whether the unwrapped command is name, followed by the known words sub
 // (Is("git", "mv") for git mv a b).
 func (c Command) Is(name string, sub ...string) bool {
