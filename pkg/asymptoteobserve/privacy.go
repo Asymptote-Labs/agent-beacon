@@ -468,8 +468,10 @@ var redactionRules = concatRules([]redactionRule{
 	// start (a line, a quote, curl's -H), so prose that says "cookie:" keeps its sentence.
 	foldedRule(`(?im)((?:^\s*|["']\s*|(?:-H|--header)(?:=|\s+)["']?)(?:set-)?cookie["']?\s*:\s*["']?)([^\n"'\\]+)`, "${1}"+redactedValue, isRedactedValue, "cookie").from(startLine),
 	// The password in a URL's userinfo: `postgres://user:pw@host`, `https://x-access-token:t@github.com`,
-	// and with no user name, the way Redis URLs carry a password: `redis://:pw@host`.
-	foldedRule(`(?i)(\b[a-z][a-z0-9+.-]*://[^/\s:@"'<>]*:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://").from(startScheme).runningOn(urlRunningOn),
+	// and with no user name, the way Redis URLs carry a password: `redis://:pw@host`. The word the
+	// scheme ends can hold an `_`, which no scheme does: of `lsv2_sk_mysql://user:pw@host` the scheme
+	// is `mysql`, and the match starts with the word.
+	foldedRule(`(?i)(\b[a-z0-9_+.-]*?[a-z][a-z0-9+.-]*://[^/\s:@"'<>]*:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://").from(startScheme).runningOn(urlRunningOn),
 	// Credentials recognizable by their own shape, wherever they appear. The type prefix is public
 	// and stays (`ghp_[REDACTED]`, `AKIA[REDACTED]`), the way secret scanners report a finding: the
 	// line still says a GitHub token or an AWS key was there, which is what detection rules match on

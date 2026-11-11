@@ -56,8 +56,9 @@ const (
 	startFlag
 	// startListedFlag: at the quote before the flag that ends at the needle.
 	startListedFlag
-	// startScheme: at a letter on a word boundary in the run of [A-Za-z0-9+.-] before the needle,
-	// a URL's `\b[a-z][a-z0-9+.-]*` scheme. The pattern opens with \b.
+	// startScheme: at a word boundary in the run of [A-Za-z0-9_+.-] before the needle, where a
+	// URL's `\b[a-z0-9_+.-]*?[a-z][a-z0-9+.-]*` scheme and the word it ends begin. The pattern
+	// opens with \b.
 	startScheme
 	// startParam: at the `?` or `&` right before the run of [A-Za-z0-9_.-] that ends at the
 	// needle, where a URL query parameter opens, and where startLabel begins when there is none
@@ -553,7 +554,7 @@ func (rule redactionRule) startFor(t string, h redactHit, pos int, boundary bool
 			return run - 1
 		}
 		for q := max(run, pos); q <= last; q++ {
-			if wordBoundary(t, q) && (rule.start != startScheme || isASCIILetter(t[q])) {
+			if wordBoundary(t, q) {
 				return q
 			}
 		}
@@ -632,7 +633,7 @@ var labelClass, schemeClass = func() (label, scheme [256]bool) {
 		b := byte(c)
 		alnum := isASCIILetter(b) || '0' <= b && b <= '9'
 		label[c] = alnum || b == '_' || b == '.' || b == '-'
-		scheme[c] = alnum || b == '+' || b == '.' || b == '-'
+		scheme[c] = alnum || b == '_' || b == '+' || b == '.' || b == '-'
 	}
 	return label, scheme
 }()

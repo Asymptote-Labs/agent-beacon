@@ -392,6 +392,22 @@ func TestRedactStringURLLabelPasswordWithQueryString(t *testing.T) {
 	}
 }
 
+// A URL's scheme glued to a word that ends in `_`, which \b alone would not let the scheme start
+// after (#1250): the match starts with the word, and the word stays.
+func TestRedactStringRedactsAURLPasswordAfterAWordEndingInAnUnderscore(t *testing.T) {
+	for input, want := range map[string]string{
+		"lsv2_sk_mysql://u:p@h":                     "lsv2_sk_mysql://u:[REDACTED]@h",
+		"x lsv2_sk_mysql://user:hunter2@db.example": "x lsv2_sk_mysql://user:[REDACTED]@db.example",
+		"_redis://:hunter2@cache":                   "_redis://:[REDACTED]@cache",
+		"a_1.mysql://u:hunter2@h":                   "a_1.mysql://u:[REDACTED]@h",
+		"a.b_mysql://u:hunter2@h":                   "a.b_mysql://u:[REDACTED]@h",
+	} {
+		if got := RedactString(input); got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 // awsPairLabelRun is 34 bytes of an AWS secret access key's alphabet: with a 6-byte label word
 // after it, the label is exactly as long as a secret access key, 40 bytes.
 const awsPairLabelRun = "Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3x"
