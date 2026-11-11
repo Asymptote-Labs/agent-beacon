@@ -594,15 +594,16 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 	writeSnapshot := false
 	next := state
 	release := func() {}
+	var resolvePackages packageResolver
 	if !scope.NoConsoleUser {
-		confined, err := confineInventoryScan(scope.HomeDir)
+		confined, resolver, err := confineInventoryScan(scope.HomeDir)
 		if err != nil {
 			// Never scan a home root does not own without the confinement; the liveness heartbeat
 			// still goes out.
 			fmt.Fprintf(os.Stderr, "warning: inventory scan skipped: %v\n", err)
 			scope = heartbeatScope{NoConsoleUser: true}
 		} else {
-			release = confined
+			release, resolvePackages = confined, resolver
 		}
 	}
 	if scope.NoConsoleUser {
@@ -618,6 +619,7 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 			Now:              func() time.Time { return now },
 			IncludeContents:  settings.IncludeContents,
 			MaxContentBytes:  settings.MaxContentBytes,
+			ResolvePackages:  resolvePackages,
 		})
 		release()
 		digest = endpointinventory.SnapshotDigest(inventoryResult)
@@ -1974,21 +1976,28 @@ func syntheticEvent(destination string) schema.Event {
 // scanning a home it does not own -- the system job reading the console user's home. That user can
 // plant anything there: a symlink to a root-only file (whose content or hash would land in the
 // world-readable system log), a FIFO that hangs the job while it holds the inventory lock, or a
-// link to /dev/zero. Confined, those read as absent. It returns the release to call after the scan.
-func confineInventoryScan(home string) (func(), error) {
+// link to /dev/zero. Confined, those read as absent. It returns the release to call after the scan
+// and, confined, the resolver the scan names MCP server packages with: the console user's own (see
+// packagesAsUser), since the launcher config it reads is wherever that user pointed it. Without
+// one, a confined scan holds every package back as private.
+func confineInventoryScan(home string) (func(), packageResolver, error) {
 	if strings.TrimSpace(home) == "" || os.Geteuid() != 0 {
-		return func() {}, nil
+		return func() {}, nil, nil
 	}
 	uid, err := sessionfs.OwnerUID(home)
 	if err != nil {
-		return nil, fmt.Errorf("could not read the owner of %s: %w", home, err)
+		return nil, nil, fmt.Errorf("could not read the owner of %s: %w", home, err)
 	}
 	if uid == 0 {
-		return func() {}, nil
+		return func() {}, nil, nil
 	}
 	confined, err := sessionfs.Confine(home, uid, sessionfs.Options{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return confined.Release, nil
+	resolver, err := packagesAsUser(uid, home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: MCP server packages are held back as private: %v\n", err)
+	}
+	return confined.Release, resolver, nil
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/launchpkg"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -1599,4 +1600,45 @@ func TestScanResolvesProjectScopeServersWithTheProjectsConfig(t *testing.T) {
 	if s := result.MCPServers[0]; s.Package != "" || s.PackageRegistry != PackageRegistryPrivate || s.PrivatePackage != "npm:@acme/billing-mcp" {
 		t.Fatalf("billing = %+v", s)
 	}
+}
+
+// A package Beacon could not check may have a private name, so whenever the resolver cannot
+// answer, and whenever a confined scan has none to run as the user, every package is held back.
+func TestScanHoldsPackagesBackWithoutAnAnswer(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers": {
+		"supabase": {"command": "npx", "args": ["-y", "@supabase/mcp-server-supabase"]},
+		"local": {"command": "node", "args": ["server.js"]}
+	}}`)
+	heldBack := func(t *testing.T, result Result) {
+		t.Helper()
+		for _, s := range result.MCPServers {
+			want := [3]string{"", PackageRegistryPrivate, "npm:@supabase/mcp-server-supabase"}
+			if s.ServerName == "local" {
+				want = [3]string{}
+			}
+			if got := [3]string{s.Package, s.PackageRegistry, s.PrivatePackage}; got != want {
+				t.Errorf("%s = %q, want %q", s.ServerName, got, want)
+			}
+		}
+	}
+	options := Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow}
+
+	var asked launchpkg.RegistryEnv
+	options.ResolvePackages = func(env launchpkg.RegistryEnv, queries []launchpkg.Query) ([]launchpkg.Answer, error) {
+		asked = env
+		return nil, os.ErrDeadlineExceeded
+	}
+	heldBack(t, Scan(options))
+	if asked.Home != home || !asked.System {
+		t.Errorf("resolver asked with %+v, want the scanned home and the system's files", asked)
+	}
+
+	options.ResolvePackages = nil
+	c, err := sessionfs.Confine(home, os.Getuid(), sessionfs.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Release()
+	heldBack(t, Scan(options))
 }

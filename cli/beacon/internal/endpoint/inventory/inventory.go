@@ -23,6 +23,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/launchpkg"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -88,6 +89,12 @@ type Options struct {
 	// inventory snapshot is scanned that way, so a server's package_registry does not depend on
 	// which command took the snapshot. Its Home is always the scanned home.
 	LauncherEnv *launchpkg.RegistryEnv
+	// ResolvePackages answers which package each server runs. The answer reads the launcher
+	// config the user chose (an npmrc's userconfig, a project, a server's PATH), so it must be
+	// read with that user's rights, never root's: the system job, which scans as root, passes one
+	// that runs as the console user. Nil resolves in this process, which a confined scan never
+	// does: there every package is held back as private.
+	ResolvePackages func(launchpkg.RegistryEnv, []launchpkg.Query) ([]launchpkg.Answer, error)
 }
 
 // PackageRegistry values: where a server's launcher fetches the package it runs.
@@ -225,26 +232,48 @@ func Scan(opts Options) Result {
 		result.Configs = append(result.Configs, config)
 		result.MCPServers = append(result.MCPServers, servers...)
 	}
-	resolvePackages(result.MCPServers, home, opts.LauncherEnv)
+	resolvePackages(result.MCPServers, home, opts)
 	result.Skills = scanSkills(home, wd, redaction, opts.Runtimes, co)
 	return result
 }
 
 // resolvePackages names the npm or PyPI package each server runs and where its launcher fetches
-// it from. It runs inside Scan so that a confined scan reads the launcher config under the same
-// confinement as everything else, with the home Scan resolved.
-func resolvePackages(servers []MCPServer, home string, launchers *launchpkg.RegistryEnv) {
+// it from, with the home Scan resolved. A resolver that fails holds every package back as private:
+// a name Beacon could not check may be a private one.
+func resolvePackages(servers []MCPServer, home string, opts Options) {
 	if len(servers) == 0 {
 		return
 	}
 	env := launchpkg.RegistryEnv{System: true}
-	if launchers != nil {
-		env = *launchers
+	if opts.LauncherEnv != nil {
+		env = *opts.LauncherEnv
 	}
 	env.Home = home
-	registries := launchpkg.LocalRegistries(env)
+	queries := make([]launchpkg.Query, len(servers))
+	for i, s := range servers {
+		queries[i] = launchpkg.Query{Launch: s.Launch, ProjectDirs: s.projectDirs}
+	}
+	resolve := opts.ResolvePackages
+	if resolve == nil && !sessionfs.Confined(home) {
+		resolve = func(env launchpkg.RegistryEnv, queries []launchpkg.Query) ([]launchpkg.Answer, error) {
+			return launchpkg.ResolveAll(env, queries), nil
+		}
+	}
+	var answers []launchpkg.Answer
+	if resolve != nil {
+		if got, err := resolve(env, queries); err == nil && len(got) == len(queries) {
+			answers = got
+		}
+	}
 	for i := range servers {
-		if p, ok := launchpkg.Resolve(servers[i].Launch, servers[i].projectDirs, registries); ok {
+		if answers != nil {
+			if answers[i].OK {
+				servers[i].RecordPackage(answers[i].Package)
+			}
+			continue
+		}
+		if p, ok := launchpkg.FromCommand(launchpkg.Command(servers[i].Launch)); ok {
+			p.Private = true
 			servers[i].RecordPackage(p)
 		}
 	}

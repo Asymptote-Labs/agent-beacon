@@ -13,11 +13,11 @@ import (
 // Package is the npm or PyPI package a launch command runs.
 type Package struct {
 	// Ref names it as Beacon Intel looks it up: npm:<name> or pypi:<name>, without a version.
-	Ref string
+	Ref string `json:"ref"`
 	// Private is set when the command, the server's env or its launcher's own configuration may
-	// fetch it from a registry or index other than the public one. Its name may then be private
-	// too.
-	Private bool
+	// fetch it from a registry or index other than the public one, or when Beacon could not read
+	// that configuration. Its name may then be private too.
+	Private bool `json:"private"`
 }
 
 // Resolve names the package a server's redacted definition runs. registries is what the
@@ -34,6 +34,34 @@ func Resolve(def map[string]interface{}, projectDirs []string, registries Regist
 		p.Private = true
 	}
 	return p, true
+}
+
+// Query is one server's question: its redacted launch definition and the directories the runtime
+// starts it in.
+type Query struct {
+	Launch      map[string]interface{} `json:"launch"`
+	ProjectDirs []string               `json:"project_dirs,omitempty"`
+}
+
+// Answer is a Query's package; OK is false when its command runs none.
+type Answer struct {
+	Package Package `json:"package"`
+	OK      bool    `json:"ok"`
+}
+
+// ResolveAll answers each query against the launcher configuration env names, read once. It reads
+// that configuration with this process's own rights, so it must run as the user whose launchers
+// read it: see the inventory scan's ResolvePackages.
+func ResolveAll(env RegistryEnv, queries []Query) []Answer {
+	if len(queries) == 0 {
+		return nil
+	}
+	registries := LocalRegistries(env)
+	answers := make([]Answer, len(queries))
+	for i, q := range queries {
+		answers[i].Package, answers[i].OK = Resolve(q.Launch, q.ProjectDirs, registries)
+	}
+	return answers
 }
 
 // Command is a definition's command and its string arguments.

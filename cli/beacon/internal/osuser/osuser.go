@@ -138,3 +138,37 @@ func parseAccountRecord(out, want string) (Info, error) {
 	}
 	return Info{}, fmt.Errorf("no usable account record for %q", want)
 }
+
+// GroupIDs are the groups of the account with uid, its primary group first, as the system's id(1)
+// reports them: id consults NSS and macOS's directory service, which the CGO-free os/user never
+// does. They are the groups a process run as that account should carry.
+func GroupIDs(uid int) ([]int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+	defer cancel()
+	out, err := runID(ctx, uid)
+	if err != nil {
+		return nil, fmt.Errorf("id -G %d: %w", uid, err)
+	}
+	var gids []int
+	for _, field := range strings.Fields(out) {
+		gid, err := strconv.Atoi(field)
+		if err != nil {
+			return nil, fmt.Errorf("id -G %d printed %q", uid, strings.TrimSpace(out))
+		}
+		gids = append(gids, gid)
+	}
+	if len(gids) == 0 {
+		return nil, fmt.Errorf("id -G %d printed no groups", uid)
+	}
+	return gids, nil
+}
+
+// runID is a var for the same reason runGetent is.
+var runID = func(ctx context.Context, uid int) (string, error) {
+	path, err := exec.LookPath("id")
+	if err != nil {
+		return "", fmt.Errorf("id is not available: %w", err)
+	}
+	out, err := exec.CommandContext(ctx, path, "-G", strconv.Itoa(uid)).Output()
+	return string(out), err
+}

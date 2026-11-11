@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
+	"syscall"
 )
 
 // Registries is what the machine's own launcher configuration says about where packages come
@@ -36,10 +37,10 @@ type Registries struct {
 // would run in (empty to skip project files), the environment the launcher inherits, and
 // whether to read the system-wide files under /etc and the package managers' prefixes.
 type RegistryEnv struct {
-	Home       string
-	WorkingDir string
-	Environ    []string
-	System     bool
+	Home       string   `json:"home"`
+	WorkingDir string   `json:"working_dir,omitempty"`
+	Environ    []string `json:"environ,omitempty"`
+	System     bool     `json:"system"`
 }
 
 // CurrentRegistryEnv is this process's home, environment and working directory. An agent
@@ -101,12 +102,26 @@ func LocalRegistries(env RegistryEnv) Registries {
 	if xdg == "" {
 		xdg = join(home, ".config")
 	}
-	appData := getenv("APPDATA")
+	// Windows' per-user and machine config locations. A launcher reads them whatever environment
+	// Beacon's own job has, and a snapshot is scanned with none, so they are derived as Windows
+	// lays them out when the environment does not name them.
+	appData, localAppData, programData := getenv("APPDATA"), getenv("LOCALAPPDATA"), getenv("ProgramData")
 	system := func(path string) string {
 		if !env.System {
 			return ""
 		}
 		return path
+	}
+	if runtime.GOOS == "windows" {
+		if appData == "" {
+			appData = join(home, "AppData", "Roaming")
+		}
+		if localAppData == "" {
+			localAppData = join(home, "AppData", "Local")
+		}
+		if programData == "" {
+			programData = system(os.Getenv("ProgramData"))
+		}
 	}
 
 	// A config file or prefix the environment names is resolved as npm, pip and uv resolve it
@@ -141,7 +156,7 @@ func LocalRegistries(env RegistryEnv) Registries {
 	}
 	for _, path := range append(npmrcs, system("/etc/npmrc"),
 		// pnpm's global config (pnpm config set --location=global), npmrc format.
-		join(xdg, "pnpm", "rc"), join(home, "Library", "Preferences", "pnpm", "rc"), join(getenv("LOCALAPPDATA"), "pnpm", "config", "rc"),
+		join(xdg, "pnpm", "rc"), join(home, "Library", "Preferences", "pnpm", "rc"), join(localAppData, "pnpm", "config", "rc"),
 		system("/usr/local/etc/npmrc"), system("/opt/homebrew/etc/npmrc"), join(appData, "npm", "etc", "npmrc")) {
 		reg.readNpmrc(path)
 	}
@@ -160,14 +175,14 @@ func LocalRegistries(env RegistryEnv) Registries {
 	for _, path := range []string{envPath("PIP_CONFIG_FILE", &reg.PyPI), join(home, ".pip", "pip.conf"), join(xdg, "pip", "pip.conf"),
 		join(home, "Library", "Application Support", "pip", "pip.conf"), join(appData, "pip", "pip.ini"), join(home, "pip", "pip.ini"),
 		system("/etc/pip.conf"), system("/etc/xdg/pip/pip.conf"), system("/Library/Application Support/pip/pip.conf"),
-		join(getenv("ProgramData"), "pip", "pip.ini"), join(getenv("VIRTUAL_ENV"), "pip.conf")} {
+		join(programData, "pip", "pip.ini"), join(getenv("VIRTUAL_ENV"), "pip.conf")} {
 		if registryLine(path, isPyPIIndexLine) {
 			reg.PyPI = true
 		}
 	}
 	// uv: user, system and project configuration.
 	for _, path := range []string{envPath("UV_CONFIG_FILE", &reg.PyPI), join(xdg, "uv", "uv.toml"), join(appData, "uv", "uv.toml"),
-		system("/etc/uv/uv.toml"), system("/etc/xdg/uv/uv.toml"), join(getenv("ProgramData"), "uv", "uv.toml")} {
+		system("/etc/uv/uv.toml"), system("/etc/xdg/uv/uv.toml"), join(programData, "uv", "uv.toml")} {
 		if registryLine(path, isPyPIIndexLine) {
 			reg.PyPI = true
 		}
@@ -185,9 +200,8 @@ func LocalRegistries(env RegistryEnv) Registries {
 
 // nodeNpmrcs are the global and builtin npmrc files of the first node in dirs: its install
 // prefix is its directory's parent on Unix and its own directory on Windows, both as found and
-// with symlinks resolved. The dirs are the user's to choose (a server's command or env PATH), so
-// the node is looked up as sessionfs.ResolveFileOutside looks; unsure reports one it would not
-// judge, whose npm config Beacon then cannot vouch for.
+// with symlinks resolved. unsure reports a node Beacon could not look up (see unreadable), whose
+// npm config it then cannot vouch for.
 func nodeNpmrcs(dirs []string) (paths []string, unsure bool) {
 	for _, dir := range dirs {
 		if dir == "" {
@@ -195,12 +209,16 @@ func nodeNpmrcs(dirs []string) (paths []string, unsure bool) {
 		}
 		for _, name := range []string{"node", "node.exe"} {
 			node := filepath.Join(dir, name)
-			real, err := sessionfs.ResolveFileOutside(node)
-			if errors.Is(err, sessionfs.ErrRefused) {
+			info, err := os.Stat(node)
+			if unreadable(err) {
 				return nil, true
 			}
-			if err != nil {
+			if err != nil || info.IsDir() {
 				continue
+			}
+			real, err := filepath.EvalSymlinks(node)
+			if err != nil {
+				return nil, true
 			}
 			prefixes := []string{filepath.Dir(dir), dir}
 			if real != node {
@@ -355,7 +373,7 @@ func (r *Registries) readNpmrc(path string) {
 	}
 	r.read[path] = true
 	lines, err := readConfigLines(path)
-	if errors.Is(err, sessionfs.ErrRefused) {
+	if unreadable(err) {
 		r.NPM = true
 	}
 	if err != nil {
@@ -504,7 +522,7 @@ func cutKeyValue(line string) (key, value string, ok bool) {
 
 func registryLine(path string, match func(string) bool) bool {
 	lines, err := readConfigLines(path)
-	if errors.Is(err, sessionfs.ErrRefused) {
+	if unreadable(err) {
 		return true
 	}
 	for _, line := range lines {
@@ -515,24 +533,20 @@ func registryLine(path string, match func(string) bool) bool {
 	return false
 }
 
-// readConfigLines returns a config file's lines without blanks or comments. The system inventory
-// job reads the console user's config as root, and the paths it follows from there (an npmrc's
-// userconfig or prefix, a project directory, a server's cwd or PATH) are the user's to choose, so
-// they open through sessionfs.OpenOutside. A file there that the confinement turns down fails
-// with sessionfs.ErrRefused: Beacon cannot tell what it says, so the caller holds its ecosystem
-// back as private. Any other failure, a path root cannot even look up included, is an absent
-// file.
+// readConfigLines returns a config file's lines without blanks or comments. It reads with this
+// process's own rights, which are the launcher user's (see ResolveAll).
 func readConfigLines(path string) ([]string, error) {
 	if path == "" {
 		return nil, os.ErrNotExist
 	}
-	f, err := sessionfs.OpenOutside(path)
+	// Non-blocking, so a FIFO is opened and turned down rather than waited on for a writer.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
-		return nil, errors.New(path + ": not a regular file")
+		return nil, &fs.PathError{Op: "read", Path: path, Err: errNotConfig}
 	}
 	var lines []string
 	scanner := bufio.NewScanner(io.LimitReader(f, maxRegistryConfigBytes))
@@ -545,4 +559,15 @@ func readConfigLines(path string) ([]string, error) {
 		lines = append(lines, line)
 	}
 	return lines, nil
+}
+
+var errNotConfig = errors.New("not a regular file")
+
+// unreadable reports a config lookup that failed for any reason but the file not being there. A
+// missing file is missing for the launcher too; anything else (a file the user may not read, a
+// directory a group they are in may enter but Beacon's lookup of their groups missed, macOS privacy
+// protection, a FIFO or a directory where a file should be) leaves Beacon unable to tell what the
+// launcher reads, so its ecosystem is held back as private.
+func unreadable(err error) bool {
+	return err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR)
 }
