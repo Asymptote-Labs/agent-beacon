@@ -3,35 +3,42 @@ package codec
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
 )
 
 // ReadRoot's first message is the full decode's first non-system message, read without reading
-// the history after it: a body cut off after that message still yields it.
+// the history after it: a body cut off after that message still yields it. The system text sent
+// ahead of it is kept as written; system text after the messages is not read.
 func TestReadRoot(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		p     llm.Protocol
-		body  string
-		first string // "" for no root
+		name   string
+		p      llm.Protocol
+		body   string
+		first  string // "" for no root
+		system []string
 	}{
-		{"anthropic", llm.AnthropicMessages,
+		{"anthropic, system after the messages", llm.AnthropicMessages,
 			`{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"fix it"},{"type":"text","text":"now"}]},{"role":"assistant","content":"ok"}],"system":"sys"}`,
-			"fix it\nnow"},
+			"fix it\nnow", nil},
+		{"anthropic, system ahead", llm.AnthropicMessages,
+			`{"model":"m","system":[{"type":"text","text":"sys"}],"tools":[],"messages":[{"role":"user","content":"fix it"}]}`,
+			"fix it", []string{`[{"type":"text","text":"sys"}]`}},
 		{"chat skips system messages", llm.OpenAIChat,
 			`{"model":"m","messages":[{"role":"system","content":"sys"},{"role":"developer","content":"dev"},{"role":"user","content":"fix it"},{"role":"assistant","content":"ok"}]}`,
-			"fix it"},
-		{"responses input string", llm.OpenAIResponses, `{"model":"m","instructions":"sys","input":"fix it"}`, "fix it"},
+			"fix it", []string{`{"role":"system","content":"sys"}`, `{"role":"developer","content":"dev"}`}},
+		{"responses input string", llm.OpenAIResponses, `{"model":"m","instructions":"sys","input":"fix it"}`, "fix it", []string{`"sys"`}},
+		{"responses instructions after the input", llm.OpenAIResponses, `{"model":"m","input":"fix it","instructions":"sys"}`, "fix it", nil},
 		{"responses input items", llm.OpenAIResponses,
 			`{"model":"m","input":[{"role":"developer","content":"dev"},{"type":"message","role":"user","content":[{"type":"input_text","text":"fix it"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`,
-			"fix it"},
+			"fix it", []string{`{"role":"developer","content":"dev"}`}},
 		{"responses naming the state members below the top level", llm.OpenAIResponses,
-			`{"model":"m","metadata":{"conversation":"c","previous_response_id":"r"},"input":[{"role":"user","content":"fix it"}],"store":false}`,
-			"fix it"},
-		{"no messages", llm.OpenAIChat, `{"model":"m","messages":[{"role":"system","content":"sys"}]}`, ""},
-		{"no messages member", llm.AnthropicMessages, `{"model":"m"}`, ""},
+			`{"model":"m","instructions":"sys","metadata":{"conversation":"c","previous_response_id":"r"},"input":[{"role":"user","content":"fix it"}],"store":false}`,
+			"fix it", []string{`"sys"`}},
+		{"no messages", llm.OpenAIChat, `{"model":"m","messages":[{"role":"system","content":"sys"}]}`, "", nil},
+		{"no messages member", llm.AnthropicMessages, `{"model":"m"}`, "", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, err := ReadRoot(tc.p, []byte(tc.body))
@@ -43,6 +50,13 @@ func TestReadRoot(t *testing.T) {
 					t.Fatalf("First = %+v, want none", r.First)
 				}
 				return
+			}
+			var system []string
+			for _, s := range r.System {
+				system = append(system, string(s))
+			}
+			if !slices.Equal(system, tc.system) {
+				t.Errorf("System = %q, want %q", system, tc.system)
 			}
 			if r.First == nil || r.First.Text() != tc.first {
 				t.Fatalf("First = %+v, want %q", r.First, tc.first)

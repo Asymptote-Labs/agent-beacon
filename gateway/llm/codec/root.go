@@ -10,12 +10,18 @@ import (
 )
 
 // Root is what a request body says about the conversation it belongs to, read without decoding
-// its history: the provider-side state a stateful request continues, or else the conversation's
-// first message, which clients resend unchanged with every call.
+// its history: the provider-side state a stateful request continues, or else the system text and
+// first message the conversation opens with, which clients resend unchanged with every call.
 type Root struct {
 	// Conversation and PreviousResponse are as in llm.Request.
 	Conversation     string
 	PreviousResponse string
+	// System is the system text sent ahead of the conversation, as written: the top-level
+	// system or instructions member when it comes before the messages, then the system messages
+	// before the first other one, each a slice of the body. It is not decoded: a client resends
+	// it byte for byte. System text sent after the messages is not read, as that would mean
+	// reading past the whole history.
+	System [][]byte
 	// First is the conversation's first non-system message, decoded as the full decode decodes
 	// it; nil when the request has none, or is stateful, so that it carries only its new turn.
 	First *llm.Message
@@ -24,32 +30,41 @@ type Root struct {
 // Stateful is llm.Request's Stateful.
 func (r Root) Stateful() bool { return r.Conversation != "" || r.PreviousResponse != "" }
 
-// ReadRoot reads a request body's Root. It reads the message array only as far as its first
-// non-system message, so its cost does not grow with the conversation. A Responses body may name
-// the state it continues after its input, so one that mentions either member is walked to its
-// end, its input skipped unvalidated; one that mentions neither (as written, unescaped) is read
-// only as far as its input's first message. Member names match exactly, as the decoders match
-// them; of duplicate members it reads the first.
+// ReadRoot reads a request body's Root. It reads the body only as far as the first non-system
+// message, so its cost does not grow with the conversation. A Responses body may name the state
+// it continues after its input, so one that mentions either member is walked to its end, its
+// input skipped unvalidated; one that mentions neither (as written, unescaped) is read only as
+// far as its input's first message. Member names match exactly, as the decoders match them; of
+// duplicate members it reads the first.
 func ReadRoot(p llm.Protocol, body []byte) (Root, error) {
 	var r Root
 	switch p {
 	case llm.AnthropicMessages:
-		return r, firstOf(body, "messages", anthropic{}, &r)
+		if at, ok := memberStart(body, "messages", "system", &r); ok {
+			return r, firstElement(body, at, anthropic{}, &r)
+		}
+		return r, nil
 	case llm.OpenAIChat:
-		return r, firstOf(body, "messages", openAIChat{}, &r)
+		if at, ok := memberStart(body, "messages", "", &r); ok {
+			return r, firstElement(body, at, openAIChat{}, &r)
+		}
+		return r, nil
 	case llm.OpenAIResponses:
 		if !mentionsState(body) {
-			at, ok := jsonscan.MemberStart(body, func(n string) bool { return n == "input" })
-			if !ok {
-				return r, nil
+			if at, ok := memberStart(body, "input", "instructions", &r); ok {
+				return r, responsesFirst(body, at, &r)
 			}
-			return r, responsesFirst(body, at, &r)
+			return r, nil
 		}
-		var input []byte
+		var input, instructions []byte
 		var seen [3]bool // input, previous_response_id, conversation
 		err := jsonscan.Object(body, func(name string, value []byte) error {
 			var err error
 			switch name {
+			case "instructions":
+				if !seen[0] && instructions == nil {
+					instructions = value
+				}
 			case "input":
 				if !seen[0] {
 					seen[0], input = true, value
@@ -70,9 +85,25 @@ func ReadRoot(p llm.Protocol, body []byte) (Root, error) {
 		if err != nil || r.Stateful() || input == nil {
 			return r, err
 		}
+		if instructions != nil {
+			r.System = append(r.System, instructions)
+		}
 		return r, responsesFirst(input, 0, &r)
 	}
 	return r, fmt.Errorf("codec: unknown protocol %q", p)
+}
+
+// memberStart finds the top-level member name of body, keeping the first member named system
+// before it, if any, as the root's system text.
+func memberStart(body []byte, name, system string, r *Root) (int, bool) {
+	if system == "" {
+		return jsonscan.MemberStart(body, name, nil)
+	}
+	return jsonscan.MemberStart(body, name, func(n, value []byte) {
+		if r.System == nil && string(n) == system {
+			r.System = append(r.System, value)
+		}
+	})
 }
 
 // responsesFirst reads the first non-system message of the Responses input at b[at]: a string is
@@ -112,17 +143,9 @@ func mentionsState(body []byte) bool {
 
 var previousName, conversationName = []byte(`"previous_response_id"`), []byte(`"conversation"`)
 
-// firstOf reads the first non-system message of the array that is member name of body.
-func firstOf(body []byte, name string, c skimCodec, r *Root) error {
-	at, ok := jsonscan.MemberStart(body, func(n string) bool { return n == name })
-	if !ok {
-		return nil
-	}
-	return firstElement(body, at, c, r)
-}
-
 // firstElement decodes the elements of the array at b[at] up to the first that holds a
-// non-system message, which it sets as r.First.
+// non-system message, which it sets as r.First; the elements before it that hold system messages
+// join r.System as written.
 func firstElement(b []byte, at int, c skimCodec, r *Root) error {
 	if b[at] != '[' {
 		return nil
@@ -139,6 +162,9 @@ func firstElement(b []byte, at int, c skimCodec, r *Root) error {
 				r.First = &msgs[i]
 				return false
 			}
+		}
+		if len(msgs) > 0 {
+			r.System = append(r.System, elem)
 		}
 		return true
 	})

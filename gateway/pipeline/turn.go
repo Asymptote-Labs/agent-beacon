@@ -176,8 +176,13 @@ func (d *digest) int(n int) {
 
 // field writes s after its length, hashed in place.
 func (d *digest) field(s string) {
-	d.int(len(s))
-	d.h.Write(unsafe.Slice(unsafe.StringData(s), len(s))) // Write neither keeps nor modifies it
+	d.bytes(unsafe.Slice(unsafe.StringData(s), len(s))) // Write neither keeps nor modifies it
+}
+
+// bytes writes b after its length.
+func (d *digest) bytes(b []byte) {
+	d.int(len(b))
+	d.h.Write(b)
 }
 
 // message writes a message's role and parts.

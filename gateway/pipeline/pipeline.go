@@ -25,7 +25,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
 	"github.com/asymptote-labs/agent-beacon/gateway/harness"
-	"github.com/asymptote-labs/agent-beacon/gateway/llm"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm/codec"
 	"github.com/asymptote-labs/agent-beacon/gateway/store"
 )
@@ -354,7 +353,7 @@ func (p *Pipeline) sessionID(c *gateway.Call) (session string, named bool, previ
 	case root.PreviousResponse != "":
 		return own, false, root.PreviousResponse
 	default:
-		if s, ok := rootSession(c, root.First); ok {
+		if s, ok := rootSession(c, &root); ok {
 			return s, false, ""
 		}
 	}
@@ -387,20 +386,19 @@ func callRoot(c *gateway.Call) (codec.Root, bool) {
 
 // rootSession names a conversation no header names by its root, which a client resends unchanged
 // with every call: a digest of the gateway, the client's harness, the caller's identity (every
-// field the gateway resolved) and the conversation's first non-system message, as "root:<hex>".
-// A call with no identity at all gets no root: the root would then merge different people's
-// conversations that open alike, and the second person's prompts would be taken for retries of
-// the first's. The system text is left out: reading it can mean reading past the whole history
-// (Anthropic bodies often send it after the messages), and it changes in some clients part-way
-// through a conversation.
+// field the gateway resolved), the system text sent ahead of the conversation, as written, and
+// its first non-system message, as "root:<hex>". A call with no identity at all gets no root: the
+// root would then merge different people's conversations that open alike.
 //
-// It is a heuristic: two conversations of one caller in one harness that open with the same
-// message (one person sending the same opening prompt twice) are one session, so their resent
-// system text and tools are recorded once and a retried tail of one hides the other's identical
-// tail. A stateful request has no root (sessionID).
-func rootSession(c *gateway.Call, first *llm.Message) (string, bool) {
+// It is a heuristic. Two conversations of one caller in one harness with the same system text
+// that open with the same message are one session; they share a session.id, and lose nothing, as
+// a root session never takes a tail for a retry. A client that changes its system text part-way
+// through a conversation splits it into two sessions there. System text sent after the messages
+// (an Anthropic body may send it last) is not read, as that would mean reading past the whole
+// history. A stateful request has no root (sessionID).
+func rootSession(c *gateway.Call, root *codec.Root) (string, bool) {
 	id := c.Client.Identity
-	if id == (gateway.Identity{}) || first == nil {
+	if id == (gateway.Identity{}) || root.First == nil {
 		return "", false
 	}
 	d := newDigest()
@@ -409,6 +407,10 @@ func rootSession(c *gateway.Call, first *llm.Message) (string, bool) {
 	for _, f := range [...]string{id.User, id.Email, id.Team, id.Org, id.Key} {
 		d.field(f)
 	}
-	d.message(first)
+	d.int(len(root.System))
+	for _, s := range root.System {
+		d.bytes(s)
+	}
+	d.message(root.First)
 	return "root:" + d.hex(), true
 }

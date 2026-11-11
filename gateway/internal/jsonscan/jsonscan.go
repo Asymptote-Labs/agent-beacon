@@ -62,34 +62,41 @@ func FirstString(b []byte, name string) string {
 	return out
 }
 
-// MemberStart is the offset in b of the value of the first top-level member of the object b whose
-// name match accepts, and false when there is none. It reads only as far as that value's start,
-// skipping the members before it unvalidated, as Object does.
-func MemberStart(b []byte, match func(name string) bool) (int, bool) {
+// MemberStart is the offset in b of the value of the first top-level member of the object b named
+// name, and false when there is none. It reads only as far as that value's start, skipping the
+// members before it unvalidated, as Object does. before, when not nil, is handed each member it
+// skips: its unescaped name, valid only during the call, and its value.
+func MemberStart(b []byte, name string, before func(name, value []byte)) (int, bool) {
 	i := ws(b, 0)
 	if i >= len(b) || b[i] != '{' {
 		return 0, false
 	}
 	i = ws(b, i+1)
-	var name []byte
+	var buf []byte
 	for i < len(b) && b[i] == '"' {
 		end, err := skipString(b, i)
 		if err != nil {
 			return 0, false
 		}
-		if name, err = jsontext.AppendUnquote(name[:0], b[i:end]); err != nil {
-			name = append(name[:0], b[i:end]...)
+		n := b[i+1 : end-1]
+		if bytes.IndexByte(n, '\\') >= 0 {
+			if buf, err = jsontext.AppendUnquote(buf[:0], b[i:end]); err == nil {
+				n = buf
+			}
 		}
 		i = ws(b, end)
 		if i >= len(b) || b[i] != ':' {
 			return 0, false
 		}
 		start := ws(b, i+1)
-		if match(string(name)) {
+		if string(n) == name {
 			return start, start < len(b)
 		}
 		if i, err = skipValue(b, start); err != nil {
 			return 0, false
+		}
+		if before != nil {
+			before(n, b[start:i])
 		}
 		i = ws(b, i)
 		if i >= len(b) || b[i] != ',' {

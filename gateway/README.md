@@ -43,16 +43,19 @@ arguments or results.
 `session.id` is, in order: a session header the client sent (`pipeline.session_headers`, by default
 `x-claude-code-session-id`, `session_id`, `x-session-id`, `conversation_id`); the gateway's own
 conversation id (LiteLLM's trace id, Portkey's `session_id` metadata); or, failing both, a digest
-of the conversation's root, `root:<hex>`: the gateway, the client's harness, the caller's identity
-and the first user message, which a client resends unchanged on every call. A call's reply joins
-its request's session: Envoy and Portkey hand the reply the request it answers, and the reply's
-session is named from it as the request's was (LiteLLM names both by its trace id). A root needs
-an identity: without one (Envoy without `identity_headers`, Portkey without identity metadata)
-different people's conversations that open alike would be one session, so each call is its own
-session instead. Set identity headers to get conversation-level sessions without a session
-header. The root is a heuristic: two conversations of one caller in one harness that open with the
-same message are one session. Send a session header, or Portkey `session_id` metadata, where that
-matters.
+of the conversation's root, `root:<hex>`: the gateway, the client's harness, the caller's identity,
+the system text sent ahead of the messages (as written) and the first user message, which a client
+resends unchanged on every call. A call's reply joins its request's session: Envoy and Portkey hand
+the reply the request it answers, and the reply's session is named from it as the request's was
+(LiteLLM names both by its trace id). A root needs an identity: without one (Envoy without
+`identity_headers`, Portkey without identity metadata) different people's conversations that open
+alike would be one session, so each call is its own session instead. Set identity headers to get
+conversation-level sessions without a session header. The root is a heuristic: two conversations
+of one caller in one harness with the same system text that open with the same message are one
+session, and a client that changes its system text part-way through a conversation splits it into
+two sessions there. System text sent after the messages (an Anthropic body may send it last) is
+not part of the root, as reading it would mean reading past the whole history. Send a session
+header, or Portkey `session_id` metadata, where that matters.
 
 Naming a session reads no store: a call's two phases are named by the same function from the same
 request body, so they always agree, in any order and on any replica.

@@ -175,16 +175,17 @@ func TestSessionID(t *testing.T) {
 // With no session header or gateway session (Portkey without session metadata, Envoy without
 // session headers), a conversation is named by its root: every call of one conversation, and each
 // call's reply (named from the request body it carries), share a session, and conversations that
-// open differently, or are another caller's, do not. The root is read from the body, however long
-// the history after it.
+// open differently, are another caller's, or run under other system text, do not. The root is
+// read from the body, however long the history after it.
 func TestRootSession(t *testing.T) {
 	rec := &recorder{}
 	p := New(Config{Analyzers: []Analyzer{rec}})
 	defer p.Close()
 	ctx := context.Background()
+	system := "You are a coding agent."
 	body := func(first string, turns int) []byte {
 		var b strings.Builder
-		b.WriteString(`{"model":"m","system":"You are a coding agent.","messages":[{"role":"user","content":` + strconv.Quote(first) + `}`)
+		b.WriteString(`{"model":"m","system":` + strconv.Quote(system) + `,"messages":[{"role":"user","content":` + strconv.Quote(first) + `}`)
 		for k := range turns {
 			fmt.Fprintf(&b, `,{"role":"assistant","content":"step %d"},{"role":"user","content":"go on %d"}`, k, k)
 		}
@@ -214,6 +215,18 @@ func TestRootSession(t *testing.T) {
 	// Without any identity there is no root: each call is its own session.
 	call("c10", body("fix the tests", 1), gateway.Identity{})
 	call("c11", body("fix the tests", 1), gateway.Identity{})
+	// The same caller and opening under other system text (another repository, another agent).
+	system = "You are a review agent."
+	call("c12", body("fix the tests", 1), alice)
+	call("c13", body("fix the tests", 3), alice)
+	reply("c13", body("fix the tests", 3), alice)
+	chat := func(id, sys string) {
+		p.Handle(ctx, &gateway.Call{Gateway: "pk", ID: id, Phase: gateway.PhaseRequest, Protocol: llm.OpenAIChat, Client: gateway.Client{Identity: alice},
+			Body: []byte(`{"model":"m","messages":[{"role":"system","content":"` + sys + `"},{"role":"user","content":"fix the tests"}]}`)})
+	}
+	chat("c14", "repo a")
+	chat("c15", "repo b")
+	chat("c16", "repo a")
 	got := make([]string, len(rec.turns))
 	for i, turn := range rec.turns {
 		got[i] = turn.SessionID
@@ -231,7 +244,13 @@ func TestRootSession(t *testing.T) {
 		t.Errorf("callers named by email, team or key: sessions %v", got[7:10])
 	}
 	if got[10] != "pk:c10" || got[11] != "pk:c11" {
-		t.Errorf("calls with no identity: sessions %v, want each its own", got[10:])
+		t.Errorf("calls with no identity: sessions %v, want each its own", got[10:12])
+	}
+	if !strings.HasPrefix(got[12], "root:") || got[12] == got[2] || got[13] != got[12] || got[14] != got[12] {
+		t.Errorf("other system text: sessions %v, want one root apart from %q", got[12:15], got[2])
+	}
+	if got[15] == got[16] || got[17] != got[15] {
+		t.Errorf("chat system messages: sessions %v, want repo a's two calls together and repo b apart", got[15:])
 	}
 }
 

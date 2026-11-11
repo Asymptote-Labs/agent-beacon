@@ -172,7 +172,7 @@ func TestMemberStartElements(t *testing.T) {
 		`{"model": "unterminated, "messages":[1]}`:                    nil,
 		`{"model":[1,2],"stream":true,"messages":["m"] , "tools":[]}`: {`"m"`},
 	} {
-		at, ok := MemberStart([]byte(body), func(n string) bool { return n == "messages" })
+		at, ok := MemberStart([]byte(body), "messages", nil)
 		if !ok {
 			if want != nil {
 				t.Errorf("MemberStart(%s) found nothing", body)
@@ -193,5 +193,17 @@ func TestMemberStartElements(t *testing.T) {
 		if err != nil || !slices.Equal(got, want) {
 			t.Errorf("Elements(%s) = %q, %v, want %q", body, got, err, want)
 		}
+	}
+}
+
+// MemberStart hands each member before the one it finds to before, unescaped, with its value.
+func TestMemberStartBefore(t *testing.T) {
+	var got []string
+	body := `{"model" : "m", "sys\u0074em":[{"t":"a"}] ,"n":1,"messages":[],"tools":[1]}`
+	at, ok := MemberStart([]byte(body), "messages", func(name, value []byte) {
+		got = append(got, string(name)+"="+string(value))
+	})
+	if want := []string{`model="m"`, `system=[{"t":"a"}]`, `n=1`}; !ok || body[at] != '[' || !slices.Equal(got, want) {
+		t.Errorf("MemberStart = %d, %v, before saw %q, want %q", at, ok, got, want)
 	}
 }
