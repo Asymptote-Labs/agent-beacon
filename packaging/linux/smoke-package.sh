@@ -44,9 +44,16 @@ cleanup
 
 # Pulled prebuilt when BEACON_SMOKE_REGISTRY is set, built from smoke/package-$FORMAT.Dockerfile
 # otherwise; BEACON_SMOKE_BASE replaces the base image.
+#
+# The package manager reads no repository while the test runs: the image already carries the
+# package's one dependency (systemd). dnf refreshes metadata it considers stale (after 48 hours;
+# the image is rebuilt weekly), so the rpm lane disables every repository, which also makes a
+# missing dependency fail at once instead of being downloaded. apt-get never refreshes its lists on
+# install and fetches nothing for a package whose dependencies are installed; its --no-download
+# cannot take a local .deb at all.
 case "$FORMAT" in
   deb) PKGMGR_INSTALL="apt-get install -y -qq /var/tmp/beacon.deb" ;;
-  rpm) PKGMGR_INSTALL="dnf install -y -q /var/tmp/beacon.rpm" ;;
+  rpm) PKGMGR_INSTALL="dnf install -y -q --disablerepo='*' /var/tmp/beacon.rpm" ;;
   *) echo "unsupported format $FORMAT" >&2; exit 1 ;;
 esac
 IMAGE="$(sh "$ROOT_DIR/packaging/linux/smoke/image.sh" "package-$FORMAT")"
@@ -394,7 +401,7 @@ echo "ok: upgrade left the service running and the config in place"
 # collected telemetry.
 case "$FORMAT" in
   deb) docker exec "$CONTAINER" apt-get remove -y -qq beacon >/dev/null 2>&1 ;;
-  rpm) docker exec "$CONTAINER" dnf remove -y -q beacon >/dev/null 2>&1 ;;
+  rpm) docker exec "$CONTAINER" dnf remove -y -q --disablerepo='*' beacon >/dev/null 2>&1 ;;
 esac
 after="$(docker exec "$CONTAINER" systemctl is-active beacon-collector.service 2>/dev/null || true)"
 [ "$after" != active ] || { echo "collector still active after package removal" >&2; exit 1; }
