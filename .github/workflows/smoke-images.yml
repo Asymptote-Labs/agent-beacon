@@ -8,8 +8,13 @@ name: Smoke images
 #   - weekly, every image is rebuilt from a freshly pulled base under its existing tag, so the
 #     smoke tests keep running on a patched base without a pull request to bump anything.
 #
-# Until the first publish of a recipe, the smoke scripts build it themselves, as on a developer
-# machine, so a pull request that changes a Dockerfile still tests the change.
+# An image is published only once it boots, and every publish also carries a dated tag to roll back
+# to (see smoke/image.sh). Until the first publish of a recipe, the smoke scripts build it
+# themselves, as on a developer machine, so a pull request that changes a Dockerfile still tests it.
+#
+# Cost: the packages are public and so is this repository, so GHCR storage and transfer and these
+# Actions minutes are free. The prune job bounds each package anyway (smoke/prune.sh), so that a
+# change of visibility could not leave a year of weekly images to bill for.
 on:
   push:
     branches:
@@ -28,6 +33,9 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
+env:
+  IMAGES: systemd package-deb package-rpm
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -45,7 +53,65 @@ jobs:
         run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push ${{ matrix.image }}
+      - name: Build, boot-check and push ${{ matrix.image }}
         run: |
           BEACON_SMOKE_REGISTRY="ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')" \
             sh packaging/linux/smoke/image.sh --publish "${{ matrix.image }}"
+
+  # Deletes versions CI and a rollback no longer need; see smoke/prune.sh for what is kept. Only on
+  # main: what it keeps is decided by the Dockerfiles in the checkout, and a branch's are not the ones
+  # main's CI pulls. Runs after a failed publish too, since what it keeps does not depend on what
+  # was just pushed. A version it cannot delete is a warning, not a failure.
+  prune:
+    needs: publish
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Delete versions no longer needed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Word splitting of $IMAGES is the point: one argument per image.
+        run: |
+          # shellcheck disable=SC2086
+          sh packaging/linux/smoke/prune.sh "$GITHUB_REPOSITORY_OWNER" $IMAGES
+
+  # A failed publish on main has no reviewer watching, and GitHub mails a failed scheduled run only
+  # to whoever last edited the cron line. One open issue tracks it instead: opened or commented on
+  # when a publish fails, closed by the next run that publishes. A run dispatched from a branch
+  # reports nothing, since what it publishes is the branch's business.
+  report:
+    needs: [publish, prune]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TITLE: "Smoke images: publish failing"
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      FAILED: ${{ needs.publish.result != 'success' }}
+    steps:
+      - name: Open, update or close the tracking issue
+        run: |
+          set -eu
+          open="$(gh issue list --state open --search "in:title \"$TITLE\"" --json number,title \
+            --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")"
+          if [ "$FAILED" = true ]; then
+            body="The smoke image workflow failed: $RUN_URL
+
+          CI keeps pulling the last published images, so pull requests are not affected until a Dockerfile changes, but the images are not getting base updates. A distribution mirror outage is the usual cause; re-run the workflow once it is over."
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --body "Failed again: $RUN_URL"
+            else
+              gh issue create --title "$TITLE" --body "$body"
+            fi
+          elif [ -n "$open" ]; then
+            gh issue close "$open" --comment "Published successfully: $RUN_URL"
+          fi
