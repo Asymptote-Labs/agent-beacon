@@ -17,7 +17,7 @@ var backfillCollectors = []string{
 	"claudesession", "codexsession", "cursorsession", "opencodesession", "copilotsession",
 	"clinesession", "factorysession", "pisession", "primesession", "hermessession",
 	"dshsession", "fxsession", "groksession", "openclawsession", "devinsession",
-	"harness2session",
+	"harness2session", "antigravitysession",
 }
 
 // directReads are the calls that would read a session store around the confinement.

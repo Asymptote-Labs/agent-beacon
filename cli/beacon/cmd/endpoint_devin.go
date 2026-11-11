@@ -1,20 +1,15 @@
 package cmd
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/devinsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/spf13/cobra"
 )
 
@@ -175,64 +170,12 @@ func reportEndpointDevinSweep(cmd *cobra.Command, summary devinsession.Summary) 
 	}
 }
 
-// endpointDevinLiveCoverage finds, per Devin session id, the earliest hook event the retained
-// runtime log holds. The poll sweep uses it to skip what the hooks already recorded: a session
-// the hooks never saw is collected whole, while a covered one keeps only the events the hook
-// payload cannot carry.
-//
-// Every retained archive is read because coverage can sit several rotations back on a busy
-// machine; a missing file is simply not evidence. The scan decodes only the three fields it
-// needs, so a runtime.jsonl of any size costs a line at a time, and only lines that could be a
-// Devin event are unmarshalled.
+// endpointDevinLiveCoverage finds, per Devin session id, the earliest Devin hook event the
+// retained runtime log holds (see endpointHookCoverage). The poll sweep uses it to skip what the
+// hooks already recorded: a session the hooks never saw is collected whole, while a covered one
+// keeps only the events the hook payload cannot carry.
 func endpointDevinLiveCoverage(logPath string) map[string]time.Time {
-	coverage := map[string]time.Time{}
-	for _, path := range writer.RetainedLogPaths(logPath) {
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if !bytes.Contains(line, []byte("devin")) {
-				continue
-			}
-			var event struct {
-				Timestamp string `json:"timestamp"`
-				Harness   struct {
-					Name             string `json:"name"`
-					CollectionMethod string `json:"collection_method"`
-				} `json:"harness"`
-				Session struct {
-					ID string `json:"id"`
-				} `json:"session"`
-			}
-			if json.Unmarshal(line, &event) != nil {
-				continue
-			}
-			name := asymptoteobserve.NormalizeHarnessName(event.Harness.Name)
-			if (name != "devin-cli" && name != "devin") || event.Harness.CollectionMethod != asymptoteobserve.CollectionMethodHook {
-				continue
-			}
-			sessionID := strings.TrimSpace(event.Session.ID)
-			if sessionID == "" {
-				continue
-			}
-			ts, err := asymptoteobserve.ParseTimestamp(event.Timestamp)
-			if err != nil {
-				continue
-			}
-			if earliest, ok := coverage[sessionID]; !ok || ts.Before(earliest) {
-				coverage[sessionID] = ts
-			}
-		}
-		_ = f.Close()
-	}
-	if len(coverage) == 0 {
-		return nil
-	}
-	return coverage
+	return endpointHookCoverage(logPath, "devin", "devin-cli", "devin")
 }
 
 type devinSessionStatus struct {

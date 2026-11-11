@@ -25,6 +25,10 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 		outputJSON(hookNoopResponse())
 		return
 	}
+	if platformFlag == "antigravity" && !antigravityTurnStart(input) {
+		outputJSON(hookNoopResponse())
+		return
+	}
 
 	sessionID := resolveSessionID(input, platformFlag)
 	logger := newHookLogger("prompt-submit", platformFlag, sessionID)
@@ -46,6 +50,9 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 	}
 	if platformFlag == goosePlatform {
 		prompt = goosePrompt(input)
+	}
+	if platformFlag == "antigravity" {
+		prompt = getFirstStr(input, "lastUserInput")
 	}
 	hasPrompt := prompt != ""
 	if hasPrompt {
@@ -74,4 +81,15 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 
 	maybeUploadCursorCloudTelemetry(logger)
 	outputJSON(hookNoopResponse())
+}
+
+// antigravityTurnStart reports whether an Antigravity PreInvocation payload is the first model
+// call of a turn. Antigravity has no prompt-submit hook: PreInvocation runs before every model
+// call, carrying the turn's prompt as `lastUserInput` each time, and `invocationNum` counts the
+// calls from 0 again at the start of every turn, resumed conversations included. Recording only
+// invocation 0 records each prompt once. A payload without the counter is recorded, because a
+// duplicate prompt beats a lost one.
+func antigravityTurnStart(input map[string]interface{}) bool {
+	n, ok := jsonInt(input["invocationNum"])
+	return !ok || n == 0
 }

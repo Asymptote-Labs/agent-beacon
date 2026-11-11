@@ -22,6 +22,7 @@ func TestEverySessionSyncRefusesARotateBytesBelowTheDefault(t *testing.T) {
 		run  func(*cobra.Command, []string) error
 		opt  *int64
 	}{
+		{"antigravity", endpointAntigravitySyncCmd, runEndpointAntigravitySync, &endpointAntigravityOpts.rotateBytes},
 		{"claude", endpointClaudeSyncCmd, runEndpointClaudeSync, &endpointClaudeOpts.rotateBytes},
 		{"devin", endpointDevinSyncCmd, runEndpointDevinSync, &endpointDevinOpts.rotateBytes},
 		{"codex", endpointCodexSyncCmd, runEndpointCodexSync, &endpointCodexOpts.rotateBytes},

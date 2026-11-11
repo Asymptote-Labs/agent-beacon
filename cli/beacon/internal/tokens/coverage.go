@@ -129,8 +129,11 @@ var usageExpectation = map[string]struct {
 	// carries the semconv names -- the generic-OTLP case exactly, not a runtime Beacon reads.
 	"grok_bot": {ExpectGenericOTLP, "only if Cursor's server-side OTel export carries GenAI semconv usage"},
 
-	"cursor":          {ExpectNone, "no usage on any hook payload; preCompact reports context only"},
-	"antigravity_cli": {ExpectNone, "hook payloads carry no token counts"},
+	"cursor": {ExpectNone, "no usage on any hook payload; preCompact reports context only"},
+	// Antigravity CLI's hooks carry no token counts, but every planner response it commits to its
+	// transcript does, and `beacon endpoint antigravity sync` reads them -- same shape as Hermes
+	// above and Devin CLI below.
+	"antigravity_cli": {ExpectReported, "beacon endpoint antigravity sync reads per-response token counts; hook payloads carry none"},
 	"grok":            {ExpectNone, "hook payloads carry no token counts"},
 	// Devin reaches the log under three names, and all three need an entry. The hook installer
 	// writes --platform devin-cli and devin-desktop, an older install still writes plain devin,

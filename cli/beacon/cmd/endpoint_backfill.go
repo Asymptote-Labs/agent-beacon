@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/antigravitysession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
@@ -148,6 +149,10 @@ var endpointBackfillRunners = func() []endpointBackfillRunner {
 			s, err := groksession.CollectOnce(groksession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveGrokStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
+		{Name: "Antigravity CLI", Sync: "beacon endpoint antigravity sync", State: func(m bool) []string { return []string{resolveAntigravityStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
+			s, err := antigravitysession.CollectOnce(antigravitysession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveAntigravityStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget, LiveCoverage: endpointAntigravityLiveCoverage(r.LogPath)})
+			return s.EventsEmitted, err
+		}, SQLite: true},
 		{Name: "Harness²", Sync: "beacon endpoint harness2 sync", State: func(m bool) []string { return []string{resolveHarness2StatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			opts := harness2session.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHarness2StatePath("", r.UserMode), Since: r.Since, Budget: r.Budget}
 			opts.ExtraRoots = harness2BackfillExtraRoots(r.UserMode)
