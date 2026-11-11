@@ -323,15 +323,13 @@ func TestOpenOutsideRefusesWhatTheUserCanPlant(t *testing.T) {
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Skipf("mkfifo: %v", err)
 	}
-	fileLink := filepath.Join(f.outside, "file-link")
-	dirLink := filepath.Join(f.outside, "dir-link")
-	if err := os.Symlink(f.secret, fileLink); err != nil {
+	link := filepath.Join(f.outside, "link")
+	if err := os.Symlink(f.secret, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Dir(f.secret), dirLink); err != nil {
-		t.Fatal(err)
-	}
-	c := confine(t, f.home, os.Getuid())
+	// Ownership cannot be changed without root, so the console user's uid is the one injected:
+	// to a confinement for uid+1, the 0600 files this test wrote are someone else's.
+	c := confine(t, f.home, os.Getuid()+1)
 
 	done := make(chan error, 1)
 	go func() {
@@ -344,10 +342,10 @@ func TestOpenOutsideRefusesWhatTheUserCanPlant(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("opening a FIFO outside the home blocked; a planted one would hang the inventory job")
 	}
-	_, err := OpenOutside(fileLink)
-	requireRefusedAsAbsent(t, "a symlink the user made", err)
-	_, err = OpenOutside(filepath.Join(dirLink, filepath.Base(f.secret)))
-	requireRefusedAsAbsent(t, "a path through a directory symlink the user made", err)
+	_, err := OpenOutside(f.secret)
+	requireRefusedAsAbsent(t, "a file the console user could not read", err)
+	_, err = OpenOutside(link)
+	requireRefusedAsAbsent(t, "a link to a file the console user could not read", err)
 	if n, _ := c.Refused(); n != 3 {
 		t.Fatalf("refusals = %d, want 3", n)
 	}
@@ -359,11 +357,45 @@ func TestOpenOutsideRefusesWhatTheUserCanPlant(t *testing.T) {
 	}
 }
 
-func TestOpenOutsideRefusesFilesAnotherUserOwns(t *testing.T) {
+func TestOpenOutsideReadsWhatAnyoneMayRead(t *testing.T) {
+	const system = "/etc/hosts"
+	info, err := os.Stat(system)
+	if err != nil || info.Mode().Perm()&0o004 == 0 {
+		t.Skipf("%s is not a world-readable file here", system)
+	}
 	f := newFixture(t)
+	link := filepath.Join(f.outside, "hosts")
+	if err := os.Symlink(system, link); err != nil {
+		t.Fatal(err)
+	}
 	confine(t, f.home, os.Getuid()+1)
-	_, err := OpenOutside(f.secret)
-	requireRefusedAsAbsent(t, "a file outside the home another uid owns", err)
+	for _, path := range []string{system, link} {
+		file, err := OpenOutside(path)
+		if err != nil {
+			t.Fatalf("OpenOutside(%s), a file anyone may read: %v", path, err)
+		}
+		_ = file.Close()
+	}
+}
+
+func TestConfinementCoversTheHomesRealPath(t *testing.T) {
+	f := newFixture(t)
+	link := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(f.home, link); err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(f.real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confine(t, link, os.Getuid())
+	if !Confined(filepath.Join(link, ".claude")) || !Confined(real) {
+		t.Fatalf("Confined(%s) = %v, Confined(%s) = %v", link, Confined(link), real, Confined(real))
+	}
+	data, err := ReadFile(real)
+	if err != nil || string(data) != "mine\n" {
+		t.Fatalf("ReadFile of the home's real path = %q, %v", data, err)
+	}
 }
 
 func TestOpenOutsideIsOSOpenUnconfined(t *testing.T) {

@@ -45,7 +45,9 @@ const maxRefusalsKept = 8
 // Confinement is an active confinement of session-store reads to one user's home.
 type Confinement struct {
 	home string
-	root *os.Root
+	// realHome is home with symlinks resolved, when that differs.
+	realHome string
+	root     *os.Root
 	// uid is the owner every file read must have; negative skips the check (Windows).
 	uid int
 
@@ -84,6 +86,11 @@ func Confine(home string, uid int, opts Options) (*Confinement, error) {
 		return nil, fmt.Errorf("confine session reads to %s: %w", home, err)
 	}
 	c := &Confinement{home: home, root: root, uid: uid, scratchParent: opts.ScratchDir}
+	// A home reached through a symlink (/home -> /var/home) is also inside under its real path,
+	// so a reader that resolves a path inside it finds it still confined.
+	if real, err := filepath.EvalSymlinks(home); err == nil && real != home {
+		c.realHome = real
+	}
 	if !active.CompareAndSwap(nil, c) {
 		_ = root.Close()
 		return nil, errors.New("confine session reads: a confinement is already active")
@@ -142,16 +149,27 @@ func (c *Confinement) refuse(op, path, reason string) error {
 	return &fs.PathError{Op: op, Path: path, Err: fs.ErrNotExist}
 }
 
-// rel turns an absolute path into one relative to the home, or reports that it is outside.
+// rel turns an absolute path into one relative to the home, or reports that it is outside. A
+// path under the home's real location counts as under the home.
 func (c *Confinement) rel(path string) (string, bool) {
 	if !filepath.IsAbs(path) {
 		return "", false
 	}
 	path = filepath.Clean(path)
-	if path == c.home {
+	if rel, ok := under(c.home, path); ok {
+		return rel, true
+	}
+	if c.realHome != "" {
+		return under(c.realHome, path)
+	}
+	return "", false
+}
+
+func under(home, path string) (string, bool) {
+	if path == home {
 		return ".", true
 	}
-	prefix := c.home
+	prefix := home
 	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
 		prefix += string(filepath.Separator)
 	}
@@ -206,13 +224,13 @@ func Active() bool { return active.Load() != nil }
 // and a path inside the home is opened as Open does. A path outside it is one the console user
 // may have chosen, so while a confinement is active it opens only
 //
-//   - through no symlink the user made (the system's own, root-owned ones such as macOS's /etc
-//     and /tmp, are followed);
 //   - non-blocking, and only a regular file, never a FIFO, socket or device;
-//   - a file the console user owns, or a root-owned one in a directory only an administrator
-//     writes (/etc, /Library).
+//   - a file the console user could read without root: one they own, or one anyone may read in
+//     directories anyone may enter (/etc/npmrc, a root- or other-admin-installed node's npmrc).
 //
-// Anything else is refused and reads as absent, as with Open.
+// Where the path leads through symlinks does not matter: it is the file reached that must be
+// one the console user could read, so root reading it discloses nothing. Anything else is
+// refused and reads as absent, as with Open.
 func OpenOutside(path string) (*os.File, error) {
 	c := active.Load()
 	if c == nil {
@@ -224,11 +242,7 @@ func OpenOutside(path string) (*os.File, error) {
 	if !filepath.IsAbs(path) {
 		return nil, c.refuse("open", path, "not an absolute path")
 	}
-	path = filepath.Clean(path)
-	if err := noUserSymlinks(path); err != nil {
-		return nil, c.failed("open", path, err)
-	}
-	real, err := filepath.EvalSymlinks(path)
+	real, err := filepath.EvalSymlinks(filepath.Clean(path))
 	if err != nil {
 		return nil, c.failed("open", path, err)
 	}
@@ -246,50 +260,31 @@ func OpenOutside(path string) (*os.File, error) {
 		return nil, c.refuse("open", path, "not a regular file ("+info.Mode().Type().String()+")")
 	}
 	if c.uid >= 0 {
-		owner, ok := ownerUID(info)
-		if !ok || (owner != c.uid && !(owner == 0 && adminOnly(real))) {
+		if owner, ok := ownerUID(info); !ok || (owner != c.uid && !anyoneCanRead(real, info)) {
 			_ = f.Close()
-			return nil, c.refuse("open", path, fmt.Sprintf("outside the home and owned by uid %d, neither the console user (uid %d) nor root in a system directory", owner, c.uid))
+			return nil, c.refuse("open", path, fmt.Sprintf("outside the home, owned by uid %d and not readable by the console user (uid %d) without root", owner, c.uid))
 		}
 	}
 	return f, nil
 }
 
-// errUserSymlink is a path through a symlink someone other than root made.
-var errUserSymlink = errors.New("reached through a symlink root did not make")
-
-// noUserSymlinks checks every component of an absolute path: a symlink must be root's.
-func noUserSymlinks(path string) error {
-	vol := filepath.VolumeName(path)
-	sep := string(filepath.Separator)
-	cur := vol + sep
-	for _, part := range strings.Split(strings.TrimPrefix(path[len(vol):], sep), sep) {
-		if part == "" {
-			continue
-		}
-		cur = filepath.Join(cur, part)
-		info, err := os.Lstat(cur)
-		if err != nil {
-			return err
-		}
-		if info.Mode()&fs.ModeSymlink != 0 {
-			if owner, ok := ownerUID(info); !ok || owner != 0 {
-				return errUserSymlink
-			}
-		}
+// anyoneCanRead reports whether any user may read the file at a resolved path: it is readable
+// by others and every directory above it may be entered by others.
+func anyoneCanRead(path string, info fs.FileInfo) bool {
+	if info.Mode().Perm()&0o004 == 0 {
+		return false
 	}
-	return nil
-}
-
-// adminOnly reports whether a resolved path is in a system directory only an administrator
-// writes, where a root-owned file is configuration rather than something linked in.
-func adminOnly(path string) bool {
-	for _, dir := range []string{"/etc/", "/private/etc/", "/Library/"} {
-		if strings.HasPrefix(path, dir) {
+	for dir := filepath.Dir(path); ; {
+		d, err := os.Stat(dir)
+		if err != nil || !d.IsDir() || d.Mode().Perm()&0o001 == 0 {
+			return false
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
 			return true
 		}
+		dir = parent
 	}
-	return false
 }
 
 // Open opens a file or directory for reading.

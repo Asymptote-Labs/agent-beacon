@@ -611,8 +611,13 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 			MaxContentBytes:  settings.MaxContentBytes,
 		})
 		// The job's environment is not the user's shell, so only the files in their home and the
-		// system's say where packages come from. Read while the scan is still confined.
-		intel.AnnotatePackages(&inventoryResult, intel.LocalRegistries(intel.RegistryEnv{Home: scope.HomeDir, System: true}))
+		// system's say where packages come from. Read while the scan is still confined. A
+		// user-mode job scans its own home, as Scan does when given none.
+		registryHome := scope.HomeDir
+		if registryHome == "" {
+			registryHome, _ = os.UserHomeDir()
+		}
+		intel.AnnotatePackages(&inventoryResult, intel.LocalRegistries(intel.RegistryEnv{Home: registryHome, System: true}))
 		release()
 		digest = endpointinventory.SnapshotDigest(inventoryResult)
 		// Compare against the last digest for *this* home: a multi-user machine alternates

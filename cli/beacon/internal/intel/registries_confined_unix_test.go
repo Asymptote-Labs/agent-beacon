@@ -56,4 +56,16 @@ func TestConfinedRegistriesHoldBackWhatTheyCannotRead(t *testing.T) {
 	if reg := read("userconfig=" + filepath.Join(outside, "missing") + "\n"); reg.NPM {
 		t.Errorf("a missing npmrc held npm packages back")
 	}
+	// A path root cannot even look up (macOS privacy protection, a root-squashed network home;
+	// here a directory no one may enter) is absent, as it is unconfined.
+	locked := filepath.Join(outside, "locked")
+	if err := os.Mkdir(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(locked, 0o700)
+	if os.Geteuid() != 0 {
+		if reg := read("userconfig=" + filepath.Join(locked, "npmrc") + "\n"); reg.NPM {
+			t.Errorf("an npmrc root could not look up held npm packages back")
+		}
+	}
 }

@@ -433,9 +433,9 @@ func TestAnnotatePackages(t *testing.T) {
 	want := map[string][2]string{
 		"supabase": {"npm:@supabase/mcp-server-supabase", "public"},
 		"fetch":    {"pypi:mcp-server-fetch", "public"},
-		"flagged":  {"npm:flag-pkg", "private"},
-		"env":      {"npm:env-pkg", "private"},
-		"scoped":   {"npm:@corp/tool", "private"},
+		"flagged":  {"", "private"},
+		"env":      {"", "private"},
+		"scoped":   {"", "private"},
 		"binary":   {"", ""},
 		"remote":   {"", ""},
 		"stale":    {"", ""},

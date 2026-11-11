@@ -139,11 +139,12 @@ type MCPServer struct {
 	ParserStatus    string                 `json:"parser_status"`
 	Redaction       string                 `json:"redaction"`
 	Definition      map[string]interface{} `json:"definition,omitempty"`
-	// Package is the npm or PyPI package the server's launch command runs, as Beacon Intel
-	// knows it (npm:<name> or pypi:<name>, no version), and PackageRegistry where it comes
-	// from: "public", or "private" when the command, its env or the machine's launcher config
-	// points that ecosystem at another registry or index, so the name may be private too. Set
-	// by intel.AnnotatePackages; empty for anything else (a binary, a script, a remote URL).
+	// Package is the npm or PyPI package the server's launch command runs from the public
+	// registry, as Beacon Intel knows it (npm:<name> or pypi:<name>, no version), and
+	// PackageRegistry "public". When the command, its env or the machine's launcher config
+	// points that ecosystem at another registry or index, PackageRegistry is "private" and
+	// Package is left out, since the name may be private too. Set by intel.AnnotatePackages;
+	// both empty for anything else (a binary, a script, a remote URL).
 	Package         string `json:"package,omitempty"`
 	PackageRegistry string `json:"package_registry,omitempty"`
 	// Launch is the redacted definition, kept whether or not contents are captured, so a reader

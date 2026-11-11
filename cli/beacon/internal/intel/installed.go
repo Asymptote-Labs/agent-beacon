@@ -195,8 +195,10 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 
 // AnnotatePackages records on each MCP server the package its launch command runs and whether
 // it comes from the public registry, so an inventory snapshot names a server the way Beacon
-// Intel does without carrying its arguments. Run it while the scan's confinement, if any, still
-// holds: the registry config it reads is in the scanned home.
+// Intel does without carrying its arguments. A package from a private registry or index keeps
+// only the "private" marker: its name may itself be private, and a launch command's arguments
+// never left the device before. Run it while the scan's confinement, if any, still holds: the
+// registry config it reads is in the scanned home.
 func AnnotatePackages(res *inventory.Result, registries Registries) {
 	for i := range res.MCPServers {
 		s := &res.MCPServers[i]
@@ -205,10 +207,11 @@ func AnnotatePackages(res *inventory.Result, registries Registries) {
 		if !ok {
 			continue
 		}
-		s.Package, s.PackageRegistry = q, "public"
 		if basis == BasisPrivateNPM || basis == BasisPrivatePyPI {
 			s.PackageRegistry = "private"
+			continue
 		}
+		s.Package, s.PackageRegistry = q, "public"
 	}
 }
 

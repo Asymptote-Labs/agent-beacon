@@ -2,9 +2,7 @@ package intel
 
 import (
 	"bufio"
-	"errors"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -514,8 +512,10 @@ func registryLine(path string, match func(string) bool) bool {
 // file that is there but that a confined scan would not read: the system inventory job reads
 // the console user's config as root, and the paths it follows from there (an npmrc's
 // userconfig or prefix, a project directory, a server's cwd or PATH) are the user's to choose,
-// so sessionfs.OpenOutside admits only what is safe to read. Beacon cannot tell what such a
-// file says, so the caller holds its ecosystem back as private.
+// so sessionfs.OpenOutside admits only what the user could read themselves. Beacon cannot tell
+// what such a file says, so the caller holds its ecosystem back as private. A path root cannot
+// even look up (macOS privacy protection over ~/Documents, a root-squashed network home) is
+// absent, as it is unconfined: refused needs the file to be seen there.
 func readConfigLines(path string) (lines []string, ok, refused bool) {
 	if path == "" {
 		return nil, false, false
@@ -524,7 +524,7 @@ func readConfigLines(path string) (lines []string, ok, refused bool) {
 	if err != nil {
 		if sessionfs.Active() {
 			_, statErr := os.Lstat(path)
-			refused = !errors.Is(statErr, fs.ErrNotExist)
+			refused = statErr == nil
 		}
 		return nil, false, refused
 	}
