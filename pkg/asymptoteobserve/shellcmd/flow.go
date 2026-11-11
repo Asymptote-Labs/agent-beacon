@@ -24,6 +24,10 @@ const (
 type FileRead struct {
 	Path string
 	Via  Via
+	// Sent is set when the command is an interpreter whose inline script opens the file inside
+	// the arguments of a call that sends them over the network. For any other command, whether
+	// it sends what it takes in is for the caller to say from what the command is.
+	Sent bool
 }
 
 // FileReads returns, for each command of a parsed command line, the files whose content it
@@ -65,7 +69,7 @@ type FileRead struct {
 // command edits in place (sed -i, which FileEffects reports) and a file a command names without
 // taking it as input (a search pattern, an archive's exclusions, an identity file) are not reads.
 // The body of a here-document is not followed, and neither is what a script does with a file once
-// it has opened it.
+// it has opened it, beyond opening it inside a call that sends it (FileRead.Sent).
 func FileReads(commands []Command) [][]FileRead {
 	f := flow{commands: commands}
 	for i := range commands {
@@ -129,15 +133,23 @@ func (f *flow) command(i int) {
 		}
 	}
 	name, args := c.run()
-	files, data := c.inputs(name, args)
+	var (
+		files, sent []string
+		data        dataWords
+	)
+	if language, ok := scriptLanguage(name); ok {
+		files, sent = scriptReads(language, inlineScript(language, c, args))
+	} else {
+		files, data = c.inputs(name, args)
+	}
 	for _, path := range files {
-		f.read(i, path, ViaDirect)
+		f.read(i, path, ViaDirect, slices.Contains(sent, path))
 	}
 	f.stdin(i)
 	for _, ref := range c.refs {
 		if ref.place == refArg && data.holds(ref.index) {
 			for _, path := range f.value(ref) {
-				f.read(i, path, ViaArgument)
+				f.read(i, path, ViaArgument, false)
 			}
 		}
 	}
@@ -161,21 +173,23 @@ func (f *flow) command(i int) {
 
 // read records that command i takes path in, and with it whatever was written into path earlier
 // in the line.
-func (f *flow) read(i int, path string, via Via) {
+func (f *flow) read(i int, path string, via Via, sent bool) {
 	// Standard input, a device, and a process substitution, whose commands are followed instead.
 	if path == "" || path == "-" || strings.HasPrefix(path, "/dev/") || strings.HasPrefix(path, "<(") {
 		return
 	}
-	read := FileRead{Path: path, Via: via}
 	if f.reads == nil {
 		f.reads = make([][]FileRead, len(f.commands))
 	}
-	if slices.Contains(f.reads[i], read) {
-		return
+	for k := range f.reads[i] {
+		if r := &f.reads[i][k]; r.Path == path && r.Via == via {
+			r.Sent = r.Sent || sent
+			return
+		}
 	}
-	f.reads[i] = append(f.reads[i], read)
+	f.reads[i] = append(f.reads[i], FileRead{Path: path, Via: via, Sent: sent})
 	for _, source := range f.files[path] {
-		f.read(i, source, via)
+		f.read(i, source, via, sent)
 	}
 }
 
@@ -207,16 +221,16 @@ func (f *flow) stdin(i int) {
 			// The target is a file, or a process substitution whose commands write it.
 			if value, substituted := f.wordValue(c, refRedirect, k); substituted {
 				for _, path := range value {
-					f.read(i, path, ViaStdin)
+					f.read(i, path, ViaStdin, false)
 				}
 			} else {
-				f.read(i, r.Target.Unquoted, ViaStdin)
+				f.read(i, r.Target.Unquoted, ViaStdin, false)
 			}
 			return
 		case "<<<":
 			value, _ := f.wordValue(c, refRedirect, k)
 			for _, path := range value {
-				f.read(i, path, ViaStdin)
+				f.read(i, path, ViaStdin, false)
 			}
 			return
 		case "<<", "<<-", "<&":
@@ -229,7 +243,7 @@ func (f *flow) stdin(i int) {
 	for j := range f.commands {
 		if before := &f.commands[j]; before.Pipeline == c.Pipeline && before.Stage == c.Stage-1 {
 			for _, path := range f.written(j) {
-				f.read(i, path, ViaStdin)
+				f.read(i, path, ViaStdin, false)
 			}
 		}
 	}

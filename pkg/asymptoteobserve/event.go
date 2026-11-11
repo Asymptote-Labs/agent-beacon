@@ -199,8 +199,8 @@ type CommandInfo struct {
 // rules (e.command.parsed_commands). It is never serialized; the cel tags are the names a rule
 // uses. threatrules.ParsedCommands says how each field is derived.
 type ParsedCommand struct {
-	// Name is the base name of the command after its wrappers (sudo, env, exec, ...): rm for
-	// `sudo /bin/rm -rf x`. Empty when it is unknown.
+	// Name is the base name of the command after its wrappers (sudo, env, exec, timeout, ...):
+	// rm for `sudo /bin/rm -rf x`. Empty when it is unknown.
 	Name string `cel:"name"`
 	// Argv are the command's words as the shell passes them, wrappers included; a word whose
 	// value the parse cannot know (a parameter, substitution, glob or leading tilde) is "".
@@ -216,12 +216,16 @@ type ParsedCommand struct {
 	// into one of its words by a substitution. A path is as written without its quotes, also
 	// where the value depends on an expansion ($HOME/.netrc, ~/.ssh/id_*).
 	FileReads []ParsedFileRead `cel:"file_reads"`
+	// ScriptSends are the files an interpreter's inline script opens inside the arguments of a
+	// call that sends them over the network: .env for
+	// python3 -c "requests.post(url, data=open('.env'))". Each is also one of FileReads.
+	ScriptSends []string `cel:"script_sends"`
 	// Pipeline identifies the command's pipeline: the stages of one pipeline share it. Stage
 	// is the 0-based position in it (curl ... | sh: sh is stage 1).
 	Pipeline int `cel:"pipeline"`
 	Stage    int `cel:"stage"`
 	// Nested is true for a command inside a command or process substitution, or inside the
-	// script a shell runs with -c.
+	// script a shell runs with -c or reads from a here-document.
 	Nested bool `cel:"nested"`
 }
 

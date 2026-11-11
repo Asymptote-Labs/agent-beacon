@@ -79,7 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `file_reads`. See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `file_reads` and `script_sends`. See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -181,29 +181,43 @@ the steps in both orders still fires once. A single event never satisfies two st
   list with one entry per simple command, and per compound command that carries
   redirections, in walk order (each statement, then the statements inside it). Each entry
   has `name` (the base name of the first word after the wrappers `command`, `builtin`,
-  `exec`, `nohup`, `time`, and `sudo` and `env` with their options and `NAME=value` words,
-  each recognized by its base name so `/usr/bin/env` is `env`; `""` when that word is
-  unknown or a wrapper option moves or replaces the command, as `sudo -i` and `env -C` do),
+  `exec`, `nohup`, `time`, `sudo` and `env` with their options and `NAME=value` words, and,
+  since v1.3, `timeout`, `nice`, `ionice`, `stdbuf`, `doas`, `torsocks`, `proxychains` and
+  `proxychains4` with their options and `timeout`'s duration; each is recognized by its base
+  name so `/usr/bin/env` is `env`; `""` when that word is unknown or a wrapper option moves
+  or replaces the command or makes the wrapper act on something else, as `sudo -i`, `env -C`,
+  `doas -s` and `ionice -p` do),
   `argv` (every word after brace expansion, wrappers included,
   as the shell passes it on, or `""` when its value depends on a parameter, command or
   arithmetic substitution, an ANSI-C or locale string, an unquoted glob character, or a
   leading tilde), `argv_raw` (the same words as written), `env` (the `NAME=value`
   assignments before the command, `""` for an unknown value), `file_effects` (the files the
-  command evidently writes, `{path, op}`), `file_reads` (the files it evidently takes as
-  input, below), `pipeline` (shared by the stages of one
+  command evidently writes, `{path, op}`, of the command `name` names), `file_reads` and
+  `script_sends` (the files it evidently takes as input and the ones its inline script
+  sends, below), `pipeline` (shared by the stages of one
   pipeline), `stage` (0-based position in it; a command inside a compound stage such as
   `{ a; b; } | c` or `(a) | c` carries that stage unless it is a stage of an inner pipeline
   or inside a substitution) and `nested` (inside a command or process
-  substitution, or inside a `-c` script). When `sh`, `bash`, `zsh`, `dash` or `ksh` appears
+  substitution, or inside a shell's script). When `sh`, `bash`, `zsh`, `dash` or `ksh` appears
   as a word of a command with an option cluster containing `c`, its first operand, if known,
   is read the same way, at most two levels deep, and its commands follow the shell's with
-  `nested` true and pipeline numbers of their own. Here-document bodies and the strings of
-  other commands are not read as commands. A command line that ends early (an unclosed
+  `nested` true and pipeline numbers of their own. Since v1.3 the same holds for the
+  here-document or here-string on the standard input of a command whose `name` is one of
+  those shells, when the shell is given neither `-c` nor a script file (`sudo bash <<'EOF'`,
+  `sh -s -- arg <<EOF`, `bash <<< 'cmd'`). Other here-document bodies, what a pipe sends a
+  shell, and the strings of other commands are not read as commands. A command line that
+  ends early (an unclosed
   quote, here-document, substitution or compound command) yields the commands before the
   point where it became incomplete; one that does not parse yields the empty list, so a
   rule that must not miss such captures keeps a `command.command` fallback for it. The
   reference derivation is `threatrules.ParsedCommands` over `shellcmd.Parse`, and the file
   effects are `shellcmd.FileEffects`.
+
+  The two v1.3 changes to `name` and to which commands are listed apply to every rule an
+  engine at v1.3 or later evaluates, whatever `spec` the rule declares: an engine derives the
+  field once per event. A rule that relies on them (`c.name == "nc"` for `timeout 5 nc ..`)
+  SHOULD declare `spec: threat-rules/v1.3`, so an engine at v1.2 sets it aside rather than
+  evaluating it on the older derivation.
 - `file_reads` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) is a field of each `parsed_commands` entry: the files whose content the command
   evidently takes in, a list of `{path, via}`. `path` is the word as written with its quotes
@@ -212,10 +226,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   `file_effects`, which leaves out a path it cannot evaluate: a rule asks what a read names,
   and `~/.ssh/id_rsa` names a private key whatever the home directory is. `via` is how the
   content reaches the command:
-  - `direct`: the command opens the file itself. The command is the one the entry runs, found
-    behind the wrappers `name` skips and behind `timeout`, `nice`, `ionice`, `stdbuf`, `doas`,
-    `torsocks`, `proxychains` and `proxychains4` as well (`name` still stops at those). By
-    that command:
+  - `direct`: the command opens the file itself. The command is the one `name` names. By that
+    command:
     - `cat`, `tac`, `head`, `tail`, `less`, `more`, `bat`, `nl`, `strings`, `od`, `hexdump`,
       `base64`: every operand; `xxd`: the first. A word that begins with `+` is not an operand
       of `less`, `more` or `tail`.
@@ -243,6 +255,19 @@ the steps in both orders still fires once. A single event never satisfies two st
       `Bun.file` (JavaScript), `File.read|readlines|binread|foreach|open` and
       `IO.read|readlines|binread|foreach` (ruby), and `file_get_contents`, `fopen`, `readfile`
       and `file` (php). A call whose mode argument holds `w`, `a` or `x` is not a read.
+      `script_sends` (since v1.3, with the same declaration rule) lists the paths of those the
+      script opens inside the parentheses of a call that sends its arguments over the network,
+      at any depth: `.env` for `requests.post(url, data=open(".env").read())`. The calls are,
+      by their last name, `post`, `put`, `patch`, `request`, `urlopen`, `Request`, `send`,
+      `sendall` and `sendto` (python); `fetch`, `axios`, `post`, `put`, `patch`, `request`,
+      `send`, `sendBeacon`, `connect` and `createConnection`, and `.end(..)` or `.write(..)`
+      called directly on what one of them returns (JavaScript); `post`, `post_form`, `put`,
+      `patch`, and `.write`, `.puts`, `.print` or `.send` called directly on `TCPSocket.new(..)`
+      or `TCPSocket.open(..)` (ruby); `curl_setopt`, `curl_setopt_array`,
+      `stream_context_create`, `socket_write`, `socket_send` and `mail` (php). A file read into
+      a variable that is sent later is a read and not a send. For a command that is not such
+      an interpreter the list is empty: whether `curl` or `nc` sends what it takes in is for
+      the rule to say.
 
     The value of an option is never an operand (`head -n 5`, `scp -i key`, `tar --exclude x`,
     `gh gist create -d text`).
@@ -271,9 +296,11 @@ the steps in both orders still fires once. A single event never satisfies two st
   written with something else, truncated or deleted; reading it takes that in too, by the
   same `via`. Paths are compared as written.
 
-  Standard input (`-`) and paths under `/dev/` are left out. Here-document bodies are not
-  followed, nor what a script does with a file after opening it, nor data that crosses a
-  `-c` script's boundary. The reference derivation is `shellcmd.FileReads`.
+  Standard input (`-`) and paths under `/dev/` are left out. The body of a here-document
+  that is not a script is not followed, nor is what a script does with a file through a
+  variable, nor data that crosses the boundary of a shell's script (`bash -c 'cat .env' | nc
+  ..` reports the read on `cat`, not on `nc`). The reference derivation is
+  `shellcmd.FileReads`.
 - `e.system_context` is on the wire, not derived: on `session.context` it names what the
   runtime gave the model. `kind` is `skill_listing` for a skill index, `source` is where
   Beacon read it (`system_prompt`, `transcript`), and `skills` names each listed skill as
@@ -321,7 +348,10 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
-- **v1.3**: `file_reads` on each entry of `e.command.parsed_commands`.
+- **v1.3**: `file_reads` and `script_sends` on each entry of `e.command.parsed_commands`.
+  `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
+  `doas`, `torsocks` and `proxychains`, and a shell's here-document or here-string script is
+  read as commands the way its `-c` script is.
 - **v1.2**: the derived field `e.command.parsed_commands`.
 - **v1.1**: `correlation.order` (`sequence` default, or `any` for order-insensitive steps),
   and the per-rule `spec` field with the engine rules above.

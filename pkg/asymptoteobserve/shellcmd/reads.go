@@ -142,7 +142,8 @@ var (
 )
 
 // inputs returns the files the command's own words name as its input, and which of its words
-// carry data. name and args are what the command runs (Command.run).
+// carry data. name and args are what the command runs (Command.run). An interpreter's inline
+// script is read by scriptReads instead.
 func (c *Command) inputs(name string, args []Word) (files []string, data dataWords) {
 	if name == "" {
 		return nil, data
@@ -187,9 +188,6 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 	case "socat":
 		return socatFiles(args), data
 	default:
-		if language, ok := scriptLanguage(name); ok {
-			return scriptReads(language, inlineScript(language, c, args)), data
-		}
 		r, ok := readers[name]
 		if !ok {
 			return nil, data

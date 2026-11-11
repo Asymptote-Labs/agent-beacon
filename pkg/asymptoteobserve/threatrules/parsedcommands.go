@@ -2,6 +2,7 @@ package threatrules
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -11,8 +12,8 @@ import (
 // ParsedCommandsPath is the CEL path of the derived parsed command line, after the "e." prefix.
 const ParsedCommandsPath = "command.parsed_commands"
 
-// fileReadsField is the field of a parsed command that spec v1.3 added.
-const fileReadsField = "file_reads"
+// v1_3Fields are the fields of a parsed command that spec v1.3 added.
+var v1_3Fields = []string{"file_reads", "script_sends"}
 
 // ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
 // to the retained command line, so a longer value (from an in-process caller) is cut there too.
@@ -29,19 +30,24 @@ const maxShellDepth = 2
 //     point where it became incomplete; one that does not parse at all yields none, and a rule
 //     falls back to matching command.command.
 //   - name is the base name of the command after its wrappers (sudo, env, command, exec, nohup,
-//     time), "" when it is unknown or a wrapper option hides it (sudo -i, env -C).
+//     time, timeout, nice, ionice, stdbuf, doas, torsocks, proxychains), "" when it is unknown
+//     or a wrapper option hides it (sudo -i, env -C).
 //   - argv and argv_raw are every word, wrappers included: argv as the shell passes it on, ""
 //     for a word whose value depends on an expansion, glob or leading tilde; argv_raw as written.
 //   - env maps each NAME=value assignment before the command to its value ("" when unknown).
 //   - file_effects are shellcmd's file effects of the command: {path, op}.
-//   - file_reads are shellcmd's file reads of the command: each path as written.
+//   - file_reads are shellcmd's file reads of the command: {path, via}, each path as written.
+//     script_sends are the paths of those an inline script opens inside a call that sends them.
 //   - pipeline, stage and nested are shellcmd's.
 //   - The script a shell (sh, bash, zsh, dash, ksh) runs with -c, when it is a known word, is
 //     read the same way, depth-limited, and its commands follow the shell's with nested true and
 //     pipeline numbers of their own. The shell may follow other words (`docker exec c sh -c ..`).
+//   - So is the here-document or here-string a shell reads its script from, when the shell is
+//     the command the statement runs (after its wrappers) and it is given no -c and no script
+//     file: `sudo bash <<'EOF'`, `sh -s -- arg <<EOF`, `bash <<< 'cmd'`.
 //
-// Here-document bodies, and the strings of commands other than a shell's -c, are not read as
-// commands. The text is read as bash whatever shell ran it.
+// Other here-document bodies, what a pipe sends a shell, and the strings of commands other than
+// a shell's -c are not read as commands. The text is read as bash whatever shell ran it.
 //
 // It is exported so that another engine implementing the Threat Rules contract can derive the
 // field the same way; fixtures that exercise it only conform if the derivation agrees.
@@ -79,7 +85,7 @@ func (p *parsedCommands) add(cmds []shellcmd.Command, nested bool, depth int) {
 		if depth >= maxShellDepth {
 			continue
 		}
-		if script, ok := shellScript(c.Argv); ok {
+		if script, ok := shellScript(c); ok {
 			if sub, _ := shellcmd.Parse(script); len(sub) > 0 {
 				p.add(sub, true, depth+1)
 			}
@@ -116,15 +122,21 @@ func parsedCommand(c shellcmd.Command, reads []shellcmd.FileRead, pipelineBase i
 		pc.FileReads = make([]asymptoteobserve.ParsedFileRead, len(reads))
 		for i, r := range reads {
 			pc.FileReads[i] = asymptoteobserve.ParsedFileRead{Path: r.Path, Via: string(r.Via)}
+			if r.Sent && !slices.Contains(pc.ScriptSends, r.Path) {
+				pc.ScriptSends = append(pc.ScriptSends, r.Path)
+			}
 		}
 	}
 	return pc
 }
 
-// shellScript returns the script of the first shell word in words when that shell runs it with
-// -c: the first operand after an option cluster containing c. ok is false when there is no such
-// shell, the shell runs a file or stdin instead, or the script is not a known word.
-func shellScript(words []shellcmd.Word) (script string, ok bool) {
+// shellScript returns the script a shell in c runs. With -c it is the first operand after an
+// option cluster containing c, of the first shell word in c's words. Without -c and without a
+// script file, it is the here-document or here-string on c's standard input, when the shell is
+// the command c runs after its wrappers. ok is false when there is no such shell, the shell runs
+// a file or what a pipe sends it, or the script is not a known word.
+func shellScript(c shellcmd.Command) (script string, ok bool) {
+	words := c.Argv
 	start := -1
 	for i, w := range words {
 		if w.Known && isShell(w.Text) {
@@ -135,8 +147,14 @@ func shellScript(words []shellcmd.Word) (script string, ok bool) {
 	if start < 0 {
 		return "", false
 	}
-	command := false
-	for i := start + 1; i < len(words); i++ {
+	// command is set by -c, and stdin by -s: the operands are then the script's arguments.
+	command, stdin := false, false
+scan:
+	for i := start + 1; ; i++ {
+		if i >= len(words) {
+			stdin = !command
+			break
+		}
 		w := words[i]
 		if !w.Known {
 			return "", false
@@ -147,13 +165,17 @@ func shellScript(words []shellcmd.Word) (script string, ok bool) {
 			if command && i+1 < len(words) && words[i+1].Known {
 				return words[i+1].Text, true
 			}
-			return "", false
+			stdin = !command && (stdin || i+1 == len(words))
+			break scan
 		case t == "--rcfile" || t == "--init-file":
 			i++ // takes a file
 		case strings.HasPrefix(t, "--"):
 		case len(t) > 1 && (t[0] == '-' || t[0] == '+'):
 			if t[0] == '-' && strings.ContainsRune(t[1:], 'c') {
 				command = true
+			}
+			if t[0] == '-' && strings.ContainsRune(t[1:], 's') {
+				stdin = true
 			}
 			if last := t[len(t)-1]; last == 'o' || last == 'O' {
 				i++ // -o option / -O shopt_option takes a name
@@ -162,10 +184,16 @@ func shellScript(words []shellcmd.Word) (script string, ok bool) {
 			if command {
 				return t, true
 			}
-			return "", false
+			break scan // with -s an argument of the script, without it a script file
 		}
 	}
-	return "", false
+	if !stdin {
+		return "", false
+	}
+	if unwrapped, ok := c.Unwrapped(); !ok || len(c.Argv)-len(unwrapped) != start {
+		return "", false
+	}
+	return c.HereInput()
 }
 
 func isShell(word string) bool {

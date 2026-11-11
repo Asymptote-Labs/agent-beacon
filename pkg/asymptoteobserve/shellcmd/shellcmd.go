@@ -54,7 +54,8 @@ type Redirect struct {
 	// Target is the word after the operator: a file, a descriptor for >& and <&, the delimiter
 	// of a here-document, or the string of a here-string.
 	Target Word
-	// Body is a here-document's text as written, expansions included. It is not read as commands.
+	// Body is a here-document's text as written, expansions included, without the line that
+	// ends it.
 	Body string
 }
 
@@ -366,9 +367,25 @@ func (p *parser) redirect(r *syntax.Redirect) Redirect {
 		out.Target = p.word(r.Word, r.Word)
 	}
 	if r.Hdoc != nil {
-		out.Body = p.raw(r.Hdoc)
+		out.Body = hereBody(p.raw(r.Hdoc), out.Target.Unquoted, r.Op == syntax.DashHdoc)
 	}
 	return out
+}
+
+// hereBody returns a here-document's text without the delimiter line that ends it, which the
+// source range of the document's word may run to. tabs is set for <<-, whose delimiter may be
+// indented with tabs.
+func hereBody(raw, delimiter string, tabs bool) string {
+	body := strings.TrimSuffix(raw, "\n")
+	start := strings.LastIndexByte(body, '\n') + 1
+	last := body[start:]
+	if tabs {
+		last = strings.TrimLeft(last, "\t")
+	}
+	if last == delimiter {
+		return raw[:start]
+	}
+	return raw
 }
 
 // callArgs returns the call's words after brace expansion, and refs with what they take their

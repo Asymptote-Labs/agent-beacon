@@ -21,6 +21,10 @@ type language struct {
 	// A call written as a method (fs.readFileSync) matches by its last name, and a name with a
 	// dot in it (File.read) only in full.
 	calls []string
+	// sends are the calls that send what they are given over the network, matched as calls are.
+	// chain are the methods that do when called on what such a call returns: the end of
+	// https.request(..).end(data).
+	sends, chain []string
 	// then, for a call it is set for, is what must follow the call for it to read the file:
 	// Path("x") alone only names one.
 	then map[string][]string
@@ -39,6 +43,7 @@ var (
 	python = language{
 		eval: "c", values: "WXQ", module: "m",
 		calls:    []string{"open", "Path"},
+		sends:    []string{"post", "put", "patch", "request", "urlopen", "Request", "send", "sendall", "sendto"},
 		then:     map[string][]string{"Path": {".read_text", ".read_bytes", ".open"}},
 		modes:    true,
 		prefixes: "rbuRBU",
@@ -50,6 +55,8 @@ var (
 		calls: []string{
 			"readFileSync", "readFile", "createReadStream", "readTextFileSync", "readTextFile", "Bun.file",
 		},
+		sends:    []string{"fetch", "axios", "post", "put", "patch", "request", "send", "sendBeacon", "connect", "createConnection"},
+		chain:    []string{"end", "write"},
 		backtick: true,
 		slashes:  true,
 	}
@@ -64,6 +71,8 @@ var (
 			"File.read", "File.readlines", "File.binread", "File.foreach", "File.open",
 			"IO.read", "IO.readlines", "IO.binread", "IO.foreach",
 		},
+		sends: []string{"post", "post_form", "put", "patch", "TCPSocket.new", "TCPSocket.open"},
+		chain: []string{"write", "puts", "print", "send"},
 		modes: true,
 		bare:  true,
 		hash:  true,
@@ -71,6 +80,7 @@ var (
 	php = language{
 		eval: "r", values: "dcz",
 		calls:   []string{"file_get_contents", "fopen", "readfile", "file"},
+		sends:   []string{"curl_setopt", "curl_setopt_array", "stream_context_create", "socket_write", "socket_send", "mail"},
 		modes:   true,
 		hash:    true,
 		slashes: true,
@@ -151,8 +161,9 @@ func inlineScript(l *language, c *Command, args []Word) string {
 	return stdinScript(c)
 }
 
-// stdinScript returns the here-document or here-string that is the command's standard input.
-func stdinScript(c *Command) string {
+// HereInput returns the here-document or here-string that is the command's standard input: the
+// body of the document as written, or the string without its quotes.
+func (c Command) HereInput() (text string, ok bool) {
 	for k := len(c.Redirects) - 1; k >= 0; k-- {
 		r := &c.Redirects[k]
 		if r.Fd != "" && r.Fd != "0" {
@@ -160,19 +171,31 @@ func stdinScript(c *Command) string {
 		}
 		switch r.Op {
 		case "<<", "<<-":
-			return r.Body
+			return r.Body, true
 		case "<<<":
-			return r.Target.Unquoted
+			return r.Target.Unquoted, true
 		case "<", "<>", "<&":
-			return ""
+			return "", false
 		}
 	}
-	return ""
+	return "", false
 }
 
-// scriptReads returns the files a script opens for reading by a literal path.
-func scriptReads(l *language, script string) []string {
-	var files []string
+func stdinScript(c *Command) string {
+	text, _ := c.HereInput()
+	return text
+}
+
+// scriptReads returns the files a script opens for reading by a literal path, and those of them
+// it opens inside the arguments of a call that sends them over the network:
+// requests.post(url, data=open(".env")), but not a file opened into a variable that is sent later.
+func scriptReads(l *language, script string) (files, sent []string) {
+	var (
+		open      callStack
+		nameEnd   = -1 // where the last name ends
+		nameSends bool // whether calling it sends
+		afterSend = -1 // just after the ) of the last call that sends
+	)
 	for i := 0; i < len(script); {
 		c := script[i]
 		switch {
@@ -184,59 +207,107 @@ func scriptReads(l *language, script string) []string {
 			} else {
 				i = len(script)
 			}
+		case c == '(':
+			open.push(nameSends && nameEnd >= 0 && skipSpaces(script, nameEnd) == i)
+			i++
+		case c == ')':
+			if open.pop() {
+				afterSend = i + 1
+			}
+			i++
 		case isNameByte(c) && (i == 0 || !isNameByte(script[i-1])):
 			// A name with the names it is qualified by: fs.promises.readFile, Path, .read.
 			end := i
 			for end < len(script) && isNameByte(script[end]) {
 				end++
 			}
-			if path, after, ok := l.opens(script, i, end); ok {
+			name := script[i:end]
+			nameEnd = end
+			nameSends = slices.ContainsFunc(l.sends, func(call string) bool { return isCall(name, call) }) ||
+				afterSend >= 0 && name[0] == '.' && slices.Contains(l.chain, name[1:]) && strings.TrimSpace(script[afterSend:i]) == ""
+			if path, ok := l.opens(script, i, end); ok {
 				files = append(files, path)
-				end = after
+				if open.sends != 0 {
+					sent = append(sent, path)
+				}
 			}
 			i = end
 		default:
 			i++
 		}
 	}
-	return files
+	return files, sent
+}
+
+// callStack is the parentheses open at a point of a script, and which of them are the arguments
+// of a call that sends. Past 64 deep it only counts.
+type callStack struct {
+	depth int
+	sends uint64
+}
+
+func (s *callStack) push(sends bool) {
+	if sends && s.depth < 64 {
+		s.sends |= 1 << s.depth
+	}
+	s.depth++
+}
+
+// pop closes the innermost parenthesis and reports whether it was a call that sends.
+func (s *callStack) pop() bool {
+	if s.depth == 0 {
+		return false
+	}
+	s.depth--
+	if s.depth >= 64 {
+		return false
+	}
+	bit := uint64(1) << s.depth
+	sends := s.sends&bit != 0
+	s.sends &^= bit
+	return sends
+}
+
+// isCall reports whether name, as written before a parenthesis, is call. A call without a dot in
+// it is also matched as a method (io.open, fs.promises.readFile).
+func isCall(name, call string) bool {
+	return name == call || !strings.Contains(call, ".") && strings.HasSuffix(name, "."+call)
 }
 
 // opens reports whether the name at script[i:end] is one of the language's calls, with a literal
-// path as its first argument that it reads, and returns the path and where that argument ends. A
-// call without a dot in it is also matched as a method (io.open, fs.promises.readFile).
-func (l *language) opens(script string, i, end int) (path string, after int, ok bool) {
+// path as its first argument that it reads, and returns the path.
+func (l *language) opens(script string, i, end int) (path string, ok bool) {
 	name := script[i:end]
 	for _, call := range l.calls {
-		if name != call && (strings.Contains(call, ".") || !strings.HasSuffix(name, call) || name[len(name)-len(call)-1] != '.') {
+		if !isCall(name, call) {
 			continue
 		}
 		j := skipSpaces(script, end)
 		if j < len(script) && script[j] == '(' {
 			j = skipSpaces(script, j+1)
 		} else if !l.bare || j == end {
-			return "", 0, false
+			return "", false
 		}
 		path, j, ok = l.literal(script, j)
 		if !ok || path == "" || strings.Contains(path, "://") || strings.ContainsAny(path, "\n{") {
-			return "", 0, false
+			return "", false
 		}
 		if l.modes && l.writes(script, j) {
-			return "", 0, false
+			return "", false
 		}
 		if follow, needed := l.then[call]; needed {
 			after := skipSpaces(script, j)
 			if after >= len(script) || script[after] != ')' {
-				return "", 0, false
+				return "", false
 			}
 			after = skipSpaces(script, after+1)
 			if !slices.ContainsFunc(follow, func(method string) bool { return strings.HasPrefix(script[after:], method) }) {
-				return "", 0, false
+				return "", false
 			}
 		}
-		return path, j, true
+		return path, true
 	}
-	return "", 0, false
+	return "", false
 }
 
 // literal reads a string literal at i, after any prefix letters, and returns its text as written
