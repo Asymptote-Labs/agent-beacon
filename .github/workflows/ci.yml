@@ -55,8 +55,11 @@ jobs:
   # Node is only the build host -- the shipped artifact is browser JavaScript run
   # by Chrome -- so a matrix would triple the Chromium download and the serial
   # e2e wall time for no signal.
+  # Pinned to 26.04 rather than ubuntu-latest, whose image is mid-move between releases: the job
+  # relies on what the runner image ships (Edge, and Chromium's system libraries alongside Chrome)
+  # instead of installing them from Ubuntu's mirrors, so the image has to be a known one.
   browser-extension:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # The e2e launches a persistent Chromium context against a local HTTPS replay
     # server. A wedged browser is a plausible failure mode, so bound it rather
     # than holding a runner for the six-hour GitHub default.
@@ -140,21 +143,22 @@ jobs:
 
       # Chromium leg only. The msedge leg installs nothing into this directory
       # but Playwright's .links bookkeeping, and saving that under the shared
-      # key would give the chromium leg a cache hit with no browser in it.
+      # key would give the chromium leg a cache hit with no browser in it. The
+      # runner image is in the key because a browser build is linked against its
+      # libraries.
       - name: Cache Playwright browsers
         if: matrix.browser == 'chromium'
         id: pw-cache
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+          key: playwright-ubuntu-26.04-${{ steps.pw.outputs.version }}
 
-      # Split from the browser download on purpose: the apt packages live outside
-      # ~/.cache/ms-playwright, so a cache hit must not skip them.
-      - name: Install Playwright system dependencies
-        working-directory: browser-extension
-        run: npx playwright install-deps chromium
-
+      # No `playwright install-deps` or `--with-deps` here or below: those run apt
+      # against Ubuntu's mirrors, and a mirror outage failed every browser job. The
+      # runner image already carries Chromium's system libraries, which Google
+      # Chrome needs too. The download itself comes from Playwright's CDN.
+      #
       # The full Chromium build, not the headless shell: e2e/fixtures.ts uses
       # channel: 'chromium', which is what supports MV3 extensions in headless.
       - name: Install Chromium for Playwright
@@ -162,15 +166,14 @@ jobs:
         working-directory: browser-extension
         run: npx playwright install chromium
 
-      # Edge stable installs from Microsoft's apt repository into
-      # /opt/microsoft/msedge, outside the Playwright cache, so it is installed
-      # on every run. Edge still honors --load-extension (checked on Edge 153),
-      # which is what lets the same harness load dist/. Branded Google Chrome
-      # stopped honoring it, which is why `chrome` is not a matrix leg.
-      - name: Install Microsoft Edge for Playwright
+      # Edge stable is the runner image's own, at /opt/microsoft/msedge where the
+      # msedge channel looks for it, so nothing is installed. Edge still honors
+      # --load-extension (checked on Edge 153), which is what lets the same
+      # harness load dist/. Branded Google Chrome stopped honoring it, which is
+      # why `chrome` is not a matrix leg.
+      - name: Check the runner's Microsoft Edge
         if: matrix.browser == 'msedge'
-        working-directory: browser-extension
-        run: npx playwright install msedge
+        run: /opt/microsoft/msedge/msedge --version
 
       # `npx playwright test`, not `npm test`: the pretest hook would rebuild
       # dist/ and hide a build failure inside the e2e step. GitHub sets CI=true,
@@ -198,8 +201,9 @@ jobs:
   # Chrome, because that is what fleets run and it no longer loads unpacked
   # extensions from the command line. Linux reads machine policy from /etc with
   # no device-management check, and the runner's passwordless sudo writes it.
+  # Pinned to 26.04 for the reason browser-extension is.
   browser-extension-policy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     env:
       BROWSER_CHANNEL: chrome
@@ -220,12 +224,12 @@ jobs:
         working-directory: browser-extension
         run: npm run build
 
-      # Google Chrome stable from Google's apt repository, plus its system
-      # libraries. It installs outside ~/.cache/ms-playwright, so there is
-      # nothing to cache.
-      - name: Install Google Chrome for Playwright
-        working-directory: browser-extension
-        run: npx playwright install --with-deps chrome
+      # Google Chrome stable is the runner image's own, at /opt/google/chrome
+      # where the chrome channel looks for it, so nothing is installed -- no
+      # `--with-deps`, whose apt run against Ubuntu's mirrors failed this job in
+      # a mirror outage.
+      - name: Check the runner's Google Chrome
+        run: /opt/google/chrome/chrome --version
 
       - name: Policy install e2e
         working-directory: browser-extension
@@ -460,8 +464,9 @@ jobs:
   # Runs the real dashboard with hostile fixture lenses (testdata/lens-e2e) and drives the session
   # page in headless Chromium: every way out of the lens sandbox in spec/lenses/SPEC.md must be
   # refused, and a lens that throws, stalls or navigates must give way to the full session.
+  # Pinned to 26.04 for the reason browser-extension is.
   lens-e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     defaults:
       run:
@@ -484,8 +489,10 @@ jobs:
         run: make build-hooks-current
       - name: Install test dependencies
         run: npm ci
+      # Chromium only, from Playwright's CDN. No `--with-deps`: the runner image carries Chromium's
+      # system libraries, and the apt run against Ubuntu's mirrors failed this job in an outage.
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - name: Run lens sandbox e2e
         run: npx playwright test
       - name: Upload Playwright report and traces
@@ -709,8 +716,19 @@ jobs:
   # ours to install units into.
   linux-systemd-smoke:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      # The container image comes prebuilt from smoke-images.yml, not from apt; see smoke/image.sh.
+      BEACON_SMOKE_REGISTRY: ghcr.io/asymptote-labs
     steps:
       - uses: actions/checkout@v7
+      # Not fatal: without a login the pull fails and image.sh builds the image itself.
+      - name: Log in to GHCR
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin || echo "::warning::GHCR login failed; the smoke image will be built locally"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
@@ -745,8 +763,20 @@ jobs:
   # this covers the package postinstall doing it for the user, which is what they actually do.
   linux-package-smoke:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      # The container images come prebuilt from smoke-images.yml, not from apt or dnf; see
+      # smoke/image.sh.
+      BEACON_SMOKE_REGISTRY: ghcr.io/asymptote-labs
     steps:
       - uses: actions/checkout@v7
+      # Not fatal: without a login the pull fails and image.sh builds the image itself.
+      - name: Log in to GHCR
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin || echo "::warning::GHCR login failed; the smoke images will be built locally"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Fast and needs nothing built: the install script's arguments, against a stub binary.
       - name: Validate the packaging scripts
         run: sh packaging/linux/test-endpoint-scripts.sh

@@ -42,37 +42,15 @@ cleanup() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 cleanup
 
-# binutils is for readelf, which checks the packaged Vector is static. Rocky rather than Fedora for
-# the rpm lane because RHEL and Rocky are what RPM fleets actually run; its image already has
-# curl-minimal, which conflicts with the curl package.
+# Pulled prebuilt when BEACON_SMOKE_REGISTRY is set, built from smoke/package-$FORMAT.Dockerfile
+# otherwise; BEACON_SMOKE_BASE replaces the base image.
 case "$FORMAT" in
-  deb) IMAGE=beacon-package-smoke-deb
-       BASE="${BEACON_SMOKE_BASE:-ubuntu:24.04}"
-       INSTALL_PKGS="systemd systemd-sysv dbus libpam-systemd curl ca-certificates iproute2 binutils"
-       PKGMGR_INSTALL="apt-get install -y -qq /var/tmp/beacon.deb" ;;
-  rpm) IMAGE=beacon-package-smoke-rpm
-       BASE="${BEACON_SMOKE_BASE:-rockylinux/rockylinux:9}"
-       INSTALL_PKGS="systemd dbus ca-certificates iproute binutils"
-       PKGMGR_INSTALL="dnf install -y -q /var/tmp/beacon.rpm" ;;
+  deb) PKGMGR_INSTALL="apt-get install -y -qq /var/tmp/beacon.deb" ;;
+  rpm) PKGMGR_INSTALL="dnf install -y -q /var/tmp/beacon.rpm" ;;
   *) echo "unsupported format $FORMAT" >&2; exit 1 ;;
 esac
-
-echo "building $IMAGE ($ARCH, $FORMAT)"
-if [ "$FORMAT" = deb ]; then
-  docker build -q -t "$IMAGE" - >/dev/null <<DOCKERFILE
-FROM $BASE
-RUN apt-get update -qq && apt-get install -y -qq $INSTALL_PKGS >/dev/null
-STOPSIGNAL SIGRTMIN+3
-CMD ["/sbin/init"]
-DOCKERFILE
-else
-  docker build -q -t "$IMAGE" - >/dev/null <<DOCKERFILE
-FROM $BASE
-RUN dnf install -y -q $INSTALL_PKGS >/dev/null
-STOPSIGNAL SIGRTMIN+3
-CMD ["/sbin/init"]
-DOCKERFILE
-fi
+IMAGE="$(sh "$ROOT_DIR/packaging/linux/smoke/image.sh" "package-$FORMAT")"
+echo "image: $IMAGE ($ARCH, $FORMAT)"
 
 echo "starting systemd container"
 docker run -d --name "$CONTAINER" --privileged --cgroupns=host \
