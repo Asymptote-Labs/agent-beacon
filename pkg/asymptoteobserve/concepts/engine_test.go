@@ -2,9 +2,9 @@ package concepts_test
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -36,9 +36,10 @@ func credentialStores(t *testing.T) *concepts.Catalog {
 	return c
 }
 
-// TestCredentialStoresInTheRuleEngine runs the generated CEL expression in the threat-rules
-// engine, as a rule would carry it, over every example and counterexample: the engine must say
-// what the regular expressions say on their own, for each tier.
+// TestCredentialStoresInTheRuleEngine runs the generated expressions in the threat-rules engine,
+// composed the way a rule reads a credential: a file read by path, a command that reads such a
+// file, or a command that gets one out of a store. Every example of a store the tier takes in
+// must match, as a file event and as a command, and no counterexample may.
 func TestCredentialStoresInTheRuleEngine(t *testing.T) {
 	c := credentialStores(t)
 	for _, tier := range []concepts.Tier{concepts.TierDefinite, concepts.TierLikely} {
@@ -46,30 +47,39 @@ func TestCredentialStoresInTheRuleEngine(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		prog, err := threatrules.CompileMatch(`e.event.action == "file.read" && ` + selection.CEL("e.file.path"))
+		prog, err := threatrules.CompileMatch(
+			`(e.event.action == "file.read" && ` + selection.PathCEL("e.file.path") + `) || ` +
+				`(e.event.action == "command.executed" && e.command.parsed_commands.exists(c, ` +
+				`c.file_reads.exists(f, ` + selection.PathCEL("f.path") + `) || ` + selection.CommandCEL("c") + `))`)
 		if err != nil {
-			t.Fatalf("%s: the generated expression does not compile as a rule match: %v", tier, err)
+			t.Fatalf("%s: the generated expressions do not compile as a rule match: %v", tier, err)
+		}
+		check := func(s concepts.Store, what string, event asymptoteobserve.Event, want bool) {
+			t.Helper()
+			if got, err := threatrules.EvalMatch(prog, event); err != nil || got != want {
+				t.Errorf("%s stores, %s of %s (%s): the engine says %v, %v; want %v", tier, what, s.ID, s.Tier, got, err, want)
+			}
+		}
+		command := func(line string) asymptoteobserve.Event {
+			return asymptoteobserve.Event{
+				Event:   asymptoteobserve.EventInfo{Action: "command.executed"},
+				Command: &asymptoteobserve.CommandInfo{Command: line},
+			}
 		}
 		for _, s := range c.Stores {
-			for i, path := range append(append([]string(nil), s.Examples...), s.Counterexamples...) {
-				want := false
-				for _, term := range selection {
-					if regexp.MustCompile(term.Include).MatchString(path) && (term.Exclude == "" || !regexp.MustCompile(term.Exclude).MatchString(path)) {
-						want = true
-					}
-				}
+			for i, example := range append(append([]string(nil), s.Examples...), s.Counterexamples...) {
 				// An example is in the selection exactly when its store's tier is, and a
 				// counterexample never is.
-				if expect := i < len(s.Examples) && (tier == concepts.TierLikely || s.Tier == concepts.TierDefinite); want != expect {
-					t.Errorf("%s: %q of store %s (%s): the expressions say %v", tier, path, s.ID, s.Tier, want)
+				want := i < len(s.Examples) && (tier == concepts.TierLikely || s.Tier == concepts.TierDefinite)
+				if len(s.Commands) > 0 {
+					check(s, fmt.Sprintf("command %q", example), command(example), want)
+					continue
 				}
-				event := asymptoteobserve.Event{
+				check(s, fmt.Sprintf("file %q", example), asymptoteobserve.Event{
 					Event: asymptoteobserve.EventInfo{Action: "file.read"},
-					File:  &asymptoteobserve.FileInfo{Path: path},
-				}
-				if got, err := threatrules.EvalMatch(prog, event); err != nil || got != want {
-					t.Errorf("%s: the engine says %v, %v for %q; the expressions say %v", tier, got, err, path, want)
-				}
+					File:  &asymptoteobserve.FileInfo{Path: example},
+				}, want)
+				check(s, fmt.Sprintf("cat of %q", example), command("cat '"+example+"'"), want)
 			}
 		}
 	}

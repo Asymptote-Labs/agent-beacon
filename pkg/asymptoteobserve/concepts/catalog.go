@@ -2,10 +2,12 @@
 // catalog is a reviewed list of named things, and every target that needs the definition (a CEL
 // expression, a KQL expression, a documentation table) is generated from it.
 //
-// The first catalog is the credential stores: the files that hold credentials, by path. Each
-// store says which paths it is, which it is not, how sure a match is (its tier), and proves it
-// with example paths, which Decode checks. The expressions generated from the catalog are
-// checked against the same examples, so a store means the same path set wherever it is used.
+// The first catalog is the credential stores: where credentials are kept and how they are got
+// out. A store is either files, named by path, or commands that hand a credential over (the
+// keychain, a signed-in CLI, a key agent). Each store says what it matches, how sure a match is
+// (its tier), and proves it with examples, which Decode checks. The expressions generated from
+// the catalog are checked against the same examples, so a store means the same thing wherever it
+// is used.
 package concepts
 
 import (
@@ -20,15 +22,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Tier is how sure it is that a path a store matches holds a credential.
+// Tier is how sure it is that what a store matches holds or yields a credential.
 type Tier string
 
 const (
-	// TierDefinite is a file that exists to hold a credential: ~/.aws/credentials, an SSH
-	// private key.
+	// TierDefinite is a file that exists to hold a credential (~/.aws/credentials, an SSH
+	// private key), or a command that prints one (gh auth token).
 	TierDefinite Tier = "definite"
-	// TierLikely is a file that often holds one and often does not: ~/.kube/config,
-	// .env.development, a file named credentials.json.
+	// TierLikely is a file that often holds one and often does not (~/.kube/config,
+	// .env.development, a file named credentials.json), or a command that shows what a store
+	// holds without the secret itself (ssh-add -l).
 	TierLikely Tier = "likely"
 )
 
@@ -38,7 +41,7 @@ func (least Tier) includes(t Tier) bool {
 	return least == TierLikely || t == TierDefinite
 }
 
-// Catalog is a list of stores that name files by path.
+// Catalog is a list of stores.
 type Catalog struct {
 	// Name identifies the catalog (credential-stores), and Version counts its revisions.
 	Name        string `yaml:"catalog"`
@@ -55,7 +58,8 @@ type Kind struct {
 	Title string `yaml:"title"`
 }
 
-// Store is one thing that holds credentials, as the paths it is found at.
+// Store is one thing that holds credentials: files, by Match, or what commands hand over, by
+// Commands. It has one or the other.
 type Store struct {
 	ID    string `yaml:"id"`
 	Title string `yaml:"title"`
@@ -63,15 +67,19 @@ type Store struct {
 	Tier  Tier   `yaml:"tier"`
 	// Match are the patterns (see pattern) of the paths that are this store, and Exclude the
 	// patterns of the ones among them that are not: .env.example is no dotenv file.
-	Match   []string `yaml:"match"`
+	Match   []string `yaml:"match,omitempty"`
 	Exclude []string `yaml:"exclude,omitempty"`
-	// Examples are paths that are this store, at least one for each Match pattern.
-	// Counterexamples are paths that look like it and are no store of the catalog at all, at
-	// least one for each Exclude pattern.
+	// Commands are the commands that read this store.
+	Commands []CommandMatch `yaml:"commands,omitempty"`
+	// Examples are what the store is: paths for a store of files, at least one for each Match
+	// pattern, and command lines for a store of commands, at least one for each of Commands.
+	// Counterexamples look like the store and are no store of the catalog at all, with at least
+	// one for each Exclude pattern.
 	Examples        []string `yaml:"examples"`
 	Counterexamples []string `yaml:"counterexamples,omitempty"`
 
 	match, exclude []pattern
+	commands       []commandPattern
 }
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -102,8 +110,15 @@ func Decode(data []byte) (*Catalog, error) {
 	if err := c.compile(); err != nil {
 		return nil, err
 	}
-	if err := c.checkExamples(); err != nil {
-		return nil, err
+	for i := range c.Stores {
+		s := &c.Stores[i]
+		check := c.checkPaths
+		if len(s.commands) > 0 {
+			check = c.checkCommands
+		}
+		if err := check(s); err != nil {
+			return nil, fmt.Errorf("store %s: %w", s.ID, err)
+		}
 	}
 	return &c, nil
 }
@@ -139,8 +154,10 @@ func (c *Catalog) compile() error {
 			return fmt.Errorf("store %s: kind %q is not one of the catalog's kinds", s.ID, s.Kind)
 		case s.Tier != TierDefinite && s.Tier != TierLikely:
 			return fmt.Errorf("store %s: tier %q: want %s or %s", s.ID, s.Tier, TierDefinite, TierLikely)
-		case len(s.Match) == 0:
-			return fmt.Errorf("store %s: no match patterns", s.ID)
+		case len(s.Match) == 0 && len(s.Commands) == 0:
+			return fmt.Errorf("store %s: no match patterns and no commands", s.ID)
+		case len(s.Commands) > 0 && (len(s.Match) > 0 || len(s.Exclude) > 0):
+			return fmt.Errorf("store %s: both paths and commands: a store is files or commands, so make it two", s.ID)
 		}
 		ids[s.ID] = true
 		var err error
@@ -149,6 +166,13 @@ func (c *Catalog) compile() error {
 		}
 		if s.exclude, err = parsePatterns(s.Exclude); err != nil {
 			return fmt.Errorf("store %s: exclude: %w", s.ID, err)
+		}
+		for k, m := range s.Commands {
+			p, err := parseCommandMatch(m)
+			if err != nil {
+				return fmt.Errorf("store %s: commands[%d]: %w", s.ID, k, err)
+			}
+			s.commands = append(s.commands, p)
 		}
 	}
 	return nil
@@ -169,44 +193,89 @@ func parsePatterns(sources []string) ([]pattern, error) {
 	return patterns, nil
 }
 
-// checkExamples holds every store to its examples. An example must be the store's own: the one
+// checkPaths holds a store of files to its examples. An example must be the store's own: the one
 // Lookup returns, so two stores that claim the same path are told apart or told off. Every
 // pattern must be shown at work by an example, so none is dead or untested.
-func (c *Catalog) checkExamples() error {
-	for i := range c.Stores {
-		s := &c.Stores[i]
-		used := make([]bool, len(s.match))
-		for _, example := range s.Examples {
-			comps := splitPath(example)
-			found, ok := c.lookup(comps)
+func (c *Catalog) checkPaths(s *Store) error {
+	used := make([]bool, len(s.match))
+	for _, example := range s.Examples {
+		comps := splitPath(example)
+		if !s.matchesComponents(comps) {
+			return fmt.Errorf("example %q: not matched", example)
+		}
+		if found, _ := c.lookup(comps); found != s {
+			return fmt.Errorf("example %q: is store %s, which comes first or is the surer tier", example, found.ID)
+		}
+		for k := range s.match {
+			used[k] = used[k] || s.match[k].matchesComponents(comps)
+		}
+	}
+	if k := slices.Index(used, false); k >= 0 {
+		return fmt.Errorf("match pattern %q: no example shows it", s.Match[k])
+	}
+	excluded := make([]bool, len(s.exclude))
+	for _, counter := range s.Counterexamples {
+		comps := splitPath(counter)
+		if found, ok := c.lookup(comps); ok {
+			return fmt.Errorf("counterexample %q: is store %s", counter, found.ID)
+		}
+		if !slices.ContainsFunc(s.match, func(p pattern) bool { return p.matchesComponents(comps) }) {
+			continue
+		}
+		for k := range s.exclude {
+			excluded[k] = excluded[k] || s.exclude[k].matchesComponents(comps)
+		}
+	}
+	if k := slices.Index(excluded, false); k >= 0 {
+		return fmt.Errorf("exclude pattern %q: no counterexample shows it", s.Exclude[k])
+	}
+	return nil
+}
+
+// checkCommands holds a store of commands to its examples, which are command lines: one of the
+// commands an example runs must be this store, and none of the commands a counterexample runs
+// may be any store. Every entry of Commands must be shown at work by an example.
+func (c *Catalog) checkCommands(s *Store) error {
+	used := make([]bool, len(s.commands))
+	for _, example := range s.Examples {
+		commands, err := invocations(example)
+		if err != nil {
+			return fmt.Errorf("example %q: %w", example, err)
+		}
+		own := false
+		var other *Store
+		for _, inv := range commands {
+			found, ok := c.lookupCommand(inv.name, inv.args)
 			switch {
-			case !s.matchesComponents(comps):
-				return fmt.Errorf("store %s: example %q: not matched", s.ID, example)
-			case !ok || found != s:
-				return fmt.Errorf("store %s: example %q: is store %s, which comes first or is the surer tier", s.ID, example, found.ID)
-			}
-			for k := range s.match {
-				used[k] = used[k] || s.match[k].matchesComponents(comps)
-			}
-		}
-		if k := slices.Index(used, false); k >= 0 {
-			return fmt.Errorf("store %s: match pattern %q: no example shows it", s.ID, s.Match[k])
-		}
-		excluded := make([]bool, len(s.exclude))
-		for _, counter := range s.Counterexamples {
-			comps := splitPath(counter)
-			if found, ok := c.lookup(comps); ok {
-				return fmt.Errorf("store %s: counterexample %q: is store %s", s.ID, counter, found.ID)
-			}
-			if !slices.ContainsFunc(s.match, func(p pattern) bool { return p.matchesComponents(comps) }) {
-				continue
-			}
-			for k := range s.exclude {
-				excluded[k] = excluded[k] || s.exclude[k].matchesComponents(comps)
+			case !ok:
+			case found == s:
+				own = true
+				for k := range s.commands {
+					used[k] = used[k] || s.commands[k].matches(inv.name, inv.args)
+				}
+			default:
+				other = found
 			}
 		}
-		if k := slices.Index(excluded, false); k >= 0 {
-			return fmt.Errorf("store %s: exclude pattern %q: no counterexample shows it", s.ID, s.Exclude[k])
+		switch {
+		case !own && other != nil:
+			return fmt.Errorf("example %q: is store %s, which comes first or is the surer tier", example, other.ID)
+		case !own:
+			return fmt.Errorf("example %q: not matched", example)
+		}
+	}
+	if k := slices.Index(used, false); k >= 0 {
+		return fmt.Errorf("commands[%d] (%s): no example shows it", k, s.Commands[k])
+	}
+	for _, counter := range s.Counterexamples {
+		commands, err := invocations(counter)
+		if err != nil {
+			return fmt.Errorf("counterexample %q: %w", counter, err)
+		}
+		for _, inv := range commands {
+			if found, ok := c.lookupCommand(inv.name, inv.args); ok {
+				return fmt.Errorf("counterexample %q: is store %s", counter, found.ID)
+			}
 		}
 	}
 	return nil
@@ -220,17 +289,38 @@ func (s *Store) matchesComponents(comps []string) bool {
 	return in(s.match) && !in(s.exclude)
 }
 
-// Lookup returns the store path is: of the stores that match it, the definite one before the
-// likely one, and the one listed first before the others.
+// matchesCommand reports whether a command with this name and these words after it reads the
+// store.
+func (s *Store) matchesCommand(name string, args []string) bool {
+	return slices.ContainsFunc(s.commands, func(p commandPattern) bool { return p.matches(name, args) })
+}
+
+// Lookup returns the store of files path is: of the stores that match it, the definite one
+// before the likely one, and the one listed first before the others.
 func (c *Catalog) Lookup(path string) (*Store, bool) {
 	return c.lookup(splitPath(path))
 }
 
 func (c *Catalog) lookup(comps []string) (*Store, bool) {
+	return c.first(func(s *Store) bool { return s.matchesComponents(comps) })
+}
+
+// LookupCommand returns the store a command reads, by the command's name after sudo and the
+// like and the words after the name (shellcmd's Name and ArgsText, which are name and args of a
+// parsed command in a rule). Among several, it prefers as Lookup does.
+func (c *Catalog) LookupCommand(name string, args []string) (*Store, bool) {
+	return c.lookupCommand(name, args)
+}
+
+func (c *Catalog) lookupCommand(name string, args []string) (*Store, bool) {
+	return c.first(func(s *Store) bool { return s.matchesCommand(name, args) })
+}
+
+func (c *Catalog) first(matches func(*Store) bool) (*Store, bool) {
 	var found *Store
 	for i := range c.Stores {
 		s := &c.Stores[i]
-		if (found == nil || found.Tier != TierDefinite && s.Tier == TierDefinite) && s.matchesComponents(comps) {
+		if (found == nil || found.Tier != TierDefinite && s.Tier == TierDefinite) && matches(s) {
 			found = s
 		}
 	}
@@ -238,50 +328,58 @@ func (c *Catalog) lookup(comps []string) (*Store, bool) {
 }
 
 // Selection is some of a catalog's stores as regular expressions (RE2 syntax, which Go, CEL's
-// matches and Kusto's `matches regex` share): a path is in the selection when it matches the
-// Include of one of the terms and not that term's Exclude.
-type Selection []Term
+// matches and Kusto's `matches regex` share). A path is in the selection when it matches the
+// Include of one of Paths and not that term's Exclude. A command is in it when it matches every
+// expression of one of Commands.
+type Selection struct {
+	Paths    []PathTerm
+	Commands []CommandTerm
+}
 
-// Term is one alternative of a Selection. Exclude is "" when the term excludes nothing.
-type Term struct {
+// PathTerm is one alternative of a selection's paths. Exclude is "" when it excludes nothing.
+type PathTerm struct {
 	Include, Exclude string
 }
 
 // Select returns the stores of at least the tier min, of the given kinds or, with none given, of
 // every kind.
 func (c *Catalog) Select(min Tier, kinds ...string) (Selection, error) {
+	var selection Selection
 	if min != TierDefinite && min != TierLikely {
-		return nil, fmt.Errorf("tier %q: want %s or %s", min, TierDefinite, TierLikely)
+		return selection, fmt.Errorf("tier %q: want %s or %s", min, TierDefinite, TierLikely)
 	}
 	for _, kind := range kinds {
 		if !slices.ContainsFunc(c.Kinds, func(k Kind) bool { return k.ID == kind }) {
-			return nil, fmt.Errorf("kind %q is not one of the catalog's kinds", kind)
+			return selection, fmt.Errorf("kind %q is not one of the catalog's kinds", kind)
 		}
 	}
-	// The stores that exclude nothing share one expression; one that excludes gets its own, so
-	// that what it leaves out is not taken from a store that keeps it.
+	// The stores of files that exclude nothing share one expression; one that excludes gets its
+	// own, so that what it leaves out is not taken from a store that keeps it.
 	var plain []pattern
-	var terms Selection
 	for i := range c.Stores {
 		s := &c.Stores[i]
 		switch {
 		case !min.includes(s.Tier) || len(kinds) > 0 && !slices.Contains(kinds, s.Kind):
+		case len(s.commands) > 0:
+			for k := range s.commands {
+				selection.Commands = append(selection.Commands, s.commands[k].term())
+			}
 		case len(s.exclude) == 0:
 			plain = append(plain, s.match...)
 		default:
-			terms = append(terms, Term{Include: patternsRegex(s.match), Exclude: patternsRegex(s.exclude)})
+			selection.Paths = append(selection.Paths, PathTerm{Include: patternsRegex(s.match), Exclude: patternsRegex(s.exclude)})
 		}
 	}
 	if len(plain) > 0 {
-		terms = slices.Insert(terms, 0, Term{Include: patternsRegex(plain)})
+		selection.Paths = slices.Insert(selection.Paths, 0, PathTerm{Include: patternsRegex(plain)})
 	}
-	return terms, nil
+	return selection, nil
 }
 
-// CEL returns the selection as a CEL boolean expression over subject, a string expression such
-// as e.file.path.
-func (s Selection) CEL(subject string) string {
-	return s.expression("false", " || ", func(t Term) string {
+// PathCEL returns the selection's paths as a CEL boolean expression over subject, a string
+// expression such as e.file.path. It is false for a selection without stores of files.
+func (s Selection) PathCEL(subject string) string {
+	return anyOf(s.Paths, " || ", func(t PathTerm) string {
 		include := subject + ".matches(" + strconv.Quote(t.Include) + ")"
 		if t.Exclude == "" {
 			return include
@@ -290,11 +388,13 @@ func (s Selection) CEL(subject string) string {
 	})
 }
 
-// KQL returns the selection as a Kusto boolean expression over column, a string column.
-func (s Selection) KQL(column string) string {
+// PathKQL returns the selection's paths as a Kusto boolean expression over column, a string
+// column. Commands have no Kusto form: they are matched on a command line the rule engine has
+// parsed, which a query over the raw events does not have.
+func (s Selection) PathKQL(column string) string {
 	// In a verbatim string literal a backslash is itself and a double quote is written twice.
 	literal := func(regex string) string { return `@"` + strings.ReplaceAll(regex, `"`, `""`) + `"` }
-	return s.expression("false", " or ", func(t Term) string {
+	return anyOf(s.Paths, " or ", func(t PathTerm) string {
 		include := column + " matches regex " + literal(t.Include)
 		if t.Exclude == "" {
 			return include
@@ -303,16 +403,35 @@ func (s Selection) KQL(column string) string {
 	})
 }
 
-func (s Selection) expression(empty, or string, term func(Term) string) string {
-	if len(s) == 0 {
-		return empty
+// CommandCEL returns the selection's commands as a CEL boolean expression over subject, an
+// expression for one parsed command such as the c of e.command.parsed_commands.exists(c, ..).
+// It reads the command's name and args. It is false for a selection without stores of commands.
+func (s Selection) CommandCEL(subject string) string {
+	return anyOf(s.Commands, " || ", func(t CommandTerm) string {
+		parts := []string{subject + ".name.matches(" + strconv.Quote(t.Name) + ")"}
+		for _, regex := range []string{t.Words, t.Flags} {
+			if regex != "" {
+				parts = append(parts, subject+".args.matches("+strconv.Quote(regex)+")")
+			}
+		}
+		if len(parts) == 1 {
+			return parts[0]
+		}
+		return "(" + strings.Join(parts, " && ") + ")"
+	})
+}
+
+// anyOf joins the rendering of each term with or, and is false for no terms.
+func anyOf[T any](terms []T, or string, render func(T) string) string {
+	if len(terms) == 0 {
+		return "false"
 	}
-	terms := make([]string, len(s))
-	for i, t := range s {
-		terms[i] = term(t)
+	rendered := make([]string, len(terms))
+	for i, t := range terms {
+		rendered[i] = render(t)
 	}
-	if len(terms) == 1 {
-		return terms[0]
+	if len(rendered) == 1 {
+		return rendered[0]
 	}
-	return "(" + strings.Join(terms, or) + ")"
+	return "(" + strings.Join(rendered, or) + ")"
 }

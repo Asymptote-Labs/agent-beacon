@@ -221,7 +221,7 @@ func (p *pattern) regex() string {
 			b.WriteString(`(?:` + notSeparator + `+` + separator + `)*`)
 			continue
 		}
-		writeItems(&b, part.items)
+		writeItems(&b, part.items, notSeparator)
 		if i < len(p.parts)-1 || p.under {
 			b.WriteString(separator)
 		}
@@ -232,18 +232,20 @@ func (p *pattern) regex() string {
 	return b.String()
 }
 
-func writeItems(b *strings.Builder, items []item) {
+// writeItems writes items as a regular expression. within is the class of the characters a *
+// runs over: the ones that do not end what the items are matched against.
+func writeItems(b *strings.Builder, items []item, within string) {
 	for _, it := range items {
 		switch {
 		case it.star:
-			b.WriteString(notSeparator + `*`)
+			b.WriteString(within + `*`)
 		case it.alts != nil:
 			b.WriteString(`(?:`)
 			for i, alt := range it.alts {
 				if i > 0 {
 					b.WriteByte('|')
 				}
-				writeItems(b, alt)
+				writeItems(b, alt, within)
 			}
 			b.WriteByte(')')
 		default:

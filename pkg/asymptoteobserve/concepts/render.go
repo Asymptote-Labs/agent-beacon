@@ -15,13 +15,18 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 	if c.Description != "" {
 		fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(c.Description))
 	}
-	b.WriteString("A pattern names a file by the last components of its path, whatever directory they are in:\n" +
-		"`.aws/credentials` is the file `credentials` in a directory `.aws`. Letters match without regard\n" +
-		"to case, and `/` in a pattern is `/` or `\\` in a path. `*` is any run of characters within a\n" +
-		"component, `{a,b,}` one of the alternatives (which may be empty), a component `**` any number\n" +
-		"of directories, and a trailing `/**` everything under a directory.\n\n" +
-		"A `definite` store exists to hold a credential. A `likely` one often holds one and often does\n" +
-		"not. A path that two stores match is the definite one's, then the one listed first.\n")
+	b.WriteString("A store is files or commands.\n\n" +
+		"A path pattern names a file by the last components of its path, whatever directory they are\n" +
+		"in: `.aws/credentials` is the file `credentials` in a directory `.aws`. Letters match without\n" +
+		"regard to case, and `/` in a pattern is `/` or `\\` in a path. `*` is any run of characters\n" +
+		"within a component, `{a,b,}` one of the alternatives (which may be empty), a component `**`\n" +
+		"any number of directories, and a trailing `/**` everything under a directory.\n\n" +
+		"A command is matched after the command line is read as bash: by its name behind `sudo` and\n" +
+		"the like, by words that follow each other somewhere after the name, and by an option of which\n" +
+		"one must be there. `-w|-g` is either short option, alone or in a cluster such as `-aw`, in its\n" +
+		"own case; a longer option is a whole word that may carry `=value`.\n\n" +
+		"A `definite` store exists to hold a credential, or prints one. A `likely` one often holds one\n" +
+		"and often does not. What two stores match is the definite one's, then the one listed first.\n")
 	for _, kind := range c.Kinds {
 		header := false
 		for i := range c.Stores {
@@ -30,16 +35,22 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 				continue
 			}
 			if !header {
-				fmt.Fprintf(&b, "\n## %s (`%s`)\n\n| Store | Tier | Paths | Except | Example |\n|---|---|---|---|---|\n", kind.Title, kind.ID)
+				fmt.Fprintf(&b, "\n## %s (`%s`)\n\n| Store | Tier | Paths or commands | Except | Example |\n|---|---|---|---|---|\n", kind.Title, kind.ID)
 				header = true
 			}
-			fmt.Fprintf(&b, "| `%s`: %s | %s | %s | %s | `%s` |\n", s.ID, s.Title, s.Tier, code(s.Match), code(s.Exclude), s.Examples[0])
+			matches := append([]string(nil), s.Match...)
+			for _, m := range s.Commands {
+				matches = append(matches, m.String())
+			}
+			fmt.Fprintf(&b, "| `%s`: %s | %s | %s | %s | `%s` |\n", s.ID, s.Title, s.Tier, code(matches), code(s.Exclude), cell(s.Examples[0]))
 		}
 	}
 	b.WriteString("\n## Generated expressions\n\n" +
-		"What a rule or a query uses is a selection of the catalog as one expression. These are the two\n" +
-		"selections of every kind, over a path `p` in CEL and a column `FilePath` in KQL. The regular\n" +
-		"expressions are RE2 syntax, which both read the same way.\n")
+		"What a rule or a query uses is a selection of the catalog as expressions. These are the two\n" +
+		"selections of every kind: the files over a path `p` in CEL and a column `FilePath` in KQL, and\n" +
+		"the commands over a parsed command `c` in CEL, which reads `c.name` and `c.args`. The regular\n" +
+		"expressions are RE2 syntax, which CEL and KQL read the same way. Commands have no KQL form: a\n" +
+		"query over raw events has no parsed command line.\n")
 	for _, tier := range []Tier{TierDefinite, TierLikely} {
 		selection, err := c.Select(tier)
 		if err != nil {
@@ -49,7 +60,8 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 		if tier == TierLikely {
 			title = "`likely` and `definite` stores"
 		}
-		fmt.Fprintf(&b, "\n### %s\n\nCEL:\n\n```\n%s\n```\n\nKQL:\n\n```\n%s\n```\n", title, selection.CEL("p"), selection.KQL("FilePath"))
+		fmt.Fprintf(&b, "\n### %s\n\nFiles, CEL:\n\n```\n%s\n```\n\nFiles, KQL:\n\n```\n%s\n```\n\nCommands, CEL:\n\n```\n%s\n```\n",
+			title, selection.PathCEL("p"), selection.PathKQL("FilePath"), selection.CommandCEL("c"))
 	}
 	return b.String(), nil
 }
@@ -58,7 +70,12 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 func code(patterns []string) string {
 	quoted := make([]string, len(patterns))
 	for i, p := range patterns {
-		quoted[i] = "`" + p + "`"
+		quoted[i] = "`" + cell(p) + "`"
 	}
 	return strings.Join(quoted, "<br>")
+}
+
+// cell makes text safe inside a table cell's inline code: a | would end the cell.
+func cell(text string) string {
+	return strings.ReplaceAll(text, "|", `\|`)
 }
