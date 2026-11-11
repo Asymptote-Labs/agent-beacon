@@ -39,7 +39,7 @@ func SocketRedirects(commands []Command) [][]SocketRedirect {
 	var open map[descriptorKey]string
 	for i := range commands {
 		c := &commands[i]
-		scope := descriptorKey{within: c.within, subshell: c.subshell}
+		scope := descriptorKey{shell: c.shell, within: c.within, subshell: c.subshell}
 		// Only a bare exec's redirections outlast the command.
 		keeps := len(c.Argv) == 1 && c.Argv[0].Known && c.Argv[0].Text == "exec"
 		for _, r := range c.Redirects {
@@ -62,12 +62,16 @@ func SocketRedirects(commands []Command) [][]SocketRedirect {
 			target := r.Target.Unquoted
 			if number, isNumber := descriptorNumber(target); (r.Op == ">&" || r.Op == "<&") && (isNumber || target == "-") {
 				// A duplicated descriptor is the socket an exec opened it on: in this shell, or in
-				// the one this subshell or substitution was started from.
+				// one it was started from (a subshell or a substitution from its shell, a script
+				// from the shell that runs it).
 				from := scope
 				from.fd = number
 				found.Path = open[from]
-				if found.Path == "" {
-					found.Path = open[descriptorKey{fd: number}]
+				for shell := c.shell; found.Path == ""; shell = commands[shell-1].shell {
+					found.Path = open[descriptorKey{shell: shell, fd: number}]
+					if shell == 0 {
+						break
+					}
 				}
 			} else if isSocketPath(target) {
 				found.Path = target
@@ -94,11 +98,11 @@ func SocketRedirects(commands []Command) [][]SocketRedirect {
 	return out
 }
 
-// descriptorKey is a descriptor of one shell: the command line's own, or a substitution's or a
-// subshell's.
+// descriptorKey is a descriptor of one shell: the command line's own or a script's (shell, as
+// Command.shell), or a substitution's or a subshell's in it.
 type descriptorKey struct {
-	within, subshell int32
-	fd               string
+	shell, within, subshell int32
+	fd                      string
 }
 
 // descriptorNumber reads the target of >& or <& as a descriptor: digits, with the - that moves it.

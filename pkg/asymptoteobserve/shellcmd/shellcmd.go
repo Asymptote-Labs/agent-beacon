@@ -78,6 +78,9 @@ type Command struct {
 	Stage    int
 	// Nested is true inside a command substitution ($(...), `...`) or a process substitution.
 	Nested bool
+	// InScript is true for a command of the script a shell of the command line runs (its -c
+	// text, or the here-document it reads): WithScripts adds those after the shell.
+	InScript bool
 	// AfterCD is true when a cd, pushd or popd comes earlier in the command line, so a relative
 	// path no longer names the file it would at the start. The directory itself is not tracked.
 	AfterCD bool
@@ -93,6 +96,11 @@ type Command struct {
 	// subshell identifies the innermost ( .. ) the statement is inside, or is 0: what an exec
 	// there leaves open is closed when the subshell ends.
 	subshell int32
+	// shell is, for a command WithScripts added, one more than the index of the shell whose
+	// script it is in, and 0 for a command of the command line itself. scripted is set on a
+	// shell whose script's commands follow it.
+	shell    int32
+	scripted bool
 }
 
 // wordRef is one thing a word of a command takes its value from: a command substitution or an
@@ -104,6 +112,9 @@ type wordRef struct {
 	index int // of the word in Argv, Redirects or Env, or of the declaration
 	subst int
 	name  string
+	// For refDeclares: exported is set when the declaration is an export, and bare when it
+	// gives the variable no value (export T), so that the variable keeps the one it has.
+	exported, bare bool
 }
 
 // refPlace is where the word of a wordRef is.
@@ -195,11 +206,12 @@ type parser struct {
 }
 
 // declaration is an assignment by export, declare, local, readonly or typeset, and where its
-// statement ends.
+// statement ends. value is nil for an export that names a variable without assigning it.
 type declaration struct {
-	end   uint
-	name  string
-	value []syntax.WordPart
+	end      uint
+	name     string
+	value    []syntax.WordPart
+	exported bool
 }
 
 func (p *parser) visit(node syntax.Node) bool {
@@ -247,9 +259,15 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 		p.compounds = append(p.compounds, compound{start: stmt.Pos().Offset(), end: stmt.End().Offset(), stage: st})
 	}
 	if decl, ok := stmt.Cmd.(*syntax.DeclClause); ok {
+		exported := decl.Variant != nil && decl.Variant.Value == "export"
 		for _, as := range decl.Args {
-			if as.Name != nil && as.Value != nil {
-				p.declared = append(p.declared, declaration{end: stmt.End().Offset(), name: as.Name.Value, value: as.Value.Parts})
+			switch {
+			case as.Name == nil:
+			case as.Value != nil:
+				p.declared = append(p.declared, declaration{end: stmt.End().Offset(), name: as.Name.Value, value: as.Value.Parts, exported: exported})
+			case exported && as.Naked:
+				// export T: the variable keeps its value and the commands it runs get it.
+				p.declared = append(p.declared, declaration{end: stmt.End().Offset(), name: as.Name.Value, exported: true})
 			}
 		}
 	}
@@ -299,7 +317,7 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			pending = append(pending, d)
 			continue
 		}
-		c.refs = append(c.refs, wordRef{place: refDeclares, index: carried, name: d.name})
+		c.refs = append(c.refs, wordRef{place: refDeclares, index: carried, name: d.name, exported: d.exported, bare: d.value == nil})
 		c.refs = p.refs(c.refs, d.value, refDeclared, carried)
 		carried++
 	}

@@ -86,9 +86,9 @@ Beacon ships with a small built-in baseline so `beacon scan` works before any ru
   `secret-read-then-egress` correlation. `credentials-in-curl-data` remains for
   inline credential fields; overlapping curl/wget file uploads can fire both.
   What a command takes in is followed through pipes, redirections, substitutions,
-  variables and copies within the command line, and into an inline script that
-  opens the file in the call that sends it; data that crosses a `bash -c` boundary
-  or moves through a script's own variables is not followed.
+  variables and copies within the command line, into and out of a `bash -c` script,
+  and into an inline script that opens the file in the call that sends it; what an
+  inline script does with the file through its own variables is not followed.
 - The rules that ask about a credential share one definition of it: the rule
   pack's credential catalog (`rules/concepts/credential-stores.md`), which lists
   the files that hold credentials and the commands that hand them over.

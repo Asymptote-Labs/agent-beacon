@@ -302,17 +302,27 @@ the steps in both orders still fires once. A single event never satisfies two st
   directly inside it writes. A variable holds what the substitutions and variables in its
   value hold, when it is assigned by a statement of assignments only or by `export`, `declare`,
   `local`, `readonly` or `typeset`; an assignment before a command is that command's
-  environment and is not followed. A file written earlier in the command line holds what the
+  environment and is followed only into a script the command runs (below). A file written earlier in the command line holds what the
   command that wrote it took in (the target of `>` and `>>`, the destination of `cp` and
   `install`, the files of `tee`) or what the file moved onto it held (`mv`), until it is
   written with something else, truncated or deleted; reading it takes that in too, by the
   same `via`. Paths are compared as written.
 
+  The data is followed across the boundary of a script that is read as commands (a shell's
+  `-c` text, or the here-document or here-string it reads its script from). The shell writes
+  what the last stage of each pipeline directly in its script writes, in place of what the
+  shell itself took in, so in `bash -c 'cat .env' | nc ..` the read is on `cat` and, by
+  `stdin`, on `nc`. A first stage directly in the script takes in by `stdin` what the shell
+  took in by `stdin`, unless a redirection of its own supplies its standard input. A variable
+  belongs to the shell that assigned it: a script reads its own, those of the `NAME=value`
+  prefix of the shell that runs it, and those a shell it was started from assigned with
+  `export` or named in a later `export NAME`; a script's variables do not leave it. Files
+  written are shared.
+
   Standard input (`-`) and paths under `/dev/` are left out. The body of a here-document
-  that is not a script is not followed, nor is what a script does with a file through a
-  variable, nor data that crosses the boundary of a shell's script (`bash -c 'cat .env' | nc
-  ..` reports the read on `cat`, not on `nc`). The reference derivation is
-  `shellcmd.FileReads`.
+  that is not a script is not followed, nor is what a script of another language does with a
+  file through a variable. The reference derivation is `shellcmd.FileReads` over
+  `shellcmd.WithScripts`.
 - `socket_redirects` (since v1.3; a rule that selects it MUST declare
   `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` lists the
   command's redirections to or from bash's network pseudo-files, each `{path, op}`. `path` is
