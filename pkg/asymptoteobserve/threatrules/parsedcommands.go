@@ -33,14 +33,16 @@ const maxShellDepth = 3
 //     point where it became incomplete; one that does not parse at all yields none, and a rule
 //     falls back to matching command.command.
 //   - name is the base name of the command after its wrappers (sudo, env, command, exec, nohup,
-//     time, timeout, nice, ionice, stdbuf, doas, torsocks, proxychains), "" when it is unknown
-//     or a wrapper option hides it (sudo -i, env -C).
+//     time, timeout, nice, ionice, stdbuf, doas, torsocks, proxychains, caffeinate, uv run and
+//     the like: shellcmd.Command.Unwrapped), "" when it is unknown or a wrapper option hides it
+//     (sudo -l, env -C).
 //   - argv and argv_raw are every word, wrappers included: argv as the shell passes it on, ""
 //     for a word whose value depends on an expansion, glob or leading tilde; argv_raw as written.
 //   - args is shellcmd's ArgsText: the words of argv after name, one per line.
 //   - env maps each NAME=value assignment before the command to its value ("" when unknown).
 //   - file_effects are shellcmd's file effects of the command: {path, op}. file_writes are its
-//     file writes: the same, and the ones whose path is only known as written.
+//     file writes: the same, the ones whose path is only known as written, and the directory
+//     an archive or a clone puts files into.
 //   - file_reads are shellcmd's file reads of the command: {path, via}, each path as written.
 //     script_sends are the paths of those an inline script opens inside a call that sends them.
 //   - socket_redirects are shellcmd's socket redirections of the command: {path, op}.
@@ -51,13 +53,19 @@ const maxShellDepth = 3
 //     (`docker exec c sh -c ..`).
 //   - So is the here-document or here-string a shell reads its script from, when the shell is
 //     the command the statement runs (after its wrappers) and it is given no -c and no script
-//     file: `sudo bash <<'EOF'`, `sh -s -- arg <<EOF`, `bash <<< 'cmd'`.
+//     file: `sudo bash <<'EOF'`, `sh -s -- arg <<EOF`, `bash <<< 'cmd'`; what a pipe sends
+//     such a shell when the stage before prints its own words (`echo 'cmd' | sh`); and the
+//     command line a carrier hands on (xargs, find -exec, ssh, docker exec, eval and the
+//     like: shellcmd.Command.Carried).
+//   - runs_read says the command line a command hands on was read to its end, and span is
+//     shellcmd's span of the command.
 //   - file_reads and socket_redirects follow the data across a script's boundary: the script's
 //     commands read what the shell gets on its standard input, and the shell writes what they
 //     write.
 //
-// Other here-document bodies, what a pipe sends a shell, and the strings of commands other than
-// a shell's -c are not read as commands. The text is read as bash whatever shell ran it.
+// Other here-document bodies, what a pipe sends a shell from a command that does not print its
+// own words, a script file, and the code of an interpreter are not read as commands. The text
+// is read as bash whatever shell ran it.
 //
 // It is exported so that another engine implementing the Threat Rules contract can derive the
 // field the same way; fixtures that exercise it only conform if the derivation agrees.

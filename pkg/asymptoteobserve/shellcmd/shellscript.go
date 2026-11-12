@@ -12,7 +12,8 @@ import (
 // input, when the shell is the command it runs after its wrappers (`sudo bash <<'EOF'`,
 // `sh -s -- arg <<EOF`, `bash <<< 'cmd'`). ok is false when there is no such shell, the shell
 // runs a file or what a pipe sends it, or the script is not a known word. A PowerShell in the
-// command runs the script of its -Command option (powershellScript).
+// command runs the script of its -Command option (powershellScript). WithScripts also reads
+// what a pipe sends a shell when the stage before it prints it literally.
 func (c Command) Script() (script string, ok bool) {
 	script, _, ok = c.script()
 	return script, ok
@@ -22,6 +23,22 @@ func (c Command) Script() (script string, ok bool) {
 // after the script with -c, and the one before the first operand with -s, so that each word after
 // it is $1, $2 and so on. zero is -1 where the operands are not the script's (PowerShell).
 func (c Command) script() (script string, zero int, ok bool) {
+	script, zero, found, stdin := c.scriptScan()
+	switch {
+	case found:
+		return script, zero, true
+	case !stdin:
+		return "", -1, false
+	}
+	script, ok = c.HereInput()
+	return script, zero, ok
+}
+
+// scriptScan reads the words after the first shell word of the command. It returns the -c
+// script when there is one and it is a known word (found), and otherwise whether the shell is
+// the command the statement runs and reads its script from its standard input (stdin): it is
+// given no -c and no script file. zero is as script says.
+func (c Command) scriptScan() (script string, zero int, found, stdin bool) {
 	words := c.Argv
 	start := -1
 	for i, w := range words {
@@ -31,11 +48,11 @@ func (c Command) script() (script string, zero int, ok bool) {
 		}
 	}
 	if start < 0 {
-		script, ok = c.powershellScript()
-		return script, -1, ok
+		script, found := c.powershellScript()
+		return script, -1, found, false
 	}
 	// command is set by -c, and stdin by -s: the operands are then the script's arguments.
-	command, stdin := false, false
+	command := false
 	zero = len(words) - 1
 scan:
 	for i := start + 1; ; i++ {
@@ -49,13 +66,13 @@ scan:
 				zero = i - 1
 				break // with -s, the script's first argument
 			}
-			return "", -1, false
+			return "", -1, false, false
 		}
 		t := w.Text
 		switch {
 		case t == "--" || t == "-": // a lone - ends the options as -- does
 			if command && i+1 < len(words) && words[i+1].Known {
-				return words[i+1].Text, i + 2, true
+				return words[i+1].Text, i + 2, true, false
 			}
 			stdin = !command && (stdin || i+1 == len(words))
 			zero = i
@@ -75,20 +92,152 @@ scan:
 			}
 		default:
 			if command {
-				return t, i + 1, true
+				return t, i + 1, true, false
 			}
 			zero = i - 1
 			break scan // with -s an argument of the script, without it a script file
 		}
 	}
 	if !stdin {
-		return "", -1, false
+		return "", -1, false, false
 	}
 	if unwrapped, ok := c.Unwrapped(); !ok || len(c.Argv)-len(unwrapped) != start {
-		return "", -1, false
+		return "", -1, false, false
 	}
-	script, ok = c.HereInput()
-	return script, zero, ok
+	return "", zero, false, true
+}
+
+// pipedScript returns the script a pipe sends the shell at commands[i], when it is told by
+// the command line: the shell reads its script from its standard input, that is the pipe and
+// not a redirection, and every command of the stage before it prints its own words (printed).
+// `echo 'rm -rf /' | sh`, `printf '%s\n' 'id' | sudo bash` and `cat <<'EOF' | sh` are read;
+// `curl .. | sh` and `echo "$CMD" | sh` are not.
+func pipedScript(commands []Command, i int) (string, bool) {
+	shell := &commands[i]
+	if shell.Stage == 0 {
+		return "", false
+	}
+	if _, _, found, stdin := shell.scriptScan(); found || !stdin {
+		return "", false
+	}
+	for _, r := range shell.Redirects {
+		if (r.Fd == "" || r.Fd == "0") && strings.HasPrefix(r.Op, "<") {
+			return "", false // its standard input is not the pipe
+		}
+	}
+	var parts []string
+	for k := range commands {
+		d := &commands[k]
+		if k == i || d.Pipeline != shell.Pipeline || d.Stage != shell.Stage-1 {
+			continue
+		}
+		text, ok := d.printed()
+		if !ok {
+			return "", false
+		}
+		parts = append(parts, text)
+	}
+	if len(parts) == 0 {
+		return "", false
+	}
+	return strings.Join(parts, "\n"), true
+}
+
+// printed returns what the command writes to its standard output, when its own words say it:
+// the words of echo, a printf format that takes only strings with its arguments, and the
+// here-document or here-string cat is given with no file. ok is false for any other command,
+// for one with a word whose value is unknown, and for one whose output is redirected.
+func (c Command) printed() (string, bool) {
+	name, args := c.run()
+	for _, r := range c.Redirects {
+		if (r.Fd == "" || r.Fd == "1") && (strings.HasPrefix(r.Op, ">") || strings.HasPrefix(r.Op, "&>")) {
+			return "", false
+		}
+	}
+	for _, w := range args {
+		if !w.Known {
+			return "", false
+		}
+	}
+	switch name {
+	case "echo":
+		escapes := false
+		for len(args) > 0 && len(args[0].Text) > 1 && args[0].Text[0] == '-' && strings.Trim(args[0].Text[1:], "neE") == "" {
+			escapes = escapes || strings.ContainsRune(args[0].Text, 'e')
+			args = args[1:]
+		}
+		words := make([]string, len(args))
+		for k, w := range args {
+			words[k] = w.Text
+		}
+		text := strings.Join(words, " ")
+		if escapes {
+			text = printfEscapes.Replace(text)
+		}
+		return text, true
+	case "printf":
+		if len(args) > 0 && args[0].Text == "--" {
+			args = args[1:]
+		}
+		if len(args) == 0 || strings.HasPrefix(args[0].Text, "-") {
+			return "", false // printf -v assigns a variable
+		}
+		return printfOutput(args[0].Text, args[1:])
+	case "cat":
+		if len(args) == 0 || len(args) == 1 && args[0].Text == "-" {
+			return c.HereInput()
+		}
+	}
+	return "", false
+}
+
+// printfEscapes are the backslash escapes a printf format and echo -e turn into characters,
+// as far as a command line needs them.
+var printfEscapes = strings.NewReplacer(`\n`, "\n", `\t`, "\t", `\\`, `\`, `\"`, `"`, `\'`, `'`)
+
+// printfOutput returns what printf prints for a format whose only directives are %s, %b and
+// %%: the format once when it has none, and otherwise once for each group of arguments, as
+// printf reuses its format. ok is false for any other directive.
+func printfOutput(format string, args []Word) (string, bool) {
+	var literals []string // the text before each directive, and after the last
+	var b strings.Builder
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			b.WriteByte(format[i])
+			continue
+		}
+		if i+1 == len(format) {
+			return "", false
+		}
+		i++
+		switch format[i] {
+		case '%':
+			b.WriteByte('%')
+		case 's', 'b':
+			literals = append(literals, printfEscapes.Replace(b.String()))
+			b.Reset()
+		default:
+			return "", false
+		}
+	}
+	tail := printfEscapes.Replace(b.String())
+	if len(literals) == 0 {
+		return tail, true
+	}
+	var out strings.Builder
+	for next := 0; ; {
+		for _, literal := range literals {
+			out.WriteString(literal)
+			if next < len(args) {
+				out.WriteString(args[next].Text)
+				next++
+			}
+		}
+		out.WriteString(tail)
+		if next >= len(args) {
+			return out.String(), true
+		}
+	}
 }
 
 func isShell(word string) bool {
@@ -214,7 +363,7 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 	if slices.ContainsFunc(commands, func(c Command) bool { return c.outer != 0 }) {
 		at = make([]int32, len(commands))
 	}
-	for i, c := range commands {
+	for idx, c := range commands {
 		if c.outer != 0 {
 			c.outer = at[c.outer-1]
 		}
@@ -235,7 +384,7 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		}
 		x.out = append(x.out, c)
 		if at != nil {
-			at[i] = int32(len(x.out))
+			at[idx] = int32(len(x.out))
 		}
 		if depth <= 0 {
 			continue
@@ -249,6 +398,8 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 				// A script read from the shell's standard input leaves none for its commands.
 				here, isHere := c.HereInput()
 				onStdin = isHere && here == script
+			} else if script, ok = pipedScript(commands, idx); ok {
+				onStdin = true
 			}
 		}
 		if !ok {

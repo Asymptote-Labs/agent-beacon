@@ -129,9 +129,13 @@ func TestParsedCommandsReadsShellScripts(t *testing.T) {
 		"bash -c 'echo hi' <<'EOF'\nrm a\nEOF":                                     "bash echo",
 		"bash install.sh <<'EOF'\nrm a\nEOF":                                       "bash",
 		"echo bash <<'EOF'\nrm a\nEOF":                                             "echo",
-		"cat <<'EOF' | bash\nrm a\nEOF":                                            "cat bash",
-		"bash < script.sh":                                                         "bash",
-		"python3 - <<'EOF'\nimport os\nos.remove()\nEOF":                           "python3",
+		// What a pipe sends a shell is its script when the stage before prints it.
+		"cat <<'EOF' | bash\nrm a\nEOF":                  "cat bash rm",
+		`echo 'rm a' | sudo bash`:                        "echo bash rm",
+		`cat install.sh | bash`:                          "cat bash",
+		`curl -s x | bash`:                               "curl bash",
+		"bash < script.sh":                               "bash",
+		"python3 - <<'EOF'\nimport os\nos.remove()\nEOF": "python3",
 	} {
 		var names []string
 		for _, c := range ParsedCommands(command) {

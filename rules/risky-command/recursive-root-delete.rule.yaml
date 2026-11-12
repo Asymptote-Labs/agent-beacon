@@ -1,13 +1,14 @@
 id: recursive-root-delete
-spec: threat-rules/v1.2  # needed for e.command.parsed_commands
-version: 4
+spec: threat-rules/v1.3  # needed for the commands a carrier or a pipe hands a shell
+version: 5
 title: Recursive delete targeting a sensitive root path
 description: >
   A recursive or forced `rm` with an operand that is a filesystem root, home, or a
   bare wildcard — a destructive command an autonomous agent should not run
   unprompted. The command line is read as bash, so a path under home (`~/project`)
-  or the same text inside a quoted string or a here-document does not fire; a
-  command line that does not parse falls back to matching its text.
+  or the same text inside a quoted string or a here-document does not fire, and the
+  rm that `ssh host`, `docker exec`, `eval`, `find -exec` or a script echoed into a
+  shell runs does; a command line that does not parse falls back to matching its text.
 severity: critical
 status: stable
 posture: detect
@@ -33,6 +34,42 @@ emit:
   reason: "Recursive rm targeting a root, home, or wildcard path"
 
 tests:
+  - name: rm_rf_root_on_another_host
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh root@host.example 'rm -rf /'" }
+        session: { id: s1 }
+  - name: rm_rf_root_in_a_container
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker exec -u root web rm -rf /" }
+        session: { id: s1 }
+  - name: rm_rf_root_echoed_into_a_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'rm -rf /' | sudo sh" }
+        session: { id: s1 }
+  - name: rm_rf_root_given_to_eval
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "eval 'rm -rf /'" }
+        session: { id: s1 }
+  - name: rm_rf_root_behind_a_runner
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "caffeinate -i rm -rf ~" }
+        session: { id: s1 }
+  - name: rm_rf_root_echoed_and_not_run
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'rm -rf /' | tee notes.txt" }
+        session: { id: s1 }
   - name: rm_rf_root
     verdict: match
     events:
