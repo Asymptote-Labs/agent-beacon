@@ -90,7 +90,7 @@ BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/gateway-v
 curl -fsSLO "${BASE}/beacon-gateway_${VERSION}_linux_amd64.tar.gz" -O "${BASE}/checksums.txt"
 sha256sum --check --ignore-missing checksums.txt
 tar -xzf "beacon-gateway_${VERSION}_linux_amd64.tar.gz"
-./beacon-gateway_${VERSION}_linux_amd64/beacon-gateway -config beacon-gateway.yaml
+./beacon-gateway_${VERSION}_linux_amd64/beacon-gateway -config beacon-gateway_${VERSION}_linux_amd64/beacon-gateway.example.yaml
 ```
 
 Each archive carries the binary, the license, the README and `beacon-gateway.example.yaml`, the
