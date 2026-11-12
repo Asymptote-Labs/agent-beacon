@@ -353,21 +353,18 @@ func TestScanEventsDerivesOncePerEvent(t *testing.T) {
 		want = append(want, f...)
 	}
 
+	// The correlation rules among them read the same derivation: once per event for them all.
 	derivations := 0
 	deriveObserver = func() { derivations++ }
 	t.Cleanup(func() { deriveObserver = nil })
-	if _, err := ScanEvents(singleEventRules(rules), events); err != nil {
+	got, err := ScanEvents(rules, events)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if derivations == 0 || derivations > len(events) {
 		t.Fatalf("derived %d times over %d events; want once per event at most", derivations, len(events))
 	}
 	deriveObserver = nil
-
-	got, err := ScanEvents(rules, events)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if !reflect.DeepEqual(findingKeys(got), findingKeys(want)) {
 		t.Fatalf("ScanEvents differs from each rule's Findings:\n got %v\nwant %v", findingKeys(got), findingKeys(want))
 	}

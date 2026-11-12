@@ -345,7 +345,7 @@ func TestOrderedCorrelationMatchesExhaustiveSearch(t *testing.T) {
 			events[i] = corrEvent(ts, actions[rng.Intn(len(actions))], "s", nil)
 		}
 		for ri, c := range rules {
-			got, err := c.matchSessionInSequence(events)
+			got, err := c.matchSessionInSequence(events, c.ownSteps(events))
 			if err != nil {
 				t.Fatal(err)
 			}

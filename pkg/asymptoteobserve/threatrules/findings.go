@@ -95,7 +95,7 @@ func (c *CompiledRule) correlationFindings(events []asymptoteobserve.Event) ([]F
 	groups, order := groupBySession(events)
 	var findings []Finding
 	for _, sid := range order {
-		seq, err := c.matchSession(groups[sid])
+		seq, err := c.matchSession(groups[sid], c.ownSteps(groups[sid]))
 		if err != nil {
 			return nil, err
 		}
@@ -125,10 +125,12 @@ func (c *CompiledRule) newFinding(evidence []asymptoteobserve.Event) Finding {
 // ScanEvents runs every compiled rule over the events and returns all findings, in rule
 // order. It is the aggregator backing the `beacon scan` command.
 //
-// Single-event rules run event by event, as an EventScanner runs them: only the rules that can
-// match an event's action are evaluated, and an event's derived fields (a parsed command line, a
-// tool result's text) are computed once for every rule that references them, not once per rule,
-// and dropped before the next event. Correlation rules run after, each over the whole sequence.
+// The rules run event by event, as an EventScanner runs the single-event ones: only the rules
+// that can match an event's action are evaluated, and an event's derived fields (a parsed
+// command line, a tool result's text) are computed once for every rule that references them,
+// not once per rule, and dropped before the next event. The steps of the correlation rules are
+// evaluated in the same pass, on the same form of the event, and each rule is then matched
+// over the whole sequence from those answers (stepTable).
 func ScanEvents(rules []*CompiledRule, events []asymptoteobserve.Event) ([]Finding, error) {
 	found := make([][]Finding, len(rules))
 	var single []*CompiledRule
@@ -139,21 +141,26 @@ func ScanEvents(rules []*CompiledRule, events []asymptoteobserve.Event) ([]Findi
 			at = append(at, r)
 		}
 	}
-	if len(single) > 0 {
+	steps := newStepTable(rules, events)
+	if len(single) > 0 || steps != nil {
 		scanner := newEventScanner(single)
 		for i := range events {
-			err := scanner.scan(&eventInput{event: &events[i]}, func(k int) {
+			in := &eventInput{event: &events[i]}
+			err := scanner.scan(in, func(k int) {
 				found[at[k]] = append(found[at[k]], single[k].newFinding([]asymptoteobserve.Event{events[i]}))
 			})
 			if err != nil {
 				return nil, err
+			}
+			if steps != nil {
+				steps.fill(i, in)
 			}
 		}
 	}
 	var all []Finding
 	for r, rule := range rules {
 		if rule.steps != nil {
-			f, err := rule.correlationFindings(events)
+			f, err := steps.findings(rule)
 			if err != nil {
 				return nil, fmt.Errorf("rule %q: %w", rule.Rule().ID, err)
 			}

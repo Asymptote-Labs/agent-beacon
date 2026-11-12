@@ -13,7 +13,7 @@ import (
 func (c *CompiledRule) evaluateCorrelation(events []asymptoteobserve.Event) (Verdict, error) {
 	groups, order := groupBySession(events)
 	for _, sid := range order {
-		matched, err := c.matchSession(groups[sid])
+		matched, err := c.matchSession(groups[sid], c.ownSteps(groups[sid]))
 		if err != nil {
 			return "", err
 		}
@@ -24,14 +24,24 @@ func (c *CompiledRule) evaluateCorrelation(events []asymptoteobserve.Event) (Ver
 	return VerdictNoMatch, nil
 }
 
+// stepEval reports whether a step of a rule holds for an event of the session being matched,
+// each by its index. A rule on its own evaluates the step (ownSteps); a scan answers from what
+// it worked out as it passed over the events (stepTable).
+type stepEval func(step, event int) (bool, error)
+
+// ownSteps evaluates the rule's steps on the events of one session.
+func (c *CompiledRule) ownSteps(events []asymptoteobserve.Event) stepEval {
+	return func(step, event int) (bool, error) { return c.eval(c.steps[step], events[event]) }
+}
+
 // matchSession returns the matched step events for the first alignment in one session
 // that satisfies the steps within the window, or nil if none. It dispatches on the
 // rule's order: sequence (the default) or any.
-func (c *CompiledRule) matchSession(events []asymptoteobserve.Event) ([]asymptoteobserve.Event, error) {
+func (c *CompiledRule) matchSession(events []asymptoteobserve.Event, holds stepEval) ([]asymptoteobserve.Event, error) {
 	if c.anyOrder {
-		return c.matchSessionAnyOrder(events)
+		return c.matchSessionAnyOrder(events, holds)
 	}
-	return c.matchSessionInSequence(events)
+	return c.matchSessionInSequence(events, holds)
 }
 
 // matchSessionInSequence returns the matched step events (one per step, in step order)
@@ -43,7 +53,7 @@ func (c *CompiledRule) matchSession(events []asymptoteobserve.Event) ([]asymptot
 // the caller is responsible for (see SortEvents); if a step's timestamp is absent the
 // window is not enforced against it (positive fixtures need not carry timestamps, while
 // window fixtures supply them).
-func (c *CompiledRule) matchSessionInSequence(events []asymptoteobserve.Event) ([]asymptoteobserve.Event, error) {
+func (c *CompiledRule) matchSessionInSequence(events []asymptoteobserve.Event, holds stepEval) ([]asymptoteobserve.Event, error) {
 	// Try every step-0 match as a candidate anchor. A single greedy pass is not enough:
 	// an early anchor whose final step falls outside the window must not mask a later
 	// anchor that completes in-window with the same downstream event.
@@ -54,14 +64,14 @@ func (c *CompiledRule) matchSessionInSequence(events []asymptoteobserve.Event) (
 	// credential reads took over half a minute for one rule).
 	cursors := make([]stepCursor, len(c.steps))
 	for start := range events {
-		matched, err := c.eval(c.steps[0], events[start])
+		matched, err := holds(0, start)
 		if err != nil {
 			return nil, err
 		}
 		if !matched {
 			continue
 		}
-		seq, err := c.completeFrom(events, start, cursors)
+		seq, err := c.completeFrom(events, start, cursors, holds)
 		if err != nil {
 			return nil, err
 		}
@@ -81,12 +91,12 @@ func (c *CompiledRule) matchSessionInSequence(events []asymptoteobserve.Event) (
 // time of the final step, so if the greedy-earliest final is outside the window no other
 // alignment from this anchor could do better — the anchor is abandoned and the caller
 // tries the next one.
-func (c *CompiledRule) completeFrom(events []asymptoteobserve.Event, start int, cursors []stepCursor) ([]asymptoteobserve.Event, error) {
+func (c *CompiledRule) completeFrom(events []asymptoteobserve.Event, start int, cursors []stepCursor, holds stepEval) ([]asymptoteobserve.Event, error) {
 	seq := make([]asymptoteobserve.Event, 1, len(c.steps))
 	seq[0] = events[start]
 	prev := start
 	for s := 1; s < len(c.steps); s++ {
-		j, err := c.nextHit(&cursors[s], s, events, prev)
+		j, err := c.nextHit(&cursors[s], s, events, prev, holds)
 		if err != nil {
 			return nil, err
 		}
@@ -119,7 +129,7 @@ type stepCursor struct {
 
 // nextHit returns the index of the earliest event after `after` that satisfies step s, or
 // -1 when none does. Successive calls on one cursor must pass a non-decreasing `after`.
-func (c *CompiledRule) nextHit(cur *stepCursor, s int, events []asymptoteobserve.Event, after int) (int, error) {
+func (c *CompiledRule) nextHit(cur *stepCursor, s int, events []asymptoteobserve.Event, after int, holds stepEval) (int, error) {
 	if hit := cur.hit - 1; hit > after {
 		// The query that found it started at or before after and saw no earlier hit, so
 		// there is none between after and it either.
@@ -131,7 +141,7 @@ func (c *CompiledRule) nextHit(cur *stepCursor, s int, events []asymptoteobserve
 		j = cur.scanned
 	}
 	for ; j < len(events); j++ {
-		matched, err := c.eval(c.steps[s], events[j])
+		matched, err := holds(s, j)
 		if err != nil {
 			return -1, err
 		}
@@ -154,13 +164,13 @@ func (c *CompiledRule) nextHit(cur *stepCursor, s int, events []asymptoteobserve
 // anchor, and the steps are assigned distinct events at or after it by bipartite
 // matching, so one event never satisfies two steps and a step whose only candidate is
 // already taken can displace the earlier choice onto an alternative.
-func (c *CompiledRule) matchSessionAnyOrder(events []asymptoteobserve.Event) ([]asymptoteobserve.Event, error) {
+func (c *CompiledRule) matchSessionAnyOrder(events []asymptoteobserve.Event, holds stepEval) ([]asymptoteobserve.Event, error) {
 	// hits[s] lists, ascending, the indices of the events that satisfy step s.
 	hits := make([][]int, len(c.steps))
 	anchorable := make([]bool, len(events))
-	for s, prog := range c.steps {
+	for s := range c.steps {
 		for i := range events {
-			matched, err := c.eval(prog, events[i])
+			matched, err := holds(s, i)
 			if err != nil {
 				return nil, err
 			}
