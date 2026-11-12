@@ -34,6 +34,24 @@ emit:
   reason: "Recursive rm targeting a root, home, or wildcard path"
 
 tests:
+  - name: rm_rf_root_run_by_an_inline_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import os; os.system('rm -rf /')\"" }
+        session: { id: s1 }
+  - name: rm_rf_root_as_words_of_an_inline_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['rm', '-rf', '/'], check=True)\nEOF" }
+        session: { id: s1 }
+  - name: rm_rf_root_printed_by_an_inline_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"print('never run rm -rf /')\"" }
+        session: { id: s1 }
   - name: rm_rf_root_on_another_host
     verdict: match
     events:

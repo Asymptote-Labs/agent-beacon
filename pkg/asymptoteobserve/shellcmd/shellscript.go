@@ -297,16 +297,18 @@ var powershellValueOptions = []string{
 }
 
 // isRunner is a cheap test for a word that may name a program that is handed a command line: a
-// shell, one of the programs Carried reads, or a wrapper that can run its command somewhere
-// else.
+// shell, one of the programs Carried reads, a wrapper that can run its command somewhere else,
+// or an interpreter, whose inline script may run some.
 func isRunner(word string) bool {
-	switch ProgramName(word) {
+	base := ProgramName(word)
+	switch base {
 	case "sh", "bash", "zsh", "dash", "ksh",
 		"xargs", "find", "ssh", "docker", "podman", "nerdctl", "kubectl", "su", "eval", "watch", "trap",
 		"sudo", "env", "uv":
 		return true
 	}
-	return isPowerShell(word)
+	_, interpreter := scriptLanguage(base)
+	return interpreter || isPowerShell(word)
 }
 
 // WithScripts returns commands with the commands each one hands on put after it: those of a
@@ -394,7 +396,7 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		// A carrier's command line comes first: `find -exec sh -c .. \; -exec rm {} +` runs
 		// two, and Script would read the shell's alone. Its operands are not that line's $1.
 		script, ok := c.Carried()
-		carried, onStdin, zero := ok, false, -1
+		carried, onStdin, interpreter, zero := ok, false, false, -1
 		if !ok {
 			if script, zero, ok = c.script(); ok {
 				// A script read from the shell's standard input leaves none for its commands.
@@ -402,6 +404,11 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 				onStdin = isHere && here == script
 			} else if script, ok = pipedScript(commands, idx); ok {
 				onStdin = true
+			} else if script, ok = c.scriptRuns(); ok {
+				// The commands an interpreter's inline script runs. The interpreter is not a
+				// shell: it is not read (RunsRead), and what it writes is also its own.
+				interpreter = true
+				_, onStdin = c.HereInput()
 			}
 		}
 		if !ok {
@@ -409,7 +416,7 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		}
 		if sub, err := Parse(script); len(sub) > 0 {
 			at := len(x.out)
-			x.out[at-1].scripted, x.out[at-1].scriptOnStdin = true, onStdin
+			x.out[at-1].scripted, x.out[at-1].ranCommands, x.out[at-1].scriptOnStdin = !interpreter, interpreter, onStdin
 			x.out[at-1].scriptZero = int32(zero + 1)
 			// A shell after other words (`tool sh -c ..`) runs the script, and the words
 			// before it run what this package does not know.

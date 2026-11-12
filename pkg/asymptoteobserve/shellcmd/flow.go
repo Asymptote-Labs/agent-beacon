@@ -184,15 +184,26 @@ func (f *flow) command(i int) {
 	}
 	// What the command writes to its standard output is what it took in. A shell whose script
 	// was read writes what the script's commands write, and the script runs with the shell's
-	// NAME=value prefix as its variables and its operands as its positional parameters.
+	// NAME=value prefix as its variables and its operands as its positional parameters. An
+	// interpreter whose inline script runs commands writes what they write as well as what it
+	// took in itself.
 	taken := f.taken(i)
-	if c.scripted {
+	if c.scripted || c.ranCommands {
 		for k := range c.Env {
 			value, _ := f.wordValue(c, refEnv, k)
 			f.assign(int32(i+1), c.Env[k].Name, value)
 		}
 		f.positional(i)
-		taken = f.scriptOutput(i)
+		ran := f.scriptOutput(i)
+		if c.scripted {
+			taken = ran
+		} else {
+			for _, path := range ran {
+				if !slices.Contains(taken, path) {
+					taken = append(slices.Clip(taken), path)
+				}
+			}
+		}
 	}
 	if len(taken) > 0 && !slices.Contains(digests, name) && !c.outputElsewhere() {
 		if f.out == nil {

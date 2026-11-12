@@ -101,12 +101,15 @@ type Command struct {
 	// carrier whose command line it is in, and 0 for a command of the command line itself.
 	// scripted is set on a shell or carrier whose commands follow it, runsRead when that
 	// command line was read to its end, and scriptOnStdin when a shell read its script from
-	// its standard input. scriptZero is one more than the index in Argv of the word that is the
-	// script's $0, or 0 where its operands are not the script's (a carrier, PowerShell).
+	// its standard input. ranCommands is set instead of scripted on an interpreter whose
+	// inline script runs the commands that follow it. scriptZero is one more than the index in
+	// Argv of the word that is the script's $0, or 0 where its operands are not the script's (a
+	// carrier, an interpreter, PowerShell).
 	shell         int32
 	scriptZero    int32
 	scripted      bool
 	runsRead      bool
+	ranCommands   bool
 	scriptOnStdin bool
 	// source is the text the statement was parsed from (the command line, or the script it is
 	// in), end the offset where its words and redirections end, and hdocs its here-documents,
