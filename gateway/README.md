@@ -125,6 +125,11 @@ registers none beyond the in-memory store and the `jsonl` output: every call is 
 nothing that could change a verdict the pipeline answers each call as soon as it is admitted and
 records it afterwards.
 
+An analyzer, policy or observer sees a call only for the length of its own method: the callout
+adapters read bodies into pooled buffers that the pipeline returns once it has read the call
+(`gateway.Call.Release`), so none may keep the `pipeline.Turn`, its `Call`, or bytes of the
+`Call.Body` afterwards. Everything the pipeline decodes from a body is a copy.
+
 An output is an entry of `outputs`, naming its type and the record kinds it receives:
 
 ```yaml

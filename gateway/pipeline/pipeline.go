@@ -190,6 +190,7 @@ func (p *Pipeline) Stats() Stats {
 // Handle implements gateway.Handler.
 func (p *Pipeline) Handle(ctx context.Context, c *gateway.Call) gateway.Verdict {
 	if !p.analyze(ctx) {
+		released(c)
 		return p.overloaded("analysis slots")
 	}
 	if c.Time.IsZero() {
@@ -197,21 +198,35 @@ func (p *Pipeline) Handle(ctx context.Context, c *gateway.Call) gateway.Verdict 
 	}
 	if !p.answerFirst {
 		defer p.release()
+		defer released(c)
 		return p.run(ctx, c)
 	}
 	// The adapter releases its reservation for the body when Handle returns; the analysis
 	// still reading it holds the bytes again until it ends, with the request body a reply
 	// carries. The two overlap, so the budget is briefly counted twice rather than ever not at
-	// all.
-	held := p.bodies.hold(int64(len(c.Body) + len(c.RequestBody)))
+	// all. What is held is what the bodies keep in memory, as the adapter states it: a pooled
+	// buffer may hold both bodies, and more than either.
+	n := c.BodyBytes
+	if n <= 0 {
+		n = int64(len(c.Body) + len(c.RequestBody))
+	}
+	held := p.bodies.hold(n)
 	p.pending.Add(1)
 	go func() {
 		defer p.pending.Done()
 		defer p.release()
 		defer p.bodies.release(held)
+		defer released(c)
 		p.run(context.WithoutCancel(ctx), c)
 	}()
 	return allow
+}
+
+// released tells the adapter that nothing reads the call's bodies any more (Call.Release).
+func released(c *gateway.Call) {
+	if c.Release != nil {
+		c.Release()
+	}
 }
 
 // run analyzes one call and returns its verdict.

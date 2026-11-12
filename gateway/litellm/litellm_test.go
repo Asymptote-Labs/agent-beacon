@@ -65,6 +65,28 @@ func post(t *testing.T, h gateway.Handler, payload string) response {
 	return r
 }
 
+// A payload goes back to the pool only once nothing reads it: a request built over its payload
+// keeps it until the handler releases the call, and a reply's copies keep nothing of it. Reusing
+// the pool with more calls must leave every call already handed over as it was.
+func TestPooledPayloadsAreNotReusedEarly(t *testing.T) {
+	reply := `{"input_type":"response","litellm_call_id":"c1","model":"m","texts":["ok"],"structured_messages":[{"role":"user","content":"fix it"}]}`
+	h := &fakeHandler{}
+	var want [][2][]byte
+	for i, payload := range []string{requestPayload, reply, requestPayload, reply} {
+		post(t, h, payload)
+		c := h.calls[i]
+		want = append(want, [2][]byte{bytes.Clone(c.Body), bytes.Clone(c.RequestBody)})
+		if c.Phase == gateway.PhaseRequest && c.Release == nil {
+			t.Errorf("call %d: a request built over its payload is not released by the handler", i)
+		}
+	}
+	for i, c := range h.calls {
+		if !bytes.Equal(c.Body, want[i][0]) || !bytes.Equal(c.RequestBody, want[i][1]) {
+			t.Errorf("call %d changed after later calls reused the pool:\n%s\n%s", i, c.Body, c.RequestBody)
+		}
+	}
+}
+
 // A request payload as LiteLLM 1.106.6 sent it for an Anthropic /v1/messages call: the tool result
 // arrives as a tool message and must decode as a result tied to its call.
 const requestPayload = `{"input_type":"request","litellm_call_id":"c1","litellm_trace_id":"trace-1","model":"claude-mock",
