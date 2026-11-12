@@ -39,7 +39,8 @@ match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
       agent_cli(c) && (
-        (c.env.map(k, k + "=") + c.argv_raw).exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)=")) ||
+        c.env.exists(k, k.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)$")) ||
+        c.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)=")) ||
         e.command.parsed_commands.exists(x,
           (x.name == "export" || x.name.matches("^(declare|typeset)$") && x.args.matches("(?m)^-[A-Za-z]*x[A-Za-z]*$")) &&
           x.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)=")))
