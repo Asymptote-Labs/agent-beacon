@@ -185,5 +185,7 @@ case "$BEACON_NO_START" in
     ;;
 esac
 
+# Tells the CLI this install came from the package, for its install telemetry (setup_path).
+export BEACON_INSTALL_SOURCE=package
 exec "$BEACON_BIN" "$@"
 
