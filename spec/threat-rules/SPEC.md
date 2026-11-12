@@ -528,6 +528,24 @@ body uses it. Expansion is hygienic: a variable the body binds itself (the `f` o
 `exists(f, ..)` still means the rule's `f`. A call with the wrong number of arguments is a
 load-time error. A predicate is called only as `name(..)`, never as a method.
 
+A predicate MAY bind one of its parameters for its caller: it does when its body uses the
+parameter as the variable of a comprehension. The call then passes a name for that
+parameter (any identifier but `e`, not an expression), and the arguments the body places
+inside that comprehension MAY use the name. With
+
+```yaml
+  - name: some_word
+    params: [c, w, cond]
+    body: c.argv.exists(w, cond)
+```
+
+the call `some_word(c, word, word.startsWith("--force"))` is
+`c.argv.exists(word, word.startsWith("--force"))`. This is how a predicate takes a condition
+and decides what it is asked of: a list of one names a value, as in
+`[c.span].exists(t, cond)`. A parameter the body binds MUST NOT also be read outside that
+binding, and passing anything but a name for it is a load-time error. The name means nothing
+outside the call.
+
 ### Catalogs (`*.catalog.yaml`)
 
 A catalog is a reviewed list of named things that a predicate tests membership of. The
