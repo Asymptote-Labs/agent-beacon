@@ -228,7 +228,7 @@ func (m matcher) program(act *eventActivation) cel.Program {
 //     and anything else that can build a larger string or list keeps the tracker;
 //   - every comprehension accumulates a bool or a number, so none builds a list or a map;
 //   - a literal has its own size, a value read from the event the size its class allows
-//     (eventSizes), and anything else the larger of the two (classSizes).
+//     (eventSizes), and anything else the size of what it is made of (classSizes).
 //
 // The sizes are a class: a tier for each of the four measures of eventSizes, the smallest that
 // holds the event. The tiers of the two list measures are close together, because a rule's
@@ -336,7 +336,6 @@ type untracked struct {
 	prog  cel.Program
 	env   *cel.Env
 	ast   *cel.Ast
-	lit   literals
 	limit uint64
 	// cost holds, for each size class, one more than bound's result for it, and 0 until that
 	// has been worked out; learned is what the estimates behind those results have shown.
@@ -367,8 +366,7 @@ var untrackedOverloads = map[string]bool{
 // newUntracked returns the untracked program for a checked expression, or nil when its shape
 // keeps the tracker.
 func newUntracked(env *cel.Env, ast *cel.Ast, limit uint64) (*untracked, error) {
-	lit, ok := untrackedShape(ast)
-	if !ok || limit > math.MaxUint32-2 {
+	if !untrackedShape(ast) || limit > math.MaxUint32-2 {
 		// The second never holds of MaxEvalCost; a bound is stored in 32 bits.
 		return nil, nil
 	}
@@ -376,7 +374,7 @@ func newUntracked(env *cel.Env, ast *cel.Ast, limit uint64) (*untracked, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &untracked{prog: prog, env: env, ast: ast, lit: lit, limit: limit}, nil
+	return &untracked{prog: prog, env: env, ast: ast, limit: limit}, nil
 }
 
 // bound returns an upper bound of the expression's cost on an event in size class c, the most
@@ -426,7 +424,7 @@ func (u *untracked) resolve(t classTiers) uint64 {
 // with tiers t, or one more than the limit when it is over the limit.
 func (u *untracked) estimate(t classTiers) uint64 {
 	long, word, top, nested := t.sizes()
-	est, err := u.env.EstimateCost(u.ast, classSizes{long: long, word: word, top: top, nested: nested, lit: u.lit})
+	est, err := u.env.EstimateCost(u.ast, classSizes{long: long, word: word, top: top, nested: nested})
 	if err != nil || est.Max > u.limit {
 		return u.limit + 1
 	}
@@ -505,21 +503,17 @@ func (l *learned) implies(t classTiers, limit uint64) (uint64, bool) {
 	return 0, false
 }
 
-// literals are the largest string and the longest list or map an expression writes itself.
-type literals struct{ maxString, maxList int }
-
 // untrackedShape reports whether every operation of the expression is in untrackedOverloads and
-// every comprehension accumulates a bool or a number, and returns the sizes of its literals.
-func untrackedShape(ast *cel.Ast) (literals, bool) {
+// every comprehension accumulates a bool or a number.
+func untrackedShape(ast *cel.Ast) bool {
 	native := ast.NativeRep()
 	for _, ref := range native.ReferenceMap() {
 		for _, id := range ref.OverloadIDs {
 			if !untrackedOverloads[id] {
-				return literals{}, false
+				return false
 			}
 		}
 	}
-	var lit literals
 	ok := true
 	celast.PreOrderVisit(native.Expr(), celast.NewExprVisitor(func(e celast.Expr) {
 		switch e.Kind() {
@@ -534,23 +528,12 @@ func untrackedShape(ast *cel.Ast) (literals, bool) {
 			default:
 				ok = false
 			}
-		case celast.LiteralKind:
-			switch v := e.AsLiteral().Value().(type) {
-			case string:
-				lit.maxString = max(lit.maxString, len(v))
-			case []byte:
-				lit.maxString = max(lit.maxString, len(v))
-			}
-		case celast.ListKind:
-			lit.maxList = max(lit.maxList, len(e.AsList().Elements()))
-		case celast.MapKind:
-			lit.maxList = max(lit.maxList, len(e.AsMap().Entries()))
 		case celast.StructKind:
 			// A struct literal is built by the type provider; keep the tracker.
 			ok = false
 		}
 	}))
-	return lit, ok
+	return ok
 }
 
 // classSizes tells cel-go's estimator how large the values of an event in a size class can be,
@@ -561,12 +544,13 @@ func untrackedShape(ast *cel.Ast) (literals, bool) {
 //
 // A value read from the event is at most as large as its class allows, and which class it is
 // in follows from the markers in its path as it does for eventSizes from the lists the value
-// is inside. Any other node (the variable of a loop over a list the expression writes, the
-// result of a conditional) holds a value of the event or one of the expression's literals, so
-// it is given the largest size of either.
+// is inside. Any other node is left to cel-go, which sizes it from what it is made of: the
+// variable of a loop over a list the expression writes is as large as the largest entry
+// written (`[c.span].exists(t, ..)` gives t the size of a span, and a loop over literals the
+// size of the longest), the result of a conditional as large as the larger branch. Where
+// cel-go knows no size it assumes the largest there is, and the expression keeps the tracker.
 type classSizes struct {
 	long, word, top, nested uint64
-	lit                     literals
 }
 
 func (z classSizes) EstimateSize(n checker.AstNode) *checker.SizeEstimate {
@@ -581,10 +565,8 @@ func (z classSizes) EstimateSize(n checker.AstNode) *checker.SizeEstimate {
 	depth, ok := eventPathDepth(n.Path())
 	var size uint64
 	switch {
-	case !ok && text:
-		size = max(z.long, z.word, uint64(z.lit.maxString))
 	case !ok:
-		size = max(z.top, z.nested, uint64(z.lit.maxList))
+		return nil
 	case text && depth <= longDepth:
 		size = z.long
 	case text:

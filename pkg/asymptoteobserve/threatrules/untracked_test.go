@@ -161,27 +161,40 @@ func TestUntrackedShape(t *testing.T) {
 		if iss != nil && iss.Err() != nil {
 			t.Fatalf("%s: %v", tc.expr, iss.Err())
 		}
-		if _, ok := untrackedShape(ast); ok != tc.ok {
+		if ok := untrackedShape(ast); ok != tc.ok {
 			t.Errorf("%s: untracked %v, want %v", tc.expr, ok, tc.ok)
 		}
 	}
-	// A literal has its own size whatever the event's class, and a value that may be one of the
-	// expression's literals (the variable of a loop over a list it writes) is as large as the
-	// largest of them: matching a 1 KiB command line against a 2,000-character pattern costs
-	// (1025 * 0.1) * (2000 * 0.25).
+	// A literal has its own size whatever the event's class, and a variable the expression
+	// binds itself is as large as the largest thing it is bound to. Matching a 1 KiB command
+	// line against a 2,000-character pattern costs (1025 * 0.1) * (2000 * 0.25) = 51,250.
 	long := strings.Repeat("x", 2000)
-	ast, _ := env.Compile(`e.command.command == "` + long + `"`)
-	u, err := newUntracked(env, ast, MaxEvalCost)
-	if err != nil || u == nil || !u.fits(0) {
-		t.Fatalf("long literal: %+v, %v", u, err)
+	bound := func(expr string) uint64 {
+		t.Helper()
+		ast, iss := env.Compile(expr)
+		if iss != nil && iss.Err() != nil {
+			t.Fatalf("%s: %v", expr[:60], iss.Err())
+		}
+		u, err := newUntracked(env, ast, MaxEvalCost)
+		if err != nil || u == nil || !u.fits(0) {
+			t.Fatalf("%s: %+v, %v", expr[:60], u, err)
+		}
+		return u.bound(0)
 	}
-	if lit, _ := untrackedShape(ast); lit.maxString != 2000 {
-		t.Fatalf("literal size %d", lit.maxString)
+	bound(`e.command.command == "` + long + `"`)
+	// The pattern is a variable bound to the literal: as long as the literal.
+	if b := bound(`["` + long + `"].exists(p, e.command.command.matches(p))`); b < 51250 {
+		t.Fatalf("pattern from a literal list: bound %d; want at least 51250", b)
 	}
-	ast, _ = env.Compile(`["` + long + `"].exists(p, e.command.command.matches(p))`)
-	u, err = newUntracked(env, ast, MaxEvalCost)
-	if err != nil || u == nil || u.bound(0) < 51250 {
-		t.Fatalf("pattern from a literal list: bound %d, %v; want at least 51250", u.bound(0), err)
+	// The text is a variable bound to the command line: as long as a command line, not as the
+	// pattern, which would double the cost.
+	if b := bound(`[e.command.command].exists(t, t.matches("` + long + `"))`); b < 51250 || b > 60000 {
+		t.Fatalf("text bound to the command line: bound %d; want 51250 and a little", b)
+	}
+	// Bound to either: as long as the longer. A one-character pattern costs a quarter-unit a
+	// character, rounded up to one, over (2001 * 0.1).
+	if b := bound(`[e.command.command, "` + long + `"].exists(t, t.matches("x"))`); b < 201 {
+		t.Fatalf("text bound to the command line or a literal: bound %d; want at least 201", b)
 	}
 }
 
