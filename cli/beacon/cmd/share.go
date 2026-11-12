@@ -767,20 +767,7 @@ func shareActiveSession(dir, harness string) (activesession.Entry, bool) {
 // so the next command can name one.
 func shareNoSessionError(sources []handoff.Source, harness, dir string) error {
 	msg := fmt.Sprintf("no agent session found in %s", dir)
-	stored, _ := handoff.List(sources, handoff.Filter{Harness: harness, Limit: 5})
-	logged, _ := handoff.LogSessions(shareLogPath(), handoff.Filter{Harness: harness, Limit: 5})
-	seen := map[string]bool{}
-	var all []handoff.Session
-	for _, s := range append(stored, logged...) {
-		if key := s.Harness + "\x00" + s.ID; !seen[key] {
-			seen[key] = true
-			all = append(all, s)
-		}
-	}
-	sort.SliceStable(all, func(i, j int) bool { return all[i].UpdatedAt.After(all[j].UpdatedAt) })
-	if len(all) > 5 {
-		all = all[:5]
-	}
+	all, _ := handoff.ListWithLog(sources, shareLogPath(), handoff.Filter{Harness: harness, Limit: 5})
 	if len(all) == 0 {
 		return errors.New(msg + "; Beacon has no sessions recorded yet (is `beacon endpoint install` set up for this runtime?)")
 	}
@@ -816,25 +803,16 @@ type shareCandidate struct {
 // shareCandidateList is shareCandidates with each session's origin, so a session only the log has
 // (its store lost it, or cannot be read) is read from the log rather than sent back to the store.
 func shareCandidateList(sources []handoff.Source, harness, dir string, limit int) ([]shareCandidate, error) {
-	stored, _ := handoff.List(sources, handoff.Filter{Harness: harness, Directory: dir})
-	logged, logErr := handoff.LogSessions(shareLogPath(), handoff.Filter{Harness: harness, Directory: dir})
-	if logErr != nil && !errors.Is(logErr, os.ErrNotExist) && len(stored) == 0 {
-		return nil, fmt.Errorf("read runtime log: %w", logErr)
+	sessions, err := handoff.ListWithLog(sources, shareLogPath(), handoff.Filter{Harness: harness, Directory: dir, Limit: limit})
+	// Preserve share's existing behavior: unreadable stores are skipped; only a
+	// log failure with no usable store result stops the listing.
+	var logErr *handoff.LogReadError
+	if len(sessions) == 0 && errors.As(err, &logErr) {
+		return nil, logErr
 	}
-	seen := map[string]bool{}
 	var out []shareCandidate
-	for _, s := range stored {
-		seen[s.Harness+"\x00"+s.ID] = true
-		out = append(out, shareCandidate{session: s})
-	}
-	for _, s := range logged {
-		if !seen[s.Harness+"\x00"+s.ID] {
-			out = append(out, shareCandidate{session: s, fromLog: true})
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].session.UpdatedAt.After(out[j].session.UpdatedAt) })
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
+	for _, session := range sessions {
+		out = append(out, shareCandidate{session: session, fromLog: session.FromLog})
 	}
 	return out, nil
 }
