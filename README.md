@@ -383,7 +383,7 @@ The [Beacon Skills page](https://docs.beacon.sh/concepts/beacon-skills#install) 
 
 | Gateway | Collection | Captures |
 | --- | --- | --- |
-| LiteLLM, Envoy (incl. Envoy Gateway, Istio), Portkey | [`beacon-gateway`](gateway/README.md) hook adapter | Prompts, responses, tool calls, and token usage for every model call routed through the gateway |
+| LiteLLM, Envoy (incl. Envoy Gateway, Istio), Portkey | [`beacon-gateway`](gateway/README.md) hook adapter, released as a container image (`ghcr.io/asymptote-labs/beacon-gateway`) and static binaries on `gateway-v*` tags | Prompts, responses, tool calls, and token usage for every model call routed through the gateway |
 
 ---
 

@@ -22,6 +22,11 @@ Protocols: Anthropic Messages, OpenAI Chat Completions and OpenAI Responses, JSO
 
 ## Running
 
+Each `gateway-v*` release publishes `ghcr.io/asymptote-labs/beacon-gateway:<version>` (linux/amd64
+and linux/arm64, distroless, nonroot) and static Linux and macOS binaries; see
+[docs/runtimes/llm-gateway.mdx](../docs/runtimes/llm-gateway.mdx#run-it) for running it as a
+sidecar and verifying a release. From source:
+
 ```sh
 cd gateway
 go build -o beacon-gateway ./cmd/beacon-gateway

@@ -362,8 +362,8 @@ A pushed `v*` tag runs the full release end-to-end via
    Upload order is pool, index, then `Release.gpg`/`Release`/`InRelease` with `Acquire-By-Hash`.
    Skipped with a notice until every `APT_*` setting exists, and for prerelease (`-`) tags.
 
-Every third-party action in `release.yml`, `release-extension.yml` and
-`npm-publish-sdk.yml` is pinned to a full commit SHA with the version in a
+Every third-party action in `release.yml`, `release-extension.yml`,
+`release-gateway.yml` and `npm-publish-sdk.yml` is pinned to a full commit SHA with the version in a
 trailing comment, because these jobs hold the signing secrets or, for the SDK,
 the `id-token` npm's trusted publisher accepts. Bump them by SHA, never back to
 a tag.
@@ -377,7 +377,8 @@ The apt repository adds secrets `APT_GPG_PRIVATE_KEY` (armored, no passphrase; b
 `APT_S3_ACCESS_KEY_ID`, `APT_S3_SECRET_ACCESS_KEY` and Variables `APT_S3_BUCKET`,
 `APT_REPO_URL` (https), plus optional `APT_S3_ENDPOINT` (R2/GCS) and `APT_S3_REGION`.
 Optional: `BEACON_LINUX_SIGNING_KEY` (ASCII-armored OpenPGP secret key) and
-`BEACON_LINUX_SIGNING_KEY_PASSPHRASE`, which turn on Linux signing.
+`BEACON_LINUX_SIGNING_KEY_PASSPHRASE`, which turn on Linux signing. The `gateway-release`
+environment holds a second copy of the same key for `release-gateway.yml` (see Gateway Release).
 
 Linux signing is trusted only through the fingerprints, one per line, in
 `cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint`. The
@@ -393,10 +394,11 @@ unsigned releases before v1.3.57. The fingerprint is published in
 `docs/platforms/linux.mdx#release-signing`; change both together.
 To rotate, add the new fingerprint in a release still signed by the old key. Then
 sign `checksums.txt` with both keys and ship both in `beacon-release-key.gpg` (the
-GoReleaser `signs` entry and the `finalize` step sign with one key today, so extend
-both first; `gpgv` and
+GoReleaser `signs` entry, the `finalize` step and `release-gateway.yml`'s `sign` job sign with
+one key today, so extend all three first; `gpgv` and
 `validSigFrom` accept either pinned key), and keep the old fingerprint pinned until
-the fleet has moved. A host that skipped the transition pins only the old key, cannot
+the fleet has moved. The key is in two environments, `release` and `gateway-release`:
+change it in both. A host that skipped the transition pins only the old key, cannot
 verify a new-key-only release, and must reinstall.
 
 Keep one-time Apple-side onboarding steps out of the repo and share them with
@@ -717,6 +719,66 @@ curl -fsSL https://github.com/Asymptote-Labs/agent-beacon/releases/download/ext-
 The feed must name `<version>`, the CRX's release URL and its SHA-256. Chrome Web
 Store publication is not wired; unmanaged machines load the zip unpacked through
 developer mode.
+
+### Gateway Release
+
+`beacon-gateway` (`gateway/`) versions independently of the CLI. A pushed annotated `gateway-v*`
+tag runs `.github/workflows/release-gateway.yml`, which publishes its own GitHub release (static
+`beacon-gateway_<version>_{linux,darwin}_{amd64,arm64}.tar.gz`, `checksums.txt`,
+`checksums.txt.sig` and the release key) and pushes
+`ghcr.io/asymptote-labs/beacon-gateway:<version>` for linux/amd64 and linux/arm64. It never moves
+a tag after the release is published and pushes no `latest` tag: deployments pin a version or a
+digest. `gateway-v*` and the CLI's `v*` cannot collide, as with `ext-v*`.
+
+The release builds with `gateway/scripts/release-build.sh`, the script CI's `gateway` job runs on
+every change, and the image from `gateway/Dockerfile` copies those binaries in. GoReleaser OSS
+cannot release a prefixed tag, so the gateway does not use it. Jobs: `verify` (the tag is
+`gateway-v<version>` and `<version>` is what `cmd/beacon-gateway/version.go` builds; vet, tests,
+race), `build` (archives, image pushed with timestamps rewritten to the commit's, build-provenance
+attestations for the archives and the image, a draft release), `smoke`
+(`gateway/scripts/image-smoke.sh` on the pushed digest, on amd64 and arm64 runners), `sign` and
+`publish`. `build` refuses a release that is already published, so a re-run never changes bytes
+someone has pulled. The release is created with `--latest=false`, and `publish` gives "Latest"
+back to the newest stable `v*` release if it moved anyway.
+
+Signing uses the CLI's Linux release key, so `checksums.txt` verifies exactly as
+`docs/platforms/linux.mdx#release-signing` describes. The key lives in its own `gateway-release`
+environment, which admits only `gateway-v*` tags and holds `BEACON_LINUX_SIGNING_KEY` (and
+`BEACON_LINUX_SIGNING_KEY_PASSPHRASE` if the key ever gets one) and nothing else, so a gateway
+release never reaches the `release` environment's Apple, Homebrew and apt secrets. Only the `sign`
+job enters it: it checks out nothing but `release-key.fingerprint`, refuses a key that file does
+not pin, and has a read-only token. `publish` checks the signature against the draft's own
+`checksums.txt` before publishing it and again after.
+
+GHCR creates the package private on the first push. Once, after the first release: make
+`beacon-gateway` public in the organization's package settings; the image's
+`org.opencontainers.image.source` label links it to this repository.
+
+Bump `const version` in `gateway/cmd/beacon-gateway/version.go` before tagging; the workflow fails
+when the tag and the source disagree.
+
+```bash
+cd gateway && go vet ./... && go test ./... && sh scripts/release-build.sh
+cd ..
+git tag -a gateway-v<version> -m "gateway-v<version>"
+git push origin gateway-v<version>
+gh run list --workflow release-gateway.yml --limit 5
+```
+
+Verify after the run:
+
+```bash
+gh release view gateway-v<version> --repo Asymptote-Labs/agent-beacon --json isDraft,isLatest,assets \
+  --jq '{isDraft, isLatest, assets: [.assets[].name]}'
+gh release download gateway-v<version> --repo Asymptote-Labs/agent-beacon --dir /tmp/gw
+gpgv --keyring /tmp/gw/beacon-release-key.gpg /tmp/gw/checksums.txt.sig /tmp/gw/checksums.txt
+(cd /tmp/gw && sha256sum --check checksums.txt)
+gh attestation verify /tmp/gw/beacon-gateway_<version>_linux_amd64.tar.gz --repo Asymptote-Labs/agent-beacon
+gh attestation verify oci://ghcr.io/asymptote-labs/beacon-gateway:<version> --repo Asymptote-Labs/agent-beacon
+docker run --rm ghcr.io/asymptote-labs/beacon-gateway:<version> -version
+```
+
+`isDraft` and `isLatest` must both be false.
 
 ## Implementation Notes
 
