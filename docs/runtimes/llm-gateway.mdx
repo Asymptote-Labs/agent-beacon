@@ -20,11 +20,15 @@ resolved for the call.
 
 ## Supported gateways
 
-| Gateway | Hook |
-|---------|------|
-| LiteLLM proxy | `generic_guardrail_api` guardrail, `pre_call` and `post_call` |
-| Envoy, Envoy Gateway, Istio | External Processing (`ext_proc`) filter |
-| Portkey AI Gateway | `default.webhook` guardrail |
+| Gateway | Hook | Protocols | Streamed replies | Token usage |
+|---------|------|-----------|------------------|-------------|
+| [LiteLLM proxy](/runtimes/gateways/litellm) | `generic_guardrail_api` guardrail, `pre_call` and `post_call` | All LiteLLM serves | Yes | No |
+| [Envoy, Envoy Gateway, Istio](/runtimes/gateways/envoy) | External Processing (`ext_proc`) filter | Anthropic Messages, Chat Completions, Responses | Yes | Yes |
+| [Portkey AI Gateway](/runtimes/gateways/portkey) | `default.webhook` guardrail | Chat Completions, Anthropic Messages | No | Yes (non-streamed) |
+
+Each page covers what that gateway exposes, how sessions and identity are named, and how to
+deploy it. One `beacon-gateway` process can serve several gateways at once: list one entry per
+gateway under `gateways`.
 
 Model protocols: Anthropic Messages, OpenAI Chat Completions and OpenAI Responses, as JSON or
 server-sent events.
@@ -49,6 +53,28 @@ tool arguments or tool results, set:
 content:
   retention: metadata
 ```
+
+## Deployment notes
+
+These apply whichever gateway you attach to.
+
+- **Fail open.** Every shipped configuration lets model calls through unrecorded when
+  `beacon-gateway` is down or slow. Keep it that way: the open build observes only and never
+  blocks a call.
+- **Health and counters.** `/healthz` and `/stats` are served on the admin listener
+  (`admin: 127.0.0.1:4029`). `/stats` counts calls, calls let through unanalyzed when admission
+  was full, analysis failures and records dropped per output.
+- **Replicas.** The open build's `store` is in memory and per process. Run one `beacon-gateway`
+  per gateway replica (a sidecar), and expect a session whose calls land on several replicas to
+  record its system text and tool definitions once per replica.
+- **Load.** `pipeline.max_in_flight` (default two per CPU), `pipeline.max_body_bytes` and
+  `pipeline.queue_wait` bound the work in progress; a call that waits longer than `queue_wait`
+  goes through unrecorded. `gc.memory_limit` defaults to 80% of the container's memory limit.
+- **Outputs.** Write `beacon.event` records to a file your log shipper reads. The file uses the
+  runtime JSONL schema, so the same SIEM mappings apply.
+- **Sessions.** Clients that send a session header get one session per conversation. Claude Code
+  sends `x-claude-code-session-id`; other clients can send `session_id`, `x-session-id` or
+  `conversation_id`, or set `pipeline.session_headers`.
 
 ## What gets recorded
 
@@ -76,5 +102,14 @@ readers record, so a gateway's and an endpoint's record of one model call can be
   </Card>
   <Card title="Integration model" icon="plug" href="/runtimes/integration-model">
     How Beacon collects from each kind of agent runtime.
+  </Card>
+  <Card title="LiteLLM" icon="layer-group" href="/runtimes/gateways/litellm">
+    Guardrail API setup for the LiteLLM proxy.
+  </Card>
+  <Card title="Envoy, Envoy Gateway, Istio" icon="route" href="/runtimes/gateways/envoy">
+    External Processing setup for Envoy-based gateways.
+  </Card>
+  <Card title="Portkey" icon="shield-check" href="/runtimes/gateways/portkey">
+    Webhook guardrail setup for Portkey.
   </Card>
 </Columns>
