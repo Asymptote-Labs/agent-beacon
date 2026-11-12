@@ -42,7 +42,8 @@ pipeline:
   seen_ttl: 6h
 
 # All cross-call state (what a session already reported) lives here; replicas keep none of their
-# own. "memory" is per process.
+# own. "memory" is per process: about 50 bytes a key, so the default million keys is about 50 MB.
+# When full it forgets the keys least recently used; a forgotten key means content reported again.
 store:
   type: memory
   max_entries: 1000000
