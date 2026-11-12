@@ -1838,15 +1838,35 @@ func followsSecretFlag(previous interface{}) bool {
 	return followsSecretFlag(jsonValue(previous))
 }
 
+// EventSanitizeOptions are the choices a writer makes about how SanitizeEventWith treats an event.
+type EventSanitizeOptions struct {
+	// RedactSecrets replaces credentials in every sanitized string. The collector exporter makes it
+	// configurable (redact_secrets); every other writer redacts.
+	RedactSecrets bool
+	// GenAIOutputLimit, when positive, is the string limit for gen_ai.output in place of the
+	// raw-attribute limit the rest of gen_ai keeps. The exporter raises it for a browser chat answer,
+	// which is what that event is about.
+	GenAIOutputLimit int
+}
+
+// SanitizeEvent is SanitizeEventWith with secret redaction on and the default limits, which is what
+// every writer but the collector exporter uses.
 func SanitizeEvent(event Event, maxBytes int) Event {
-	event.Message = CleanString(event.Message, DefaultStringLimit, true)
+	return SanitizeEventWith(event, maxBytes, EventSanitizeOptions{RedactSecrets: true})
+}
+
+// SanitizeEventWith caps and redacts an event's strings for the runtime log and sets field_truncated
+// when the result would still not fit in maxBytes.
+func SanitizeEventWith(event Event, maxBytes int, opts EventSanitizeOptions) Event {
+	redact := opts.RedactSecrets
+	event.Message = CleanString(event.Message, DefaultStringLimit, redact)
 	if event.Tool != nil {
-		event.Tool.Command = CleanString(event.Tool.Command, DefaultStringLimit, true)
+		event.Tool.Command = CleanString(event.Tool.Command, DefaultStringLimit, redact)
 		event.Tool.Path = TruncateString(event.Tool.Path, DefaultRawStringLimit)
 	}
 	if event.Command != nil {
-		event.Command.Command = CleanString(event.Command.Command, DefaultStringLimit, true)
-		event.Command.Output = CleanString(event.Command.Output, DefaultStringLimit, true)
+		event.Command.Command = CleanString(event.Command.Command, DefaultStringLimit, redact)
+		event.Command.Output = CleanString(event.Command.Output, DefaultStringLimit, redact)
 	}
 	// Retained content the writers have always emitted but this function never
 	// saw, because the struct did not declare the fields. A diff or a block of
@@ -1854,37 +1874,42 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 	// these get the same limit and the same secret redaction as prompt.text
 	// rather than a weaker one.
 	if event.File != nil {
-		event.File.Diff = CleanString(event.File.Diff, DefaultStringLimit, true)
+		event.File.Diff = CleanString(event.File.Diff, DefaultStringLimit, redact)
 	}
 	if event.Approval != nil {
-		event.Approval.Reason = CleanString(event.Approval.Reason, DefaultStringLimit, true)
+		event.Approval.Reason = CleanString(event.Approval.Reason, DefaultStringLimit, redact)
 	}
 	if event.Policy != nil {
-		event.Policy.Reason = CleanString(event.Policy.Reason, DefaultStringLimit, true)
+		event.Policy.Reason = CleanString(event.Policy.Reason, DefaultStringLimit, redact)
 	}
 	if event.Prompt != nil {
-		event.Prompt.Text = CleanString(event.Prompt.Text, DefaultStringLimit, true)
+		event.Prompt.Text = CleanString(event.Prompt.Text, DefaultStringLimit, redact)
 	}
 	// The run, vcs and top-level model, repository and branch strings come from the environment, a
 	// runtime's attributes or the repository's own refs (a pull request names its branch), so they
 	// get the raw-attribute limit and secret redaction too.
-	metadata := PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit}
+	metadata := PrivacyOptions{RedactSecrets: redact, StringLimit: DefaultRawStringLimit}
 	event.Run = SanitizeRun(event.Run, metadata)
 	event.VCS = SanitizeVCS(event.VCS, metadata)
-	event.Model = CleanString(event.Model, DefaultRawStringLimit, true)
-	event.Repository = CleanString(event.Repository, DefaultRawStringLimit, true)
-	event.Branch = CleanString(event.Branch, DefaultRawStringLimit, true)
+	event.Model = CleanString(event.Model, DefaultRawStringLimit, redact)
+	event.Repository = CleanString(event.Repository, DefaultRawStringLimit, redact)
+	event.Branch = CleanString(event.Branch, DefaultRawStringLimit, redact)
 	if event.MCP != nil {
-		event.MCP = SanitizeMCP(event.MCP, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+		event.MCP = SanitizeMCP(event.MCP, metadata)
 	}
 	if event.SystemContext != nil {
-		event.SystemContext = sanitizeSystemContext(event.SystemContext)
+		event.SystemContext = sanitizeSystemContext(event.SystemContext, metadata)
 	}
 	if event.GenAI != nil {
-		event.GenAI = SanitizeGenAI(event.GenAI, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+		output := event.GenAI.Output
+		event.GenAI = SanitizeGenAI(event.GenAI, metadata)
+		if opts.GenAIOutputLimit > 0 && output != nil {
+			answer := PrivacyOptions{RedactSecrets: redact, StringLimit: opts.GenAIOutputLimit}
+			event.GenAI.Output = SanitizeGenAI(&GenAIInfo{Output: output}, answer).Output
+		}
 	}
 	if event.Raw != nil {
-		event.Raw = SanitizeMap(event.Raw, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+		event.Raw = SanitizeMap(event.Raw, metadata)
 	}
 	// Marshaling the event only to measure it was a third of SanitizeEvent's cost. A bound on its
 	// size decides most events without it; a marshal that fails leaves Truncated as it was.

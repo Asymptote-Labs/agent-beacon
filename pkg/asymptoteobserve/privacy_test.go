@@ -64,6 +64,40 @@ func TestSanitizeEventKeepsToolDescriptionsToThePromptTextLimit(t *testing.T) {
 	}
 }
 
+// The collector exporter's redact_secrets setting reaches every field SanitizeEventWith cleans,
+// system_context included, and its browser-answer limit lifts gen_ai.output alone: the rest of
+// gen_ai keeps the raw-attribute limit.
+func TestSanitizeEventWithHonorsRedactionAndTheAnswerLimit(t *testing.T) {
+	secret := "token=sk-options-0123456789abcdef"
+	long := strings.Repeat("a", 8*1024)
+	build := func() Event {
+		event := NewEvent(NewEventOptions{Action: "gen_ai.response", Harness: HarnessInfo{Name: "test"}, Message: secret})
+		event.SystemContext = &SystemContextInfo{Kind: "skills", Source: secret}
+		event.GenAI = &GenAIInfo{
+			Input:  &GenAIInputInfo{Messages: long},
+			Output: &GenAIOutputInfo{Messages: long},
+		}
+		return event
+	}
+
+	kept := SanitizeEventWith(build(), DefaultMaxEventBytes, EventSanitizeOptions{RedactSecrets: false})
+	if kept.Message != secret || kept.SystemContext.Source != secret {
+		t.Fatalf("redaction off changed message/system_context: %q / %q", kept.Message, kept.SystemContext.Source)
+	}
+	redacted := SanitizeEventWith(build(), DefaultMaxEventBytes, EventSanitizeOptions{RedactSecrets: true})
+	if strings.Contains(redacted.Message, "sk-options") || strings.Contains(redacted.SystemContext.Source, "sk-options") {
+		t.Fatalf("redaction on leaked: %q / %q", redacted.Message, redacted.SystemContext.Source)
+	}
+
+	answer := SanitizeEventWith(build(), DefaultMaxEventBytes, EventSanitizeOptions{RedactSecrets: true, GenAIOutputLimit: 16 * 1024})
+	if got := answer.GenAI.Output.Messages; got != long {
+		t.Fatalf("gen_ai.output = %v, want all %d bytes under the answer limit", got, len(long))
+	}
+	if got, _ := answer.GenAI.Input.Messages.(string); len(got) > DefaultRawStringLimit {
+		t.Fatalf("gen_ai.input = %d bytes, want the raw-attribute limit to still apply", len(got))
+	}
+}
+
 func TestSanitizeEventRedactsAndTruncates(t *testing.T) {
 	event := NewEvent(NewEventOptions{
 		Action:  "tool.invoked",

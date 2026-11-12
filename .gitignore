@@ -55,6 +55,8 @@ cli/beacon-hooks/*.exe
 !cli/beacon/internal/harness2session/testdata/**/*.jsonl
 !cli/beacon/internal/endpoint/falcon/pack/sample-event.jsonl
 !cli/beacon/internal/endpoint/gcs/pack/sample-event.jsonl
+# The collector exporter's written output, pinned byte for byte; captured once, never regenerated.
+!collector-builder/exporter/beaconjsonexporter/testdata/writer_golden.jsonl
 *.log
 
 # Collector builder outputs

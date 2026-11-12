@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/beaconevent"
 	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/runtimelog"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -42,60 +41,16 @@ func (w jsonlWriter) append(event beaconEvent) error {
 	return appendJSONL(w.path, append(data, '\n'), w.rotateBytes, w.rotateArchives)
 }
 
+// sanitize is asymptoteobserve.SanitizeEventWith with the exporter's choices: secret redaction as
+// configured (redact_secrets), and a browser chat answer kept to browserResponseStringLimit with its
+// duplicate in raw dropped.
 func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
-	event.Message = w.cleanString(event.Message, asymptoteobserve.DefaultStringLimit)
-	if event.Tool != nil {
-		event.Tool.Command = w.cleanString(event.Tool.Command, asymptoteobserve.DefaultStringLimit)
-		event.Tool.Path = asymptoteobserve.TruncateString(event.Tool.Path, asymptoteobserve.DefaultRawStringLimit)
+	opts := asymptoteobserve.EventSanitizeOptions{RedactSecrets: w.redactSecrets}
+	if event.GenAI != nil && event.GenAI.Output != nil && browserChatHarnesses[event.Harness.Name] {
+		opts.GenAIOutputLimit = browserResponseStringLimit
+		event.Raw = withoutRawAnswer(event.Raw)
 	}
-	if event.Command != nil {
-		event.Command.Command = w.cleanString(event.Command.Command, asymptoteobserve.DefaultStringLimit)
-		event.Command.Output = w.cleanString(event.Command.Output, asymptoteobserve.DefaultStringLimit)
-	}
-	// Mirrors SanitizeEvent: retained bulk content gets the prompt-text limit and
-	// secret redaction, not the shorter raw-attribute limit.
-	if event.File != nil {
-		event.File.Diff = w.cleanString(event.File.Diff, asymptoteobserve.DefaultStringLimit)
-	}
-	if event.Approval != nil {
-		event.Approval.Reason = w.cleanString(event.Approval.Reason, asymptoteobserve.DefaultStringLimit)
-	}
-	if event.Policy != nil {
-		event.Policy.Reason = w.cleanString(event.Policy.Reason, asymptoteobserve.DefaultStringLimit)
-	}
-	if event.Prompt != nil {
-		event.Prompt.Text = w.cleanString(event.Prompt.Text, asymptoteobserve.DefaultStringLimit)
-	}
-	// Mirrors SanitizeEvent: the run block and the top-level model, repository and branch come from
-	// OTLP resource attributes and the CI environment, where a pull request names its own branch.
-	event.Run = asymptoteobserve.SanitizeRun(event.Run, w.privacyOptions())
-	event.Model = w.cleanString(event.Model, asymptoteobserve.DefaultRawStringLimit)
-	event.Repository = w.cleanString(event.Repository, asymptoteobserve.DefaultRawStringLimit)
-	event.Branch = w.cleanString(event.Branch, asymptoteobserve.DefaultRawStringLimit)
-	if event.MCP != nil {
-		event.MCP = asymptoteobserve.SanitizeMCP(event.MCP, w.privacyOptions())
-	}
-	browserResponse := event.GenAI != nil && event.GenAI.Output != nil && browserChatHarnesses[event.Harness.Name]
-	if event.GenAI != nil {
-		output := event.GenAI.Output
-		event.GenAI = asymptoteobserve.SanitizeGenAI(event.GenAI, w.privacyOptions())
-		if browserResponse {
-			opts := w.privacyOptions()
-			opts.StringLimit = browserResponseStringLimit
-			event.GenAI.Output = asymptoteobserve.SanitizeGenAI(&beaconevent.GenAIInfo{Output: output}, opts).Output
-		}
-	}
-	if event.Raw != nil {
-		event.Raw = w.sanitizeMap(event.Raw)
-		// The answer is in gen_ai.output.messages already, so the raw copy would only add its first
-		// 2 KB to the line again. SanitizeMap returned new maps, so this leaves the caller's alone.
-		if attrs, ok := event.Raw["attributes"].(map[string]interface{}); ok && browserResponse {
-			delete(attrs, "gen_ai.output.messages")
-		}
-	}
-	if data, err := json.Marshal(event); err == nil && len(data) > w.maxEventBytes {
-		event.Truncated = true
-	}
+	event.Base = asymptoteobserve.SanitizeEventWith(event.Base, w.maxEventBytes, opts)
 	return event
 }
 
@@ -106,23 +61,30 @@ const browserResponseStringLimit = 16 * 1024
 
 var browserChatHarnesses = map[string]bool{"claude_web": true, "chatgpt_web": true}
 
-func (w jsonlWriter) sanitizeMap(input map[string]interface{}) map[string]interface{} {
-	return asymptoteobserve.SanitizeMap(input, w.privacyOptions())
-}
-
-func (w jsonlWriter) privacyOptions() asymptoteobserve.PrivacyOptions {
-	return asymptoteobserve.PrivacyOptions{
-		RedactSecrets: w.redactSecrets,
-		StringLimit:   asymptoteobserve.DefaultRawStringLimit,
+// withoutRawAnswer is raw without the answer's copy in its attributes: the answer is in
+// gen_ai.output.messages already, so the raw copy would only add its first 2 KB to the line again.
+// It copies what it changes and leaves the caller's maps alone. It runs before sanitizing, so the
+// field_truncated decision sees the line as it will be written.
+func withoutRawAnswer(raw map[string]interface{}) map[string]interface{} {
+	attrs, ok := raw["attributes"].(map[string]interface{})
+	if !ok {
+		return raw
 	}
-}
-
-func (w jsonlWriter) sanitizeSlice(input []interface{}) []interface{} {
-	return asymptoteobserve.SanitizeSlice(input, w.privacyOptions())
-}
-
-func (w jsonlWriter) cleanString(value string, limit int) string {
-	return asymptoteobserve.CleanString(value, limit, w.redactSecrets)
+	if _, ok := attrs["gen_ai.output.messages"]; !ok {
+		return raw
+	}
+	trimmed := make(map[string]interface{}, len(attrs))
+	for key, value := range attrs {
+		if key != "gen_ai.output.messages" {
+			trimmed[key] = value
+		}
+	}
+	out := make(map[string]interface{}, len(raw))
+	for key, value := range raw {
+		out[key] = value
+	}
+	out["attributes"] = trimmed
+	return out
 }
 
 // In system mode the collector runs as root, while agent hooks append to the
