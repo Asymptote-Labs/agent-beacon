@@ -2,6 +2,7 @@ package threatrules
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shellcmd"
@@ -15,14 +16,14 @@ const ParsedCommandsPath = "command.parsed_commands"
 const ParsedIncompletePath = "command.parsed_incomplete"
 
 // v1_3Fields are the fields of a parsed command that spec v1.3 added.
-var v1_3Fields = []string{"args", "file_reads", "file_writes", "script_sends", "socket_redirects"}
+var v1_3Fields = []string{"args", "file_reads", "file_writes", "script_sends", "socket_redirects", "runs_read", "span"}
 
 // ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
 // to the retained command line, so a longer value (from an in-process caller) is cut there too.
 const ParsedCommandsLimit = asymptoteobserve.DefaultStringLimit
 
 // maxShellDepth bounds how many `sh -c` scripts inside one another are read.
-const maxShellDepth = 2
+const maxShellDepth = 3
 
 // ParsedCommands returns what a rule sees as e.command.parsed_commands: command read as a bash
 // command line, one entry per command it runs, in the order shellcmd.Parse walks them.
@@ -82,19 +83,35 @@ func ParsedCommandLine(command string) (parsed []asymptoteobserve.ParsedCommand,
 	reads := shellcmd.FileReads(cmds)
 	sockets := shellcmd.SocketRedirects(cmds)
 	out := make([]asymptoteobserve.ParsedCommand, len(cmds))
+	wrote := make([]bool, len(cmds))
 	for i, c := range cmds {
 		var taken []shellcmd.FileRead
 		if reads != nil {
 			taken = reads[i]
 		}
 		out[i] = parsedCommand(c, taken)
+		out[i].RunsRead = c.RunsRead()
+		wrote[i] = slices.ContainsFunc(out[i].FileWrites, writesContent)
 		if sockets != nil {
 			for _, s := range sockets[i] {
 				out[i].SocketRedirects = append(out[i].SocketRedirects, asymptoteobserve.ParsedSocketRedirect{Path: s.Path, Op: string(s.Op)})
 			}
 		}
 	}
+	for i, span := range shellcmd.Spans(cmds, wrote) {
+		out[i].Span = span
+	}
 	return out, incomplete
+}
+
+// writesContent reports whether a file write puts content in a file a later command of the
+// line could read or run: not a deletion, an emptying or a touch, and not a device.
+func writesContent(e asymptoteobserve.ParsedFileEffect) bool {
+	switch shellcmd.Op(e.Op) {
+	case shellcmd.OpWrite, shellcmd.OpAppend, shellcmd.OpEdit, shellcmd.OpMoveTo, shellcmd.OpLink:
+		return !strings.HasPrefix(e.Path, "/dev/")
+	}
+	return false
 }
 
 func parsedCommand(c shellcmd.Command, reads []shellcmd.FileRead) asymptoteobserve.ParsedCommand {

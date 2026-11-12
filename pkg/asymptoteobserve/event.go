@@ -243,9 +243,20 @@ type ParsedCommand struct {
 	// is the 0-based position in it (curl ... | sh: sh is stage 1).
 	Pipeline int `cel:"pipeline"`
 	Stage    int `cel:"stage"`
-	// Nested is true for a command inside a command or process substitution, or inside the
-	// script a shell runs with -c or reads from a here-document.
+	// Nested is true for a command inside a command or process substitution, inside the
+	// script a shell runs with -c or reads from a here-document, or run by a carrier (the
+	// command of xargs, find -exec, ssh, docker exec, eval and the like).
 	Nested bool `cel:"nested"`
+	// RunsRead is true when the command hands a command line to another program to run (a
+	// shell's script, the command of xargs, find -exec, ssh, docker exec, eval and the like)
+	// and that command line was read to its end: its commands follow this one in the list.
+	RunsRead bool `cel:"runs_read"`
+	// Span is the part of the command line that can decide what the command runs: its own
+	// words, redirections and here-documents, starting earlier when something before it on
+	// the line reaches it (an earlier stage of its pipeline, a command that wrote a file, a
+	// variable). For a rule that must match text because the command is a program it cannot
+	// see into, and wants the text that reaches that command, not the whole line.
+	Span string `cel:"span"`
 }
 
 // ParsedFileEffect is a file a parsed command evidently writes. Op is one of write, append,

@@ -43,16 +43,23 @@ definitions:
       A parsed command is a program that runs none of its words as a command line, so what it
       does is told by its name and words: a shell builtin that takes no command, a file or
       text utility, a compiler, a package manager installing by name, a version control or
-      cloud client outside the subcommands that run something. A program that runs a word of
-      its own as a command line in some uses is listed with that use as its exception: ip
-      netns exec, apt -o (an APT::…::Pre-Invoke), rpm --eval, gem open, zip -TT, split
-      --filter, sort --compress-program, a compiler's -wrapper, iptables --modprobe, flyctl ssh
-      -C, doctl --ssh-command, git grep -O, tar -F. A shell is one when it runs a -c script,
-      which the parser reads, as the first stage of its pipeline and not inside another
-      shell's script, and the script is its last word: Codex logs its argv joined by spaces,
-      so `bash -lc rm -rf /x` was the script `rm -rf /x`, and words after a script leave the
-      line to its text. A variable that names a program to run (GIT_SSH_COMMAND, EDITOR) is
-      asked of the line by command_unread, not here.
+      cloud client outside the subcommands that run something. A program that does run a
+      command line it is given is one too when the parser read that command line to its end
+      (c.runs_read), because its commands are then entries of their own and answer for
+      themselves: a shell with a -c script or a here-document, ssh with a command, docker
+      exec, kubectl exec --, su -c, eval, watch and trap. xargs and find -exec are not: the
+      parser lists the command they run, but its operands come from a pipe or from what find
+      matches, so `find /home -name .zsh_history | xargs cat` is not told by `cat` alone. A
+      variable that names a program to run (GIT_SSH_COMMAND, EDITOR) is asked of the line by
+      command_unread, not here.
+
+      A program that runs a word of its own as a command line in some uses is listed with that
+      use as its exception: ip netns exec, apt -o (an APT::…::Pre-Invoke), rpm --eval, gem open,
+      zip -TT, split --filter, sort --compress-program, a compiler's -wrapper, iptables
+      --modprobe, flyctl ssh -C, doctl --ssh-command, git grep -O, tar -F. A shell vouches for
+      its line only when its -c script is its last word: Codex logs its argv joined by spaces, so
+      `bash -lc rm -rf /x` was the script `rm -rf /x`, and words after a script leave the line to
+      its text.
 
       The body is written for the engine's cost bound, which an expression must fit under to
       be evaluated without metering: the names are lists of at most sixteen (a longer list,
@@ -88,9 +95,10 @@ definitions:
        c.name in ["tar", "gtar", "bsdtar"] ? !c.args.matches("(?m)^(--to-command|--checkpoint-action|--use-compress-program|--rsh-command|--rmt-command|--info-script|--new-volume-script|-I|-F)") :
        c.name in ["sed", "gsed"] ? !c.args.matches("(?m)/[A-Za-z0-9]*e[A-Za-z0-9]*$|(^|[;{0-9$/])\\s*e(\\s|$)") :
        c.name in ["awk", "gawk", "mawk", "nawk"] ? !c.args.matches("system\\s*\\(|\\|\\s*\"|\"\\s*\\||getline") :
-       c.name in ["sh", "bash", "zsh", "dash", "ksh"] ? c.stage == 0 && !c.nested && size(c.argv) > 1 && c.argv[size(c.argv) - 2].matches("^-[A-Za-z]*c[A-Za-z]*$") && !c.argv.exists(a, a == "") :
-       c.name in ["docker", "podman", "nerdctl", "docker-compose"] ? !c.args.matches("(?m)^(run|exec|create|debug)$") :
-       c.name == "kubectl" ? !c.args.matches("(?m)^(exec|run|debug|attach|plugin|--)$") :
+       c.name in ["sh", "bash", "zsh", "dash", "ksh", "eval", "watch", "trap", "su"] ? c.runs_read && (!c.args.matches("(?m)^-[A-Za-z]*c[A-Za-z]*$") || size(c.argv) > 1 && c.argv[size(c.argv) - 2].matches("^-[A-Za-z]*c[A-Za-z]*$")) :
+       c.name == "ssh" ? c.runs_read && !c.args.matches("(?mi)^-o\\n?(proxy|local|knownhosts|permitlocal)command") :
+       c.name in ["docker", "podman", "nerdctl", "docker-compose"] ? !c.args.matches("(?m)^(run|exec|create|debug)$") || c.args.matches("\\Aexec\\n") && c.runs_read :
+       c.name == "kubectl" ? !c.args.matches("(?m)^(exec|run|debug|attach|plugin|--)$") || c.args.matches("\\Aexec\\n") && c.runs_read :
        c.name == "helm" ? !c.args.matches("(?m)^--post-renderer") :
        c.name in ["npm", "pnpm", "yarn"] ? !c.args.matches("(?m)^(exec|x|dlx|npx|create|init|explore)$") :
        c.name == "uv" ? !c.args.matches("(?m)^(run|tool|x)$") :
@@ -174,10 +182,22 @@ definitions:
             command: { command: "caffeinate -i ./deploy.sh" }
       - name: a_remote_command
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
-        verdict: no_match
+        verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "ssh build@host.example 'chmod 777 /srv'" }
+      - name: a_remote_login_with_no_command
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh build@host.example" }
+      - name: a_remote_command_through_a_local_proxy_command
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh -o ProxyCommand='nc -X 5 -x proxy.example:1080 %h %p' host.example uptime" }
       - name: an_interpreter
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
         verdict: no_match
@@ -228,10 +248,28 @@ definitions:
             command: { command: "bash -c \"$CMD\"" }
       - name: a_container_command
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
-        verdict: no_match
+        verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "docker exec web chmod 777 /srv" }
+      - name: a_container_started_with_a_command
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "docker run --rm -v /:/host alpine chmod 777 /host/srv" }
+      - name: a_command_line_given_to_eval
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "eval 'mkdir -p build && touch build/.stamp'" }
+      - name: xargs_whose_command_takes_its_words_from_a_pipe
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git ls-files | xargs rm -f" }
       - name: a_container_build
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
         verdict: match
@@ -407,8 +445,23 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "GIT_SSH_COMMAND='ssh -R 9000:localhost:22 host.example' git fetch" }
-      - name: a_script_inside_a_script_inside_a_script
-        verdict: match
+      - name: a_script_inside_a_script
+        verdict: no_match
         events:
           - event: { action: command.executed }
             command: { command: "bash -c \"bash -c 'chmod 777 /srv'\"" }
+      - name: scripts_nested_deeper_than_the_parser_reads
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sh -c 'sh -c \"sh -c \\\"sh -c id\\\"\"'" }
+      - name: a_remote_command_line_the_parser_read
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh build@host.example 'cd /srv && chmod 777 app'" }
+      - name: a_remote_command_line_that_ends_early
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh build@host.example 'echo \"unterminated'" }

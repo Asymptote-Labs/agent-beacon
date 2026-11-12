@@ -185,7 +185,7 @@ These are computed by the engine from the event just before evaluation. They are
 never written to or read from the log, so a fixture sets the source field, not these.
 
 - `e.command.parsed_commands`: `command.command` read as a bash command line (spec v1.2): one
-  entry per command it runs, each with `name` (base name after sudo/env/exec/timeout/...
+  entry per command it runs, each with `name` (base name after sudo/env/exec/timeout/uv run/...
   wrappers, "" when unknown), `argv` and `argv_raw` (every word, wrappers included: as
   passed, "" when it depends on an expansion, glob or `~`; and as written), `args` (spec
   v1.3: the words after the name, one per line, so `c.args.matches("(?m)^auth\ntoken$")`
@@ -202,8 +202,16 @@ never written to or read from the log, so a fixture sets the source field, not t
   are not data), `socket_redirects` (spec v1.3, `{path, op}`: its redirections to or from
   bash's `/dev/tcp/host/port` and `/dev/udp/host/port`, also through a descriptor an
   earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`
-  (0-based) and `nested` (inside `$(...)`, `<(...)` or a shell's script: its `-c` text, or
-  the here-document it reads, which are read too).
+  (0-based), `nested` (inside `$(...)`, `<(...)`, a shell's script or what a carrier
+  runs), `runs_read` (spec v1.3: true when the command hands a command line to another
+  program and that command line was read to its end, so its commands follow it in the
+  list: a shell's `-c` text or the here-document it reads, and the command of `xargs`,
+  `find -exec`, `ssh host`, `docker exec`, `kubectl exec --`, `su -c`, `eval`, `watch` and
+  `trap`) and `span` (spec v1.3: the part of the line that can decide what the command
+  runs, for a rule that must match text because the command is a program it cannot see
+  into: its own words, redirections and here-documents, starting earlier when an earlier
+  stage of its pipeline, a command that wrote a file, or a variable the line may have
+  set reaches it, and covering the loop or the line when it is in a loop or a function).
   Other here-document bodies and strings are not commands. A declaration is one (spec
   v1.3): `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.
   The first 4096 bytes are read; a cut capture yields the commands before the cut, and

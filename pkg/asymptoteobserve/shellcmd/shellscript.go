@@ -147,18 +147,30 @@ var powershellValueOptions = []string{
 	"if", "inputformat", "of", "outputformat", "config", "configurationname", "settingsfile", "v", "version",
 }
 
-// WithScripts returns commands with the commands of each shell's script (Command.Script) put
-// after the shell that runs it, InScript set, and so on for the shells inside a script, depth
-// scripts deep. The script is read as bash whatever shell runs it. Its pipelines are numbered
-// after every pipeline before them, so no two commands of the result share a Pipeline unless
-// they are stages of one pipeline.
+// isRunner is a cheap test for a word that may name a program that is handed a command line: a
+// shell, or one of the programs Carried reads.
+func isRunner(word string) bool {
+	switch ProgramName(word) {
+	case "sh", "bash", "zsh", "dash", "ksh",
+		"xargs", "find", "ssh", "docker", "podman", "nerdctl", "kubectl", "su", "eval", "watch", "trap":
+		return true
+	}
+	return isPowerShell(word)
+}
+
+// WithScripts returns commands with the commands each one hands on put after it: those of a
+// shell's script (Command.Script) and of the command line a carrier runs (Command.Carried:
+// xargs, find -exec, ssh, docker exec, eval and the like), InScript set, and so on for the
+// ones inside those, depth levels deep. The text is read as bash whatever reads it. Its
+// pipelines are numbered after every pipeline before them, so no two commands of the result
+// share a Pipeline unless they are stages of one pipeline.
 //
 // The result is one command line to FileReads and SocketRedirects, which follow the data
-// across a script's boundary: what the shell gets on its standard input reaches the script's
-// commands, what they write is what the shell writes, and the script sees the shell's
-// environment (its NAME=value prefix, and what the command line exported).
+// across the boundary: what the shell or carrier gets on its standard input reaches the
+// commands it runs, what they write is what it writes, and they see its environment (its
+// NAME=value prefix, and what the command line exported).
 func WithScripts(commands []Command, depth int) []Command {
-	if depth <= 0 || !slices.ContainsFunc(commands, hasShellWord) {
+	if depth <= 0 || !slices.ContainsFunc(commands, hasRunnerWord) {
 		return commands
 	}
 	x := expander{out: make([]Command, 0, len(commands)+4)}
@@ -166,9 +178,9 @@ func WithScripts(commands []Command, depth int) []Command {
 	return x.out
 }
 
-// hasShellWord is a cheap test for a command that may run a script: most do not.
-func hasShellWord(c Command) bool {
-	return slices.ContainsFunc(c.Argv, func(w Word) bool { return w.Known && (isShell(w.Text) || isPowerShell(w.Text)) })
+// hasRunnerWord is a cheap test for a command that may hand a command line on: most do not.
+func hasRunnerWord(c Command) bool {
+	return slices.ContainsFunc(c.Argv, func(w Word) bool { return w.Known && isRunner(w.Text) })
 }
 
 func isPowerShell(word string) bool {
@@ -228,17 +240,167 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		if depth <= 0 {
 			continue
 		}
-		if script, zero, ok := c.script(); ok {
-			if sub, _ := Parse(script); len(sub) > 0 {
-				at := len(x.out)
-				x.out[at-1].scripted = true
-				x.out[at-1].scriptZero = int32(zero + 1)
+		// A carrier's command line comes first: `find -exec sh -c .. \; -exec rm {} +` runs
+		// two, and Script would read the shell's alone. Its operands are not that line's $1.
+		script, ok := c.Carried()
+		onStdin, zero := false, -1
+		if !ok {
+			if script, zero, ok = c.script(); ok {
 				// A script read from the shell's standard input leaves none for its commands.
-				if here, ok := c.HereInput(); ok && here == script {
-					x.out[at-1].scriptOnStdin = true
-				}
-				x.add(sub, int32(at), depth-1)
+				here, isHere := c.HereInput()
+				onStdin = isHere && here == script
 			}
 		}
+		if !ok {
+			continue
+		}
+		if sub, err := Parse(script); len(sub) > 0 {
+			at := len(x.out)
+			x.out[at-1].scripted, x.out[at-1].scriptOnStdin = true, onStdin
+			x.out[at-1].scriptZero = int32(zero + 1)
+			x.out[at-1].runsRead = err == nil
+			x.add(sub, int32(at), depth-1)
+		}
 	}
+}
+
+// RunsRead reports whether WithScripts read the command line this command hands on (its
+// Script or what it Carried) to its end and put its commands after it. It is false for a
+// command that hands none on, one whose command line is not a known word or does not parse,
+// and one deeper than WithScripts was asked to read.
+func (c Command) RunsRead() bool { return c.runsRead }
+
+// Carried returns the command line a command hands to another program to run, for the
+// programs whose words say where it is:
+//
+//   - xargs: the words after its options (`xargs -0 rm -f` runs rm -f).
+//   - find: the words of each -exec, -execdir, -ok and -okdir up to its `;` or `+`, one
+//     command line each.
+//   - ssh: the words after the host, which the remote shell reads as one command line.
+//   - docker, podman and nerdctl exec: the words after the container. kubectl exec: the
+//     words after `--`.
+//   - su: the string of -c. eval and watch: their words, which the shell reads as one
+//     command line. trap: the action before its signals.
+//
+// The words of xargs, find and the exec commands are passed on as they are and are returned as
+// written, so a quoted word stays one word; the others are returned as the shell passes them
+// on, because a shell reads them again. ok is false when the command is none of these, names
+// no command (`ssh host`, `xargs` alone, a find without -exec), or a find clause has no end.
+//
+// The commands run where the carrier puts them: on another host, in a container, once per
+// file. Their words are still what runs.
+func (c Command) Carried() (script string, ok bool) {
+	name, args := c.run()
+	switch name {
+	case "xargs":
+		rest, _ := afterOptions(args, &carrierXargs)
+		return joinWords(rest, true)
+	case "find":
+		return findExec(args)
+	case "ssh":
+		rest, _ := afterOptions(args, &carrierSSH)
+		if len(rest) < 2 {
+			return "", false
+		}
+		return joinWords(rest[1:], false)
+	case "docker", "podman", "nerdctl":
+		if len(args) == 0 || !args[0].Known || args[0].Text != "exec" {
+			return "", false
+		}
+		rest, _ := afterOptions(args[1:], &carrierDockerExec)
+		if len(rest) < 2 {
+			return "", false
+		}
+		return joinWords(rest[1:], true)
+	case "kubectl":
+		if len(args) == 0 || !args[0].Known || args[0].Text != "exec" {
+			return "", false
+		}
+		for i, w := range args {
+			if w.Known && w.Text == "--" {
+				return joinWords(args[i+1:], true)
+			}
+		}
+	case "su":
+		for i, w := range args {
+			switch {
+			case !w.Known:
+			case (w.Text == "-c" || w.Text == "--command") && i+1 < len(args) && args[i+1].Known:
+				return args[i+1].Text, args[i+1].Text != ""
+			case strings.HasPrefix(w.Text, "--command="):
+				return w.Text[len("--command="):], len(w.Text) > len("--command=")
+			}
+		}
+	case "eval":
+		return joinWords(args, false)
+	case "watch":
+		rest, _ := afterOptions(args, &carrierWatch)
+		return joinWords(rest, false)
+	case "trap":
+		// trap action signal..: `-` and "" reset a signal and run nothing; -l and -p list.
+		if len(args) >= 2 && args[0].Known && args[0].Text != "" && !strings.HasPrefix(args[0].Text, "-") {
+			return args[0].Text, true
+		}
+	}
+	return "", false
+}
+
+var (
+	carrierXargs = wrapperSpec{optionSpec: optionSpec{short: "IndPLEsaJRS", long: []string{
+		"--max-args", "--max-procs", "--delimiter", "--arg-file", "--max-lines", "--max-chars", "--eof", "--process-slot-var",
+	}}}
+	carrierSSH        = wrapperSpec{optionSpec: optionSpec{short: "BbcDEeFIiJLlmOopQRSWw"}}
+	carrierDockerExec = wrapperSpec{optionSpec: optionSpec{short: "euw", long: []string{"--env", "--env-file", "--user", "--workdir", "--detach-keys"}}}
+	carrierWatch      = wrapperSpec{optionSpec: optionSpec{short: "nq", long: []string{"--interval", "--equexit"}}}
+)
+
+// joinWords returns words as one command line: as written when raw, else as the shell passes
+// them on, with a word it does not evaluate as written without its quotes.
+func joinWords(words []Word, raw bool) (string, bool) {
+	if len(words) == 0 {
+		return "", false
+	}
+	var b strings.Builder
+	for i, w := range words {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		switch {
+		case raw:
+			b.WriteString(w.Raw)
+		case w.Known:
+			b.WriteString(w.Text)
+		default:
+			b.WriteString(w.Unquoted)
+		}
+	}
+	return b.String(), true
+}
+
+// findExec returns the command lines of a find's -exec, -execdir, -ok and -okdir clauses, one
+// per line.
+func findExec(args []Word) (string, bool) {
+	var lines []string
+	for i := 0; i < len(args); i++ {
+		if w := args[i]; !w.Known || (w.Text != "-exec" && w.Text != "-execdir" && w.Text != "-ok" && w.Text != "-okdir") {
+			continue
+		}
+		end := i + 1
+		for end < len(args) && !(args[end].Known && (args[end].Text == ";" || args[end].Text == "+")) {
+			end++
+		}
+		if end == len(args) {
+			return "", false
+		}
+		line, ok := joinWords(args[i+1:end], true)
+		if !ok {
+			return "", false
+		}
+		lines = append(lines, line)
+		i = end
+	}
+	if len(lines) == 0 {
+		return "", false
+	}
+	return strings.Join(lines, "\n"), true
 }

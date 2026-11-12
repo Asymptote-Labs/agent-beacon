@@ -361,7 +361,8 @@ func TestParseIncomplete(t *testing.T) {
 func plain(s string) Word { return Word{Text: s, Raw: s, Known: true, Unquoted: s} }
 
 func TestParse(t *testing.T) {
-	commands, err := Parse("FOO=1 BAR=\"$X\" sudo -u deploy /opt/bin/beacon share 2>&1 | tee -a out.log | sh\ncd sub; echo `rm x` > {a,b}.txt")
+	const line = "FOO=1 BAR=\"$X\" sudo -u deploy /opt/bin/beacon share 2>&1 | tee -a out.log | sh\ncd sub; echo `rm x` > {a,b}.txt"
+	commands, err := Parse(line)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,23 +376,31 @@ func TestParse(t *testing.T) {
 			Redirects: []Redirect{{Op: ">&", Fd: "2", Target: plain("1")}},
 			Pipeline:  1,
 			refs:      []wordRef{{place: refEnv, index: 1, name: "X"}},
+			source:    line,
+			end:       56,
 		},
 		{
 			Argv:     []Word{plain("tee"), plain("-a"), plain("out.log")},
 			Offset:   59,
 			Pipeline: 1,
 			Stage:    1,
+			source:   line,
+			end:      73,
 		},
 		{
 			Argv:     []Word{plain("sh")},
 			Offset:   76,
 			Pipeline: 1,
 			Stage:    2,
+			source:   line,
+			end:      78,
 		},
 		{
 			Argv:     []Word{plain("cd"), plain("sub")},
 			Offset:   79,
 			Pipeline: 2,
+			source:   line,
+			end:      85,
 		},
 		{
 			Argv:      []Word{plain("echo"), {Raw: "`rm x`", Unquoted: "`rm x`"}},
@@ -400,6 +409,8 @@ func TestParse(t *testing.T) {
 			Pipeline:  3,
 			AfterCD:   true,
 			refs:      []wordRef{{place: refArg, index: 1, subst: 1}},
+			source:    line,
+			end:       110,
 		},
 		{
 			Argv:     []Word{plain("rm"), plain("x")},
@@ -408,6 +419,8 @@ func TestParse(t *testing.T) {
 			Nested:   true,
 			AfterCD:  true,
 			within:   1,
+			source:   line,
+			end:      97,
 			execEnd:  97,
 		},
 	}

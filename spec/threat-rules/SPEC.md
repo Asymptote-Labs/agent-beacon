@@ -79,7 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads`, `file_writes`, `script_sends` and `socket_redirects`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`, `runs_read` and `span`, for `e.command.parsed_incomplete`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -188,15 +188,21 @@ the steps in both orders still fires once. A single event never satisfies two st
   is, as before, an entry with no words and the assignment in `env`. Each entry
   has `name` (the base name of the first word after the wrappers `command`, `builtin`,
   `exec`, `nohup`, `time`, `sudo` and `env` with their options and `NAME=value` words, and,
-  since v1.3, `timeout`, `nice`, `ionice`, `stdbuf`, `doas`, `torsocks`, `proxychains` and
-  `proxychains4` with their options and `timeout`'s duration; each is recognized by its base
-  name so `/usr/bin/env` is `env`; since v1.3 a Windows executable's `.exe`, `.cmd` or `.bat`
-  is dropped from the name, so `ssh-add.exe` is `ssh-add`, and the first word after a PowerShell
+  since v1.3, `timeout`, `nice`, `ionice`, `stdbuf`, `doas`, `torsocks`, `proxychains`,
+  `proxychains4`, `caffeinate`, `setsid` and `chronic` with their options and `timeout`'s
+  duration, and the runners `uv run`, `poetry run`, `pipenv run`, `bundle exec` and
+  `mise exec ... --`, which start the command in a project's environment; each is recognized
+  by its base name so `/usr/bin/env` is `env`; since v1.3 a word whose value is unknown
+  still names a program when what follows its last `/` is written out in letters, digits and
+  `._+-@`, so `~/bin/tool`, `$HOME/go/bin/tool` and `"$dir"/tool` are `tool`, and a lone `[`
+  is the test command and not a glob; a Windows executable's `.exe`, `.cmd` or `.bat` is
+  dropped from the name (`ssh-add.exe` is `ssh-add`), and the first word after a PowerShell
   assignment's `$name =` is taken when it is a bare name (`$t = az account get-access-token`
-  is `az`); `""` when that word is unknown or a wrapper option moves
-  or replaces the command or makes the wrapper act on something else, as `sudo -i`, `env -C`,
-  `doas -s` and `ionice -p` do, or, since v1.3, does not run it, as `sudo -l` (which lists
-  whether the command is allowed), `sudo -v` and `sudo -e` do),
+  is `az`); `""` when that word names no program or a wrapper
+  option moves or replaces the command or makes the wrapper act on something else, as
+  `sudo -i`, `env -C`, `doas -s`, `ionice -p` and `uv run --directory` do, or, since v1.3,
+  does not run it, as `sudo -l` (which lists whether the command is allowed), `sudo -v`,
+  `sudo -e`, `command -v`, `command -V` and `uv run --module` do),
   `argv` (every word after brace expansion, wrappers included,
   as the shell passes it on, or `""` when its value depends on a parameter, command or
   arithmetic substitution, an ANSI-C or locale string, an unquoted glob character, or a
@@ -211,22 +217,35 @@ the steps in both orders still fires once. A single event never satisfies two st
   same with every path as written, below), `file_reads` and
   `script_sends` (the files it evidently takes as input and the ones its inline script
   sends, below), `socket_redirects` (its redirections to a network pseudo-file, below),
+  `runs_read` and `span` (whether the command line it hands on was read, and the part of
+  the line that can decide what it runs, below),
   `pipeline` (shared by the stages of one
   pipeline), `stage` (0-based position in it; a command inside a compound stage such as
   `{ a; b; } | c` or `(a) | c` carries that stage unless it is a stage of an inner pipeline
   or inside a substitution) and `nested` (inside a command or process
-  substitution, or inside a shell's script). When `sh`, `bash`, `zsh`, `dash` or `ksh` appears
+  substitution, or inside a command line another command hands on). When `sh`, `bash`,
+  `zsh`, `dash` or `ksh` appears
   as a word of a command with an option cluster containing `c`, its first operand, if known,
-  is read the same way, at most two levels deep, and its commands follow the shell's with
+  is read the same way, and its commands follow the shell's with
   `nested` true and pipeline numbers of their own. Since v1.3 the same holds for the
   here-document or here-string on the standard input of a command whose `name` is one of
   those shells, when the shell is given neither `-c` nor a script file (`sudo bash <<'EOF'`,
-  `sh -s -- arg <<EOF`, `bash <<< 'cmd'`), and for the words after the `-Command` (`-c`)
-  option of `powershell` or `pwsh`, joined with spaces as PowerShell joins them, which read as
-  commands where PowerShell and bash agree on a command and its words
-  (`powershell -Command "Get-StoredCredential -Target x"`). Other here-document bodies, what a
-  pipe sends a shell, and the strings of other commands are not read as commands. A command
-  line that ends early (an unclosed
+  `sh -s -- arg <<EOF`, `bash <<< 'cmd'`), and for the command line a carrier hands on, when
+  `name` is the carrier: the words after the options of `xargs`; the words of each `-exec`,
+  `-execdir`, `-ok` and `-okdir` of `find` up to its `;` or `+`; the words after the host of
+  `ssh`, after the container of `docker exec`, `podman exec` and `nerdctl exec`, and after
+  `--` of `kubectl exec`; the string of `su -c`; the words of `eval` and `watch`; and the
+  action of `trap`. The words of `xargs`, `find` and the exec commands are read as written;
+  the others as the shell passes them on, because a shell reads them again. Those commands
+  run where the carrier puts them (another host, a container, once per file); their words
+  are still what runs. A command line handed on is read at most three levels deep (two
+  before v1.3). Since v1.3 the words after the `-Command` (`-c`) option of `powershell` or
+  `pwsh`, joined with spaces as PowerShell joins them, are read the same way, where
+  PowerShell and bash agree on a command and its words
+  (`powershell -Command "Get-StoredCredential -Target x"`). Other here-document bodies, what
+  a pipe sends a
+  shell, and the strings of other commands are not read as commands. A command line that
+  ends early (an unclosed
   quote, here-document, substitution or compound command) yields the commands before the
   point where it became incomplete; one that does not parse yields the empty list, so a
   rule that must not miss such captures keeps a `command.command` fallback for it. The
@@ -405,6 +424,39 @@ the steps in both orders still fires once. A single event never satisfies two st
   the `cat` entry `{/dev/tcp/h/1, write}`. A later `exec` that closes the descriptor or
   points it elsewhere ends that. The same path as a word of a command is not a redirection.
   The reference derivation is `shellcmd.SocketRedirects`.
+- `runs_read` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
+  later) on an entry of `e.command.parsed_commands` is true when the command hands a command
+  line to another program to run (a shell's `-c` script or the here-document it reads, and
+  the command line of a carrier, above) and the engine read that command line to its end,
+  so that its commands follow the entry in the list. It is false when the command hands
+  none on, when the command line is not a known word (`bash -c "$CMD"`), when it does not
+  parse to its end, and when it is nested deeper than the engine reads. A rule uses it to
+  tell a program whose commands answer for themselves from one it cannot see into.
+  For `xargs` and `find` it says only that the command they run is listed: that command's
+  operands come from a pipe or from what `find` matches, which the entry does not hold.
+  The reference derivation is `shellcmd.Command.RunsRead` over `shellcmd.WithScripts`.
+- `span` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
+  later) on an entry of `e.command.parsed_commands` is the part of the command line that can
+  decide what the command runs, as text. It exists for the rule that must match text because
+  a command is a program the engine cannot see into (an interpreter, a project's script, a
+  tool no list names): such a program runs what it is given, and `span` is what the line
+  gives it, where `command.command` would also hold a commit message three commands away.
+  It starts at the command's first word, or earlier: at the first earlier stage of its
+  pipeline; at the first command before it that writes a file's content (an entry of
+  `file_writes` with `op` `write`, `append`, `edit`, `move_to` or `link` and a path not under
+  `/dev/`), since the command may read or run that file without naming it; at the start of
+  the line when one of its words, redirection targets, here-document bodies or `NAME=value`
+  prefixes takes a variable's value, unless the variable is one the environment sets
+  (`HOME`, `PWD`, `OLDPWD`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `HOSTNAME`, `PATH`, `LANG`,
+  `TERM`, `UID`, `EUID`, `PPID`, `RANDOM`, `SECONDS`, `LINENO`, `OSTYPE`, `HOSTTYPE`, `?`,
+  `$`, `#`, `!`) and no statement at or before the command assigns it; at the start of the
+  outermost `for`, `while` or `until` loop around it, in which case it runs to that loop's
+  end; and it is the whole line for a command inside a function's body. It ends where the
+  command's words and redirections end, followed, each after a newline, by the bodies of the
+  here-documents of the commands in it that the line holds after that point. An entry that
+  comes from a command line another command hands on has the `span` of the entry of the line
+  itself that it came from. The span over-approximates on purpose and is never smaller than
+  the command's own text. The reference derivation is `shellcmd.Spans`.
 - `e.system_context` is on the wire, not derived: on `session.context` it names what the
   runtime gave the model. `kind` is `skill_listing` for a skill index, `source` is where
   Beacon read it (`system_prompt`, `transcript`), and `skills` names each listed skill as
@@ -595,13 +647,20 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
-- **v1.3**: `args`, `file_reads`, `file_writes`, `script_sends` and `socket_redirects` on each
-  entry of `e.command.parsed_commands`.
+- **v1.3**: `args`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`,
+  `runs_read` and `span` on each entry of `e.command.parsed_commands`, and
+  `e.command.parsed_incomplete`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
-  `doas`, `torsocks` and `proxychains`, without a Windows executable's suffix and after a
-  PowerShell assignment, and a shell's here-document or here-string script, and a PowerShell's
-  `-Command` script, are read as commands the way a `-c` script is. [Predicates](#predicates):
-  named expressions a rule calls, defined by the pack's definitions files.
+  `doas`, `torsocks`, `proxychains`, `caffeinate`, `setsid`, `chronic`, `uv run`,
+  `poetry run`, `pipenv run`, `bundle exec` and `mise exec`, and behind a path whose
+  directory is unknown (`~/bin/tool`), without a Windows executable's suffix and after a
+  PowerShell assignment; `command -v` names no command. A shell's
+  here-document or here-string script is read as commands the way its `-c` script is, and so
+  is the command line `xargs`, `find -exec`, `ssh`, `docker exec`, `kubectl exec`, `su -c`,
+  `eval`, `watch` and `trap` hand on, and a PowerShell's `-Command` script, three levels
+  deep. A declaration (`export`) is an
+  entry. [Predicates](#predicates): named expressions a rule calls, defined by the pack's
+  definitions files.
 - **v1.2**: the derived field `e.command.parsed_commands`.
 - **v1.1**: `correlation.order` (`sequence` default, or `any` for order-insensitive steps),
   and the per-rule `spec` field with the engine rules above.

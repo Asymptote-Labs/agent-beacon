@@ -97,15 +97,26 @@ type Command struct {
 	// the statement ends, or 0 outside any: what an exec of the statement leaves open is open up
 	// to there (SocketRedirects).
 	execEnd int
-	// shell is, for a command WithScripts added, one more than the index of the shell whose
-	// script it is in, and 0 for a command of the command line itself. scripted is set on a
-	// shell whose script's commands follow it, and scriptOnStdin when it read that script from
-	// its standard input. scriptZero is one more than the index in Argv of the word that is
-	// the script's $0, or 0 where its operands are not the script's.
+	// shell is, for a command WithScripts added, one more than the index of the shell or
+	// carrier whose command line it is in, and 0 for a command of the command line itself.
+	// scripted is set on a shell or carrier whose commands follow it, runsRead when that
+	// command line was read to its end, and scriptOnStdin when a shell read its script from
+	// its standard input. scriptZero is one more than the index in Argv of the word that is the
+	// script's $0, or 0 where its operands are not the script's (a carrier, PowerShell).
 	shell         int32
 	scriptZero    int32
 	scripted      bool
+	runsRead      bool
 	scriptOnStdin bool
+	// source is the text the statement was parsed from (the command line, or the script it is
+	// in), end the offset where its words and redirections end, and hdocs its here-documents,
+	// each the offset of its body, which comes after the line it is named on, and the index
+	// of its redirection. scopeStart and scopeEnd are the outermost loop around the statement,
+	// or the whole source when it is in a function's body; scopeEnd is 0 when it is in neither.
+	source               string
+	end                  int
+	hdocs                [][2]int
+	scopeStart, scopeEnd int
 }
 
 // wordRef is one thing a word of a command takes its value from: a command substitution or an
@@ -208,6 +219,9 @@ type parser struct {
 	substIDs   map[syntax.Node]int
 	declared   []declaration // not yet carried by a statement
 	moved      bool
+	// scopes are the byte ranges of the loops, and the whole source once per function
+	// declaration: a command inside one may run after anything in that range.
+	scopes []substitution
 }
 
 // declaration is an assignment by export, declare, local, readonly or typeset, and where its
@@ -227,6 +241,13 @@ func (p *parser) visit(node syntax.Node) bool {
 		p.nested = append(p.nested, substitution{n.OpPos.Offset(), n.Rparen.Offset(), p.substID(n)})
 	case *syntax.Subshell:
 		p.subshells = append(p.subshells, substitution{n.Lparen.Offset(), n.Rparen.Offset(), int(n.Lparen.Offset()) + 1})
+	case *syntax.ForClause:
+		p.scopes = append(p.scopes, substitution{start: n.Pos().Offset(), end: n.End().Offset()})
+	case *syntax.WhileClause:
+		p.scopes = append(p.scopes, substitution{start: n.Pos().Offset(), end: n.End().Offset()})
+	case *syntax.FuncDecl:
+		// Whatever the line holds may be there by the time the function is called.
+		p.scopes = append(p.scopes, substitution{start: 0, end: uint(len(p.source))})
 	case *syntax.Stmt:
 		p.stmt(n)
 	}
@@ -345,15 +366,29 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 	if isDecl {
 		c.Argv = p.declWords(decl)
 	}
+	end := offset
+	if stmt.Cmd != nil {
+		end = stmt.Cmd.End().Offset()
+	}
 	for i, r := range stmt.Redirs {
 		c.Redirects = append(c.Redirects, p.redirect(r))
 		if r.Word != nil {
 			c.refs = p.refs(c.refs, r.Word.Parts, refRedirect, i)
+			end = max(end, r.Word.End().Offset())
 		}
 		// What a here-document's body expands (unless its delimiter is quoted, which makes the
 		// body literal) is written onto the command's standard input.
 		if r.Hdoc != nil {
 			c.refs = p.refs(c.refs, r.Hdoc.Parts, refRedirect, i)
+			c.hdocs = append(c.hdocs, [2]int{int(r.Hdoc.Pos().Offset()), i})
+		}
+	}
+	c.source, c.end = p.source, int(min(end, uint(len(p.source))))
+	// A later statement of a loop's body runs before an earlier one the next time round, and
+	// a function's body runs wherever it is called: see Spans.
+	for _, s := range p.scopes {
+		if offset >= s.start && offset < s.end && (c.scopeEnd == 0 || int(s.start) < c.scopeStart) {
+			c.scopeStart, c.scopeEnd = int(s.start), int(min(s.end, uint(len(p.source))))
 		}
 	}
 	p.commands = append(p.commands, c)
