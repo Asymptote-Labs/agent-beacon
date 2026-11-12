@@ -60,6 +60,9 @@ type Summary struct {
 	SessionsChanged int `json:"sessions_changed"`
 	EventsEmitted   int `json:"events_emitted"`
 	SpoolEvents     int `json:"spool_events,omitempty"`
+	// SpoolRejected counts staged lines the drain refused: unreadable, or not a hook event of the
+	// session whose workspace held them.
+	SpoolRejected   int `json:"spool_rejected,omitempty"`
 	Errors          int `json:"errors"`
 	MalformedLines  int `json:"malformed_lines"`
 	PartialSessions int `json:"partial_sessions"`
@@ -124,17 +127,19 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	var errs []error
 	opts.guard = sessionsync.NewRetentionGuard(opts.Print, opts.Write)
 	var stopErr error
-	// The redelivery guard is loaded once per sweep, from the log as it stands before any
-	// drain appends: every id found there is already recorded.
-	seen := loadDrainedIDs(opts.LogPath)
 	for _, ref := range refs {
 		// Drain before the store mapping so the live hook copy of an event lands first.
 		// The writer keeps the line it saw and skips a matching candidate, so wherever the
 		// two capture paths describe one event identically (same key, same call id), the
 		// surviving copy is the collection_method=hook line doctor's capture check counts,
 		// not the poll backfill of the same moment.
-		drained, drainErr := drainSessionSpool(ref, opts, seen)
-		summary.SpoolEvents += drained
+		drainErr := drainSessionSpool(ref, opts, &summary)
+		if sessionsync.Stopped(drainErr) {
+			// As for the store below: the rest stays staged for a later sync.
+			stopErr = drainErr
+			errs = append(errs, drainErr)
+			break
+		}
 		if drainErr != nil {
 			summary.Errors++
 			errs = append(errs, fmt.Errorf("DeepSeek session %s spool: %w", ref.ID, drainErr))

@@ -10,7 +10,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/spf13/cobra"
 )
 
@@ -141,6 +140,9 @@ func reportDshSweep(cmd *cobra.Command, summary dshsession.Summary) {
 	if summary.SpoolEvents > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d spooled hook event(s) drained from workspace spools\n", summary.SpoolEvents)
 	}
+	if summary.SpoolRejected > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %d spooled line(s) rejected: unreadable, or not a hook event of the session whose workspace held them\n", summary.SpoolRejected)
+	}
 	if summary.MalformedLines > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d unreadable line(s) in DeepSeek session logs\n", summary.MalformedLines)
 	}
@@ -209,7 +211,7 @@ func runEndpointDshStatus(cmd *cobra.Command, args []string) error {
 			status.ParentSession = ref.Meta.ParentSessionID
 			status.Model = ref.Meta.Model
 			status.Title = ref.Meta.Title
-			status.SpoolBytes = asymptoteobserve.DSHSpoolPendingBytes(ref.Meta.CWD, ref.ID)
+			status.SpoolBytes = dshsession.SpoolPendingBytes(ref)
 		}
 		if cursor := state.Sources[ref.Path]; cursor != nil {
 			status.CollectedLine = cursor.LastLine

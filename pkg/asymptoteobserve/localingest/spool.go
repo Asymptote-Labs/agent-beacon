@@ -48,7 +48,9 @@ func (s Spool) maxBytes() int64 {
 	return s.MaxBytes
 }
 
-func (s Spool) filePath() string { return filepath.Join(s.Dir, spoolFileName) }
+// FilePath is the file holding the spooled lines. A reader that must not open whatever a
+// user-owned path leads to (a root process looking at a user's spool) stats it itself.
+func (s Spool) FilePath() string { return filepath.Join(s.Dir, spoolFileName) }
 
 func (s Spool) openLock() (*os.File, error) { return s.openNamedLock(spoolLockName) }
 
@@ -71,7 +73,7 @@ func (s Spool) Append(lines [][]byte) (dropped int, err error) {
 		return 0, nil
 	}
 	err = s.withLock(func() (err error) {
-		f, err := os.OpenFile(s.filePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, SpoolFileMode)
+		f, err := os.OpenFile(s.FilePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, SpoolFileMode)
 		if err != nil {
 			return err
 		}
@@ -126,7 +128,7 @@ func (s Spool) Drain(maxLines int, send func(lines [][]byte) (int, error)) (n in
 	if maxLines <= 0 {
 		return 0, nil
 	}
-	if _, err := os.Stat(s.filePath()); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(s.FilePath()); errors.Is(err, os.ErrNotExist) {
 		return 0, nil
 	}
 	drainFile, err := s.openNamedLock(spoolDrainLockName)
@@ -142,7 +144,7 @@ func (s Spool) Drain(maxLines int, send func(lines [][]byte) (int, error)) (n in
 
 	var batch [][]byte
 	if err := s.withLock(func() error {
-		data, err := os.ReadFile(s.filePath())
+		data, err := os.ReadFile(s.FilePath())
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil
@@ -171,7 +173,7 @@ func (s Spool) Drain(maxLines int, send func(lines [][]byte) (int, error)) (n in
 		return 0, sendErr
 	}
 	if err := s.withLock(func() error {
-		data, err := os.ReadFile(s.filePath())
+		data, err := os.ReadFile(s.FilePath())
 		if err != nil {
 			return err
 		}
@@ -208,7 +210,7 @@ func (s Spool) withLock(fn func() error) (err error) {
 
 // Pending reports how many events are spooled and their size.
 func (s Spool) Pending() (lines int, size int64, err error) {
-	data, err := os.ReadFile(s.filePath())
+	data, err := os.ReadFile(s.FilePath())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, 0, nil
@@ -222,7 +224,7 @@ func (s Spool) Pending() (lines int, size int64, err error) {
 // spool or the new one and never half of each. Called with the lock held.
 func (s Spool) rewrite(remaining [][]byte) error {
 	if len(remaining) == 0 {
-		if err := os.Remove(s.filePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(s.FilePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		return nil
@@ -246,7 +248,7 @@ func (s Spool) rewrite(remaining [][]byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, s.filePath())
+	return os.Rename(tmpName, s.FilePath())
 }
 
 func splitLines(data []byte) [][]byte {

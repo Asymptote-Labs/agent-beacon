@@ -79,16 +79,28 @@ as corruption.
 
 Each sweep also drains workspace spools. When DeepSeek Harness runs hooks
 inside its session sandbox, a hook that cannot write the runtime log stages the
-event at `<workspace>/.beacon/dsh-spool/<session>.jsonl`; the sweep appends
-those events to the runtime log and deletes the staged files. The report says
-how many landed:
+event in `<workspace>/.beacon/dsh-spool/<session>/`, a directory only your
+account can read; the sweep appends those events to the runtime log and
+removes them from the spool. The report says how many landed:
 
 ```text
 dsh sync: 3 sessions, 1 changed, 12 events, 0 errors
   2 spooled hook event(s) drained from workspace spools
 ```
 
-Draining runs only in write mode: `--print` leaves spools untouched.
+Anything else in the spool is refused and counted as rejected: a line that does
+not decode, or one that is not a DeepSeek Harness hook event of the session
+whose workspace holds it. Actions only Beacon writes, such as
+`session.share_requested`, are refused too, since anything running in the
+workspace can write there.
+
+Drained events count against the sweep's limits like mapped ones, so an
+install-time backfill's byte budget can leave them staged for the next sync.
+Delivery is at least once: a sweep killed between appending a batch and
+removing it from the spool appends that batch again. Draining runs only in
+write mode: `--print` leaves spools untouched. The system-mode install backfill,
+which runs as root, leaves spools alone as well; your own `beacon endpoint dsh
+sync` drains them.
 
 ## Status
 

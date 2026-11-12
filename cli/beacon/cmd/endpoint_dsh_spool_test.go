@@ -12,6 +12,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 	"github.com/spf13/cobra"
 )
 
@@ -51,20 +52,17 @@ func jsonString(s string) string {
 // would, and returns the staged byte count.
 func plantSpool(t *testing.T, workspace, id string) int {
 	t.Helper()
-	path, ok := asymptoteobserve.DSHSpoolPath(workspace, id)
+	dir, ok := asymptoteobserve.DSHSpoolDir(workspace, id)
 	if !ok {
 		t.Fatalf("unsafe test session id %q", id)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	body := `{"timestamp":"2026-09-23T12:00:00Z","vendor":"beacon","product":"endpoint-agent",` +
 		`"schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted"},` +
-		`"severity":"info","harness":{"name":"deepseek_harness","collection_method":"hook"}}` + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+		`"severity":"info","harness":{"name":"deepseek_harness","collection_method":"hook"}}`
+	if dropped, err := (localingest.Spool{Dir: dir}).Append([][]byte{[]byte(body)}); err != nil || dropped != 0 {
+		t.Fatalf("plant spool: dropped %d, err %v", dropped, err)
 	}
-	return len(body)
+	return len(body) + 1
 }
 
 // A session with staged events and no hook event in the runtime log is capture working,
@@ -128,8 +126,8 @@ func TestDshHookCapturePendingDrainClearsOnceTheSpoolIsEmpty(t *testing.T) {
 
 	// Drain: the events land in the log as hook events and the spool file goes away.
 	f.event(t, "hook", f.installedAt.Add(2*time.Hour))
-	path, _ := asymptoteobserve.DSHSpoolPath(workspace, "pending-1")
-	if err := os.Remove(path); err != nil {
+	dir, _ := asymptoteobserve.DSHSpoolDir(workspace, "pending-1")
+	if err := os.Remove((localingest.Spool{Dir: dir}).FilePath()); err != nil {
 		t.Fatal(err)
 	}
 

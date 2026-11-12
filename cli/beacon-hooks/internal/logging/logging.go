@@ -159,13 +159,11 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 		// spool from outside the sandbox. A staged event is deliberately silent: one process
 		// per event would print a note on every event into the runtime's hook stderr stream,
 		// so the staged state surfaces through `dsh status`, `dsh sync` and `doctor` instead.
-		// When the spool write fails too -- read-only mode, no workspace, unsafe ids -- the
-		// NOT-recorded explanation below fires unchanged, which is the honest report for an
-		// event nothing captured.
-		if spoolPath := l.dshSpoolPath(event); spoolPath != "" {
-			if spoolErr := writeEndpointJSON(spoolPath, event); spoolErr == nil {
-				return nil
-			}
+		// When staging fails too -- read-only mode, no workspace, unsafe ids, a full spool --
+		// the NOT-recorded explanation below fires unchanged, which is the honest report for
+		// an event nothing captured.
+		if l.stageInDSHSpool(event) {
+			return nil
 		}
 		fmt.Fprintf(os.Stderr, "logging: failed to write endpoint event to %s: %v\n", path, err)
 		reportEndpointWriteFailure(os.Stderr, l.platform, path, err)
@@ -255,42 +253,45 @@ func recordActiveSession(event map[string]interface{}) {
 	_ = activesession.Record(activesession.DefaultPath(), name, id, dir, time.Now())
 }
 
-// dshSpoolPath resolves the workspace spool file a sandboxed DeepSeek Harness hook should
-// stage one event in when the runtime log cannot be written, or "" when no spool applies.
+// stageInDSHSpool stages one event a sandboxed DeepSeek Harness hook could not write to the
+// runtime log in the session workspace's spool, and reports whether it did.
 //
-// Spooling is dsh-only: its sandbox is the reason the log write fails (#605), and staging
-// another runtime's events into a project checkout would be new pollution with no drain
-// path. The session id must be a safe filename component on BOTH the writing and the
-// draining side (ValidDSHSessionIDForSpool is what they share), and the workspace comes
-// from the event's own session.working_directory -- the envelope value the bridge stamped
-// from session.header.cwd, the same directory the sandbox confines writes to -- with the
-// process cwd as the fallback for callers that did not carry the field.
-func (l *Logger) dshSpoolPath(event map[string]interface{}) string {
+// Staging is dsh-only: its sandbox is the reason the log write fails (#605), and staging another
+// runtime's events into a project checkout would be new pollution with no drain path. The session
+// id must be a safe directory name on BOTH the writing and the draining side
+// (ValidDSHSessionIDForSpool is what they share), and the workspace comes from the event's own
+// session.working_directory -- the envelope value the bridge stamped from session.header.cwd, the
+// same directory the sandbox confines writes to -- with the process cwd as the fallback for callers
+// that did not carry the field.
+//
+// The spool is a localingest.Spool, the store a restricted-mode hook already falls back to, not the
+// runtime log's writer: it is private to this account wherever the workspace lives, bounded, and
+// waits at most its short lock timeout for a sweep draining it, so a hook never holds the agent up
+// behind `beacon endpoint dsh sync`.
+func (l *Logger) stageInDSHSpool(event map[string]interface{}) bool {
 	if l == nil || asymptoteobserve.NormalizeHarnessName(l.platform) != dshHarnessName {
-		return ""
-	}
-	if !asymptoteobserve.ValidDSHSessionIDForSpool(l.sessionID) {
-		return ""
+		return false
 	}
 	cwd := ""
 	if session, ok := event["session"].(map[string]interface{}); ok {
 		cwd, _ = session["working_directory"].(string)
 	}
-	cwd = strings.TrimSpace(cwd)
-	if cwd == "" {
+	if strings.TrimSpace(cwd) == "" {
 		cwd, _ = os.Getwd()
 	}
-	path, ok := asymptoteobserve.DSHSpoolPath(cwd, l.sessionID)
+	dir, ok := asymptoteobserve.DSHSpoolDir(cwd, l.sessionID)
 	if !ok {
-		return ""
+		return false
 	}
-	// Creating the directory here doubles as the eligibility probe: if the workspace itself
-	// is not writable (read-only mode), there is no spool and the caller reports the loss.
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return ""
+	line, err := encodeEndpointLine(event)
+	if err != nil {
+		return false
 	}
-	ensureSpoolGitExclude(filepath.Dir(path))
-	return path
+	if dropped, err := (localingest.Spool{Dir: dir}).Append([][]byte{line}); err != nil || dropped > 0 {
+		return false
+	}
+	ensureSpoolGitExclude(filepath.Dir(dir))
+	return true
 }
 
 // reportedWriteFailures remembers which runtime log paths this process has already explained a
@@ -551,9 +552,19 @@ func writeEndpointJSONFile(path string, event map[string]interface{}) error {
 	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
 		return err
 	}
-	data, err := json.Marshal(sanitizeEndpointMap(event))
+	data, err := encodeEndpointLine(event)
 	if err != nil {
 		return err
+	}
+	return deliverEndpointLine(path, data)
+}
+
+// encodeEndpointLine is the line an endpoint event is written as: sanitized, cut down to the
+// 64 KiB event limit, and stamped with its event.id.
+func encodeEndpointLine(event map[string]interface{}) ([]byte, error) {
+	data, err := json.Marshal(sanitizeEndpointMap(event))
+	if err != nil {
+		return nil, err
 	}
 	if len(data) > 64*1024 {
 		event["field_truncated"] = true
@@ -561,33 +572,30 @@ func writeEndpointJSONFile(path string, event map[string]interface{}) error {
 		event["message"] = truncateEndpoint(fmt.Sprint(event["message"]), 1024)
 		data, err = json.Marshal(sanitizeEndpointMap(event))
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if len(data) > 64*1024 {
 		compactEndpointContent(event)
 		data, err = json.Marshal(sanitizeEndpointMap(event))
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if len(data) > 64*1024 {
 		event = minimalEndpointEvent(event)
 		data, err = json.Marshal(sanitizeEndpointMap(event))
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if len(data) > 64*1024 {
-		return fmt.Errorf("endpoint event exceeds 64 KiB after metadata fallback")
+		return nil, fmt.Errorf("endpoint event exceeds 64 KiB after metadata fallback")
 	}
 	// Stamped last, over the bytes that are actually about to be written, so
 	// none of the size fallbacks above can leave the ID describing an event that
 	// no longer exists.
-	if data, err = withEndpointEventID(event, data); err != nil {
-		return err
-	}
-	return deliverEndpointLine(path, data)
+	return withEndpointEventID(event, data)
 }
 
 // EndpointIngest delivers to the system log through the collector when the endpoint is in the

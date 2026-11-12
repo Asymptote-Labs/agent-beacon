@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
@@ -207,8 +206,7 @@ func dshHookCaptureCheckAt(logPath, hooksPath, dshHome string) diagnostics.Check
 			// live, spool or no spool; they are not evidence of anything.
 			continue
 		}
-		pending := ref.Meta != nil && strings.TrimSpace(ref.Meta.CWD) != "" &&
-			asymptoteobserve.DSHSpoolPendingBytes(ref.Meta.CWD, ref.ID) > 0
+		pending := dshsession.SpoolPendingBytes(ref) > 0
 		if !pending && modified.Before(oldestRetained) {
 			continue
 		}

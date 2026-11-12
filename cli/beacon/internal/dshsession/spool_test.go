@@ -2,63 +2,65 @@ package dshsession
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
 
-// The spool is how a sandboxed DeepSeek Harness hook's events reach the runtime log (#605):
-// the hook stages them in the session workspace because the sandbox cannot write ~/.beacon,
-// and `beacon endpoint dsh sync` drains them from outside the harness. These tests pin the
-// drain contract: events land verbatim as hook events, files are deleted once emptied, a
-// crash between append and delete cannot double-deliver, and a hook mid-append blocks
-// instead of losing its event.
+// The spool is how a sandboxed DeepSeek Harness hook's events reach the runtime log (#605): the
+// hook stages them in the session workspace because the sandbox cannot write ~/.beacon, and
+// `beacon endpoint dsh sync` drains them from outside the harness. These tests pin the drain
+// contract: staged hook events land as hook events and leave the spool, anything a sandboxed hook
+// of the session could not have staged is refused, the sweep's limits apply to drained events, a
+// system backfill leaves spools alone, and a hook staging mid-drain loses nothing.
 
-func spoolTestEvent(t *testing.T, sessionID, action, id string) schema.Event {
+func spoolTestEvent(t *testing.T, sessionID, action string) schema.Event {
 	t.Helper()
 	event := asymptoteobserve.NewEvent(asymptoteobserve.NewEventOptions{
 		Action:   action,
 		Category: "session",
 		Severity: schema.SeverityInfo,
 		Harness: schema.HarnessInfo{
-			Name:             dshsessionHarnessForTest,
+			Name:             Harness,
 			CollectionMethod: asymptoteobserve.CollectionMethodHook,
 		},
 		Message: action + " for " + sessionID,
 	})
 	event.Session = &schema.SessionInfo{ID: sessionID}
-	event.Event.ID = id
 	return event
 }
 
-// dshsessionHarnessForTest is the canonical harness name the drain must preserve.
-const dshsessionHarnessForTest = "deepseek_harness"
-
-func writeSpoolFile(t *testing.T, path string, events ...schema.Event) {
+func spoolTestLine(t *testing.T, event schema.Event) []byte {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	data, err := json.Marshal(event)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var out strings.Builder
-	for _, event := range events {
-		data, err := json.Marshal(event)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out.Write(data)
-		out.WriteByte('\n')
+	return data
+}
+
+// stage appends lines to sessionID's spool in workspace the way a sandboxed hook does.
+func stage(t *testing.T, workspace, sessionID string, lines ...[]byte) {
+	t.Helper()
+	dir, ok := asymptoteobserve.DSHSpoolDir(workspace, sessionID)
+	if !ok {
+		t.Fatalf("unsafe test session id %q", sessionID)
 	}
-	if err := os.WriteFile(path, []byte(out.String()), 0o644); err != nil {
-		t.Fatal(err)
+	if dropped, err := (localingest.Spool{Dir: dir}).Append(lines); err != nil || dropped != 0 {
+		t.Fatalf("stage: dropped %d, err %v", dropped, err)
 	}
+}
+
+func spoolTestRef(sessionID, workspace string) SessionRef {
+	return SessionRef{ID: sessionID, Meta: &SessionMeta{ID: sessionID, CWD: workspace}}
 }
 
 func spoolTestOpts(t *testing.T) CollectOptions {
@@ -93,81 +95,73 @@ func readLogLines(t *testing.T, path string) []schema.Event {
 	return out
 }
 
-func TestDrainSessionSpoolMovesEventsAsHookEventsAndDeletesTheFile(t *testing.T) {
+func TestDrainSessionSpoolMovesEventsAsHookEventsAndEmptiesTheSpool(t *testing.T) {
 	workspace := t.TempDir()
 	opts := spoolTestOpts(t)
-	ref := SessionRef{ID: "sess-drain-1", Meta: &SessionMeta{ID: "sess-drain-1", CWD: workspace}}
-	base, ok := asymptoteobserve.DSHSpoolPath(workspace, ref.ID)
-	if !ok {
-		t.Fatal("safe id produced no spool path")
-	}
-	writeSpoolFile(t, base,
-		spoolTestEvent(t, ref.ID, "session.started", "id-start"),
-		spoolTestEvent(t, ref.ID, "prompt.submitted", "id-prompt"),
+	ref := spoolTestRef("sess-drain-1", workspace)
+	stage(t, workspace, ref.ID,
+		spoolTestLine(t, spoolTestEvent(t, ref.ID, "session.started")),
+		spoolTestLine(t, spoolTestEvent(t, ref.ID, "prompt.submitted")),
 	)
 
-	drained, err := drainSessionSpool(ref, opts, loadDrainedIDs(opts.LogPath))
-	if err != nil {
+	var summary Summary
+	if err := drainSessionSpool(ref, opts, &summary); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
-	if drained != 2 {
-		t.Fatalf("drained = %d, want 2", drained)
+	if summary.SpoolEvents != 2 || summary.SpoolRejected != 0 {
+		t.Fatalf("SpoolEvents/SpoolRejected = %d/%d, want 2/0", summary.SpoolEvents, summary.SpoolRejected)
 	}
 	events := readLogLines(t, opts.LogPath)
-	if len(events) != 2 {
-		t.Fatalf("log has %d events, want 2", len(events))
+	if got := actionsOf(events); strings.Join(got, ",") != "session.started,prompt.submitted" {
+		t.Fatalf("log actions = %v, want the staged events in order", got)
 	}
 	for _, event := range events {
-		if event.Harness.CollectionMethod != asymptoteobserve.CollectionMethodHook {
-			t.Errorf("action %s landed with collection_method=%q, want hook: a drained spool holds deferred hook events",
-				event.Event.Action, event.Harness.CollectionMethod)
-		}
-		if event.Harness.Name != dshsessionHarnessForTest {
-			t.Errorf("harness.name = %q, want %s", event.Harness.Name, dshsessionHarnessForTest)
+		if event.Harness.CollectionMethod != asymptoteobserve.CollectionMethodHook || event.Harness.Name != Harness {
+			t.Errorf("%s landed as %s/%s, want %s/hook: a drained spool holds deferred hook events",
+				event.Event.Action, event.Harness.Name, event.Harness.CollectionMethod, Harness)
 		}
 	}
-	if pending := asymptoteobserve.DSHSpoolPendingBytes(workspace, ref.ID); pending != 0 {
-		t.Errorf("spool still holds %d bytes after drain", pending)
-	}
-	if _, err := os.Stat(base); !os.IsNotExist(err) {
-		t.Errorf("drained spool file still exists: %v", err)
+	if pending := SpoolPendingBytes(ref); pending != 0 {
+		t.Errorf("spool still holds %d bytes after the drain", pending)
 	}
 }
 
-// A crash between "appended" and "deleted" leaves the file in place; the next drain
-// redelivers it. The id guard keeps that from landing the same events twice -- most
-// importantly the lifecycle events (session.started, prompt.submitted), which sit outside
-// the writer's own call-id dedupe allowlist and would otherwise always double-count.
-func TestDrainSessionSpoolRedeliveryAfterCrashDoesNotDoubleCount(t *testing.T) {
+// The workspace is writable by the sandboxed agent and, depending on where it lives, by others,
+// so a staged line is untrusted. Only a hook event of the session whose workspace holds the spool
+// is appended; a forged share request in particular must never reach the log, where Beacon Cloud
+// would publish the session on it.
+func TestDrainSessionSpoolRejectsWhatASandboxedHookCouldNotHaveStaged(t *testing.T) {
 	workspace := t.TempDir()
 	opts := spoolTestOpts(t)
-	ref := SessionRef{ID: "sess-redrain", Meta: &SessionMeta{ID: "sess-redrain", CWD: workspace}}
-	base, _ := asymptoteobserve.DSHSpoolPath(workspace, ref.ID)
-	events := []schema.Event{
-		spoolTestEvent(t, ref.ID, "session.started", "id-a"),
-		spoolTestEvent(t, ref.ID, "prompt.submitted", "id-b"),
-	}
-	writeSpoolFile(t, base, events...)
+	ref := spoolTestRef("sess-trust", workspace)
 
-	// Simulate the crash: both events reached the log, the delete never ran.
-	for _, event := range events {
-		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode}); err != nil {
-			t.Fatal(err)
-		}
+	otherSession := spoolTestEvent(t, "sess-someone-else", "prompt.submitted")
+	otherHarness := spoolTestEvent(t, ref.ID, "prompt.submitted")
+	otherHarness.Harness.Name = "claude_code"
+	polled := spoolTestEvent(t, ref.ID, "prompt.submitted")
+	polled.Harness.CollectionMethod = asymptoteobserve.CollectionMethodPoll
+	shareRequest := spoolTestEvent(t, ref.ID, asymptoteobserve.ActionShareRequested)
+	stage(t, workspace, ref.ID,
+		spoolTestLine(t, otherSession),
+		spoolTestLine(t, otherHarness),
+		spoolTestLine(t, polled),
+		spoolTestLine(t, shareRequest),
+		[]byte(`{"timestamp":"2026-09-23T0`), // a torn line from a killed hook
+		spoolTestLine(t, spoolTestEvent(t, ref.ID, "session.started")),
+	)
+
+	var summary Summary
+	if err := drainSessionSpool(ref, opts, &summary); err != nil {
+		t.Fatalf("drain: %v", err)
 	}
-	seen := loadDrainedIDs(opts.LogPath)
-	drained, err := drainSessionSpool(ref, opts, seen)
-	if err != nil {
-		t.Fatalf("redrain: %v", err)
+	if summary.SpoolEvents != 1 || summary.SpoolRejected != 5 {
+		t.Fatalf("SpoolEvents/SpoolRejected = %d/%d, want 1/5", summary.SpoolEvents, summary.SpoolRejected)
 	}
-	if drained != 0 {
-		t.Fatalf("redrain appended %d events, want 0 (ids already in the log)", drained)
+	if got := actionsOf(readLogLines(t, opts.LogPath)); len(got) != 1 || got[0] != "session.started" {
+		t.Fatalf("log actions = %v, want only the genuine staged event", got)
 	}
-	if got := len(readLogLines(t, opts.LogPath)); got != 2 {
-		t.Fatalf("log has %d events after redrain, want 2", got)
-	}
-	if _, err := os.Stat(base); !os.IsNotExist(err) {
-		t.Fatalf("redrain did not delete the drained file: %v", err)
+	if pending := SpoolPendingBytes(ref); pending != 0 {
+		t.Errorf("rejected lines were left staged (%d bytes); they would be refused on every sweep", pending)
 	}
 }
 
@@ -177,134 +171,83 @@ func TestDrainSessionSpoolIsInertInPrintMode(t *testing.T) {
 	opts := spoolTestOpts(t)
 	opts.Print = true
 	opts.Write = false
-	ref := SessionRef{ID: "sess-print", Meta: &SessionMeta{ID: "sess-print", CWD: workspace}}
-	base, _ := asymptoteobserve.DSHSpoolPath(workspace, ref.ID)
-	writeSpoolFile(t, base, spoolTestEvent(t, ref.ID, "session.started", "id-p"))
+	ref := spoolTestRef("sess-print", workspace)
+	stage(t, workspace, ref.ID, spoolTestLine(t, spoolTestEvent(t, ref.ID, "session.started")))
 
-	drained, err := drainSessionSpool(ref, opts, nil)
-	if err != nil {
+	var summary Summary
+	if err := drainSessionSpool(ref, opts, &summary); err != nil {
 		t.Fatalf("drain in print mode: %v", err)
 	}
-	if drained != 0 {
-		t.Fatalf("print mode drained %d events, want 0", drained)
-	}
-	if pending := asymptoteobserve.DSHSpoolPendingBytes(workspace, ref.ID); pending == 0 {
-		t.Fatal("print mode consumed the spool file")
+	if summary.SpoolEvents != 0 || SpoolPendingBytes(ref) == 0 {
+		t.Fatalf("print mode drained %d events; the spool must be left as it was", summary.SpoolEvents)
 	}
 }
 
-// Rotated archives hold older events than the live file; the drain empties them oldest
-// first so the runtime log receives the session's history in order.
-func TestDrainSessionSpoolEmptiesRotatedArchivesBeforeTheLiveFile(t *testing.T) {
+// A system backfill runs as root over the console user's home. The drain writes and removes files
+// under a workspace path the user's session store names, so under confinement it does nothing and
+// the user's own sync drains the spool later.
+func TestDrainSessionSpoolLeavesSpoolsAloneUnderBackfillConfinement(t *testing.T) {
 	workspace := t.TempDir()
 	opts := spoolTestOpts(t)
-	ref := SessionRef{ID: "sess-arch", Meta: &SessionMeta{ID: "sess-arch", CWD: workspace}}
-	base, _ := asymptoteobserve.DSHSpoolPath(workspace, ref.ID)
-	writeSpoolFile(t, base+".1", spoolTestEvent(t, ref.ID, "session.started", "id-old"))
-	writeSpoolFile(t, base, spoolTestEvent(t, ref.ID, "prompt.submitted", "id-new"))
+	ref := spoolTestRef("sess-confined", workspace)
+	stage(t, workspace, ref.ID, spoolTestLine(t, spoolTestEvent(t, ref.ID, "session.started")))
+	before := SpoolPendingBytes(ref)
 
-	drained, err := drainSessionSpool(ref, opts, loadDrainedIDs(opts.LogPath))
+	confined, err := sessionfs.Confine(t.TempDir(), -1, sessionfs.Options{})
 	if err != nil {
+		t.Fatal(err)
+	}
+	var summary Summary
+	drainErr := drainSessionSpool(ref, opts, &summary)
+	confined.Release()
+	if drainErr != nil {
+		t.Fatalf("drain under confinement: %v", drainErr)
+	}
+	if summary.SpoolEvents != 0 || len(readLogLines(t, opts.LogPath)) != 0 {
+		t.Fatalf("a confined sweep drained %d events", summary.SpoolEvents)
+	}
+	if after := SpoolPendingBytes(ref); after != before {
+		t.Fatalf("spool changed under confinement: %d -> %d bytes", before, after)
+	}
+}
+
+// A hook that fires while a sweep drains its session waits only for the spool's short lock, not
+// for the sweep's appends, and its event survives the drain for the next sweep to deliver.
+func TestDrainSessionSpoolKeepsAnEventStagedWhileItWasSending(t *testing.T) {
+	workspace := t.TempDir()
+	opts := spoolTestOpts(t)
+	ref := spoolTestRef("sess-concurrent", workspace)
+	stage(t, workspace, ref.ID, spoolTestLine(t, spoolTestEvent(t, ref.ID, "session.started")))
+
+	orig := emitEvent
+	t.Cleanup(func() { emitEvent = orig })
+	staged := false
+	emitEvent = func(event schema.Event, opts CollectOptions) error {
+		if !staged {
+			staged = true
+			stage(t, workspace, ref.ID, spoolTestLine(t, spoolTestEvent(t, ref.ID, "prompt.submitted")))
+		}
+		return orig(event, opts)
+	}
+
+	var summary Summary
+	if err := drainSessionSpool(ref, opts, &summary); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
-	if drained != 2 {
-		t.Fatalf("drained = %d, want 2", drained)
+	if err := drainSessionSpool(ref, opts, &summary); err != nil {
+		t.Fatalf("second drain: %v", err)
 	}
-	events := readLogLines(t, opts.LogPath)
-	if len(events) != 2 || events[0].Event.Action != "session.started" || events[1].Event.Action != "prompt.submitted" {
-		t.Fatalf("order in log = %+v, want the archive's event first", actionsOf(events))
+	if got := actionsOf(readLogLines(t, opts.LogPath)); strings.Join(got, ",") != "session.started,prompt.submitted" {
+		t.Fatalf("log actions = %v, want both events: the one staged mid-drain must not be lost", got)
 	}
-	for _, path := range []string{base, base + ".1"} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Errorf("%s survived the drain: %v", path, err)
-		}
+	if pending := SpoolPendingBytes(ref); pending != 0 {
+		t.Errorf("spool still holds %d bytes", pending)
 	}
 }
 
-// A hook killed mid-append leaves a torn tail line. It is not an event and must not block
-// the valid events around it from draining.
-func TestDrainSessionSpoolDropsTornTailWithoutBlocking(t *testing.T) {
-	workspace := t.TempDir()
-	opts := spoolTestOpts(t)
-	ref := SessionRef{ID: "sess-torn", Meta: &SessionMeta{ID: "sess-torn", CWD: workspace}}
-	base, _ := asymptoteobserve.DSHSpoolPath(workspace, ref.ID)
-	writeSpoolFile(t, base, spoolTestEvent(t, ref.ID, "session.started", "id-ok"))
-	f, err := os.OpenFile(base, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString(`{"timestamp":"2026-09-23T0`); err != nil { // torn, no newline
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	drained, err := drainSessionSpool(ref, opts, loadDrainedIDs(opts.LogPath))
-	if err != nil {
-		t.Fatalf("drain with a torn tail: %v", err)
-	}
-	if drained != 1 {
-		t.Fatalf("drained = %d, want 1 valid event", drained)
-	}
-	if _, err := os.Stat(base); !os.IsNotExist(err) {
-		t.Fatalf("file with a torn tail survived: %v", err)
-	}
-}
-
-// The drain takes the same lock every hook append takes. A hook firing mid-drain waits for
-// the sweep and then writes its event -- blocking is the filelock contract, dropping is
-// the bug #605 exists to prevent.
-func TestDrainSessionSpoolBlocksWhileAHookHoldsTheSpoolLock(t *testing.T) {
-	workspace := t.TempDir()
-	opts := spoolTestOpts(t)
-	ref := SessionRef{ID: "sess-lock", Meta: &SessionMeta{ID: "sess-lock", CWD: workspace}}
-	base, _ := asymptoteobserve.DSHSpoolPath(workspace, ref.ID)
-	writeSpoolFile(t, base, spoolTestEvent(t, ref.ID, "session.started", "id-l"))
-
-	hookLock, err := os.OpenFile(base+".lock", os.O_CREATE|os.O_RDWR, 0o666)
-	if err != nil {
-		t.Fatal(err)
-	}
-	held, err := filelock.Exclusive(hookLock)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	done := make(chan struct{})
-	var drained int
-	var drainErr error
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		drained, drainErr = drainSessionSpool(ref, opts, loadDrainedIDs(opts.LogPath))
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		t.Fatal("drain completed while a hook held the spool lock; it must block")
-	case <-time.After(100 * time.Millisecond):
-	}
-	if err := held.Release(); err != nil {
-		t.Fatal(err)
-	}
-	if err := hookLock.Close(); err != nil {
-		t.Fatal(err)
-	}
-	wg.Wait()
-	if drainErr != nil {
-		t.Fatalf("drain after lock release: %v", drainErr)
-	}
-	if drained != 1 {
-		t.Fatalf("drained = %d, want 1", drained)
-	}
-}
-
-// End to end through CollectOnce: a store session whose workspace holds a spool comes out
-// with the staged hook events AND the poll mapping in the log, the spool is gone, and the
-// sweep report counts the drained events separately so an operator can see the drain work.
+// End to end through CollectOnce: a store session whose workspace holds a spool comes out with the
+// staged hook events AND the poll mapping in the log, the spool is emptied, and the sweep report
+// counts the drained events separately so an operator can see the drain work.
 func TestCollectOnceDrainsTheWorkspaceSpoolAlongsideTheStore(t *testing.T) {
 	root := t.TempDir()
 	workspace := t.TempDir()
@@ -312,10 +255,9 @@ func TestCollectOnceDrainsTheWorkspaceSpoolAlongsideTheStore(t *testing.T) {
 		record("session", map[string]interface{}{"id": "s-collect", "cwd": workspace}),
 		record("user/message", map[string]interface{}{"message": map[string]interface{}{"content": "hello"}}),
 	)
-	base, _ := asymptoteobserve.DSHSpoolPath(workspace, "s-collect")
-	writeSpoolFile(t, base,
-		spoolTestEvent(t, "s-collect", "session.started", "id-spooled-start"),
-		spoolTestEvent(t, "s-collect", "prompt.submitted", "id-spooled-prompt"),
+	stage(t, workspace, "s-collect",
+		spoolTestLine(t, spoolTestEvent(t, "s-collect", "session.started")),
+		spoolTestLine(t, spoolTestEvent(t, "s-collect", "prompt.submitted")),
 	)
 
 	opts := CollectOptions{
@@ -335,7 +277,7 @@ func TestCollectOnceDrainsTheWorkspaceSpoolAlongsideTheStore(t *testing.T) {
 	if summary.EventsEmitted == 0 {
 		t.Fatal("poll mapping emitted nothing; the fixture session was not collected")
 	}
-	if pending := asymptoteobserve.DSHSpoolPendingBytes(workspace, "s-collect"); pending != 0 {
+	if pending := SpoolPendingBytes(spoolTestRef("s-collect", workspace)); pending != 0 {
 		t.Fatalf("spool still holds %d bytes after the sweep", pending)
 	}
 	var hookEvents, pollEvents int
@@ -355,17 +297,53 @@ func TestCollectOnceDrainsTheWorkspaceSpoolAlongsideTheStore(t *testing.T) {
 	}
 }
 
+// Drained events are bounded like mapped ones: an install-time backfill's byte budget stops the
+// sweep at the first staged event that does not fit, and leaves it staged for a later sync.
+func TestCollectOnceStopsTheDrainWhenTheBudgetIsSpent(t *testing.T) {
+	root := t.TempDir()
+	workspace := t.TempDir()
+	writeSession(t, filepath.Join(root, "sessions", "s-budget"), SessionFileJSON,
+		record("session", map[string]interface{}{"id": "s-budget", "cwd": workspace}),
+	)
+	stage(t, workspace, "s-budget", spoolTestLine(t, spoolTestEvent(t, "s-budget", "session.started")))
+
+	opts := CollectOptions{
+		DSHHome:   root,
+		StatePath: filepath.Join(t.TempDir(), "state.json"),
+		Write:     true,
+		LogPath:   filepath.Join(t.TempDir(), "runtime.jsonl"),
+		UserMode:  true,
+		Budget:    writer.NewBudget(1),
+	}
+	summary, err := CollectOnce(opts)
+	if !errors.Is(err, writer.ErrBudgetSpent) {
+		t.Fatalf("CollectOnce err = %v, want the spent budget", err)
+	}
+	if summary.SpoolEvents != 0 || summary.Errors != 0 {
+		t.Fatalf("SpoolEvents/Errors = %d/%d, want 0/0: a spent budget is a stop, not a failure", summary.SpoolEvents, summary.Errors)
+	}
+	if len(readLogLines(t, opts.LogPath)) != 0 {
+		t.Fatal("the drain wrote past a spent budget")
+	}
+	if SpoolPendingBytes(spoolTestRef("s-budget", workspace)) == 0 {
+		t.Fatal("the event that did not fit was taken out of the spool")
+	}
+}
+
+// An append the writer refuses for any other reason fails the session's drain; what landed before
+// it is counted and the refused event stays staged.
 func TestCollectOnceCountsSpoolEventsAppendedBeforeDrainFailure(t *testing.T) {
 	root := t.TempDir()
 	workspace := t.TempDir()
 	writeSession(t, filepath.Join(root, "sessions", "s-partial-drain"), SessionFileJSON,
 		record("session", map[string]interface{}{"id": "s-partial-drain", "cwd": workspace}),
 	)
-	base, _ := asymptoteobserve.DSHSpoolPath(workspace, "s-partial-drain")
-	valid := spoolTestEvent(t, "s-partial-drain", "session.started", "id-valid")
-	invalid := spoolTestEvent(t, "s-partial-drain", "prompt.submitted", "id-invalid")
+	invalid := spoolTestEvent(t, "s-partial-drain", "prompt.submitted")
 	invalid.Vendor = ""
-	writeSpoolFile(t, base, valid, invalid)
+	stage(t, workspace, "s-partial-drain",
+		spoolTestLine(t, spoolTestEvent(t, "s-partial-drain", "session.started")),
+		spoolTestLine(t, invalid),
+	)
 
 	opts := CollectOptions{
 		DSHHome:   root,
@@ -381,19 +359,20 @@ func TestCollectOnceCountsSpoolEventsAppendedBeforeDrainFailure(t *testing.T) {
 	if summary.SpoolEvents != 1 {
 		t.Fatalf("SpoolEvents = %d, want 1 event appended before the drain failed", summary.SpoolEvents)
 	}
+	if SpoolPendingBytes(spoolTestRef("s-partial-drain", workspace)) == 0 {
+		t.Fatal("the refused event was taken out of the spool")
+	}
 }
 
 // The --workspace / --session-id filters decide which sessions are considered at all; a
-// filtered-out session's spool is left untouched rather than half-drained behind the
-// operator's filter.
+// filtered-out session's spool is left untouched rather than drained behind the operator's filter.
 func TestCollectOnceLeavesASpoolWhenItsSessionIsFilteredOut(t *testing.T) {
 	root := t.TempDir()
 	workspace := t.TempDir()
 	writeSession(t, filepath.Join(root, "sessions", "s-filtered"), SessionFileJSON,
 		record("session", map[string]interface{}{"id": "s-filtered", "cwd": workspace}),
 	)
-	base, _ := asymptoteobserve.DSHSpoolPath(workspace, "s-filtered")
-	writeSpoolFile(t, base, spoolTestEvent(t, "s-filtered", "session.started", "id-f"))
+	stage(t, workspace, "s-filtered", spoolTestLine(t, spoolTestEvent(t, "s-filtered", "session.started")))
 
 	opts := CollectOptions{
 		DSHHome:   root,
@@ -410,7 +389,7 @@ func TestCollectOnceLeavesASpoolWhenItsSessionIsFilteredOut(t *testing.T) {
 	if summary.SpoolEvents != 0 {
 		t.Fatalf("filtered sweep drained %d events, want 0", summary.SpoolEvents)
 	}
-	if pending := asymptoteobserve.DSHSpoolPendingBytes(workspace, "s-filtered"); pending == 0 {
+	if SpoolPendingBytes(spoolTestRef("s-filtered", workspace)) == 0 {
 		t.Fatal("filtered session's spool was consumed")
 	}
 }

@@ -4,9 +4,17 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
+
+// stagedSpoolFile is where a dsh hook stages events for sessionID in workspace.
+func stagedSpoolFile(workspace, sessionID string) string {
+	return localingest.Spool{Dir: filepath.Join(workspace, ".beacon", "dsh-spool", sessionID)}.FilePath()
+}
 
 // When the runtime log is unreachable but the workspace is writable -- the normal
 // workspace-write sandbox DeepSeek Harness runs hooks in (#605) -- a dsh hook stages the
@@ -35,10 +43,23 @@ func TestDshSandboxedWriteStagesEventInWorkspaceSpool(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("a staged event printed to stderr:\n%s", stderr)
 	}
-	spool := filepath.Join(workspace, ".beacon", "dsh-spool", "sess-stage-1.jsonl")
+	spool := stagedSpoolFile(workspace, "sess-stage-1")
 	data, err := os.ReadFile(spool)
 	if err != nil {
 		t.Fatalf("staged event not in spool: %v", err)
+	}
+	// The staged line holds the same prompts and output as the log, and a workspace outside the
+	// home directory is no reason to share it: the spool is private wherever it lives.
+	if runtime.GOOS != "windows" {
+		for path, want := range map[string]os.FileMode{spool: 0o600, filepath.Dir(spool): 0o700} {
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := info.Mode().Perm(); got != want {
+				t.Errorf("%s mode = %v, want %v", path, got, want)
+			}
+		}
 	}
 	var event map[string]interface{}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
@@ -210,7 +231,7 @@ func TestSpoolOutsideAGitWorktreeSkipsContainment(t *testing.T) {
 		}); err != nil {
 		t.Fatalf("staged write outside a repo: %v", err)
 	}
-	spool := filepath.Join(workspace, ".beacon", "dsh-spool", "sess-nogit-1.jsonl")
+	spool := stagedSpoolFile(workspace, "sess-nogit-1")
 	if _, err := os.Stat(spool); err != nil {
 		t.Fatalf("spool file missing outside a repo: %v", err)
 	}
