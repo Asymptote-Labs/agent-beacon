@@ -149,11 +149,20 @@ func (a *adapter) handler(h gateway.Handler) http.Handler {
 			return
 		}
 		defer release()
-		body, err := gateway.ReadBody(r, maxBody)
+		body, free, err := gateway.ReadBody(r, maxBody)
 		if err != nil {
 			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		// The pipeline returns the body's buffer once it has read the call (Call.Release); a
+		// payload that never reaches it is returned here, after anything that may still format
+		// part of it.
+		handed := false
+		defer func() {
+			if !handed {
+				free()
+			}
+		}()
 		var env envelope
 		if err := decodeEnvelope(body, &env); err != nil {
 			http.Error(w, "bad webhook payload: "+err.Error(), http.StatusBadRequest)
@@ -164,6 +173,7 @@ func (a *adapter) handler(h gateway.Handler) http.Handler {
 			writeReply(w, reply{Verdict: true})
 			return
 		}
+		c.Release, handed = free, true
 		writeVerdict(w, h.Handle(r.Context(), c))
 	})
 	return mux

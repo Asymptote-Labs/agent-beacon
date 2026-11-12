@@ -14,7 +14,9 @@ import (
 // Analyzer inspects a turn and reports findings and records. Analyze runs concurrently with
 // other calls, including calls of the same session: it must be fast and keep anything that
 // outlives the call in Turn.Store, not in its own memory. Analyzers run in order, one at a time
-// per call; the events analyzer runs first and leaves the call's events on the Turn.
+// per call; the events analyzer runs first and leaves the call's events on the Turn. Neither the
+// Turn nor its Call (whose Body buffer is reused once the call is analyzed) may be kept past
+// Analyze; a Policy's and an Observer's arguments likewise only for the call.
 type Analyzer interface {
 	Name() string
 	Analyze(ctx context.Context, t *Turn) (Report, error)

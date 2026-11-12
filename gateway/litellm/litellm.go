@@ -102,11 +102,19 @@ func (a *adapter) guardrail(w http.ResponseWriter, r *http.Request, h gateway.Ha
 		return
 	}
 	defer release()
-	body, err := gateway.ReadBody(r, maxBody)
+	body, free, err := gateway.ReadBody(r, maxBody)
 	if err != nil {
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	// The pipeline returns the body's buffer once it has read the call (Call.Release); a payload
+	// that never reaches it is returned here, after anything that may still format part of it.
+	handed := false
+	defer func() {
+		if !handed {
+			free()
+		}
+	}()
 	var req request
 	if err := decodeRequest(body, &req); err != nil {
 		http.Error(w, "decode body: "+err.Error(), http.StatusBadRequest)
@@ -117,6 +125,7 @@ func (a *adapter) guardrail(w http.ResponseWriter, r *http.Request, h gateway.Ha
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	c.Release, handed = free, true
 	writeVerdict(w, h.Handle(r.Context(), c))
 }
 

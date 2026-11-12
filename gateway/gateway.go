@@ -77,6 +77,10 @@ type Call struct {
 	// it exactly as it named the request's, so the reply joins its request's session without
 	// waiting for the request's analysis or asking the store.
 	RequestBody []byte
+	// Release, when set, is called by the Handler once, when it will read nothing of Body or
+	// RequestBody again, which may be after Handle returns. An adapter that reads bodies into
+	// pooled buffers returns them here (ReadBody); nothing derived from a body refers to it.
+	Release func()
 }
 
 // Client is what the gateway knows about who made the call.
@@ -141,7 +145,9 @@ type Verdict struct {
 //
 // Handle may answer before analysis ends, when nothing analysis finds could change the verdict;
 // the pipeline then keeps reading the Call. An adapter hands over a Call and everything it points
-// to (Body, Client.Headers, Request, Response) and never modifies or reuses them afterwards.
+// to (Body, Client.Headers, Request, Response) and never modifies or reuses them afterwards; it
+// reuses the Body's buffer only once the Handler calls Release, which it does exactly once for
+// every Call handed to Handle.
 type Handler interface {
 	Admit(ctx context.Context, size int64) (release func(), refused Verdict, ok bool)
 	Handle(ctx context.Context, c *Call) Verdict
