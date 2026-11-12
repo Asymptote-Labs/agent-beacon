@@ -151,7 +151,15 @@
             "pages": [
               "runtimes/index",
               "runtimes/integration-model",
-              "runtimes/llm-gateway",
+              {
+                "group": "LLM Gateways",
+                "root": "runtimes/llm-gateway",
+                "pages": [
+                  "runtimes/gateways/litellm",
+                  "runtimes/gateways/envoy",
+                  "runtimes/gateways/portkey"
+                ]
+              },
               {
                 "group": "Local Agents",
                 "pages": [

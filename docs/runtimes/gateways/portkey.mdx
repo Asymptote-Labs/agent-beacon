@@ -1,0 +1,145 @@
+---
+title: "Portkey AI Gateway"
+description: "Record agent model calls that pass through Portkey with beacon-gateway as a webhook guardrail"
+---
+
+## How it attaches
+
+`beacon-gateway` is the target of Portkey's webhook guardrail check (`default.webhook`). Portkey
+runs a guardrail's checks before the provider call (`beforeRequestHook`) and after it
+(`afterRequestHook`), POSTs the hook's context to the webhook, and reads back
+`{"verdict": true|false}`.
+
+| Hook | Portkey sends | Beacon records |
+|------|---------------|----------------|
+| Input guardrail (`beforeRequestHook`) | The body the client sent, before Portkey translates it for the provider | `session.context`, `mcp.tool_listed`, `prompt.submitted`, tool results |
+| Output guardrail (`afterRequestHook`) | Portkey's reply in the client's format | `agent.message`, `token.usage`, tool calls |
+
+`beacon-gateway` always answers `200` with `{"verdict": true}`, so the call goes ahead. Portkey
+blocks on a false verdict only when the check is configured with `deny: true`; leave it unset.
+
+## What is supported
+
+| | |
+|---|---|
+| Protocols | Chat Completions (`chatComplete`) and Anthropic Messages (`messages`) requests. Other request types (completions, embeddings, OpenAI Responses) are ignored. |
+| Streaming | Requests are recorded. Replies to streamed requests are not: Portkey passes the stream through unparsed and sends the output hook no reply body. Non-streamed replies are recorded in full. |
+| Token usage | Yes, for non-streamed replies. |
+| Sessions | The `session_id` key of the client's `x-portkey-metadata` header, else a digest of the conversation's root when an identity is known, else one session per call. |
+| Identity | Keys of `x-portkey-metadata`. By default `_user` (Portkey's end-user field) is the user; `identity_metadata` maps others. |
+| Client headers | None. Portkey removes the client's headers from the webhook payload. |
+
+## Configure beacon-gateway
+
+```yaml title="beacon-gateway.yaml"
+gateways:
+  - type: portkey
+    addr: 127.0.0.1:4022
+    path: /portkey/webhook               # default
+    token: ${PORTKEY_WEBHOOK_TOKEN}      # required as "Authorization: Bearer <token>" when set
+    identity_metadata:                   # x-portkey-metadata keys
+      user: _user
+      team: team
+      org: org
+outputs:
+  - jsonl: /var/log/beacon/gateway-events.jsonl
+    kinds: [beacon.event]
+```
+
+Set `token` whenever the webhook is reachable by anything other than Portkey; `${VAR}` is
+expanded from the environment, so the token stays out of the file.
+
+## Deploy
+
+<Steps>
+  <Step title="Start beacon-gateway where Portkey can reach it">
+    ```bash
+    cd gateway
+    go build -o beacon-gateway ./cmd/beacon-gateway
+    PORTKEY_WEBHOOK_TOKEN=<random secret> ./beacon-gateway -config beacon-gateway.yaml
+    ```
+
+    With the open-source gateway self-hosted (`npx @portkey-ai/gateway`, the Docker image, or a
+    Kubernetes deployment), run `beacon-gateway` beside it and keep the webhook on loopback or
+    the cluster network. Portkey's hosted gateway calls the webhook from Portkey's
+    infrastructure, so it needs a public HTTPS URL in front of `beacon-gateway` (a reverse
+    proxy or load balancer terminating TLS), and the token.
+  </Step>
+  <Step title="Add the webhook as an input and an output guardrail">
+    In a Portkey config, add the webhook check to both hooks:
+
+    ```json title="Portkey config"
+    {
+      "input_guardrails": [
+        {
+          "default.webhook": {
+            "webhookURL": "http://127.0.0.1:4022/portkey/webhook",
+            "headers": { "Authorization": "Bearer <token>" }
+          }
+        }
+      ],
+      "output_guardrails": [
+        {
+          "default.webhook": {
+            "webhookURL": "http://127.0.0.1:4022/portkey/webhook",
+            "headers": { "Authorization": "Bearer <token>" }
+          }
+        }
+      ]
+    }
+    ```
+
+    In the Portkey app, create a guardrail with the **Webhook** check, the same URL and the
+    `Authorization` header, and attach it to the config as both an input and an output
+    guardrail. Do not turn on deny for an observe-only setup.
+
+    A webhook that times out or answers an error is an errored check, which Portkey treats as
+    passing unless the check sets `failOnError`. Leave that off so a `beacon-gateway` outage
+    never blocks model calls.
+  </Step>
+  <Step title="Send session and identity metadata from clients">
+    Clients (or the app in front of Portkey) send them in the metadata header:
+
+    ```http
+    x-portkey-metadata: {"_user": "jdoe", "session_id": "3f2c…", "team": "platform"}
+    ```
+
+    Without `session_id`, calls are grouped by the conversation's opening only when `_user` (or
+    another mapped identity) is present; otherwise every call is its own session.
+  </Step>
+  <Step title="Check it">
+    ```bash
+    tail -n 5 /var/log/beacon/gateway-events.jsonl
+    curl -s http://127.0.0.1:4029/stats
+    ```
+  </Step>
+</Steps>
+
+## Limits
+
+- **Pairing request and reply.** Portkey does not pass its trace or span id to the webhook, so
+  `beacon-gateway` pairs a reply with its request by a digest of the request body. Two calls with
+  byte-identical bodies share a call id, and a guardrail that rewrites the request before the
+  output hook breaks the pairing.
+- **Streamed replies** are not recorded (see above). Collect them from the endpoint, or have
+  clients that need reply coverage call without `stream`.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---------|-------|
+| No events | The config is attached to the request (`x-portkey-config` or the virtual key's default config) and the webhook URL is reachable from where Portkey runs. |
+| `401` in `beacon-gateway`'s log | The `Authorization` header in the check does not match `token`. |
+| Prompts but no replies | The requests are streamed, or the output guardrail is missing. |
+| `user` is empty | `x-portkey-metadata` has no `_user` (or the key mapped in `identity_metadata`). |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="LLM gateways" icon="network-wired" href="/runtimes/llm-gateway">
+    What gateway collection records and the settings shared by every gateway.
+  </Card>
+  <Card title="Envoy" icon="route" href="/runtimes/gateways/envoy">
+    Attach through Envoy, Envoy Gateway or Istio instead.
+  </Card>
+</Columns>

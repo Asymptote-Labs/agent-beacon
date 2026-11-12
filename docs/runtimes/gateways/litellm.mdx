@@ -1,0 +1,129 @@
+---
+title: "LiteLLM"
+description: "Record agent model calls that pass through a LiteLLM proxy with beacon-gateway"
+---
+
+## How it attaches
+
+`beacon-gateway` attaches to the LiteLLM proxy as a
+[Generic Guardrail API](https://docs.litellm.ai/docs/proxy/guardrails/quick_start) guardrail
+(`guardrail: generic_guardrail_api`). LiteLLM calls it twice per model call and waits for each
+answer:
+
+| Guardrail mode | LiteLLM sends | Beacon records |
+|----------------|---------------|----------------|
+| `pre_call` | The whole request: system text, tools, history and tool results | `session.context`, `mcp.tool_listed`, `prompt.submitted`, tool results |
+| `post_call` | The model's reply text and its tool calls | `agent.message`, `command.executed`, `file.read`, `mcp.tool_invoked`, `tool.invoked` |
+
+Both calls are `POST <api_base>/beta/litellm_basic_guardrail_api`. `beacon-gateway` answers
+`{"action": "NONE"}`, so the call goes ahead unchanged.
+
+## What is supported
+
+| | |
+|---|---|
+| Protocols | Every protocol LiteLLM serves (Anthropic Messages, OpenAI Chat Completions, OpenAI Responses). LiteLLM normalizes them to chat messages before it calls the guardrail. |
+| Streaming | Yes. With `streaming_buffer_until_moderated: false` the stream reaches the client as it arrives and the reply is recorded when it ends. |
+| Sessions | LiteLLM's `litellm_trace_id` names the session on both phases, unless the client sends a session header (`x-claude-code-session-id`, `session_id`, `x-session-id`, `conversation_id`) that LiteLLM forwards. |
+| Identity | From the LiteLLM virtual key: user id, user email, team id, org id, and the key's alias (or its hash). |
+| Client headers | Only headers on the guardrail's `extra_headers` list. LiteLLM sends the others as `[present]`, and Beacon ignores those. Credential headers are never recorded. |
+| Token usage | Not recorded. LiteLLM's guardrail payload carries the reply's text and tool calls, not its token counts. Use LiteLLM's own spend logs, or endpoint collection, for usage. |
+
+## Deploy
+
+<Steps>
+  <Step title="Build and start beacon-gateway">
+    ```bash
+    cd gateway
+    go build -o beacon-gateway ./cmd/beacon-gateway
+    ./beacon-gateway -config deploy/beacon-gateway.yaml
+    ```
+
+    The shipped configuration (and the built-in one, used when `-config` is omitted) enables
+    the LiteLLM adapter on `127.0.0.1:4019`:
+
+    ```yaml title="beacon-gateway.yaml"
+    gateways:
+      - type: litellm
+        addr: 127.0.0.1:4019
+    outputs:
+      - jsonl: /var/log/beacon/gateway-events.jsonl
+        kinds: [beacon.event]
+    ```
+
+    Run it next to the proxy (same host or same pod) so the guardrail call stays on loopback.
+    If LiteLLM reaches it over a network, bind `addr` to that interface and keep the port off
+    the internet: the listener has no authentication of its own.
+  </Step>
+  <Step title="Add the two guardrails to LiteLLM">
+    Add both entries to the proxy's `config.yaml` (`gateway/deploy/litellm.yaml` is a complete
+    example):
+
+    ```yaml title="config.yaml"
+    guardrails:
+      - guardrail_name: beacon-gateway-request
+        litellm_params:
+          guardrail: generic_guardrail_api
+          mode: pre_call
+          api_base: http://127.0.0.1:4019
+          default_on: true
+          unreachable_fallback: fail_open
+          extra_headers: [x-claude-code-session-id, session_id]
+      - guardrail_name: beacon-gateway-response
+        litellm_params:
+          guardrail: generic_guardrail_api
+          mode: post_call
+          api_base: http://127.0.0.1:4019
+          default_on: true
+          unreachable_fallback: fail_open
+          extra_headers: [x-claude-code-session-id, session_id]
+          streaming_buffer_until_moderated: false
+    ```
+
+    - `default_on: true` runs the guardrail on every call without clients opting in.
+    - `unreachable_fallback: fail_open` keeps the model path up when `beacon-gateway` is down;
+      those calls go through unrecorded.
+    - `extra_headers` lets the session headers through. Add any other header you want on the
+      event; never add credential headers (Beacon drops them anyway).
+  </Step>
+  <Step title="Restart the proxy and send a call">
+    ```bash
+    litellm --config config.yaml
+    ```
+
+    Send a model call through the proxy, then check the output file and the counters:
+
+    ```bash
+    tail -n 5 /var/log/beacon/gateway-events.jsonl
+    curl -s http://127.0.0.1:4029/stats
+    ```
+  </Step>
+</Steps>
+
+### Kubernetes
+
+Run `beacon-gateway` as a sidecar container in the LiteLLM proxy's pod, listening on
+`127.0.0.1:4019`, and keep `api_base: http://127.0.0.1:4019`. Every proxy replica then has its
+own `beacon-gateway`. With the open build's in-memory store each replica remembers only what it
+has seen, so a session whose calls land on several replicas records its system text and tool
+definitions once per replica. Write the output to a volume your log shipper reads.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---------|-------|
+| No events | The guardrails have `default_on: true`, and `api_base` reaches the `addr` `beacon-gateway` listens on. `/stats` shows `calls` rising when they do. |
+| Each call is its own session | The client sends no session header, or it is missing from `extra_headers`, and LiteLLM gave no trace id. |
+| Replies missing for streamed calls | The `post_call` guardrail is present and its `streaming_buffer_until_moderated` is `false`. |
+| `user` is empty | The call used the proxy's master key or no virtual key; identity comes from the virtual key. |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="LLM gateways" icon="network-wired" href="/runtimes/llm-gateway">
+    What gateway collection records and the settings shared by every gateway.
+  </Card>
+  <Card title="Envoy" icon="route" href="/runtimes/gateways/envoy">
+    Attach through Envoy, Envoy Gateway or Istio instead.
+  </Card>
+</Columns>

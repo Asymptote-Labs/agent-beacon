@@ -1,0 +1,216 @@
+---
+title: "Envoy, Envoy Gateway and Istio"
+description: "Record agent model calls that pass through Envoy with beacon-gateway as an External Processing server"
+---
+
+## How it attaches
+
+`beacon-gateway` is an Envoy
+[External Processing](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter)
+(`ext_proc`) server. Envoy opens one gRPC stream per HTTP exchange and sends it the request and
+reply headers and bodies. Anything built on Envoy's HTTP filter chain can use it: plain Envoy,
+[Envoy Gateway](https://gateway.envoyproxy.io/) and Istio gateways or sidecars.
+
+Envoy carries the provider's own wire format, so `beacon-gateway` decodes the bodies the client
+sent and the provider returned. Only a `POST` with a body to a model endpoint is decoded. The
+path decides the protocol:
+
+| Path ends in | Protocol |
+|--------------|----------|
+| `/messages` | Anthropic Messages |
+| `/chat/completions` | OpenAI Chat Completions |
+| `/responses` | OpenAI Responses |
+
+Everything else (model lists, token counting, embeddings, OpenAI Assistants thread messages)
+passes through untouched.
+
+## What is supported
+
+| | |
+|---|---|
+| Protocols | Anthropic Messages, OpenAI Chat Completions and OpenAI Responses, JSON and server-sent events. Gzip replies are decompressed. |
+| Streaming | Yes. With the reply body `STREAMED`, chunks reach the client as they arrive and `beacon-gateway` records the reply when it ends. |
+| Token usage | Yes, from the provider's reply (`token.usage`). |
+| Sessions | A session header the client sends (`x-claude-code-session-id`, `session_id`, `x-session-id`, `conversation_id`), else a digest of the conversation's root when an identity is known, else one session per call. Claude Code sends `x-claude-code-session-id`. |
+| Identity | From request headers you name in `identity_headers`, typically set by Envoy's `jwt_authn` (`claim_to_headers`) or the gateway in front. Without identity headers and without a session header, every call is its own session. |
+| Client address | The first address in `x-forwarded-for` (set `use_remote_address: true` on the connection manager). |
+| Call id | `x-request-id`, which Envoy sets on every request. |
+
+<Note>
+Envoy must see the request in plain text. Put the `ext_proc` filter on a listener where the
+client's TLS is terminated (an API gateway, an egress gateway that originates TLS to the provider),
+not on a TCP passthrough.
+</Note>
+
+## Configure beacon-gateway
+
+```yaml title="beacon-gateway.yaml"
+gateways:
+  - type: envoy
+    addr: 0.0.0.0:4021
+    identity_headers:
+      user: x-user-id      # any request header; credential headers are refused
+      email: x-user-email
+      team: x-team-id
+    # max_body: 33554432   # bytes held per body after decompression (default 32 MiB)
+outputs:
+  - jsonl: /var/log/beacon/gateway-events.jsonl
+    kinds: [beacon.event]
+```
+
+A body larger than `max_body` passes through unrecorded. The listener speaks plain gRPC with no
+authentication, so expose it only to Envoy.
+
+## Deploy with Envoy
+
+`gateway/deploy/envoy/envoy.yaml` is a complete, observe-only configuration. The parts that
+matter:
+
+```yaml title="envoy.yaml (excerpt)"
+http_filters:
+  - name: envoy.filters.http.ext_proc
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+      grpc_service:
+        envoy_grpc: { cluster_name: beacon_gateway }
+      message_timeout: 2s          # the 200ms default is too short for a long conversation
+      failure_mode_allow: true     # beacon-gateway down or slow: calls pass, unrecorded
+      processing_mode:
+        request_header_mode: SEND
+        response_header_mode: SEND
+        request_body_mode: BUFFERED
+        response_body_mode: STREAMED
+        request_trailer_mode: SKIP
+        response_trailer_mode: SKIP
+  - name: envoy.filters.http.router
+```
+
+- **Request `BUFFERED`.** The request arrives whole and is sent in one message. Raise
+  `per_connection_buffer_limit_bytes` on the listener and the provider cluster to match
+  `max_body` (the example uses 32 MiB); Envoy's 1 MiB default is too small for a long agent
+  conversation.
+- **Reply `STREAMED`.** Each chunk is forwarded as soon as `beacon-gateway` acknowledges it, which
+  it does at once, so streaming keeps its token-by-token latency.
+- **The `beacon_gateway` cluster needs HTTP/2** (`http2_protocol_options`), as every gRPC
+  cluster does.
+- **Route timeout.** Long generations outlast Envoy's 15 s default; the example sets `600s`.
+
+`beacon-gateway` tells buffered from streamed bodies by what arrives, so no setting on its side
+has to match Envoy's processing mode.
+
+Validate and run the example:
+
+```bash
+cd gateway
+./beacon-gateway -config deploy/beacon-gateway.yaml   # with the envoy entry enabled
+docker run --rm -v $PWD/deploy/envoy:/cfg envoyproxy/envoy:v1.37-latest --mode validate -c /cfg/envoy.yaml
+docker run --rm -p 10000:10000 -v $PWD/deploy/envoy:/cfg envoyproxy/envoy:v1.37-latest -c /cfg/envoy.yaml
+```
+
+The example's `provider` cluster points at a local test upstream. For a real provider, point it
+at `api.anthropic.com:443` or `api.openai.com:443` with an `UpstreamTlsContext` and set
+`auto_host_rewrite: true` on the route (both are in the file's comments). Then point clients at
+Envoy, for example `ANTHROPIC_BASE_URL=http://<envoy>:10000` for Claude Code.
+
+## Deploy with Envoy Gateway
+
+Run `beacon-gateway` as a `Deployment` with a `Service` on port 4021, and attach it to the
+`HTTPRoute` that carries model traffic with an `EnvoyExtensionPolicy`:
+
+```yaml title="envoy-extension-policy.yaml"
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: beacon-gateway
+  namespace: llm
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: models
+  extProc:
+    - backendRefs:
+        - name: beacon-gateway
+          port: 4021
+      failOpen: true
+      messageTimeout: 2s
+      processingMode:
+        request:
+          body: Buffered
+        response:
+          body: Streamed
+```
+
+Set the route's request timeout high enough for long generations, and raise the proxy's buffer
+limit (`ClientTrafficPolicy` `connection.bufferLimit`) to cover large requests. If the gateway
+authenticates callers with a `SecurityPolicy` JWT provider, use its `claimToHeaders` to put the
+caller's claims on headers and name those headers in `identity_headers`.
+
+## Deploy with Istio
+
+Insert the filter with an `EnvoyFilter` on the workload that terminates the model traffic, such
+as an egress gateway that originates TLS to the provider:
+
+```yaml title="envoyfilter.yaml"
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: beacon-gateway
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: egressgateway
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.router
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.ext_proc
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+            grpc_service:
+              envoy_grpc:
+                cluster_name: outbound|4021||beacon-gateway.beacon.svc.cluster.local
+            message_timeout: 2s
+            failure_mode_allow: true
+            processing_mode:
+              request_header_mode: SEND
+              response_header_mode: SEND
+              request_body_mode: BUFFERED
+              response_body_mode: STREAMED
+              request_trailer_mode: SKIP
+              response_trailer_mode: SKIP
+```
+
+Name the `beacon-gateway` Service port `grpc` (or set `appProtocol: grpc`) so Istio uses HTTP/2
+to it. For a sidecar, use `context: SIDECAR_OUTBOUND` and select the workload's labels instead;
+the sidecar sees plain text only when the application sends HTTP and the mesh originates TLS.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---------|-------|
+| No events | The path ends in a supported endpoint, the call is a `POST`, and Envoy reaches `beacon-gateway` (Envoy's `ext_proc` stats count stream failures). |
+| Large requests unrecorded | The body exceeded `max_body`, or Envoy's buffer limit rejected it. Raise both together. |
+| Calls fail when `beacon-gateway` restarts | `failure_mode_allow: true` (Envoy) or `failOpen: true` (Envoy Gateway) is missing. |
+| Each call is its own session | The client sends no session header and no `identity_headers` are configured. |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="LLM gateways" icon="network-wired" href="/runtimes/llm-gateway">
+    What gateway collection records and the settings shared by every gateway.
+  </Card>
+  <Card title="LiteLLM" icon="layer-group" href="/runtimes/gateways/litellm">
+    Attach to a LiteLLM proxy instead.
+  </Card>
+</Columns>
