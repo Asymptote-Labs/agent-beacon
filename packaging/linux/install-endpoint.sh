@@ -171,4 +171,6 @@ esac
 [ "$BEACON_SPLUNK_INSECURE_SKIP_VERIFY" = "1" ] && set -- "$@" --splunk-insecure-skip-verify
 [ -n "$BEACON_SPLUNK_CA_FILE" ] && set -- "$@" --splunk-ca-file "$BEACON_SPLUNK_CA_FILE"
 
+# Tells the CLI this install came from the package, for its install telemetry (setup_path).
+export BEACON_INSTALL_SOURCE=package
 exec "$BEACON_BIN" "$@"

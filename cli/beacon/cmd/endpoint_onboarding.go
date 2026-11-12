@@ -129,33 +129,40 @@ func (o onboardingOutcome) briefClose() bool {
 func maybeRunOnboarding(cmd *cobra.Command) (onboardingOutcome, error) {
 	profile := onboardingLoad()
 
-	// Legacy pending attribution remains retryable, but new interactive installs use
-	// the signed-in account and never create another email/usage submission.
 	if profile.Prompted() {
+		// Legacy pending attribution remains retryable, but new interactive installs use
+		// the signed-in account and never create another email/usage submission.
 		resendPendingOnboarding(&profile)
-		if profile.Onboarding.Destination != "" {
-			return onboardingOutcome{}, nil
-		}
-		if !onboardingEnabledByEnv() {
-			return onboardingOutcome{}, nil
-		}
-		if _, skipped := destinationSkipReason(profile); skipped {
-			return onboardingOutcome{}, nil
-		}
-		return runAccountOnboarding(cmd, &profile, true)
-	}
-
-	// Preserve the explicit unattended attribution contract for MDM rollouts. It is
-	// the only path that still uses the legacy submission endpoint.
-	if email, usage, ok := onboardingAnswersFromEnv(cmd.ErrOrStderr()); ok {
+	} else if email, usage, ok := onboardingAnswersFromEnv(cmd.ErrOrStderr()); ok {
+		// Preserve the explicit unattended attribution contract for MDM rollouts. It is
+		// the only path that still uses the legacy submission endpoint.
 		completeOnboarding(cmd, &profile, email, usage, nil, "")
 		return onboardingOutcome{}, nil
 	}
 
-	if _, skipped := onboardingSkipReason(profile); skipped {
+	run, destinationOnly := onboardingWizardPlan(profile)
+	if !run {
 		return onboardingOutcome{}, nil
 	}
-	return runAccountOnboarding(cmd, &profile, false)
+	return runAccountOnboarding(cmd, &profile, destinationOnly)
+}
+
+// onboardingWizardPlan reports whether maybeRunOnboarding shows the wizard for this profile, and
+// whether only its destination question. It has no side effects, so the install can say which
+// setup path it is taking before the wizard runs.
+func onboardingWizardPlan(profile onboarding.Profile) (run, destinationOnly bool) {
+	if profile.Prompted() {
+		if profile.Onboarding.Destination != "" || !onboardingEnabledByEnv() {
+			return false, true
+		}
+		_, skipped := destinationSkipReason(profile)
+		return !skipped, true
+	}
+	if _, _, ok := onboardingAnswersFromEnv(io.Discard); ok {
+		return false, false
+	}
+	_, skipped := onboardingSkipReason(profile)
+	return !skipped, false
 }
 
 func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, destinationOnly bool) (onboardingOutcome, error) {
