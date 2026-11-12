@@ -56,8 +56,8 @@ Until the CLI knows who you are, events are sent under the machine's random inst
 (`install_id` in `~/.beacon/profile.json`), the same ID the onboarding record uses, and
 they create no person profile.
 
-When you sign in (`beacon login` or the install wizard), the CLI links that install ID to
-you. Your email is sent once as a person property, never as an event property, and the ID
+When you sign in (`beacon login` or the install wizard), or give `beacon endpoint install`
+your email with `--email` or `BEACON_EMAIL`, the CLI links that install ID to you. Your email is sent once as a person property, never as an event property, and the ID
 it sends events under from then on is the SHA-256 of your lower-cased email. Events from a
 work email are grouped under its domain; personal mailbox domains such as `gmail.com` are
 not. Signing out with `beacon logout` does not unlink the machine.
@@ -70,6 +70,8 @@ shown and the identified ID. Deleting the file resets both.
 | Event | When | Properties |
 |-------|------|------------|
 | `$create_alias`, `$set` | The CLI learns your email | Your email, `has_beacon`, your Beacon account ID when signed in, and `first_product`/`first_surface` set once, all as person properties |
+| `cli_sign_in_completed` | A sign-in succeeds, followed by `$create_alias` and `$set` | `trigger` (`wizard` or `login_command`) |
+| `cli_email_submitted` | `beacon endpoint install` is given an email without a sign-in, followed by `$create_alias` and `$set` | `email_source` (`flag` or `env`), `email_domain_kind` (`work` or `free`); never the address |
 | `cli_install_started` | `beacon endpoint install` begins (not on `--dry-run`) | `setup_path` (`wizard`, `agent`, `ci`, `package`, or `noninteractive`), `detected_harnesses` (the runtime names discovery found), `is_first_for_device` |
 | `cli_install_completed` | `beacon endpoint install` succeeds, after hooks, skills, the session backfill and any Beacon Cloud connect | `destination` (`local` or `cloud`), `harnesses_configured` (the install targets), `backfill_session_count`, `duration_ms`, `is_first_for_device` |
 

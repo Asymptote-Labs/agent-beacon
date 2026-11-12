@@ -108,3 +108,41 @@ const (
 	DestinationLocal = "local"
 	DestinationCloud = "cloud"
 )
+
+// Identity events. Each is followed by Identify, so the person it names is known from then on.
+const (
+	// EventSignInCompleted is sent when a Beacon sign-in succeeds.
+	EventSignInCompleted = "cli_sign_in_completed"
+	// EventEmailSubmitted is sent when a person gives an email without signing in.
+	EventEmailSubmitted = "cli_email_submitted"
+)
+
+// Identity event properties.
+const (
+	// PropTrigger is what started a sign-in, a Trigger value.
+	PropTrigger = "trigger"
+	// PropEmailSource is where a submitted email came from, an EmailSource value.
+	PropEmailSource = "email_source"
+	// PropEmailDomainKind says whether a submitted email is at a work or a personal domain, never
+	// the domain itself.
+	PropEmailDomainKind = "email_domain_kind"
+)
+
+// Values of trigger.
+const (
+	TriggerWizard       = "wizard"
+	TriggerLoginCommand = "login_command"
+)
+
+// Values of email_source.
+const (
+	EmailSourceFlag   = "flag"
+	EmailSourceEnv    = "env"
+	EmailSourcePrompt = "prompt"
+)
+
+// Values of email_domain_kind.
+const (
+	EmailDomainWork = "work"
+	EmailDomainFree = "free"
+)

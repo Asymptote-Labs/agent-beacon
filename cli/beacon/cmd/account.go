@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
@@ -91,6 +92,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	if err := accountSave(*session); err != nil {
 		return fmt.Errorf("store Beacon session: %w", err)
 	}
+	recordSignIn(telemetry.TriggerLoginCommand, session.User)
 	status := accountInspect(accountNow())
 	if accountOpts.json {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(status)
