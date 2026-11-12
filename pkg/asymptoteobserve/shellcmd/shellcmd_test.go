@@ -539,9 +539,49 @@ func TestUnwrapped(t *testing.T) {
 		{`"$TOOL" share`, "", true, nil},
 		{"sudo", "", true, nil},
 		{"FOO=1", "", true, nil},
+		// A program by a path the parse does not evaluate is still named by what follows its
+		// last slash, and a wrapper by such a path still unwraps.
+		{"~/.bun/bin/bun test src", "bun", true, []string{"bun", "test"}},
+		{`"$HOME"/go/bin/govulncheck ./...`, "govulncheck", true, []string{"govulncheck"}},
+		{"$T/beacon version", "beacon", true, []string{"beacon", "version"}},
+		{"~/bin/sudo -u deploy $PREFIX/bin/rm x", "rm", true, []string{"rm"}},
+		{"$BIN/$TOOL share", "", true, nil},
+		{"${TOOL:-/usr/bin/beacon} share", "", true, nil},
+		{"$(which /usr/bin/beacon) share", "", true, nil},
+		{"$(brew --prefix)/bin/gtar xf a.tar", "gtar", true, []string{"gtar", "xf"}},
+		{"~/bin/*/run now", "run", true, []string{"run", "now"}},
+		{"~/bin/run* now", "", true, nil},
+		// A wrapper's own options are not the command.
+		{"command -p git mv a b", "git", true, []string{"git", "mv"}},
+		{"command -v docker", "", false, nil},
+		{"command -V git", "", false, nil},
+		{"exec -a worker git mv a b", "git", true, []string{"git", "mv"}},
+		{"/usr/bin/time -p -o t.txt git mv a b", "git", true, []string{"git", "mv"}},
+		{"setsid -f nohup git mv a b", "git", true, []string{"git", "mv"}},
+		{"caffeinate -i -t 600 git mv a b", "git", true, []string{"git", "mv"}},
+		// A runner that starts a command in a project's environment.
+		{"uv run pytest -q", "pytest", true, []string{"pytest", "-q"}},
+		{"uv run --no-project --with requests --python 3.12 python x.py", "python", true, []string{"python", "x.py"}},
+		{"uv run -q --env-file=.env git mv a b", "git", true, []string{"git", "mv"}},
+		{"uv run --directory sub pytest", "", false, nil},
+		{"uv run -m pytest -q", "", false, nil},
+		{"uv pip install requests", "uv", true, []string{"uv", "pip"}},
+		{"uv", "uv", true, []string{"uv"}},
+		{"poetry run pytest -q", "pytest", true, []string{"pytest"}},
+		{"pipenv run git mv a b", "git", true, []string{"git", "mv"}},
+		{"bundle exec rake db:migrate", "rake", true, []string{"rake"}},
+		{"poetry install", "poetry", true, []string{"poetry", "install"}},
+		{"mise exec -- git mv a b", "git", true, []string{"git", "mv"}},
+		{"mise x node@22 -- node -v", "node", true, []string{"node", "-v"}},
+		{"mise exec node@22", "mise", true, []string{"mise", "exec"}},
+		{"mise exec -c 'git mv a b'", "mise", true, []string{"mise", "exec"}},
+		{"mise run check", "mise", true, []string{"mise", "run"}},
+		// The test command.
+		{`[ -f "$f" ]`, "[", true, []string{"[", "-f"}},
 	} {
+		// The first command is the line's own; the ones of a substitution in its words follow.
 		commands, err := Parse(tc.command)
-		if err != nil || len(commands) != 1 {
+		if err != nil || len(commands) == 0 {
 			t.Fatalf("Parse(%q) = %+v, %v", tc.command, commands, err)
 		}
 		c := commands[0]

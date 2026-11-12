@@ -543,6 +543,10 @@ func (p *parser) refs(refs []wordRef, parts []syntax.WordPart, place refPlace, i
 func (p *parser) word(word, source *syntax.Word) Word {
 	w := Word{Raw: p.raw(source)}
 	w.Unquoted, w.Known = p.unquote(word)
+	// A lone [ is the test command, not the start of a glob pattern: nothing closes it.
+	if !w.Known && w.Unquoted == "[" && w.Raw == "[" {
+		w.Known = true
+	}
 	if w.Known {
 		w.Text = w.Unquoted
 	}

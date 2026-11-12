@@ -77,8 +77,10 @@ definitions:
       c.name in ["mount", "umount", "nft", "ufw", "swapon", "swapoff", "history", "codesign", "spctl", "pkgutil", "xattr", "defaults", "security", "ssh-keygen", "ssh-add"] ||
       c.name in ["gpg", "gpg2", "openssl", "keytool", "bq", "gsutil", "terraform", "tofu", "terragrunt", "pulumi", "supabase", "vercel", "dropdb", "createdb"] ||
       c.name in ["mysqladmin", "redis-cli"] ||
-      (c.name == "" ? size(c.argv) > 0 && c.argv[0].matches("^(.*/)?env$") &&
-         (size(c.argv) == 1 || size(c.argv) == 2 && c.argv[1] in ["-0", "--null", "-i", "--ignore-environment"]) :
+      (c.name == "" ? size(c.argv) > 0 && (
+         c.argv[0].matches("^(.*/)?env$") &&
+           (size(c.argv) == 1 || size(c.argv) == 2 && c.argv[1] in ["-0", "--null", "-i", "--ignore-environment"]) ||
+         size(c.argv) > 1 && c.argv[0] == "command" && c.argv[1] in ["-v", "-V"]) :
        c.name == "git" ? !c.args.matches("(?m)^(foreach|filter-branch|filter-repo|-x|--exec(=.*)?|--extcmd(=.*)?|--upload-pack(=.*)?|--receive-pack(=.*)?|--config-env(=.*)?|-O.*|--open-files-in-pager(=.*)?)$|^bisect\\nrun$|\\A(?:(?:-C|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n)*?-c\\n") :
        c.name == "gh" ? !c.args.matches("(?m)^(alias|ssh|exec|extension|codespace|cs)$") :
        c.name == "go" ? !c.args.matches("(?m)^-(exec|toolexec)(=.*)?$") :
@@ -128,6 +130,24 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "env -u HOME ./deploy.sh" }
+      - name: asking_what_a_name_is
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "command -v docker >/dev/null && [ -f \"$HOME/.docker/config.json\" ] && echo ok" }
+      - name: a_program_behind_a_runner_the_parser_unwraps
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "uv run --project classifier pytest -q && mise exec -- gofmt -l ." }
+      - name: a_project_program_behind_a_runner
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "uv run oracle prepare ./repo" }
       - name: a_commit_message
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
         verdict: match
