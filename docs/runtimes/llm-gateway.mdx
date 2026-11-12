@@ -72,6 +72,14 @@ These apply whichever gateway you attach to.
   goes through unrecorded. `gc.memory_limit` defaults to 80% of the container's memory limit.
 - **Outputs.** Write `beacon.event` records to a file your log shipper reads. The file uses the
   runtime JSONL schema, so the same SIEM mappings apply.
+- **Memory.** Size the sidecar by `beacon-gateway`'s own memory. A container's memory usage
+  also counts the page cache of files written inside it, which Linux keeps until the container
+  runs short. On Linux the `jsonl` output tells the kernel to drop what it has written once it is
+  on disk, so its file adds a few tens of MB rather than filling the container to its limit.
+  Another file or a log written in the same container fills it the same way: send it to a log
+  shipper or another container, or read the container's working set rather than its usage.
+  After a busy spell the gateway returns its memory to the system once it has been idle for
+  about 30 seconds.
 - **Sessions.** Clients that send a session header get one session per conversation. Claude Code
   sends `x-claude-code-session-id`; other clients can send `session_id`, `x-session-id` or
   `conversation_id`, or set `pipeline.session_headers`.
