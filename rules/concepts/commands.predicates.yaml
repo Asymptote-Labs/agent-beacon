@@ -44,6 +44,7 @@ definitions:
     body: >
       !c.env.exists(k, k.matches("(EDITOR|VISUAL|PAGER|COMMAND|ASKPASS|EXTERNAL_DIFF|LESSOPEN|LESSCLOSE)$|^(BASH_ENV|ENV)$")) && (
         c.name.matches("^(cd|pushd|popd|dirs|pwd|echo|printf|true|false|:|test|\\[|set|unset|export|declare|local|readonly|typeset|shift|return|exit|break|continue|wait|sleep|read|umask|ulimit|hash|type|which|whereis|unalias|kill|pkill|pgrep|killall|jobs|fg|bg|disown|let|getopts|shopt|ls|cat|tac|head|tail|wc|cut|sort|uniq|tr|tee|grep|egrep|fgrep|rg|ag|ack|jq|yq|diff|cmp|comm|paste|join|fold|column|nl|rev|expand|od|xxd|hexdump|strings|base64|base32|md5|md5sum|sha1sum|sha224sum|sha256sum|sha384sum|sha512sum|shasum|b2sum|cksum|sum|file|stat|du|df|touch|mkdir|rmdir|rm|cp|mv|ln|install|dd|truncate|fallocate|shred|chmod|chown|chgrp|readlink|realpath|basename|dirname|mktemp|date|seq|yes|expr|bc|printenv|id|whoami|groups|hostname|uname|uptime|ps|free|lsof|tree|zip|unzip|gzip|gunzip|zcat|bzip2|bunzip2|xz|unxz|zstd|iconv|split|numfmt|tput|clear|pbcopy|pbpaste|curl|wget|http|https|httpie|xh|xhs|dig|nslookup|host|drill|ping|traceroute|whois|ip|ifconfig|netstat|ss|gofmt|goimports|golangci-lint|staticcheck|actionlint|shellcheck|shfmt|ruff|black|mypy|pyright|flake8|isort|eslint|prettier|tsc|pytest|cargo|rustc|rustfmt|gcc|cc|clang|g\\+\\+|c\\+\\+|javac|brew|apt|apt-get|apt-cache|dpkg|dnf|yum|rpm|pacman|apk|pip|pip3|gem|systemctl|service|journalctl|dmesg|sysctl|crontab|useradd|usermod|userdel|groupadd|groupmod|gpasswd|passwd|chpasswd|visudo|insmod|modprobe|rmmod|lsmod|mount|umount|iptables|nft|ufw|swapon|swapoff|history|codesign|spctl|pkgutil|xattr|defaults|security|ssh-keygen|ssh-add|gpg|gpg2|openssl|keytool|bq|gsutil|terraform|tofu|terragrunt|pulumi|supabase|vercel|flyctl|doctl)$") ||
+        c.name == "" && c.argv.exists(a, a.matches("^(.*/)?env$")) && c.argv.all(a, a.matches("^((.*/)?env|-0|--null|-i|--ignore-environment)$")) ||
         c.name == "git" && !c.args.matches("(?m)^(foreach|filter-branch|filter-repo|-x|--exec(=.*)?|--extcmd(=.*)?|--upload-pack(=.*)?|--receive-pack(=.*)?|--config-env(=.*)?)$|^bisect\\nrun$|\\A(?:(?:-C|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n)*?-c\\n") ||
         c.name == "gh" && !c.args.matches("(?m)^(alias|ssh|exec|extension|codespace|cs)$") ||
         c.name == "go" && !c.args.matches("(?m)^-(exec|toolexec)(=.*)?$") ||
@@ -61,7 +62,9 @@ definitions:
         c.name == "mise" && !c.args.matches("(?m)^(exec|x|run|watch|en)$") ||
         c.name == "aws" && !c.args.matches("(?m)^(ssm|execute-command|ec2-instance-connect)$") ||
         c.name == "gcloud" && !c.args.matches("(?m)^(ssh|scp|--command(=.*)?)$") ||
-        c.name == "az" && !c.args.matches("(?m)^(run-command|ssh)$")
+        c.name == "az" && !c.args.matches("(?m)^(run-command|ssh)$") ||
+        c.name.matches("^(dropdb|createdb|mysqladmin|redis-cli)$") ||
+        c.name == "cdk" && !c.args.matches("(?m)^(-a|--app)(=.*)?$")
       )
     tests:
       - name: a_file_utility
@@ -70,6 +73,18 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "grep -rn 'rm -rf /' docs | head -5" }
+      - name: env_with_nothing_to_run
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "env | sort | head -20" }
+      - name: env_running_a_program_the_list_does_not_know
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "env -u HOME ./deploy.sh" }
       - name: a_commit_message
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
         verdict: match
