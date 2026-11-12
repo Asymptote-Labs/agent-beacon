@@ -207,3 +207,57 @@ func TestMemberStartBefore(t *testing.T) {
 		t.Errorf("MemberStart = %d, %v, before saw %q, want %q", at, ok, got, want)
 	}
 }
+
+// Split yields every member as Members does, and splits exactly the arrays split asks for, by kind
+// and path: walking through an object to an array inside it, with the elements of the last array
+// split within a value, and nothing for an array split did not ask for.
+func TestSplit(t *testing.T) {
+	body := `{"request":{"json":{"model":"m","messages":[{"a":"]"}, "x",[1]],"tools":[2]},"n":1},` +
+		`"messages":[3,4],"messages":[5],"json":{"messages":[6]},"other":[7]}`
+	split := func(array bool, path ...string) bool {
+		switch {
+		case !array && len(path) == 2 && path[0] == "request" && path[1] == "json":
+			return true
+		case array && len(path) == 3 && path[2] == "messages":
+			return true
+		}
+		return array && len(path) == 1 && path[0] == "messages"
+	}
+	type yielded struct {
+		parent, name, value string
+		elems               []string
+	}
+	var got []yielded
+	err := Split([]byte(body), func(name string) bool { return name == "request" }, split, func(parent, name string, value []byte, elems [][]byte) error {
+		y := yielded{parent: parent, name: name, value: string(value)}
+		for _, e := range elems {
+			y.elems = append(y.elems, string(e))
+		}
+		got = append(got, y)
+		return nil
+	})
+	want := []yielded{
+		{"request", "json", `{"model":"m","messages":[{"a":"]"}, "x",[1]],"tools":[2]}`, []string{`{"a":"]"}`, `"x"`, `[1]`}},
+		{"request", "n", `1`, nil},
+		{"", "messages", `[3,4]`, []string{`3`, `4`}},
+		{"", "messages", `[5]`, []string{`5`}},
+		{"", "json", `{"messages":[6]}`, nil}, // an object split did not ask to walk through
+		{"", "other", `[7]`, nil},
+	}
+	if err != nil || !slices.EqualFunc(got, want, func(a, b yielded) bool {
+		return a.parent == b.parent && a.name == b.name && a.value == b.value && slices.Equal(a.elems, b.elems)
+	}) {
+		t.Errorf("Split = %v\n%+v\nwant %+v", err, got, want)
+	}
+	// An array where split walks through objects is not split, and a value that is not an
+	// array or object is skipped as usual.
+	err = Split([]byte(`{"request":{"json":[1,2]}}`), func(string) bool { return true }, split, func(_, _ string, _ []byte, elems [][]byte) error {
+		if elems != nil {
+			t.Errorf("an array split asked to walk through as an object was split: %q", elems)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
+}

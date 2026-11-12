@@ -39,6 +39,20 @@ import (
 // call that a tool result in those references, so that binding a tail tool result to its call
 // finds what a full decode finds. Every other field is as DecodeRequest decodes it.
 func SkimRequest(p llm.Protocol, body []byte) (*llm.Request, error) {
+	return skimRequest(p, body, nil)
+}
+
+// SkimSplitRequest is SkimRequest for a body whose message array the caller already split while
+// walking it: elems are the array's elements, in order, as slices of body (nil: none, as
+// SkimRequest). The skim takes them for the array rather than walking it again. They are checked,
+// not trusted: they must be exactly the array's elements, separated by its own syntax, and an
+// element the cache does not hold is validated alone as any element cut from the body is; a split
+// that does not match is ignored.
+func SkimSplitRequest(p llm.Protocol, body []byte, elems [][]byte) (*llm.Request, error) {
+	return skimRequest(p, body, elems)
+}
+
+func skimRequest(p llm.Protocol, body []byte, split [][]byte) (*llm.Request, error) {
 	c, ok := For(p)
 	if !ok {
 		return nil, fmt.Errorf("codec: unknown protocol %q", p)
@@ -49,7 +63,7 @@ func SkimRequest(p llm.Protocol, body []byte) (*llm.Request, error) {
 	// body and taken from the cache (see planSkim). Anything that goes wrong on that path, an
 	// invalid body included, is decided by the plain skim of the body itself, which also
 	// reports the error.
-	if plan := planSkim(body, p, seeds); plan != nil {
+	if plan := planSkim(body, p, seeds, split); plan != nil {
 		in := &skimInput{plan: plan, seeds: seeds}
 		if req, err := rc.request(plan.shell, in); err == nil && plan.visited(in) {
 			return req, nil
@@ -270,7 +284,7 @@ func (in *skimInput) messages(dec *jsontext.Decoder, codec skimCodec) ([]llm.Mes
 			if err != nil {
 				return eofUnexpected(err)
 			}
-			return sk.add(raw, true)
+			return sk.add(raw, fromDecoder)
 		})
 	} else {
 		// The decoder must be at the placeholder: the shell's top-level member, reached once.
@@ -278,8 +292,12 @@ func (in *skimInput) messages(dec *jsontext.Decoder, codec skimCodec) ([]llm.Mes
 		if rerr != nil || string(v) != "[]" || dec.InputOffset() != int64(in.plan.messagesEnd) || in.visits != 1 {
 			return nil, nil, nil, errPlan
 		}
+		from := fromPlan
+		if in.plan.split {
+			from = fromSplit
+		}
 		for _, raw := range in.plan.elems {
-			if err = sk.add(raw, false); err != nil {
+			if err = sk.add(raw, from); err != nil {
 				break
 			}
 		}

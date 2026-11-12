@@ -66,16 +66,18 @@ func (a *adapter) Serve(ctx context.Context, h gateway.Handler) error {
 // request is LiteLLM's guardrail payload; only the fields the adapter reads are declared. The
 // conversation fields stay raw JSON: they are spliced into the body the pipeline decodes.
 type request struct {
-	InputType          string            `json:"input_type"`
-	CallID             string            `json:"litellm_call_id"`
-	TraceID            string            `json:"litellm_trace_id"`
-	Model              string            `json:"model"`
-	StructuredMessages jsontext.Value    `json:"structured_messages"`
-	Texts              jsontext.Value    `json:"texts"`
-	Tools              jsontext.Value    `json:"tools"`
-	ToolCalls          jsontext.Value    `json:"tool_calls"`
-	RequestHeaders     map[string]string `json:"request_headers"`
-	RequestData        struct {
+	InputType          string         `json:"input_type"`
+	CallID             string         `json:"litellm_call_id"`
+	TraceID            string         `json:"litellm_trace_id"`
+	Model              string         `json:"model"`
+	StructuredMessages jsontext.Value `json:"structured_messages"`
+	Texts              jsontext.Value `json:"texts"`
+	Tools              jsontext.Value `json:"tools"`
+	ToolCalls          jsontext.Value `json:"tool_calls"`
+	// messages are StructuredMessages' elements, as the walk of the payload split them.
+	messages       [][]byte
+	RequestHeaders map[string]string `json:"request_headers"`
+	RequestData    struct {
 		KeyHash   string `json:"user_api_key_hash"`
 		KeyAlias  string `json:"user_api_key_alias"`
 		UserID    string `json:"user_api_key_user_id"`
@@ -128,7 +130,7 @@ func (a *adapter) guardrail(w http.ResponseWriter, r *http.Request, h gateway.Ha
 	// A request built over its payload keeps the payload until the pipeline has read it. Any other
 	// body (a reply, a texts-only request, one the payload had no room for) is a copy and refers
 	// to none of the payload, which goes back to the pool at once.
-	if len(body) > 0 && len(c.Body) > 0 && &c.Body[0] == &body[0] {
+	if _, ok := sliceOf(body, c.Body); ok {
 		c.Release, c.BodyBytes = free, int64(cap(body))
 	} else {
 		free()
@@ -144,13 +146,16 @@ func (a *adapter) guardrail(w http.ResponseWriter, r *http.Request, h gateway.Ha
 // The other members the adapter reads are decoded as encoding/json (v1) decodes them, names
 // matched case-insensitively and the last of duplicates winning. Decoding the whole payload
 // validated and copied a long session's history, and a second copy of its text (texts), on every
-// call, only for the codec to read the history again.
+// call, only for the codec to read the history again. The walk splits the messages into their
+// elements as it passes them, which the codec takes rather than walking them again.
 func decodeRequest(body []byte, req *request) error {
 	small := append(make([]byte, 0, 1024), '{')
-	err := jsonscan.Object(body, func(name string, value []byte) error {
+	isMessages := func(name string) bool { return strings.EqualFold(name, "structured_messages") }
+	split := func(array bool, path ...string) bool { return array && len(path) == 1 && isMessages(path[0]) }
+	err := jsonscan.Split(body, nil, split, func(_, name string, value []byte, elems [][]byte) error {
 		switch {
-		case strings.EqualFold(name, "structured_messages"):
-			req.StructuredMessages = value
+		case isMessages(name):
+			req.StructuredMessages, req.messages = value, elems
 		case strings.EqualFold(name, "texts"):
 			req.Texts = value
 		case strings.EqualFold(name, "tools"):
@@ -214,7 +219,7 @@ func (a *adapter) call(req request, payload []byte) (*gateway.Call, error) {
 	switch req.InputType {
 	case "request":
 		c.Phase = gateway.PhaseRequest
-		c.Body, err = requestBody(req, payload)
+		c.Body, c.BodyMessages, err = requestBody(req, payload)
 	case "response":
 		c.Phase = gateway.PhaseResponse
 		c.Body, err = responseBody(req)
@@ -223,7 +228,7 @@ func (a *adapter) call(req request, payload []byte) (*gateway.Call, error) {
 		// the request's messages hands them on only for a reply without a trace id, rather than
 		// copying the whole conversation into a body nothing reads.
 		if err == nil && req.TraceID == "" && nullable(req.StructuredMessages) != nil {
-			c.RequestBody, err = requestBody(req, nil)
+			c.RequestBody, _, err = requestBody(req, nil)
 		}
 	default:
 		return nil, errors.New("unknown input_type " + req.InputType)
@@ -239,19 +244,20 @@ func (a *adapter) call(req request, payload []byte) (*gateway.Call, error) {
 //
 // payload, when not nil, is the buffer req's members were read from, which nothing reads once the
 // request is built: the request is built over it (inPlace) rather than copied into a second buffer
-// the size of the conversation.
-func requestBody(req request, payload []byte) ([]byte, error) {
+// the size of the conversation, and the messages' elements, which do not move, are returned as
+// the walk split them, for the codec. A copied request returns none.
+func requestBody(req request, payload []byte) (body []byte, messages [][]byte, err error) {
 	msgs := nullable(req.StructuredMessages)
 	tools := nullable(req.Tools)
 	if msgs != nil && payload != nil {
 		if b, ok := inPlace(payload, req.Model, msgs, tools); ok {
-			return b, nil
+			return b, req.messages, nil
 		}
 	}
 	if msgs == nil {
 		texts, err := decodeTexts(req.Texts)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		msgs = append(msgs, '[')
 		for i, t := range texts {
@@ -277,74 +283,69 @@ func requestBody(req request, payload []byte) ([]byte, error) {
 		b = append(b, `,"tools":`...)
 		b = append(b, tools...)
 	}
-	return append(b, '}'), nil
+	return append(b, '}'), nil, nil
 }
 
+// messagesKey opens a request built over its payload, written over the end of the longer name the
+// payload gives the messages ("structured_messages", in any spelling) just before them.
+const messagesKey = `{"messages":`
+
 // inPlace builds requestBody's request over payload, the buffer msgs and tools (nil when absent)
-// are slices of: {"messages":…,"tools":…,"model":…}, with messages and tools in the order they
-// appear in payload. Each then starts no later in the result than it did in payload, where the
-// messages are named "structured_messages" and every member is separated from the one before at
-// least as widely, so moving them left in that order never overwrites one not yet moved; the model
-// is written last, from its decoded copy. Every position is checked before anything is written:
-// when one does not hold, or the result would not fit, it reports false with payload untouched.
+// are slices of, without moving the messages, a long session's history:
+// {"messages":…,"tools":…,"model":…}, opened over the end of the messages' name and closed after
+// them, where the tools are moved from wherever they were and the model written from its decoded
+// copy. Every position is checked before anything is written: the opening must not reach the
+// tools, tools after the messages must start no earlier than where they go, and the request must
+// fit the payload. When one does not hold it reports false with payload untouched.
 func inPlace(payload []byte, model string, msgs, tools []byte) ([]byte, bool) {
-	type member struct {
-		name  string
-		value []byte
-		at    int
+	ms, ok := sliceOf(payload, msgs)
+	if !ok || ms < len(messagesKey) {
+		return nil, false
 	}
-	var members [2]member
-	n := 0
-	for _, m := range []member{{`"messages":`, msgs, 0}, {`"tools":`, tools, 0}} {
-		if m.value == nil {
-			continue
-		}
-		at := cap(payload) - cap(m.value)
-		if at < 0 || at+len(m.value) > len(payload) || &payload[at] != &m.value[0] {
+	start, me := ms-len(messagesKey), ms+len(msgs)
+	end := me
+	var ts int
+	if tools != nil {
+		if ts, ok = sliceOf(payload, tools); !ok {
 			return nil, false
 		}
-		m.at = at
-		members[n] = m
-		n++
-	}
-	ms := members[:n]
-	if n == 2 && ms[1].at < ms[0].at {
-		ms[0], ms[1] = ms[1], ms[0]
+		if ts < ms && ts+len(tools) > start {
+			return nil, false // the opening would overwrite tools before the messages
+		}
+		if end += len(`,"tools":`); ts > ms && end > ts {
+			return nil, false // tools after the messages would be overwritten before they move
+		}
+		end += len(tools)
 	}
 	var quoted []byte
 	if model != "" {
 		quoted, _ = jsontext.AppendQuote(nil, model)
-	}
-	end := 1
-	for i, m := range ms {
-		if i > 0 {
-			end++
-		}
-		if end += len(m.name); end > m.at {
-			return nil, false
-		}
-		end += len(m.value)
-	}
-	if quoted != nil {
 		end += len(`,"model":`) + len(quoted)
 	}
 	if end++; end > len(payload) {
 		return nil, false
 	}
-	w := copy(payload, "{")
-	for i, m := range ms {
-		if i > 0 {
-			w += copy(payload[w:], ",")
-		}
-		w += copy(payload[w:], m.name)
-		w += copy(payload[w:], payload[m.at:m.at+len(m.value)]) // copy moves overlapping bytes correctly
+	copy(payload[start:], messagesKey)
+	w := me
+	if tools != nil {
+		w += copy(payload[w:], `,"tools":`)
+		w += copy(payload[w:], payload[ts:ts+len(tools)]) // copy moves overlapping bytes correctly
 	}
 	if quoted != nil {
 		w += copy(payload[w:], `,"model":`)
 		w += copy(payload[w:], quoted)
 	}
 	w += copy(payload[w:], "}")
-	return payload[:w], true
+	return payload[start:w], true
+}
+
+// sliceOf returns where s starts in b when s is a non-empty slice of b's bytes.
+func sliceOf(b, s []byte) (int, bool) {
+	at := cap(b) - cap(s)
+	if len(s) == 0 || at < 0 || at+len(s) > len(b) || &b[at] != &s[0] {
+		return 0, false
+	}
+	return at, true
 }
 
 // responseBody reassembles a Chat Completions reply: LiteLLM sends the reply's text and its tool

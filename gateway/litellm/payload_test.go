@@ -4,6 +4,7 @@ import (
 	"bytes"
 	json "encoding/json/v2"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
@@ -28,6 +29,7 @@ func TestDecodeRequestMatchesFullDecode(t *testing.T) {
 		if err := json.Unmarshal([]byte(body), &want, decodeOptions); err != nil {
 			t.Fatalf("%s: full decode: %v", body, err)
 		}
+		got.messages = nil // the walk's split of the messages, which no decode makes
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s:\n got %+v\nwant %+v", body, got, want)
 		}
@@ -35,59 +37,78 @@ func TestDecodeRequestMatchesFullDecode(t *testing.T) {
 }
 
 // A request body built over its payload must decode exactly as the one built in a buffer of its
-// own, whatever order, spelling and spacing the payload gives its members.
+// own, whatever order, spelling and spacing the payload gives its members, and with the walk's
+// split of its messages as without; a payload without room after the messages for tools placed
+// before them is copied instead.
 func TestRequestBodyInPlaceDecodesAsCopied(t *testing.T) {
 	msgs := `[{"role":"system","content":"SYS"},{"role":"user","content":"hello"},{"role":"assistant","content":null,"tool_calls":[{"id":"tu1","type":"function","function":{"name":"Bash","arguments":"{\"command\":\"ls\"}"}}]},{"role":"tool","content":"a\nb","tool_call_id":"tu1"}]`
 	tools := `[{"type":"function","function":{"name":"Bash","description":"run","parameters":{"type":"object"}}}]`
-	for _, payload := range []string{
-		`{"input_type":"request","model":"gpt-4o","structured_messages":` + msgs + `,"texts":["SYS","hello"],"tools":` + tools + `}`,
-		`{"tools":` + tools + `,"structured_messages":` + msgs + `,"model":"gpt-4o","input_type":"request"}`,
-		`{"structured_messages":` + msgs + `,"tools":` + tools + `}`,
-		`{"structured_messages":` + msgs + `}`,
-		`{"Tools" : ` + tools + ` , "Structured_Messages" :` + msgs + `,"MODEL":"m"}`,
-		`{"structured\u005fmessages":` + msgs + `,"tool\u0073":` + tools + `,"model":"caf\u00e9 \"q\""}`,
-		`{"structured_messages":[1],"structured_messages":` + msgs + `,"tools":null,"model":"m"}`,
+	long := `"texts":["` + strings.Repeat("x", 200) + `"]`
+	for _, tc := range []struct {
+		payload string
+		inPlace bool
+	}{
+		{`{"input_type":"request","model":"gpt-4o","structured_messages":` + msgs + `,"texts":["SYS","hello"],"tools":` + tools + `}`, true},
+		{`{"tools":` + tools + `,"structured_messages":` + msgs + `,"model":"gpt-4o","input_type":"request"}`, false},
+		{`{"tools":` + tools + `,"structured_messages":` + msgs + `,"model":"gpt-4o",` + long + `}`, true},
+		{`{"structured_messages":` + msgs + `,"tools":` + tools + `}`, true},
+		{`{"structured_messages":` + msgs + `}`, true},
+		{`{"Tools" : ` + tools + ` , "Structured_Messages" :` + msgs + `,"MODEL":"m"}`, false},
+		{`{"structured\u005fmessages":` + msgs + `,"tool\u0073":` + tools + `,"model":"caf\u00e9 \"q\""}`, true},
+		{`{"structured_messages":[1],"structured_messages":` + msgs + `,"tools":null,"model":"m"}`, true},
+		{`{"structured_messages" :` + "\n\t " + msgs + " ,\n" + `"tools":` + tools + "\n}", true},
 	} {
 		var req request
-		if err := decodeRequest([]byte(payload), &req); err != nil {
-			t.Fatalf("%s: %v", payload, err)
+		if err := decodeRequest([]byte(tc.payload), &req); err != nil {
+			t.Fatalf("%s: %v", tc.payload, err)
 		}
-		copied, err := requestBody(req, nil)
+		copied, _, err := requestBody(req, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		buf := []byte(payload)
+		buf := []byte(tc.payload)
 		if err := decodeRequest(buf, &req); err != nil {
 			t.Fatal(err)
 		}
-		built, err := requestBody(req, buf)
+		built, split, err := requestBody(req, buf)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if &built[0] != &buf[0] {
-			t.Errorf("%s: body was not built in place", payload)
+		if _, in := sliceOf(buf, built); in != tc.inPlace {
+			t.Errorf("%s: built in place %v, want %v", tc.payload, in, tc.inPlace)
+		}
+		if tc.inPlace && len(split) != 4 {
+			t.Errorf("%s: %d messages split, want 4", tc.payload, len(split))
 		}
 		want, err := codec.DecodeRequest(llm.OpenAIChat, copied)
 		if err != nil {
-			t.Fatalf("%s: %s: %v", payload, copied, err)
+			t.Fatalf("%s: %s: %v", tc.payload, copied, err)
 		}
 		got, err := codec.DecodeRequest(llm.OpenAIChat, built)
 		if err != nil {
-			t.Fatalf("%s: %s: %v", payload, built, err)
+			t.Fatalf("%s: %s: %v", tc.payload, built, err)
 		}
 		if !reflect.DeepEqual(got, want) {
-			t.Errorf("%s:\n got %s\n     %+v\nwant %s\n     %+v", payload, built, got, copied, want)
+			t.Errorf("%s:\n got %s\n     %+v\nwant %s\n     %+v", tc.payload, built, got, copied, want)
+		}
+		plain, perr := codec.SkimRequest(llm.OpenAIChat, built)
+		splitSkim, serr := codec.SkimSplitRequest(llm.OpenAIChat, built, split)
+		if perr != nil || serr != nil || !reflect.DeepEqual(splitSkim, plain) {
+			t.Errorf("%s: skimmed with the walk's split %+v (%v), without %+v (%v)", tc.payload, splitSkim, serr, plain, perr)
 		}
 	}
 }
 
-// A member that starts too early to be moved left leaves the payload as it was.
+// Tools before the messages with no room after them for the tools leave the payload as it was.
 func TestInPlaceRefusesWithoutRoom(t *testing.T) {
-	payload := []byte(`{"x":[1],"tools":[2]}`)
+	payload := []byte(`{"tools":[1,2,3,4,5,6,7,8,9],"structured_messages":[1]}`)
 	orig := bytes.Clone(payload)
-	msgs := payload[5:8] // "messages": needs 11 bytes before it
-	if _, ok := inPlace(payload, "m", msgs, payload[17:20]); ok {
-		t.Fatal("built a body whose messages start too early")
+	tools, msgs := payload[9:28], payload[51:54]
+	if string(tools) != "[1,2,3,4,5,6,7,8,9]" || string(msgs) != "[1]" {
+		t.Fatalf("test slices %s %s", tools, msgs)
+	}
+	if _, ok := inPlace(payload, "m", msgs, tools); ok {
+		t.Fatal("built a body the payload has no room for")
 	}
 	if !bytes.Equal(payload, orig) {
 		t.Fatalf("payload modified: %s", payload)
