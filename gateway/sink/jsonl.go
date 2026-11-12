@@ -40,7 +40,16 @@ type JSONL struct {
 	// unfinished reports that a failed batch could not be cut back, so the file may end in part
 	// of a line, which the next batch cuts off before writing.
 	unfinished bool
+	// writeFrom is where what has not been handed to the disk starts (releasePages): the file's
+	// pages before it are dropped from memory as they are written out.
+	writeFrom int64
 }
+
+// releaseEvery is how much is written between page-cache releases. The kernel keeps a file's
+// written pages in memory, charged to the container, until it runs short; written steadily, they
+// filled a sidecar's memory limit and kept it there, with the kernel reclaiming on every
+// allocation. Released every 8 MiB, the output holds about two of those in memory.
+const releaseEvery = 8 << 20
 
 // OpenJSONL opens path for appending, creating it with owner-only permissions: records carry
 // prompts and tool output.
@@ -110,7 +119,7 @@ func (s *JSONL) Write(_ context.Context, batch []pipeline.Record) error {
 		return &pipeline.WriteError{Dropped: len(batch), Err: err}
 	}
 	var skipped error
-	written := 0
+	written, n := 0, 0
 	for _, r := range batch {
 		line, err := json.Marshal(r.Value)
 		if err != nil {
@@ -119,6 +128,7 @@ func (s *JSONL) Write(_ context.Context, batch []pipeline.Record) error {
 		}
 		s.w.Write(line)
 		s.w.WriteByte('\n')
+		n += len(line) + 1
 		written++
 	}
 	if err := s.w.Flush(); err != nil {
@@ -126,10 +136,26 @@ func (s *JSONL) Write(_ context.Context, batch []pipeline.Record) error {
 		s.unfinished = s.cutBack(start) != nil
 		return &pipeline.WriteError{Dropped: len(batch), Err: err}
 	}
+	s.release(start + int64(n))
 	if skipped != nil {
 		return &pipeline.WriteError{Dropped: len(batch) - written, Err: skipped}
 	}
 	return nil
+}
+
+// release hands what was written since the last release to the disk once it reaches
+// releaseEvery, without waiting, and drops from memory everything handed over before, which is on
+// disk by now (what is still being written is dropped by a later release). end is the file's size
+// after the batch; a file that shrank (rotated by copytruncate) starts over from its beginning.
+func (s *JSONL) release(end int64) {
+	if end < s.writeFrom {
+		s.writeFrom = 0
+	}
+	if end-s.writeFrom < releaseEvery {
+		return
+	}
+	releasePages(s.f, s.writeFrom, s.writeFrom, end-s.writeFrom)
+	s.writeFrom = end
 }
 
 func (s *JSONL) size() (int64, error) {
