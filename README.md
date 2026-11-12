@@ -379,6 +379,12 @@ The [Beacon Skills page](https://docs.beacon.sh/concepts/beacon-skills#install) 
 | Claude Agent SDK | `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
 | Vercel AI SDK | `experimental_telemetry` tracer handoff | Model call and tool spans where telemetry is enabled |
 
+### LLM Gateways
+
+| Gateway | Collection | Captures |
+| --- | --- | --- |
+| LiteLLM, Envoy (incl. Envoy Gateway, Istio), Portkey | [`beacon-gateway`](gateway/README.md) hook adapter | Prompts, responses, tool calls, and token usage for every model call routed through the gateway |
+
 ---
 
 ## Output Destinations
@@ -417,7 +423,8 @@ Local agents ───────┐
 Browser chat ───────┤
 CI ─────────────────┼──→ Beacon ──→ unified session history
 Cloud agents ───────┤                    │
-Agent SDKs ─────────┘                    ├──→ local JSONL
+Agent SDKs ─────────┤                    ├──→ local JSONL
+LLM gateways ───────┘                    │
                                          ├──→ reviewed memory
                                          ├──→ MCP / Agent Skills
                                          └──→ your own infrastructure
