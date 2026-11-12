@@ -107,9 +107,13 @@ func TestSpans(t *testing.T) {
 		{`echo hi; echo 'rm -rf /' | tr a-z a-z | sh`, "sh", `echo 'rm -rf /' | tr a-z a-z | sh`},
 		{"cat <<'EOF' | sh\nrm -rf /\nEOF", "sh", "cat <<'EOF' | sh\nrm -rf /\n"},
 		{`{ echo 'rm -rf /'; } | sh`, "sh", `echo 'rm -rf /'; } | sh`},
-		// A file an earlier command wrote, which it may read or run without naming it.
-		{`echo ok; printf 'all:\n\trm -rf /\n' > Makefile; make`, "make", `printf 'all:\n\trm -rf /\n' > Makefile; make`},
-		{"echo ok && cat > /tmp/x.sh <<'EOF'\nrm -rf /\nEOF\nbash /tmp/x.sh", "bash", "cat > /tmp/x.sh <<'EOF'\nrm -rf /\nEOF\nbash /tmp/x.sh"},
+		// A file an earlier command wrote, which it may read or run without naming it: the
+		// writer's piece and its own, and nothing of what lies between them.
+		{`printf 'all:\n\trm -rf /\n' > Makefile; git commit -m 'never git push --force'; make`, "make", "printf 'all:\\n\\trm -rf /\\n' > Makefile\nmake"},
+		{"echo ok && cat > /tmp/x.sh <<'EOF'\nrm -rf /\nEOF\nbash /tmp/x.sh", "bash", "cat > /tmp/x.sh <<'EOF'\nrm -rf /\n\nbash /tmp/x.sh"},
+		{`cp a b; git commit -m 'never git push --force'; echo x | tee log; ./run.sh`, "run.sh", "cp a b\necho x | tee log\n./run.sh"},
+		// A writer that takes a variable brings the line from its start.
+		{`P='rm -rf /'; echo ok; echo "$P" > x.sh; git status; sh x.sh`, "sh", `P='rm -rf /'; echo ok; echo "$P" > x.sh; git status; sh x.sh`},
 		{`echo ok; go test ./... > /dev/null; ./run.sh`, "run.sh", `./run.sh`},
 		{`echo ok; rm -f x.sh; ./run.sh`, "run.sh", `./run.sh`},
 		// A variable the line may have set, and not one the environment sets.
