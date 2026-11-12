@@ -13,7 +13,7 @@ beacon handoff export <session-id> [flags]
 beacon handoff resume <session-id> [flags]
 ```
 
-Sessions come from each runtime's own local session store, supplemented by sessions retained only in Beacon's runtime log. Store metadata wins when both contain the same runtime and session id. The store is what the runtime resumes from, and it keeps content the runtime log truncates. Every read is local and read-only: nothing is uploaded, and no runtime file is changed.
+Sessions come from each runtime's own local session store, supplemented by sessions retained only in Beacon's runtime log. Store metadata wins when both contain the same runtime and session id. The store is what the runtime resumes from, and it keeps content the runtime log truncates. Log-only sessions with no recorded prompt are treated as subagents and shown only with `--subagents`. This is a conservative heuristic: a top-level session whose prompt was not captured is hidden by default too. Store metadata is not reclassified. Every read is local and read-only: nothing is uploaded, and no runtime file is changed.
 
 ## Supported runtimes
 
