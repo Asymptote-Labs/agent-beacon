@@ -1,6 +1,7 @@
 package main
 
 import (
+	"runtime"
 	rtdebug "runtime/debug"
 	"runtime/metrics"
 	"time"
@@ -24,6 +25,10 @@ func startIdleRelease() {
 		r := idleReleaser{last: cycles(), released: true} // nothing to give back before a busy spell
 		for range time.Tick(idleRelease) {
 			if r.idle(cycles()) {
+				// A sync.Pool keeps what was put back since the last collection through the
+				// next one, and the calls that ended the busy spell put their body buffers back
+				// after it: one collection first, so FreeOSMemory's own frees them.
+				runtime.GC()
 				rtdebug.FreeOSMemory()
 				r.didRelease(cycles())
 			}
