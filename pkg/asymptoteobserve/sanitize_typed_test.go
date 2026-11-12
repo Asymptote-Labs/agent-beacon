@@ -409,7 +409,7 @@ func TestTypedConversionKeepsEveryField(t *testing.T) {
 	if got := SanitizeMCP(&mcp, opts); !reflect.DeepEqual(*got, mcp) {
 		t.Errorf("mcp = %+v, want %+v", *got, mcp)
 	}
-	if got := sanitizeSystemContext(&context); !reflect.DeepEqual(*got, context) {
+	if got := sanitizeSystemContext(&context, opts); !reflect.DeepEqual(*got, context) {
 		t.Errorf("system context = %+v, want %+v", *got, context)
 	}
 	if got := SanitizeRun(&run, opts); !reflect.DeepEqual(*got, run) {

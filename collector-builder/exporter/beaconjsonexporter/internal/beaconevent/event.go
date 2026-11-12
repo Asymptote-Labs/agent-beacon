@@ -66,49 +66,17 @@ type GenAIUsageReasoningInfo = asymptoteobserve.GenAIUsageReasoningInfo
 type GenAIWorkflowInfo = asymptoteobserve.GenAIWorkflowInfo
 type UserAgentInfo = asymptoteobserve.UserAgentInfo
 
+// Base is the event as it is written: asymptoteobserve.Event, the type every Beacon writer shares.
+// Event embeds it under this name rather than as asymptoteobserve.Event so that e.Event stays the
+// event block (action, category, ...): embedded directly, the field would itself be named Event and
+// hide it.
+type Base = asymptoteobserve.Event
+
+// Event is an exporter event: the written event, plus what the exporter tracks about it in memory
+// and never writes.
 type Event struct {
+	Base
 	ObservedAt time.Time `json:"-"`
-	Timestamp  string    `json:"timestamp"`
-	// Sequence mirrors asymptoteobserve.Event.Sequence: the exporter's monotonic emission
-	// counter, stamped in wire order as records are walked. It is what still separates the
-	// datapoints of one metric export, which all carry that export's collection instant
-	// and so tie on the timestamp no matter how precise the timestamp gets.
-	Sequence      uint64                            `json:"sequence,omitempty"`
-	Vendor        string                            `json:"vendor"`
-	Product       string                            `json:"product"`
-	SchemaVersion string                            `json:"schema_version"`
-	Event         EventInfo                         `json:"event"`
-	Severity      string                            `json:"severity"`
-	Endpoint      EndpointInfo                      `json:"endpoint"`
-	User          UserInfo                          `json:"user,omitempty"`
-	Harness       HarnessInfo                       `json:"harness"`
-	Origin        asymptoteobserve.Origin           `json:"origin,omitempty"`
-	Error         *ErrorInfo                        `json:"error,omitempty"`
-	Run           *RunInfo                          `json:"run,omitempty"`
-	Session       *SessionInfo                      `json:"session,omitempty"`
-	Trace         *TraceInfo                        `json:"trace,omitempty"`
-	JSONRPC       *JSONRPCInfo                      `json:"jsonrpc,omitempty"`
-	Network       *NetworkInfo                      `json:"network,omitempty"`
-	RPC           *RPCInfo                          `json:"rpc,omitempty"`
-	Server        *ServerInfo                       `json:"server,omitempty"`
-	Tool          *ToolInfo                         `json:"tool,omitempty"`
-	File          *FileInfo                         `json:"file,omitempty"`
-	Command       *CommandInfo                      `json:"command,omitempty"`
-	MCP           *MCPInfo                          `json:"mcp,omitempty"`
-	Approval      *ApprovalInfo                     `json:"approval,omitempty"`
-	Policy        *PolicyInfo                       `json:"policy,omitempty"`
-	Prompt        *PromptInfo                       `json:"prompt,omitempty"`
-	Content       *ContentInfo                      `json:"content,omitempty"`
-	Destination   *asymptoteobserve.DestinationInfo `json:"destination,omitempty"`
-	Health        *asymptoteobserve.HealthInfo      `json:"health,omitempty"`
-	UserAgent     *UserAgentInfo                    `json:"user_agent,omitempty"`
-	GenAI         *GenAIInfo                        `json:"gen_ai,omitempty"`
-	Model         string                            `json:"model,omitempty"`
-	Repository    string                            `json:"repository,omitempty"`
-	Branch        string                            `json:"branch,omitempty"`
-	Message       string                            `json:"message,omitempty"`
-	Raw           map[string]interface{}            `json:"raw,omitempty"`
-	Truncated     bool                              `json:"field_truncated,omitempty"`
 
 	// codexConversation is set on a Codex app-server record whose conversation no originator
 	// has named yet; CodexSurfaces.Sort holds it until one does. It is never written.
@@ -134,16 +102,6 @@ func NewEvent(action, category, severity, harnessName string, ts time.Time) Even
 		// rather than repeated at each of the log/span/metric call sites.
 		Harness: HarnessInfo{Name: harnessName, CollectionMethod: asymptoteobserve.CollectionMethodOTLP},
 	})
-	return Event{
-		ObservedAt:    ts.UTC(),
-		Timestamp:     asymptoteobserve.FormatTimestamp(ts),
-		Vendor:        base.Vendor,
-		Product:       base.Product,
-		SchemaVersion: base.SchemaVersion,
-		Event:         base.Event,
-		Severity:      string(base.Severity),
-		Endpoint:      base.Endpoint,
-		User:          base.User,
-		Harness:       base.Harness,
-	}
+	base.Timestamp = asymptoteobserve.FormatTimestamp(ts)
+	return Event{Base: base, ObservedAt: ts.UTC()}
 }

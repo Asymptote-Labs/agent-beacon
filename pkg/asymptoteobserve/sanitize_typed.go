@@ -599,8 +599,8 @@ func SanitizeVCS(in *VCSInfo, opts PrivacyOptions) *VCSInfo {
 	return out
 }
 
-func sanitizeSystemContext(in *SystemContextInfo) *SystemContextInfo {
-	g := newGenericSanitizer(PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+func sanitizeSystemContext(in *SystemContextInfo, opts PrivacyOptions) *SystemContextInfo {
+	g := newGenericSanitizer(opts)
 	out := &SystemContextInfo{Kind: g.text(in.Kind), Source: g.text(in.Source)}
 	if len(in.Skills) > 0 {
 		out.Skills = make([]SkillRefInfo, len(in.Skills))
