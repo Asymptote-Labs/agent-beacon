@@ -14,6 +14,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -168,6 +169,7 @@ func onboardingWizardPlan(profile onboarding.Profile) (run, destinationOnly bool
 func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, destinationOnly bool) (onboardingOutcome, error) {
 	now := onboardingClock()
 	status := onboardingAccountInspect(now)
+	identifySignedIn(status)
 	preset := ""
 	switch {
 	case endpointOpts.connect:
@@ -215,6 +217,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 			if err := onboardingAccountSave(*session); err != nil {
 				return onboarding.Account{}, fmt.Errorf("store Beacon session: %w", err)
 			}
+			recordSignIn(telemetry.TriggerWizard, session.User)
 			return onboarding.Account{Email: session.User.Email}, nil
 		},
 	}
@@ -234,6 +237,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		if err := onboardingAccountSave(*session); err != nil {
 			return onboardingOutcome{}, fmt.Errorf("store Beacon session: %w", err)
 		}
+		recordSignIn(telemetry.TriggerWizard, session.User)
 		status = account.Status{SignedIn: true, User: session.User}
 		options.SignedIn = true
 		options.Email = status.User.Email
@@ -291,6 +295,10 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 	}
 	skillsAnswer := onboarding.AgentToolAnswer(result.InstallSkills)
 	email := status.User.Email
+	if email == "" {
+		// An email given to this install (--email, BEACON_EMAIL) when no account names anyone.
+		email = profile.Onboarding.Email
+	}
 	// A run that never signed in is recorded as skipped, not authenticated.
 	outcome := onboarding.OutcomeAuthenticated
 	if result.WithoutAccount {

@@ -233,11 +233,16 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	if _, err := dashboardSwitchOption(); err != nil {
 		return err
 	}
+	if err := validateInstallEmailFlag(); err != nil {
+		return err
+	}
 	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(false, serviceKind, selection.OTLP, selection.Hooks))
 	}
 	installEvents := startInstallTelemetry(discovered)
+	// Before the wizard, which loads the profile this records the email in.
+	submitInstallEmail(cmd.ErrOrStderr())
 	// Asked once, on an interactive install, before anything is written to disk. Every
 	// non-interactive path (package postinstall, MDM, CI) is gated out inside.
 	onboarded, err := maybeRunOnboarding(cmd)
@@ -554,6 +559,9 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if _, err := dashboardSwitchOption(); err != nil {
+		return err
+	}
+	if err := validateInstallEmailFlag(); err != nil {
 		return err
 	}
 	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
