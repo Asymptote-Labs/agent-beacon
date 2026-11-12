@@ -43,24 +43,26 @@ func TestExpiry(t *testing.T) {
 	}
 }
 
-// The store is bounded: writing far more keys than the limit keeps it near the limit, and the
-// newest key written is always readable.
+// The store is bounded: writing far more keys than the limit keeps it within the limit (and its
+// floor of one key a shard), and the newest key written is always readable.
 func TestBounded(t *testing.T) {
-	m := NewMemory(shards * 100)
 	ctx := context.Background()
-	for i := range 50_000 {
-		key := fmt.Sprint("k", i)
-		_ = m.Set(ctx, Entry{key, []byte("v"), time.Hour})
-		if vals, _ := m.Get(ctx, key); vals[0] == nil {
-			t.Fatalf("key %s missing right after Set", key)
+	for _, limit := range []int{shards * 100, 1000, 127, 100, 64, 10} {
+		m := NewMemory(limit)
+		for i := range 20 * max(limit, shards) {
+			key := fmt.Sprint("k", i)
+			_ = m.Set(ctx, Entry{key, []byte("v"), time.Hour})
+			if vals, _ := m.Get(ctx, key); vals[0] == nil {
+				t.Fatalf("limit %d: key %s missing right after Set", limit, key)
+			}
 		}
-	}
-	total := 0
-	for i := range m.shards {
-		total += m.shards[i].len()
-	}
-	if total > shards*100 {
-		t.Errorf("store holds %d keys, limit %d", total, shards*100)
+		total := 0
+		for i := range m.shards {
+			total += m.shards[i].len()
+		}
+		if bound := max(limit, shards); total > bound {
+			t.Errorf("limit %d: store holds %d keys, more than %d", limit, total, bound)
+		}
 	}
 }
 
@@ -110,19 +112,21 @@ func TestValues(t *testing.T) {
 	}
 }
 
-// A TTL is kept to the millisecond, rounded up, so a key outlives it and no more.
+// A key's expiry is kept to the millisecond, rounded up, so a key outlives its TTL by less than a
+// millisecond and never expires before it, wherever in a millisecond it was written.
 func TestShortTTL(t *testing.T) {
 	m := NewMemory(1000)
-	now := time.Unix(1000, 0)
+	written := time.Unix(1000, 900_000) // 0.9 ms into a millisecond
+	now := written
 	m.now = func() time.Time { return now }
 	ctx := context.Background()
-	_ = m.Set(ctx, Entry{"k", []byte("v"), 1500 * time.Microsecond})
-	now = now.Add(time.Millisecond)
+	_ = m.Set(ctx, Entry{"k", []byte("v"), time.Millisecond}) // expires 1.9 ms into it
+	now = written.Add(950 * time.Microsecond)
 	if vals, _ := m.Get(ctx, "k"); vals[0] == nil {
 		t.Error("key expired before its TTL")
 	}
-	now = now.Add(time.Millisecond)
+	now = written.Add(2 * time.Millisecond)
 	if vals, _ := m.Get(ctx, "k"); vals[0] != nil {
-		t.Error("key outlived its TTL rounded up to the millisecond")
+		t.Error("key outlived its TTL by a millisecond or more")
 	}
 }

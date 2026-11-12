@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hash/maphash"
+	"math"
 	"sync"
 	"time"
 )
@@ -29,9 +30,16 @@ const shards = 64
 // full shard is never swept under its lock on the call path.
 type Memory struct {
 	seeds  [2]maphash.Seed
-	half   int // keys per shard generation
+	bound  bound
 	now    func() time.Time
 	shards [shards]shard
+}
+
+// bound is how many keys a shard keeps: half in each of two generations, or, for a shard of one
+// key, one generation of it.
+type bound struct {
+	half     int
+	keepPrev bool
 }
 
 type shard struct {
@@ -48,8 +56,8 @@ type generation struct {
 // keyHash identifies a key by two independent 64-bit hashes of it.
 type keyHash [2]uint64
 
-// entry packs an entry into a word: its expiry in Unix milliseconds above valueBits, and below
-// them how its value is held, and the value itself when it is a single byte.
+// entry packs an entry into a word: its expiry in Unix milliseconds, rounded up, above valueBits,
+// and below them how its value is held, and the value itself when it is a single byte.
 type entry uint64
 
 const (
@@ -64,11 +72,13 @@ const (
 func (e entry) expires() int64 { return int64(e >> valueBits) }
 func (e entry) kind() entry    { return e & valueKinds }
 
-// NewMemory returns a Memory holding at most maxEntries keys.
+// NewMemory returns a Memory holding at most maxEntries keys, and never fewer than one a shard
+// (64).
 func NewMemory(maxEntries int) *Memory {
+	perShard := max(1, maxEntries/shards)
 	return &Memory{
 		seeds: [2]maphash.Seed{maphash.MakeSeed(), maphash.MakeSeed()},
-		half:  max(1, maxEntries/shards/2),
+		bound: bound{half: max(1, perShard/2), keepPrev: perShard >= 2},
 		now:   time.Now,
 	}
 }
@@ -85,7 +95,7 @@ func (m *Memory) Get(_ context.Context, keys ...string) ([][]byte, error) {
 	for i, k := range keys {
 		h, s := m.hash(k)
 		s.mu.Lock()
-		if e, value, ok := s.live(h, now, m.half); ok && e.kind() != valueNone {
+		if e, value, ok := s.live(h, now, m.bound); ok && e.kind() != valueNone {
 			if e.kind() == valueByte {
 				out[i] = []byte{byte(e)}
 			} else {
@@ -99,7 +109,7 @@ func (m *Memory) Get(_ context.Context, keys ...string) ([][]byte, error) {
 
 // Set implements Store.
 func (m *Memory) Set(_ context.Context, entries ...Entry) error {
-	now := m.now().UnixMilli()
+	now := m.now().UnixNano()
 	for _, e := range entries {
 		if e.TTL <= 0 {
 			return fmt.Errorf("store: key %q: TTL must be positive", e.Key)
@@ -107,7 +117,7 @@ func (m *Memory) Set(_ context.Context, entries ...Entry) error {
 		h, s := m.hash(e.Key)
 		s.mu.Lock()
 		s.prev.delete(h)
-		s.put(h, pack(e, now), e.Value, m.half)
+		s.put(h, pack(e, now), e.Value, m.bound)
 		s.mu.Unlock()
 	}
 	return nil
@@ -115,7 +125,8 @@ func (m *Memory) Set(_ context.Context, entries ...Entry) error {
 
 // Add implements Store.
 func (m *Memory) Add(_ context.Context, entries ...Entry) ([]bool, error) {
-	now := m.now().UnixMilli()
+	t := m.now()
+	now, nowMillis := t.UnixNano(), t.UnixMilli()
 	added := make([]bool, len(entries))
 	for i, e := range entries {
 		if e.TTL <= 0 {
@@ -123,8 +134,8 @@ func (m *Memory) Add(_ context.Context, entries ...Entry) ([]bool, error) {
 		}
 		h, s := m.hash(e.Key)
 		s.mu.Lock()
-		if _, _, ok := s.live(h, now, m.half); !ok {
-			s.put(h, pack(e, now), e.Value, m.half)
+		if _, _, ok := s.live(h, nowMillis, m.bound); !ok {
+			s.put(h, pack(e, now), e.Value, m.bound)
 			added[i] = true
 		}
 		s.mu.Unlock()
@@ -132,14 +143,18 @@ func (m *Memory) Add(_ context.Context, entries ...Entry) ([]bool, error) {
 	return added, nil
 }
 
-// pack is e's entry, written at now. A TTL is rounded up to the millisecond, so a key never
-// expires before it should.
+// pack is e's entry, written at now (Unix nanoseconds). Its expiry is rounded up to the
+// millisecond, so a key never expires before it should, and outlives its TTL by less than one.
 func pack(e Entry, now int64) entry {
-	ttl := int64(e.TTL / time.Millisecond)
-	if e.TTL%time.Millisecond != 0 {
-		ttl++
+	expires := now + int64(e.TTL)
+	if expires < now {
+		expires = math.MaxInt64
 	}
-	packed := entry(now+ttl) << valueBits
+	millis := expires / int64(time.Millisecond)
+	if expires%int64(time.Millisecond) != 0 {
+		millis++
+	}
+	packed := entry(millis) << valueBits
 	switch len(e.Value) {
 	case 0:
 		return packed | valueNone
@@ -149,9 +164,10 @@ func pack(e Entry, now int64) entry {
 	return packed | valueLong
 }
 
-// live finds h's entry, unexpired at now, moving it to the current generation if it was in the
-// previous one; an expired entry is dropped. value is a long value as the shard holds it.
-func (s *shard) live(h keyHash, now int64, half int) (e entry, value []byte, ok bool) {
+// live finds h's entry, unexpired at now (Unix milliseconds), moving it to the current generation
+// if it was in the previous one; an expired entry is dropped. value is a long value as the shard
+// holds it.
+func (s *shard) live(h keyHash, now int64, b bound) (e entry, value []byte, ok bool) {
 	if e, ok = s.cur.m[h]; ok {
 		if e.expires() > now {
 			return e, s.cur.values[h], true
@@ -167,15 +183,20 @@ func (s *shard) live(h keyHash, now int64, half int) (e entry, value []byte, ok 
 	if e.expires() <= now {
 		return 0, nil, false
 	}
-	s.put(h, e, value, half)
+	s.put(h, e, value, b)
 	return e, value, true
 }
 
 // put writes h's entry to the current generation, first turning the current generation into the
-// previous one when it is full. value is copied when the entry holds it beside itself.
-func (s *shard) put(h keyHash, e entry, value []byte, half int) {
-	if _, exists := s.cur.m[h]; !exists && len(s.cur.m) >= half {
-		s.prev, s.cur = s.cur, generation{}
+// previous one when it is full (or dropping it, in a shard of one key). value is copied when the
+// entry holds it beside itself.
+func (s *shard) put(h keyHash, e entry, value []byte, b bound) {
+	if _, exists := s.cur.m[h]; !exists && len(s.cur.m) >= b.half {
+		if b.keepPrev {
+			s.prev, s.cur = s.cur, generation{}
+		} else {
+			s.prev, s.cur = generation{}, generation{}
+		}
 	}
 	if s.cur.m == nil {
 		s.cur.m = make(map[keyHash]entry)
