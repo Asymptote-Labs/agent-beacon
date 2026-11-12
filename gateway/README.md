@@ -146,6 +146,19 @@ and counted in `/stats`.
 ## Testing
 
 ```sh
-cd gateway && go vet ./... && go test ./... && go test -race ./pipeline/... ./events/... ./litellm/... ./envoy/... ./portkey/... ./llm/...
+cd gateway && go vet ./... && go test ./...
+go test -race ./pipeline/... ./events/... ./litellm/... ./envoy/... ./portkey/... ./llm/... ./harness/... ./internal/jsonscan/... ./store/... ./sink/... .
 go test ./internal/perf -run '^$' -bench . -benchmem
 ```
+
+CI's `gateway` job runs the first two lines, then builds the release as `release-gateway.yml` does
+and smoke-tests its image:
+
+```sh
+sh scripts/release-build.sh                      # dist/: static binaries, archives, checksums.txt
+docker buildx build --load -t beacon-gateway:dev -f Dockerfile dist/image
+sh scripts/image-smoke.sh beacon-gateway:dev
+```
+
+`beacon-gateway -version` prints the release in `cmd/beacon-gateway/version.go`, and the commit
+and build date when `release-build.sh` stamped them.
