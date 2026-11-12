@@ -212,6 +212,8 @@ type body struct {
 	overflow bool
 	done     bool
 	buf      []byte
+	// declared is the length the body's headers declared, -1 when they declared none.
+	declared int64
 	// held is the memory reserved for the body at admission, released by free.
 	held     int64
 	releases []func()
@@ -225,7 +227,10 @@ func (b *body) free() {
 	b.releases, b.held = nil, 0
 }
 
-// add appends a chunk and reports whether it completed a body to analyze.
+// add appends a chunk and reports whether it completed a body to analyze. A chunk is the bytes of
+// its message, which gRPC decodes into a buffer of their own that nothing else holds: a body that
+// arrives whole (BUFFERED) is kept as that buffer rather than copied, and one that arrives in
+// chunks is gathered in a buffer sized to its declared length.
 func (b *body) add(chunk []byte, end bool, limit int) bool {
 	if b.skip || b.done {
 		return false
@@ -233,12 +238,17 @@ func (b *body) add(chunk []byte, end bool, limit int) bool {
 	if !end {
 		b.streamed = true
 	}
-	if !b.overflow {
-		if len(b.buf)+len(chunk) > limit {
-			b.overflow, b.buf = true, nil
-		} else {
-			b.buf = append(b.buf, chunk...)
+	switch {
+	case b.overflow:
+	case len(b.buf)+len(chunk) > limit:
+		b.overflow, b.buf = true, nil
+	case b.buf == nil && end:
+		b.buf = chunk
+	default:
+		if b.buf == nil && b.declared > 0 {
+			b.buf = make([]byte, 0, min(b.declared, int64(limit)))
 		}
+		b.buf = append(b.buf, chunk...)
 	}
 	b.done = end
 	return end
@@ -365,6 +375,7 @@ func (x *exchange) admit(ctx context.Context, b *body, declared int64) (gateway.
 		return gateway.Verdict{}, true
 	}
 	n := declared
+	b.declared = declared
 	switch {
 	case declared < 0:
 		n = min(unknownBody, int64(x.a.cfg.MaxBody))

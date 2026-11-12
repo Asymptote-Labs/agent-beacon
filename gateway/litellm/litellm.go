@@ -112,7 +112,7 @@ func (a *adapter) guardrail(w http.ResponseWriter, r *http.Request, h gateway.Ha
 		http.Error(w, "decode body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	c, err := a.call(req)
+	c, err := a.call(req, body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -166,7 +166,9 @@ func writeVerdict(w http.ResponseWriter, v gateway.Verdict) {
 	_ = jsonv1.NewEncoder(w).Encode(resp)
 }
 
-func (a *adapter) call(req request) (*gateway.Call, error) {
+// call builds the call from the decoded payload; a request's body is built over the payload's
+// buffer (requestBody), so nothing may read req's raw members, or the payload, afterwards.
+func (a *adapter) call(req request, payload []byte) (*gateway.Call, error) {
 	rd := req.RequestData
 	c := &gateway.Call{
 		Gateway:    a.cfg.Name,
@@ -194,7 +196,7 @@ func (a *adapter) call(req request) (*gateway.Call, error) {
 	switch req.InputType {
 	case "request":
 		c.Phase = gateway.PhaseRequest
-		c.Body, err = requestBody(req)
+		c.Body, err = requestBody(req, payload)
 	case "response":
 		c.Phase = gateway.PhaseResponse
 		c.Body, err = responseBody(req)
@@ -203,7 +205,7 @@ func (a *adapter) call(req request) (*gateway.Call, error) {
 		// the request's messages hands them on only for a reply without a trace id, rather than
 		// copying the whole conversation into a body nothing reads.
 		if err == nil && req.TraceID == "" && nullable(req.StructuredMessages) != nil {
-			c.RequestBody, err = requestBody(req)
+			c.RequestBody, err = requestBody(req, nil)
 		}
 	default:
 		return nil, errors.New("unknown input_type " + req.InputType)
@@ -216,8 +218,18 @@ func (a *adapter) call(req request) (*gateway.Call, error) {
 // the codec validates the body it decodes, and re-encoding them would only scan and copy a long
 // session's history once more. A payload without structured messages (a texts-only guardrail
 // call) becomes user turns.
-func requestBody(req request) ([]byte, error) {
+//
+// payload, when not nil, is the buffer req's members were read from, which nothing reads once the
+// request is built: the request is built over it (inPlace) rather than copied into a second buffer
+// the size of the conversation.
+func requestBody(req request, payload []byte) ([]byte, error) {
 	msgs := nullable(req.StructuredMessages)
+	tools := nullable(req.Tools)
+	if msgs != nil && payload != nil {
+		if b, ok := inPlace(payload, req.Model, msgs, tools); ok {
+			return b, nil
+		}
+	}
 	if msgs == nil {
 		texts, err := decodeTexts(req.Texts)
 		if err != nil {
@@ -234,7 +246,6 @@ func requestBody(req request) ([]byte, error) {
 		}
 		msgs = append(msgs, ']')
 	}
-	tools := nullable(req.Tools)
 	b := make([]byte, 0, len(`{"model":"","messages":,"tools":}`)+len(req.Model)+len(msgs)+len(tools))
 	b = append(b, '{')
 	if req.Model != "" {
@@ -249,6 +260,73 @@ func requestBody(req request) ([]byte, error) {
 		b = append(b, tools...)
 	}
 	return append(b, '}'), nil
+}
+
+// inPlace builds requestBody's request over payload, the buffer msgs and tools (nil when absent)
+// are slices of: {"messages":…,"tools":…,"model":…}, with messages and tools in the order they
+// appear in payload. Each then starts no later in the result than it did in payload, where the
+// messages are named "structured_messages" and every member is separated from the one before at
+// least as widely, so moving them left in that order never overwrites one not yet moved; the model
+// is written last, from its decoded copy. Every position is checked before anything is written:
+// when one does not hold, or the result would not fit, it reports false with payload untouched.
+func inPlace(payload []byte, model string, msgs, tools []byte) ([]byte, bool) {
+	type member struct {
+		name  string
+		value []byte
+		at    int
+	}
+	var members [2]member
+	n := 0
+	for _, m := range []member{{`"messages":`, msgs, 0}, {`"tools":`, tools, 0}} {
+		if m.value == nil {
+			continue
+		}
+		at := cap(payload) - cap(m.value)
+		if at < 0 || at+len(m.value) > len(payload) || &payload[at] != &m.value[0] {
+			return nil, false
+		}
+		m.at = at
+		members[n] = m
+		n++
+	}
+	ms := members[:n]
+	if n == 2 && ms[1].at < ms[0].at {
+		ms[0], ms[1] = ms[1], ms[0]
+	}
+	var quoted []byte
+	if model != "" {
+		quoted, _ = jsontext.AppendQuote(nil, model)
+	}
+	end := 1
+	for i, m := range ms {
+		if i > 0 {
+			end++
+		}
+		if end += len(m.name); end > m.at {
+			return nil, false
+		}
+		end += len(m.value)
+	}
+	if quoted != nil {
+		end += len(`,"model":`) + len(quoted)
+	}
+	if end++; end > len(payload) {
+		return nil, false
+	}
+	w := copy(payload, "{")
+	for i, m := range ms {
+		if i > 0 {
+			w += copy(payload[w:], ",")
+		}
+		w += copy(payload[w:], m.name)
+		w += copy(payload[w:], payload[m.at:m.at+len(m.value)]) // copy moves overlapping bytes correctly
+	}
+	if quoted != nil {
+		w += copy(payload[w:], `,"model":`)
+		w += copy(payload[w:], quoted)
+	}
+	w += copy(payload[w:], "}")
+	return payload[:w], true
 }
 
 // responseBody reassembles a Chat Completions reply: LiteLLM sends the reply's text and its tool
