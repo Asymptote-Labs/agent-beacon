@@ -1,5 +1,6 @@
 id: kernel-module-load
-version: 2
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 3
 title: Kernel module loaded, probed, or removed
 description: >
   A kernel module was loaded (insmod), probed (modprobe), or removed
@@ -16,7 +17,10 @@ description: >
   load signature requires a module-shaped basename (starts with a
   letter) or a `.ko`/`.ko.xz`/`.ko.gz` path, so read-only
   subcommands such as `--version`, `--help`, `-V`, and `-l` do not
-  fire.
+  fire. The command is found by what the line runs: insmod, rmmod, or modprobe with
+  those words, also under sudo, by absolute path or inside `bash -c`, so the same
+  words in a commit message or a here-document do not fire. A line the parser cannot
+  vouch for (see command_unread) is matched on its text.
 severity: high
 status: experimental
 posture: detect
@@ -27,9 +31,15 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*insmod\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*modprobe\\b[^;&|]*(\\s-r\\b|\\s--remove\\b|\\s-[a-z]*f[a-z]*\\b|\\s+[a-zA-Z][a-zA-Z0-9_-]+\\.(ko|ko\\.xz|ko\\.gz)(\\s|$|[;&|])|\\s+[a-zA-Z][a-zA-Z0-9_-]+(\\s|$|[;&|]))") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*rmmod\\b")
+    e.command.parsed_commands.exists(c,
+      c.name.matches("^(insmod|rmmod)$") ||
+      c.name == "modprobe" &&
+        c.args.matches("(?m)^(-r|--remove|-[a-zA-Z]*f[a-zA-Z]*|[a-zA-Z][a-zA-Z0-9_-]+(\\.ko(\\.xz|\\.gz)?)?)$")
+    ) ||
+    ((e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*insmod\\b") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*modprobe\\b[^;&|]*(\\s-r\\b|\\s--remove\\b|\\s-[a-z]*f[a-z]*\\b|\\s+[a-zA-Z][a-zA-Z0-9_-]+\\.(ko|ko\\.xz|ko\\.gz)(\\s|$|[;&|])|\\s+[a-zA-Z][a-zA-Z0-9_-]+(\\s|$|[;&|]))") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*rmmod\\b")) &&
+      command_unread(e))
   )
 
 emit:
@@ -137,4 +147,52 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "modprobe --version && echo ok" }
+        session: { id: s1 }
+  - name: insmod_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo bash -c 'cd /tmp/build && insmod ./hook.ko'" }
+        session: { id: s1 }
+  - name: modprobe_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/sbin/modprobe overlay" }
+        session: { id: s1 }
+  - name: rmmod_under_sudo_with_an_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -n rmmod apparmor" }
+        session: { id: s1 }
+  - name: modprobe_removes_a_module_named_by_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo modprobe -r \"$MODULE\"" }
+        session: { id: s1 }
+  - name: insmod_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'sudo insmod /tmp/hook.ko'" }
+        session: { id: s1 }
+  - name: modprobe_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'ci: drop the bridge step; sudo modprobe br_netfilter is not needed'" }
+        session: { id: s1 }
+  - name: modprobe_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nIf the bridge is missing: sudo modprobe br_netfilter\nThen unload the old one: sudo rmmod bridge_old\nEOF" }
+        session: { id: s1 }
+  - name: modprobe_show_configuration
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo modprobe -c | grep -i blacklist" }
         session: { id: s1 }

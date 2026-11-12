@@ -1,5 +1,6 @@
 id: setuid-or-root-shell-escalation
-version: 2
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 3
 title: Setuid bit installed or interactive root shell requested
 description: >
   A command either installs the setuid bit on a file (chmod u+s or +s, chmod with a
@@ -7,9 +8,13 @@ description: >
   or chmod g+s setgid) — creating a standing privileged
   binary that runs as its owner — or escalates to an interactive root shell via
   `su - root` / `su root` / `su -` or `pkexec` (polkit). Setuid root binaries and
-  pkexec are classic local-privilege-escalation primitives. The setuid mode is
-  anchored to the chmod command position, and su is required to target root so that
-  `su someuser` does not match.
+  pkexec are classic local-privilege-escalation primitives. The command is found by
+  what the line runs: chmod whose first operand is such a mode, su with the operand
+  root or with nothing but a login option (`-`, `-l`, `--login`), or pkexec, also under
+  sudo, by absolute path or inside `bash -c`, so the same words in a commit message or
+  a here-document do not fire and `su someuser` does not match. A line the parser
+  cannot vouch for (see command_unread) is matched on its text, where each command is
+  anchored to the command position.
 severity: high
 status: stable
 posture: detect
@@ -18,12 +23,21 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0050
 
+# The mode is the first word of chmod that is not an option (an unknown word, such as a
+# variable, is skipped), so a file named 2024 is not a mode.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+-\\s*$") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*)pkexec\\b")
+    e.command.parsed_commands.exists(c,
+      c.name == "chmod" &&
+        c.args.matches("\\A(-[^\\n]*\\n|\\n)*(0?[2-7][0-7]{3}|[ugoa,+=rwxXst-]*[+=][rwxXt]*s[ugoa,+=rwxXst-]*)(\\n|\\z)") ||
+      c.name == "su" && c.args.matches("(?m)^root$|\\A(-|-l|--login)\\z") ||
+      c.name == "pkexec"
+    ) ||
+    ((e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+-\\s*$") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*)pkexec\\b")) &&
+      command_unread(e))
   )
 
 emit:
@@ -101,5 +115,83 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "grep pkexec /var/log/auth.log" }
+        session: { id: s1 }
+  - name: setuid_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo chmod u+s /usr/local/bin/helper" }
+        session: { id: s1 }
+  - name: setuid_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo bash -c 'chown root /usr/local/bin/helper && chmod 4755 /usr/local/bin/helper'" }
+        session: { id: s1 }
+  - name: setuid_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/bin/chmod 4755 /usr/local/bin/helper" }
+        session: { id: s1 }
+  - name: setuid_in_a_symbolic_mode_list
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod -v u=rwxs,go=rx /usr/local/bin/helper" }
+        session: { id: s1 }
+  - name: su_login_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo su -" }
+        session: { id: s1 }
+  - name: su_root_named_after_the_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "su -c 'id' root" }
+        session: { id: s1 }
+  - name: pkexec_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/pkexec /bin/sh" }
+        session: { id: s1 }
+  - name: setuid_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'cd /usr/local/bin && chmod u+s helper'" }
+        session: { id: s1 }
+  - name: setuid_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'revert: cd /usr/local/bin && chmod u+s helper'" }
+        session: { id: s1 }
+  - name: setuid_and_su_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nThe old installer ran: cd /usr/local/bin && chmod 4755 helper; pkexec ./setup; su - root\nEOF" }
+        session: { id: s1 }
+  - name: su_login_to_regular_user
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo su - postgres" }
+        session: { id: s1 }
+  - name: chmod_normal_mode_on_a_file_named_like_a_mode
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 644 2024" }
+        session: { id: s1 }
+  - name: chmod_normal_mode_with_leading_zero
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo chmod 0755 /usr/local/bin/helper" }
         session: { id: s1 }
 

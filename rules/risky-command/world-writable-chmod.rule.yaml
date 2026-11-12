@@ -1,13 +1,17 @@
 id: world-writable-chmod
-version: 4
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 5
 title: chmod grants world-writable or full permissions
 description: >
   A command makes a file or tree world-writable — an octal mode whose "other" digit
   grants write (777, 0777, 666, 0776, 1777), or a symbolic mode
   (via + or =) that grants write to other or all (e.g. o+w, a+rwx, a=rwx, o=rwx,
   ugo+rwx). Owner- or group-only grants (u+w, g=rw) are intentionally excluded because
-  they are not world-writable. chmod is anchored to the acting command position so it
-  is not matched as an argument to another program.
+  they are not world-writable. The command is found by what the line runs: chmod, also
+  under sudo, by absolute path or inside `bash -c`, whose first operand is such a mode,
+  so chmod in a commit message or a here-document does not fire. A line the parser
+  cannot vouch for (see command_unread) is matched on its text, where chmod is anchored
+  to the acting command position.
 severity: medium
 status: stable
 posture: detect
@@ -15,9 +19,16 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM06
 
+# The mode is the first word of chmod that is not an option (an unknown word, such as a
+# variable, is skipped), so a file named 777 is not a mode.
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([0-7]?[0-7]{2}[2367](\\s|$)|([ugoa]*[oa][ugoa]*)[+=][rwx]*w[rwx]*\\b)")
+  e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c,
+      c.name == "chmod" &&
+      c.args.matches("\\A(-[^\\n]*\\n|\\n)*([0-7]?[0-7]{2}[2367]|[ugoa,+=rwxXst-]*[oa][ugoa]*[+=][rwxXst]*w[ugoa,+=rwxXst-]*)(\\n|\\z)")) ||
+    (e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([0-7]?[0-7]{2}[2367](\\s|$)|([ugoa]*[oa][ugoa]*)[+=][rwx]*w[rwx]*\\b)") &&
+      command_unread(e))
+  )
 
 emit:
   reason: "chmod grants world-writable or fully permissive access"
@@ -130,4 +141,64 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "man chmod | grep 777" }
+        session: { id: s1 }
+  - name: chmod_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo chmod -R 777 /srv/app" }
+        session: { id: s1 }
+  - name: chmod_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'chmod 666 /srv/app/config'" }
+        session: { id: s1 }
+  - name: chmod_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/bin/chmod o+w /srv/app/config" }
+        session: { id: s1 }
+  - name: chmod_symbolic_mode_list
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod -R u=rwx,go+w \"$APP_DIR\"" }
+        session: { id: s1 }
+  - name: chmod_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'cd /srv && chmod 777 app'" }
+        session: { id: s1 }
+  - name: chmod_on_a_line_that_does_not_parse
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 777 /srv )" }
+        session: { id: s1 }
+  - name: chmod_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'revert: cd /srv && chmod 777 app'" }
+        session: { id: s1 }
+  - name: chmod_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nThe installer used to run: cd /srv && chmod 777 app\nEOF" }
+        session: { id: s1 }
+  - name: chmod_group_writable_tree
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo chmod -R 775 /srv/app" }
+        session: { id: s1 }
+  - name: chmod_normal_mode_on_a_file_named_like_a_mode
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 644 777" }
         session: { id: s1 }
