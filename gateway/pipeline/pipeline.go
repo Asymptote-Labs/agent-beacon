@@ -217,6 +217,13 @@ func (p *Pipeline) Handle(ctx context.Context, c *gateway.Call) gateway.Verdict 
 		defer p.release()
 		defer p.bodies.release(held)
 		defer released(c)
+		// A goroutine starts ahead of every goroutine already waiting to run on its processor,
+		// and the analysis would take it from goroutines answering other calls. gRPC's writer,
+		// which sends each Envoy reply, yields after a small write and waits for the global run
+		// queue, which a processor reads only when it has nothing else or seldom: under load,
+		// analyses kept every processor busy, Envoy exchanges took eight times as long and calls
+		// stalled behind them. Yielding first puts the analysis behind them instead.
+		runtime.Gosched()
 		p.run(context.WithoutCancel(ctx), c)
 	}()
 	return allow
