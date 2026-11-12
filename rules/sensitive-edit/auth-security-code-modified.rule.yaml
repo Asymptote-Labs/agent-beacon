@@ -1,6 +1,6 @@
 id: auth-security-code-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 6
+version: 7
 title: Authentication, payment, or security source modified
 description: >
   The agent modified a source file in the auth / payment / security surface (basename
@@ -20,17 +20,17 @@ taxonomy:
 # Which file is one definition (auth_security_code_file,
 # rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
 # path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv). A write
-# that lands in a temporary directory is left out (scratch_write): agents stage copies there
-# all the time, and moving one back into the project is a write of its own.
+# that lands in a temporary directory is left out (write_outside_scratch): agents stage
+# copies there all the time, and moving one back into the project is a write of its own.
 match: >
   (
     e.event.action in ["file.modified", "file.created", "file.edited"] &&
     auth_security_code_file(e.file.path)
   ) || (
     e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+    write_outside_scratch(e, f,
       f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      auth_security_code_file(f.path) && !scratch_write(e, f)))
+      auth_security_code_file(f.path))
   )
 
 emit:
