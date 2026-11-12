@@ -193,6 +193,12 @@ type CommandInfo struct {
 	// its own copy of each event, as it does GenAIToolCallInfo.ResultText. See
 	// threatrules.ParsedCommands.
 	ParsedCommands []ParsedCommand `json:"-" cel:"parsed_commands"`
+	// ParsedIncomplete is set when Command was not read to its end: it does not parse, it ends
+	// inside a quote, a here-document, a substitution or a compound command (as a cut capture
+	// does), or it is longer than the engine reads. ParsedCommands then lists the commands
+	// before that point only, so nothing can be concluded from a command's absence. Derived
+	// like ParsedCommands, never written or read.
+	ParsedIncomplete bool `json:"-" cel:"parsed_incomplete"`
 }
 
 // ParsedCommand is one command of a command line, as the threat-rules engine presents it to

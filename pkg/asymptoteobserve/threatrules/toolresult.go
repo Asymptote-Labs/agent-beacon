@@ -66,9 +66,10 @@ func withDerivedFields(event asymptoteobserve.Event) asymptoteobserve.Event {
 	}
 	if event.Command != nil {
 		// Derived, never asserted: an in-process caller's value is replaced, even by nothing.
-		if parsed := ParsedCommands(event.Command.Command); parsed != nil || event.Command.ParsedCommands != nil {
+		parsed, incomplete := ParsedCommandLine(event.Command.Command)
+		if parsed != nil || incomplete || event.Command.ParsedCommands != nil || event.Command.ParsedIncomplete {
 			command := *event.Command
-			command.ParsedCommands = parsed
+			command.ParsedCommands, command.ParsedIncomplete = parsed, incomplete
 			event.Command = &command
 		}
 	}

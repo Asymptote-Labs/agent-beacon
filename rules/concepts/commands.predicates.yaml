@@ -16,8 +16,14 @@
 #   e.command.parsed_commands.exists(c, <the command, by name and words>) ||
 #   (e.command.command.matches("<the text pattern>") && command_unread(e))
 #
-# command_unread(e) is true when the line holds something the parser cannot vouch for. It is
-# decided the safe way round: a command is trusted to run only itself when it is named in
+# command_unread(e) is true when the line holds something the parser cannot vouch for. The
+# first way is that the parser did not read the line to its end
+# (e.command.parsed_incomplete): it does not parse, or it stops inside a quote, a
+# here-document or a loop, as a capture that was cut does. The commands before that point
+# are listed, and say nothing about the rest.
+#
+# The second is decided the safe way round: a command is trusted to run only itself when it
+# is named in
 # command_runs_only_itself, and every other command, known or not, leaves the line to its
 # text. A program missing from the list costs a rule nothing it had before (the text pattern
 # still decides for that line); a program wrongly on the list would. Add a command only when
@@ -203,17 +209,41 @@ definitions:
   - name: command_unread
     params: [e]
     description: >
-      The command line holds something the parsed commands do not tell: it does not parse; it
-      was cut at the capture limit; one of its commands is not known to run only itself (its
-      name is unknown, or it may run one of its words as a command line); or it assigns a
-      variable that names a program to run. A rule about a command applies its text pattern
-      to such a line, and its parsed condition to every line.
+      The command line holds something the parsed commands do not tell: it was not read to its
+      end (it does not parse, or it stops inside a quote, a here-document or a loop, as a cut
+      capture does); it ends in a mark that says it was cut; one of its commands is not known
+      to run only itself (its name is unknown, or it may run one of its words as a command
+      line); or it assigns a variable that names a program to run. A rule about a command
+      applies its text pattern to such a line, and its parsed condition to every line.
     body: >
-      size(e.command.parsed_commands) == 0 ||
-      e.command.command.endsWith("...[truncated]") ||
+      e.command.parsed_incomplete ||
+      e.command.command.matches("(\\.\\.\\.\\[truncated\\]|…)$") ||
       e.command.command.matches("\\b(GIT_SSH_COMMAND|GIT_SEQUENCE_EDITOR|GIT_EDITOR|GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_ASKPASS|SSH_ASKPASS|SUDO_ASKPASS|SUDO_EDITOR|PROMPT_COMMAND|BASH_ENV|LESSOPEN|EDITOR|VISUAL|PAGER)=") ||
       e.command.parsed_commands.exists(c, size(c.argv) > 0 && !command_runs_only_itself(c))
     tests:
+      - name: a_capture_cut_inside_a_loop
+        # The commands before the loop are listed and run only themselves; the loop's body,
+        # where the cut fell, is not read.
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /srv && for d in cache logs; do chmod -R 777 $d && echo" }
+      - name: a_capture_cut_between_commands
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /srv && ls -la && chmod -R 7…" }
+      - name: a_line_that_ends_in_a_package_pattern
+        # Three dots end `./...`, which every Go command line does; they are not a cut mark.
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo 'chmod 777 is wrong'; go vet ./... && go test ./..." }
+      - name: a_comment_alone
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "# chmod 777 /srv would be wrong here" }
       - name: every_command_runs_only_itself
         verdict: no_match
         events:

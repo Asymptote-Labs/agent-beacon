@@ -238,6 +238,16 @@ the steps in both orders still fires once. A single event never satisfies two st
   field once per event. A rule that relies on them (`c.name == "nc"` for `timeout 5 nc ..`)
   SHOULD declare `spec: threat-rules/v1.3`, so an engine at v1.2 sets it aside rather than
   evaluating it on the older derivation.
+- `e.command.parsed_incomplete` (since v1.3; a rule that selects it MUST declare
+  `spec: threat-rules/v1.3` or later) is derived with `e.command.parsed_commands` and says
+  whether the command line was read to its end. It is `true` when `command.command` does not
+  parse, when it ends early (an unclosed quote, here-document, substitution or compound
+  command, which is what a capture cut by a writer or a runtime looks like), or when it is
+  longer than the 4096 bytes that are read; `false` otherwise, and for an event without a
+  command. `parsed_commands` of such a line lists the commands before that point only: in
+  `cd repo && for d in a b; do rm -rf "$d"` cut after `do`, it is `cd` alone. A rule that
+  concludes something from what the list lacks ("no command of this line is X", "every
+  command of this line is known") MUST treat an incomplete line as one it has not read.
 - `file_writes` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) is a field of each `parsed_commands` entry: the files the command evidently writes,
   a list of `{path, op}` with the `op` values of `file_effects` (`write`, `append`, `touch`,

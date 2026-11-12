@@ -10,6 +10,10 @@ import (
 // ParsedCommandsPath is the CEL path of the derived parsed command line, after the "e." prefix.
 const ParsedCommandsPath = "command.parsed_commands"
 
+// ParsedIncompletePath is the CEL path of the derived flag for a command line that was not read
+// to its end, after the "e." prefix.
+const ParsedIncompletePath = "command.parsed_incomplete"
+
 // v1_3Fields are the fields of a parsed command that spec v1.3 added.
 var v1_3Fields = []string{"args", "file_reads", "file_writes", "script_sends", "socket_redirects"}
 
@@ -57,12 +61,22 @@ const maxShellDepth = 2
 // It is exported so that another engine implementing the Threat Rules contract can derive the
 // field the same way; fixtures that exercise it only conform if the derivation agrees.
 func ParsedCommands(command string) []asymptoteobserve.ParsedCommand {
+	parsed, _ := ParsedCommandLine(command)
+	return parsed
+}
+
+// ParsedCommandLine returns ParsedCommands of command, and whether the command line was not read
+// to its end (e.command.parsed_incomplete): it does not parse, it ends early, or it is longer
+// than ParsedCommandsLimit. A rule can then conclude nothing from what the list lacks.
+func ParsedCommandLine(command string) (parsed []asymptoteobserve.ParsedCommand, incomplete bool) {
 	if command == "" {
-		return nil
+		return nil, false
 	}
-	cmds, _ := shellcmd.Parse(asymptoteobserve.TruncateUTF8(command, ParsedCommandsLimit))
+	read := asymptoteobserve.TruncateUTF8(command, ParsedCommandsLimit)
+	cmds, err := shellcmd.Parse(read)
+	incomplete = err != nil || len(read) < len(command)
 	if len(cmds) == 0 {
-		return nil
+		return nil, incomplete
 	}
 	cmds = shellcmd.WithScripts(cmds, maxShellDepth)
 	reads := shellcmd.FileReads(cmds)
@@ -80,7 +94,7 @@ func ParsedCommands(command string) []asymptoteobserve.ParsedCommand {
 			}
 		}
 	}
-	return out
+	return out, incomplete
 }
 
 func parsedCommand(c shellcmd.Command, reads []shellcmd.FileRead) asymptoteobserve.ParsedCommand {

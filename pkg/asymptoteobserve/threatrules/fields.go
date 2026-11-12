@@ -161,6 +161,11 @@ var derivedFieldDocs = map[string]string{
 		"  v1.3): `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.\n" +
 		fmt.Sprintf("  The first %d bytes are read; a cut capture yields the commands before the cut, and\n", ParsedCommandsLimit) +
 		"  one that does not parse yields an empty list.",
+	ParsedIncompletePath: "true when `command.command` was not read to its end (spec v1.3):\n" +
+		"  it does not parse, it ends inside a quote, a here-document, a substitution or a compound\n" +
+		"  command (as a cut capture does), or it is longer than the engine reads.\n" +
+		"  `e.command.parsed_commands` then lists the commands before that point only, so a rule\n" +
+		"  that concludes something from a command's absence asks this first.",
 	ToolResultTextPath: "`gen_ai.tool.call.result` as text, only on read-type tool\n" +
 		"  results (`file.read`, `mcp.tool_invoked`, MCP-named tools, web fetch/search tools, a\n" +
 		"  `tool.path` that is an http(s) URL) whose content was retained. String leaves of an\n" +
