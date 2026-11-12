@@ -125,17 +125,39 @@ jobs:
           go-version-file: gateway/go.mod
           cache: false
 
-      # Captured first: piping gh into a test under pipefail can read SIGPIPE as "no release".
+      # Only gh's "release not found" means there is no release: any other failure (a rate limit, a
+      # 5xx, the network) stops the job rather than reading as "none", or a re-run could rebuild a
+      # published release. The function is kept for the draft step, which checks again before it
+      # edits anything.
       - name: Refuse a published release
         shell: bash
         run: |
           set -euo pipefail
-          draft="$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq .isDraft 2>/dev/null || echo none)"
-          case "$draft" in
-            false)
+          cat > "$RUNNER_TEMP/release-state.sh" <<'EOF'
+          # release_state prints none, draft or published for $TAG, and fails on any other answer.
+          release_state() {
+            local out
+            if out="$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq .isDraft 2>&1)"; then
+              case "$out" in
+                true) echo draft ;;
+                false) echo published ;;
+                *) echo "::error::gh release view $TAG answered '$out'" >&2; return 1 ;;
+              esac
+            elif [ "$out" = "release not found" ]; then
+              echo none
+            else
+              echo "::error::gh release view $TAG failed: $out" >&2
+              return 1
+            fi
+          }
+          EOF
+          . "$RUNNER_TEMP/release-state.sh"
+          state="$(release_state)"
+          case "$state" in
+            published)
               echo "::error title=Already published::$TAG is published. Its archives and image tag may already be in use, so a re-run does not rebuild them; release a new version instead."
               exit 1 ;;
-            true) echo "::notice::$TAG is a draft from an earlier run; its files are replaced." ;;
+            draft) echo "::notice::$TAG is a draft from an earlier run; its files are replaced." ;;
           esac
 
       - name: Build the release
@@ -195,7 +217,7 @@ jobs:
           {
             echo "beacon-gateway $VERSION records the model calls an LLM gateway (LiteLLM, Envoy, Portkey) carries as Beacon events. See https://docs.beacon.sh/runtimes/llm-gateway."
             echo
-            echo "**Image** (linux/amd64, linux/arm64; distroless, runs as nonroot):"
+            echo "**Image** (linux/amd64, linux/arm64; distroless, runs as uid 65532):"
             echo
             echo '```'
             echo "$IMAGE:$VERSION"
@@ -204,14 +226,27 @@ jobs:
             echo
             echo "**Archives**: static binaries for Linux and macOS, amd64 and arm64, each with the license, the README and a documented configuration (\`beacon-gateway.example.yaml\`)."
             echo
-            echo "**Verify** the image and an archive against this repository's build provenance, and \`checksums.txt\` against the Beacon release key (fingerprint \`$fingerprints\`, as https://docs.beacon.sh/platforms/linux#release-signing describes):"
+            echo "**Verify** the image and an archive against this repository's build provenance, and \`checksums.txt\` against Beacon's release key. The key file comes from the release, so only its pinned fingerprint (\`$fingerprints\`, as https://docs.beacon.sh/platforms/linux#release-signing publishes) may sign: a key swapped in with the files must not pass."
             echo
-            echo '```'
-            echo "gh attestation verify oci://$IMAGE@$DIGEST --repo $REPO"
-            echo "gh attestation verify beacon-gateway_${VERSION}_linux_amd64.tar.gz --repo $REPO"
-            echo "gpgv --keyring ./beacon-release-key.gpg checksums.txt.sig checksums.txt"
-            echo "sha256sum --check --ignore-missing checksums.txt"
-            echo '```'
+            sed -e "s|{{IMAGE}}|$IMAGE|g" -e "s|{{DIGEST}}|$DIGEST|g" -e "s|{{REPO}}|$REPO|g" \
+              -e "s|{{VERSION}}|$VERSION|g" -e "s|{{FPRS}}|$fingerprints|g" <<'VERIFY'
+          ```bash
+          gh attestation verify oci://{{IMAGE}}@{{DIGEST}} --repo {{REPO}}
+          gh attestation verify beacon-gateway_{{VERSION}}_linux_amd64.tar.gz --repo {{REPO}}
+          (
+            set -euo pipefail
+            FPRS="{{FPRS}}"
+            H="$(mktemp -d)"
+            gpg --homedir "$H" --batch --import beacon-release-key.gpg
+            gpg --homedir "$H" --export $FPRS > pinned.gpg   # only the pinned keys
+            test -s pinned.gpg
+            gpgv --homedir "$H" --keyring "$PWD/pinned.gpg" --status-fd 1 checksums.txt.sig checksums.txt 2>/dev/null |
+              awk -v fprs="$FPRS" 'BEGIN { n = split(toupper(fprs), f, " "); for (i = 1; i <= n; i++) pinned[f[i]] = 1 }
+                $1 == "[GNUPG:]" && $2 == "VALIDSIG" && (toupper($NF) in pinned) { ok = 1 } END { exit !ok }'
+            sha256sum --check --ignore-missing checksums.txt
+          )
+          ```
+          VERIFY
             echo
             if [ -n "$previous" ]; then
               echo "**Changes** to \`gateway/\` since $previous:"
@@ -224,14 +259,21 @@ jobs:
 
           prerelease=false
           case "$VERSION" in *-*) prerelease=true ;; esac
-          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$REPO" --notes-file "$notes" --prerelease="$prerelease"
-            gh release upload "$TAG" --repo "$REPO" --clobber gateway/dist/*.tar.gz gateway/dist/checksums.txt
-          else
-            gh release create "$TAG" --repo "$REPO" --draft --verify-tag --latest=false \
-              --prerelease="$prerelease" --title "beacon-gateway $VERSION" --notes-file "$notes" \
-              gateway/dist/*.tar.gz gateway/dist/checksums.txt
-          fi
+          # Checked again here: the release may have been published since the guard ran.
+          . "$RUNNER_TEMP/release-state.sh"
+          state="$(release_state)"
+          case "$state" in
+            draft)
+              gh release edit "$TAG" --repo "$REPO" --notes-file "$notes" --prerelease="$prerelease"
+              gh release upload "$TAG" --repo "$REPO" --clobber gateway/dist/*.tar.gz gateway/dist/checksums.txt ;;
+            none)
+              gh release create "$TAG" --repo "$REPO" --draft --verify-tag --latest=false \
+                --prerelease="$prerelease" --title "beacon-gateway $VERSION" --notes-file "$notes" \
+                gateway/dist/*.tar.gz gateway/dist/checksums.txt ;;
+            *)
+              echo "::error title=Already published::$TAG was published while this run built it; its files are left as they are."
+              exit 1 ;;
+          esac
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

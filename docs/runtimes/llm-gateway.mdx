@@ -43,11 +43,15 @@ macOS. Pin a version: the image has no `latest` tag.
 docker run --rm ghcr.io/asymptote-labs/beacon-gateway:<version> -version
 ```
 
-The image is distroless and runs as `nonroot`. Without `-config` it serves the LiteLLM callout on
-`127.0.0.1:4019`, the admin listener on `127.0.0.1:4029`, and writes `gateway-events.jsonl` in its
-working directory, `/home/nonroot`. Both listeners are on localhost, which is where a sidecar's
-gateway reaches them. As a sidecar beside LiteLLM in Kubernetes, with the configuration in a
-ConfigMap and events written to a volume a log shipper reads:
+The image is distroless and runs as uid 65532, so it starts under the restricted Pod Security
+profile. Without `-config` it serves the LiteLLM callout on `127.0.0.1:4019`, the admin listener on
+`127.0.0.1:4029`, and writes `gateway-events.jsonl` in its working directory, `/home/nonroot`.
+Both listeners are on the container's loopback, which is where a sidecar's gateway reaches them; a
+published port (`docker run -p`) or a gateway in another container cannot. For those, mount a
+configuration whose adapter listens on `0.0.0.0`, on a network you trust: the callout answers any
+caller, so anything that can reach it can write events. As a sidecar beside LiteLLM in
+Kubernetes, with the configuration in a ConfigMap and events written to a volume a log shipper
+reads:
 
 ```yaml title="Sidecar"
 containers:
@@ -56,6 +60,12 @@ containers:
   - name: beacon-gateway
     image: ghcr.io/asymptote-labs/beacon-gateway:<version>
     args: ["-config", "/etc/beacon-gateway/beacon-gateway.yaml"]
+    securityContext:   # meets the restricted Pod Security profile
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true      # outputs go to the volume below
+      capabilities: { drop: [ALL] }
+      seccompProfile: { type: RuntimeDefault }
     resources:
       requests: { cpu: 250m, memory: 128Mi }
       limits: { memory: 512Mi }

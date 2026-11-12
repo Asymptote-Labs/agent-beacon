@@ -771,8 +771,14 @@ Verify after the run:
 gh release view gateway-v<version> --repo Asymptote-Labs/agent-beacon --json isDraft,isLatest,assets \
   --jq '{isDraft, isLatest, assets: [.assets[].name]}'
 gh release download gateway-v<version> --repo Asymptote-Labs/agent-beacon --dir /tmp/gw
-gpgv --keyring /tmp/gw/beacon-release-key.gpg /tmp/gw/checksums.txt.sig /tmp/gw/checksums.txt
-(cd /tmp/gw && sha256sum --check checksums.txt)
+# Trust only the pinned key: beacon-release-key.gpg comes from the release, like the files it signs.
+FPRS="$(xargs < cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint)"
+H="$(mktemp -d)" && gpg --homedir "$H" --batch --import /tmp/gw/beacon-release-key.gpg
+gpg --homedir "$H" --export $FPRS > /tmp/gw/pinned.gpg && test -s /tmp/gw/pinned.gpg
+gpgv --keyring /tmp/gw/pinned.gpg --status-fd 1 /tmp/gw/checksums.txt.sig /tmp/gw/checksums.txt 2>/dev/null |
+  awk -v fprs="$FPRS" 'BEGIN { n = split(toupper(fprs), f, " "); for (i = 1; i <= n; i++) pinned[f[i]] = 1 }
+    $1 == "[GNUPG:]" && $2 == "VALIDSIG" && (toupper($NF) in pinned) { ok = 1 } END { exit !ok }' && echo "signed by a pinned key"
+(cd /tmp/gw && sha256sum --check --ignore-missing checksums.txt)
 gh attestation verify /tmp/gw/beacon-gateway_<version>_linux_amd64.tar.gz --repo Asymptote-Labs/agent-beacon
 gh attestation verify oci://ghcr.io/asymptote-labs/beacon-gateway:<version> --repo Asymptote-Labs/agent-beacon
 docker run --rm ghcr.io/asymptote-labs/beacon-gateway:<version> -version
