@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"testing"
 
@@ -94,43 +93,18 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(data) > opts.MaxBytes {
-		event.Raw = nil
-		event.Message = asymptoteobserve.TruncateString(event.Message, 1024)
-		event.Truncated = true
-		data, err = json.Marshal(event)
-		if err != nil {
-			return "", err
-		}
-	}
-	if len(data) > opts.MaxBytes {
-		// Retained content is the next thing to go after raw, as in the hook adapter and the
-		// collector exporter. Each string is capped but their number is not (a multi-edit's
-		// arguments, a long todo list), and an error here makes a session sweep stop at the line
-		// and meet it again on every later sweep.
-		compactRetainedContent(&event)
-		data, err = json.Marshal(event)
-		if err != nil {
-			return "", err
-		}
-	}
-	if len(data) > opts.MaxBytes {
-		return "", fmt.Errorf("event exceeds maximum size after truncation: %d bytes", len(data))
-	}
-	// Stamped last, over the bytes that are actually about to be written, so the
-	// truncation fallback above cannot leave the ID describing an event that no
-	// longer exists. An event already at the size limit keeps its bytes and goes
-	// without one: the limit is a hard contract, and refusing to write an event
-	// over forty bytes of identity would be the worse trade.
+	var stamp func(id string) ([]byte, error)
 	if event.Event.ID == "" {
-		event.Event.ID = asymptoteobserve.EventIDForLine(data)
-		stamped, err := json.Marshal(event)
-		if err != nil {
-			return "", err
+		stamp = func(id string) ([]byte, error) {
+			event.Event.ID = id
+			return json.Marshal(event)
 		}
-		if len(stamped) <= opts.MaxBytes {
-			data = stamped
-		}
+	}
+	// An oversized event is cut down rather than refused: a session sweep that gets an error stops
+	// at that line and meets it again on every later sweep.
+	data, err = asymptoteobserve.FitEventLine(data, opts.MaxBytes, stamp)
+	if err != nil {
+		return "", err
 	}
 	line := append(data, '\n')
 	if opts.Guard == nil && opts.Budget == nil && Ingest.Applies(opts.Path) {
@@ -182,38 +156,6 @@ func deliver(opts Options, data []byte) error {
 		return ErrSpooled
 	}
 	return err
-}
-
-// compactRetainedContent drops an event's retained text and records that it did, so a reader can
-// still tell what the event was about and that its content was held back rather than never
-// captured. Mirrors the collector exporter's step of the same name.
-func compactRetainedContent(event *schema.Event) {
-	if event.File != nil {
-		event.File.Diff = ""
-	}
-	if event.Command != nil {
-		event.Command.Output = ""
-	}
-	if event.Prompt != nil {
-		event.Prompt.Text = ""
-	}
-	if event.GenAI != nil {
-		event.GenAI.Input = nil
-		event.GenAI.Output = nil
-		if event.GenAI.Tool != nil && event.GenAI.Tool.Call != nil {
-			event.GenAI.Tool.Call.Arguments = nil
-			event.GenAI.Tool.Call.Result = nil
-		}
-		// An event whose only gen_ai content was the turn text drops the object rather than
-		// writing "gen_ai":{}, as the exporter does.
-		if reflect.ValueOf(*event.GenAI).IsZero() {
-			event.GenAI = nil
-		}
-	}
-	if event.Content != nil {
-		event.Content.Included = false
-		event.Content.Truncated = true
-	}
 }
 
 // EnsureSystemLogWritable prepares a machine-wide runtime log so the people whose agent sessions

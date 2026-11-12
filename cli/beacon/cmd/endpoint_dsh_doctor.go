@@ -40,7 +40,9 @@ var doctorDshHookCaptureCheck = dshHookCaptureCheck
 // the hooks were installed, set against the last event whose harness.collection_method is `hook`.
 // Sessions with no live hook event near them are sessions the hooks did not capture, whatever the
 // cause; the sandbox is the common one and the message leads with it, and a dsh that was already
-// running when the hooks were installed is the other.
+// running when the hooks were installed is the other. A session whose workspace spool still holds
+// staged hook events is neither: capture worked and only the sweep is missing, so it gets its own
+// finding (`dsh_spool_pending_drain`) with the sync as its remedy instead of counting as a miss.
 func dshHookCaptureCheck(logPath string) (diagnostics.Check, bool) {
 	status := endpointhooks.DshHookStatus(endpointhooks.DshOptions{Level: endpointhooks.LevelUser})
 	if !status.Installed || status.HooksPath == "" {
@@ -183,19 +185,36 @@ func dshHookCaptureCheckAt(logPath, hooksPath, dshHome string) diagnostics.Check
 	// A session is missed when it was written after the hooks took effect and after the last live
 	// hook event, by more than the commit gap. Taking the later of the two lets a machine that
 	// captured fine and later moved to a sandboxed mode be flagged too, not only a fresh install.
+	//
+	// A session whose workspace still holds a spool is not a miss: its hook events exist, staged
+	// where the sandbox allowed the hook to write them (#605), and the next `beacon endpoint dsh
+	// sync` drains them into the log. Reporting it as uncaptured would call working capture broken
+	// and send the operator to change the sandbox mode for nothing; the pending drain is its own
+	// finding, with the same remedy.
 	cutoff := installedAt
 	if hookSeen && lastHook.After(cutoff) {
 		cutoff = lastHook.Add(dshHookCaptureGrace)
 	}
 	sinceInstall := 0
 	missed := 0
+	pendingDrain := 0
 	var newest time.Time
 	for _, ref := range refs {
 		modified := time.UnixMilli(ref.ModTimeUnixMS)
-		if modified.Before(installedAt) || modified.Before(oldestRetained) {
+		if modified.Before(installedAt) {
+			// Sessions before the current hooks took effect were never going to be captured
+			// live, spool or no spool; they are not evidence of anything.
+			continue
+		}
+		pending := dshsession.SpoolPendingBytes(ref) > 0
+		if !pending && modified.Before(oldestRetained) {
 			continue
 		}
 		sinceInstall++
+		if pending {
+			pendingDrain++
+			continue
+		}
 		if modified.After(cutoff) {
 			missed++
 			if modified.After(newest) {
@@ -208,6 +227,14 @@ func dshHookCaptureCheckAt(logPath, hooksPath, dshHome string) diagnostics.Check
 	case sinceInstall == 0:
 		check.Message = "no DeepSeek Harness session has run since the hooks were installed"
 		check.Evidence = "dsh_no_sessions_since_install"
+	case missed == 0 && pendingDrain > 0:
+		check.Status = diagnostics.StatusWarn
+		check.Severity = diagnostics.SeverityLow
+		check.Evidence = "dsh_spool_pending_drain"
+		check.Message = fmt.Sprintf(
+			"%d DeepSeek Harness session(s) have hook events staged in their workspace spool; capture is working, but the events are not in %s yet",
+			pendingDrain, logPath)
+		check.Action = "run `beacon endpoint dsh sync` to drain the staged events into the runtime log"
 	case missed == 0:
 		check.Message = "live DeepSeek Harness hook events are being recorded"
 		check.Evidence = "dsh_hook_events_observed"

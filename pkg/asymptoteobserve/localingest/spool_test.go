@@ -21,7 +21,7 @@ func spoolLines(prefix string, n int) [][]byte {
 
 func readSpool(t *testing.T, s Spool) []string {
 	t.Helper()
-	data, err := os.ReadFile(s.filePath())
+	data, err := os.ReadFile(s.FilePath())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -62,7 +62,7 @@ func TestSpoolAppendThenDrainEverything(t *testing.T) {
 			t.Fatalf("sent[%d] = %s, out of order", i, line)
 		}
 	}
-	if _, err := os.Stat(s.filePath()); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(s.FilePath()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("spool file left behind after a full drain: %v", err)
 	}
 	if n, _, _ := s.Pending(); n != 0 {
@@ -187,11 +187,11 @@ func TestSpoolIsPrivate(t *testing.T) {
 	if info, _ := os.Stat(s.Dir); info.Mode().Perm() != SpoolDirMode {
 		t.Fatalf("dir mode = %v", info.Mode().Perm())
 	}
-	if info, _ := os.Stat(s.filePath()); info.Mode().Perm() != SpoolFileMode {
+	if info, _ := os.Stat(s.FilePath()); info.Mode().Perm() != SpoolFileMode {
 		t.Fatalf("file mode = %v", info.Mode().Perm())
 	}
 	_, _ = s.Drain(1, func([][]byte) (int, error) { return 1, nil })
-	if info, _ := os.Stat(s.filePath()); info.Mode().Perm() != SpoolFileMode {
+	if info, _ := os.Stat(s.FilePath()); info.Mode().Perm() != SpoolFileMode {
 		t.Fatalf("rewritten file mode = %v", info.Mode().Perm())
 	}
 }

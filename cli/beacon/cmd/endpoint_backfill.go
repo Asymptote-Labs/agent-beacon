@@ -139,7 +139,7 @@ var endpointBackfillRunners = func() []endpointBackfillRunner {
 		}, SQLite: true},
 		{Name: "DeepSeek Harness", Sync: "beacon endpoint dsh sync", State: func(m bool) []string { return []string{resolveDshStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := dshsession.CollectOnce(dshsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveDshStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
-			return s.EventsEmitted, err
+			return s.EventsEmitted + s.SpoolEvents, err
 		}},
 		{Name: "fx", Sync: "beacon endpoint fx sync", State: func(m bool) []string { return []string{resolveFxStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := fxsession.CollectOnce(fxsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveFxStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})

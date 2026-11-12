@@ -137,6 +137,12 @@ func reportDshSweep(cmd *cobra.Command, summary dshsession.Summary) {
 	fmt.Fprintf(cmd.OutOrStdout(), "dsh sync: %d sessions, %d changed, %d events, %d errors\n",
 		summary.Sessions, summary.SessionsChanged, summary.EventsEmitted, summary.Errors)
 	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
+	if summary.SpoolEvents > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %d spooled hook event(s) drained from workspace spools\n", summary.SpoolEvents)
+	}
+	if summary.SpoolRejected > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %d spooled line(s) rejected: unreadable, or not a hook event of the session whose workspace held them\n", summary.SpoolRejected)
+	}
 	if summary.MalformedLines > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d unreadable line(s) in DeepSeek session logs\n", summary.MalformedLines)
 	}
@@ -156,6 +162,10 @@ type dshSessionStatus struct {
 	LastLine      int    `json:"last_line"`
 	Collected     bool   `json:"collected"`
 	SizeBytes     int64  `json:"size_bytes"`
+	// SpoolBytes is hook-captured event data staged in the session's workspace spool,
+	// waiting for a sweep to drain it into the runtime log (#605). Zero is the healthy
+	// steady state; anything else means capture worked but the last sync has not run yet.
+	SpoolBytes int64 `json:"spool_bytes,omitempty"`
 }
 
 type dshStatusReport struct {
@@ -201,6 +211,7 @@ func runEndpointDshStatus(cmd *cobra.Command, args []string) error {
 			status.ParentSession = ref.Meta.ParentSessionID
 			status.Model = ref.Meta.Model
 			status.Title = ref.Meta.Title
+			status.SpoolBytes = dshsession.SpoolPendingBytes(ref)
 		}
 		if cursor := state.Sources[ref.Path]; cursor != nil {
 			status.CollectedLine = cursor.LastLine
@@ -222,8 +233,12 @@ func runEndpointDshStatus(cmd *cobra.Command, args []string) error {
 		if session.Collected {
 			state = "collected"
 		}
-		fmt.Fprintf(out, "  %s  %s  line %d/%d  %s\n",
+		fmt.Fprintf(out, "  %s  %s  line %d/%d  %s",
 			session.SessionID, state, session.CollectedLine, session.LastLine, strings.TrimSpace(session.Workspace))
+		if session.SpoolBytes > 0 {
+			fmt.Fprintf(out, "  (spool %dB awaiting drain)", session.SpoolBytes)
+		}
+		fmt.Fprintln(out)
 	}
 	return nil
 }

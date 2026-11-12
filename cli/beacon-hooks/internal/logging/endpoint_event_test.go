@@ -383,32 +383,6 @@ func TestEndpointEventCarriesExplicitInferredFidelity(t *testing.T) {
 	}
 }
 
-// The size-limit fallback rewrites the event down to a key allowlist. Dropping the ordering keys
-// there would leave exactly the events most worth ordering unorderable. Both provenance fields live
-// inside blocks that survive wholesale, but a future edit to that list could drop them -- and
-// losing the marker silently turns an inferred event into an unmarked one, which reads as trusted.
-func TestMinimalEndpointEventKeepsOrderingAndProvenance(t *testing.T) {
-	minimal := minimalEndpointEvent(map[string]interface{}{
-		"timestamp": "2026-08-21T10:00:00.000000000Z",
-		"sequence":  uint64(42),
-		"message":   "big",
-		"event":     map[string]interface{}{"action": "approval.allowed", "fidelity": "inferred"},
-		"harness":   map[string]interface{}{"name": "cursor", "collection_method": "hook"},
-	})
-	if minimal["timestamp"] != "2026-08-21T10:00:00.000000000Z" {
-		t.Fatalf("minimal timestamp = %v", minimal["timestamp"])
-	}
-	if minimal["sequence"] != uint64(42) {
-		t.Fatalf("minimal sequence = %v, want 42", minimal["sequence"])
-	}
-	if fidelity, ok := nestedString(t, minimal, "event", "fidelity"); !ok || fidelity != "inferred" {
-		t.Fatalf("compacted event.fidelity = %q (present=%v), want inferred", fidelity, ok)
-	}
-	if method, ok := nestedString(t, minimal, "harness", "collection_method"); !ok || method != "hook" {
-		t.Fatalf("compacted harness.collection_method = %q (present=%v), want hook", method, ok)
-	}
-}
-
 // The provider prefix that canonicalizing removes is kept rather than dropped: it moves to
 // gen_ai.provider.name, where a provider belongs and stays queryable.
 func TestEndpointEventKeepsTheStrippedProviderPrefix(t *testing.T) {

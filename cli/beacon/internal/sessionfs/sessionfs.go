@@ -198,6 +198,11 @@ func Confined(path string) bool {
 	return ok
 }
 
+// Active reports whether a confinement is in force: this process is a system backfill reading a
+// user's stores as root. A collector that would also write or remove files under user-controlled
+// paths skips that work while it is.
+func Active() bool { return active.Load() != nil }
+
 // Open opens a file or directory for reading.
 func Open(path string) (*os.File, error) {
 	c := active.Load()
