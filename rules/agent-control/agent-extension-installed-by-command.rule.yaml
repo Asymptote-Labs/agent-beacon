@@ -25,13 +25,14 @@ taxonomy:
   owasp_llm: LLM03
   mitre_atlas: AML.T0011
 
-# name and args are joined so that one pattern reads the launcher, the runtime and the
-# subcommand as whole words in a row: `claude`, `mcp`, `add`, or `npx`, `-y`,
-# `@anthropic-ai/claude-code`, `mcp`, `add`.
+# Which command is an agent is the pack's one definition (agent_cli,
+# rules/concepts/agents.predicates.yaml). name and args are joined so that one pattern reads
+# the launcher, the runtime and the subcommand as whole words in a row: `claude`, `mcp`,
+# `add`, or `npx`, `-y`, `@anthropic-ai/claude-code`, `mcp`, `add`.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
-      (c.name + "\n" + c.args).matches("(?mi)\\A((npx|bunx|pnpm\\ndlx)\\n(-y\\n)?([^\\n]*/)?)?(claude(-code)?|codex|gemini(-cli)?|qwen(-code)?|opencode(-ai)?|kiro-cli|amp|cursor-agent|copilot)\\n(mcp\\n(add|add-json|add-from-claude-desktop|install)|plugins?\\n(install|add|i)|plugins?\\nmarketplace\\nadd|extensions?\\n(install|link))$") ||
+      agent_cli(c) && (c.name + "\n" + c.args).matches("(?mi)\\A((npx|bunx|pnpm\\ndlx)\\n(-y\\n)?)?[^\\n]+\\n(mcp\\n(add|add-json|add-from-claude-desktop|install)|plugins?\\n(install|add|i)|plugins?\\nmarketplace\\nadd|extensions?\\n(install|link))$") ||
       c.name.matches("(?i)^code(-insiders)?(\\.exe|\\.cmd)?$") && c.args.matches("(?m)^--(add-mcp|install-extension)(=.*)?$")
     ) ||
     ((e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?((npx|bunx|pnpm\\s+dlx)\\s+(-y\\s+)?)?([^\\s;&|]*/)?(claude(-code)?|codex|gemini(-cli)?|qwen(-code)?|opencode(-ai)?|kiro-cli|amp|cursor-agent|copilot)\\s+(mcp\\s+(add|add-json|add-from-claude-desktop|install)\\b|plugins?\\s+(install|add|i)\\b|plugins?\\s+marketplace\\s+add\\b|extensions?\\s+(install|link)\\b)") ||

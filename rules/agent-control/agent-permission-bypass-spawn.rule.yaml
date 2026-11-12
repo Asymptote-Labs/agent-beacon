@@ -4,7 +4,8 @@ version: 3
 title: Agent runtime spawned with permission/approval gating disabled
 description: >
   A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
-  Cursor Agent, Aider, Goose, OpenCode, Gemini) with a flag that disables the runtime's
+  Cursor Agent, Aider, Goose, OpenCode, Gemini and the others agent_cli names) with a
+  flag that disables the runtime's
   own permission/approval gate — for example --dangerously-skip-permissions,
   --dangerously-bypass-approvals-and-sandbox, --permission-mode bypassPermissions,
   --sandbox (or -s) danger-full-access, --ask-for-approval never, --full-auto, or --yolo.
@@ -25,15 +26,15 @@ taxonomy:
   beacon_category: agent-control
   owasp_llm: LLM06
 
-# The agent runtime must be a command the line runs AND that command must carry a
-# permission-bypass flag. Requiring both keeps the rule off ordinary uses of a bare
-# --force on non-agent commands (e.g. git push --force, npm install --force). name and
-# args are joined so that `npx codex` reads as two whole words in a row. An option's
-# value is the next word or follows `=`.
+# The agent runtime must be a command the line runs (agent_cli, the pack's one definition,
+# rules/concepts/agents.predicates.yaml) AND that command must carry a permission-bypass
+# flag. Requiring both keeps the rule off ordinary uses of a bare --force on non-agent
+# commands (e.g. git push --force, npm install --force). An option's value is the next word
+# or follows `=`.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
-      (c.name + "\n" + c.args).matches("(?i)\\A(npx\\n)?(claude|codex|cursor-agent|aider|goose|opencode|gemini)(\\n|\\z)") &&
+      agent_cli(c) &&
       c.args.matches("(?mi)^(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--full-auto|--yolo|--force)$|^--permission-mode[=\\n]bypasspermissions$|^(--sandbox|-s)[=\\n]danger-full-access$|^(--ask-for-approval|-a)[=\\n]never$")
     ) ||
     (e.command.command.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b") &&

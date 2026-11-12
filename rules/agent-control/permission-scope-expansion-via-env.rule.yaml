@@ -28,17 +28,17 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0051
 
-# The agent runtime must be a command the line runs, and the variable must be set for
-# it: in the command's own NAME=value prefix (the keys of c.env), as a NAME=value word of
-# the command as written (`sudo NAME=value agent`, `env NAME=value agent`), or as a word
-# of an `export` or `declare -x` the line also runs. The words are read as written
-# (argv_raw), since a value that holds a variable is an unknown word of argv. Requiring
-# both keeps the rule off benign uses of *_TOKEN in unrelated commands. name and args are
-# joined so that `npx codex` reads as two whole words in a row.
+# The agent runtime must be a command the line runs (agent_cli, the pack's one definition,
+# rules/concepts/agents.predicates.yaml), and the variable must be set for it: in the
+# command's own NAME=value prefix (the keys of c.env), as a NAME=value word of the command
+# as written (`sudo NAME=value agent`, `env NAME=value agent`), or as a word of an `export`
+# or `declare -x` the line also runs. The words are read as written (argv_raw), since a
+# value that holds a variable is an unknown word of argv. Requiring both keeps the rule off
+# benign uses of *_TOKEN in unrelated commands.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
-      (c.name + "\n" + c.args).matches("(?i)\\A(npx\\n)?(claude|codex|cursor-agent|aider|goose|opencode|gemini)(\\n|\\z)") && (
+      agent_cli(c) && (
         (c.env.map(k, k + "=") + c.argv_raw).exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)=")) ||
         e.command.parsed_commands.exists(x,
           (x.name == "export" || x.name.matches("^(declare|typeset)$") && x.args.matches("(?m)^-[A-Za-z]*x[A-Za-z]*$")) &&
