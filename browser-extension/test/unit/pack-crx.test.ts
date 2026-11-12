@@ -87,6 +87,7 @@ describe('update feed', () => {
     );
     expect(feedVersion(xml, id)).toBe('0.2.0');
     expect(feedVersion(xml, 'pppppppppppppppppppppppppppppppp')).toBeUndefined();
+    expect(feedVersion(xml, '.'.repeat(32))).toBeUndefined();
   });
 
   it('refuses values Chrome would reject', () => {

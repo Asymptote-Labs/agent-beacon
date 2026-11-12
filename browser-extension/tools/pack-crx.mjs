@@ -138,10 +138,16 @@ export function feedXml({ id, version, codebase, sha256: hash }) {
   ].join('\n');
 }
 
-/** The version a feed offers for `id`, or undefined when it names none. Reads only what feedXml writes. */
+/**
+ * The version a feed offers for `id`, or undefined when it names none. Reads only what feedXml writes.
+ * `id` is compared to each app's appid rather than built into the pattern, so no value of it can
+ * change what the pattern matches.
+ */
 export function feedVersion(xml, id) {
-  const app = new RegExp(`<app\\s+appid=['"]${id}['"][^>]*>([\\s\\S]*?)</app>`).exec(xml);
-  return app ? /\bversion=['"]([^'"]+)['"]/.exec(app[1])?.[1] : undefined;
+  for (const [, appid, body] of xml.matchAll(/<app\s+appid=['"]([^'"]*)['"][^>]*>([\s\S]*?)<\/app>/g)) {
+    if (appid === id) return /\bversion=['"]([^'"]+)['"]/.exec(body)?.[1];
+  }
+  return undefined;
 }
 
 /** The signed build's asset name on an `ext-v<version>` release. */
