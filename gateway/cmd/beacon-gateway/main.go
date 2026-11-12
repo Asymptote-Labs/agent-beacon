@@ -70,6 +70,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	startIdleRelease()
 	var bodyBytes int64
 	switch {
 	case cfg.Pipeline.MaxBodyBytes != "":
