@@ -67,6 +67,7 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--dashboard <mode>` | `enabled` (the default) or `disabled`: whether any account on this machine may run the [local dashboard](/cli/dashboard). See [Local dashboard](#local-dashboard). Omitted, an install keeps the recorded setting. System installs only |
 | `--no-backfill` | Skip the [session backfill](#session-backfill). `BEACON_BACKFILL=0` does the same |
 | `--connect` | After a successful install, attempt to connect this endpoint to Beacon Cloud ingest. User mode uses the signed-in CLI account; system mode opens browser approval. A connection failure does not roll back or fail the completed local install; verify with `beacon endpoint status --json` and retry with [`beacon endpoint connect`](/cli/endpoint-connect) |
+| `--email <address>` | Your email, for an install that does not sign in (for example one an agent or a script runs for you). Also read from `BEACON_EMAIL` or `BEACON_ONBOARDING_EMAIL`. Beacon records it in `~/.beacon/profile.json` unless you are signed in, and uses it only to know who installed Beacon (see [CLI telemetry](/cli/telemetry)); it is never added to your agent telemetry. A malformed `--email` stops the install before anything changes; a malformed variable is reported and ignored |
 
 ## Session backfill
 
