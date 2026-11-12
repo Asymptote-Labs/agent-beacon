@@ -47,8 +47,8 @@ func FileEffects(commands []Command) []FileEffect {
 }
 
 // FileEffects returns the files the command evidently writes: the targets of its output
-// redirections, then the operands of rm, unlink, touch, truncate, mv, cp, install, ln, tee,
-// `git mv`/`git rm` and in-place sed/perl. Anything it cannot read plainly -- an unknown word, a
+// redirections, then the operands of rm, unlink, shred, touch, truncate, mv, cp, install, ln,
+// tee, `git mv`/`git rm` and in-place sed/perl. Anything it cannot read plainly -- an unknown word, a
 // command that writes files itself -- contributes nothing, and neither does a wrapper that moves
 // the command (sudo -i). Paths are as written: relative to the directory the command runs in,
 // which after a cd (AfterCD) is not the one the command line started in.
@@ -144,6 +144,7 @@ type optionSpec struct {
 }
 
 var valueOptions = map[string]optionSpec{
+	"shred":    {short: "ns", long: []string{"--iterations", "--random-source", "--size"}},
 	"touch":    {short: "dtr", long: []string{"--date", "--reference"}},
 	"truncate": {short: "rs", long: []string{"--reference", "--size"}},
 	"cp":       {short: "St", long: []string{"--suffix", "--target-directory"}},
@@ -154,6 +155,7 @@ var valueOptions = map[string]optionSpec{
 
 // flagOptions are the value-less options that change what a command does to its operands.
 var flagOptions = map[string]optionSpec{
+	"shred":   {short: "u", long: []string{"--remove"}},
 	"tee":     {short: "a", long: []string{"--append"}},
 	"cp":      {short: "T", long: []string{"--no-target-directory", "--parents"}},
 	"mv":      {short: "T", long: []string{"--no-target-directory"}},
@@ -165,6 +167,7 @@ var flagOptions = map[string]optionSpec{
 // longOptions are every long option of the GNU commands and git mv, which parseOptions reads, so
 // that an abbreviation resolves to the one option it begins, as getopt_long and git do.
 var longOptions = map[string][]string{
+	"shred":    {"--exact", "--force", "--help", "--iterations", "--random-source", "--remove", "--size", "--verbose", "--version", "--zero"},
 	"git-mv":   {"--dry-run", "--force", "--sparse", "--verbose"},
 	"rm":       {"--dir", "--force", "--help", "--interactive", "--no-preserve-root", "--one-file-system", "--preserve-root", "--recursive", "--verbose", "--version"},
 	"unlink":   {"--help", "--version"},
@@ -355,6 +358,13 @@ func (c Command) commandTargets(written bool) []FileEffect {
 		return effectsOf(parseOptions(name, args).operands, OpTouch, written)
 	case "truncate":
 		return effectsOf(parseOptions(name, args).operands, OpTruncate, written)
+	case "shred":
+		// shred overwrites its operands, and with -u removes them.
+		opts := parseOptions(name, args)
+		if opts.flags["u"] || opts.flags["--remove"] {
+			return effectsOf(opts.operands, OpDelete, written)
+		}
+		return effectsOf(opts.operands, OpWrite, written)
 	case "tee":
 		opts := parseOptions(name, args)
 		if opts.flags["a"] || opts.flags["--append"] {

@@ -244,6 +244,8 @@ func TestFileWrites(t *testing.T) {
 		{"sed -i '' 's/a/b/' ~/.claude/settings.json", []string{"edit ~/.claude/settings.json"}},
 		{"sed -i \"s/$A/b/\" conf.ini", []string{"edit conf.ini"}},
 		{"cp hooks.json ~/.cursor/hooks.json", []string{"write ~/.cursor/hooks.json"}},
+		{"shred -u ~/.bash_history", []string{"delete ~/.bash_history"}},
+		{"shred -n 3 -z disk.img", []string{"write disk.img"}},
 		{"cp -r skills ~/.claude/", []string{"write ~/.claude/skills"}},
 		{"cp a.md b.md \"$DEST\"", []string{"write $DEST/a.md", "write $DEST/b.md"}},
 		{"cp ~/.claude/settings.json /tmp/backup.json", []string{"write /tmp/backup.json"}},
@@ -272,6 +274,53 @@ func TestFileWrites(t *testing.T) {
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("FileWrites(%q) = %q, want %q", tc.command, got, tc.want)
 		}
+	}
+}
+
+// export, declare, local, readonly and typeset are commands of the line: the builtin is the
+// name, and each option and NAME=value is one word, known when its value is.
+func TestDeclarationsAreCommands(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    []string // per command: name, then its words as text, "?" + as written when unknown
+	}{
+		{"export HISTFILE=/dev/null; ls", []string{"export HISTFILE=/dev/null", "ls"}},
+		{"export -n HISTSIZE", []string{"export -n HISTSIZE"}},
+		{`export PATH="/tmp/bin:$PATH" EDITOR=vi`, []string{`export ?PATH="/tmp/bin:$PATH" EDITOR=vi`}},
+		{"declare -x HISTSIZE=0 && readonly HISTFILE", []string{"declare -x HISTSIZE=0", "readonly HISTFILE"}},
+		{"f() { local n=1; echo $n; }", []string{"local n=1", "echo ?$n"}},
+		{"typeset -a list=(a b)", []string{"typeset -a ?list=(a b)"}},
+		{"export T=$(cat .env)", []string{"export ?T=$(cat .env)", "cat .env"}},
+		{"export -p | grep TOKEN", []string{"export -p", "grep TOKEN"}},
+		{"sudo env FOO=1 export BAR=2", []string{"export BAR=2"}}, // a word of env, not a declaration
+		{"HISTFILE=/dev/null", []string{""}},                      // an assignment alone is no command
+	} {
+		commands, err := Parse(tc.command)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", tc.command, err)
+			continue
+		}
+		var got []string
+		for _, c := range commands {
+			words, _ := c.Unwrapped()
+			var text []string
+			for _, w := range words {
+				if w.Known {
+					text = append(text, w.Text)
+				} else {
+					text = append(text, "?"+w.Raw)
+				}
+			}
+			got = append(got, strings.Join(text, " "))
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("Parse(%q) runs %q, want %q", tc.command, got, tc.want)
+		}
+	}
+	// A declaration in a pipeline is a stage of it.
+	commands, _ := Parse("export -p | grep TOKEN")
+	if len(commands) != 2 || commands[0].Pipeline != commands[1].Pipeline || commands[1].Stage != 1 {
+		t.Errorf("export -p | grep: %+v", commands)
 	}
 }
 

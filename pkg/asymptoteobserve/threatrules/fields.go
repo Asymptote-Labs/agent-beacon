@@ -157,7 +157,8 @@ var derivedFieldDocs = map[string]string{
 		"  earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`\n" +
 		"  (0-based) and `nested` (inside `$(...)`, `<(...)` or a shell's script: its `-c` text, or\n" +
 		"  the here-document it reads, which are read too).\n" +
-		"  Other here-document bodies and strings are not commands.\n" +
+		"  Other here-document bodies and strings are not commands. A declaration is one (spec\n" +
+		"  v1.3): `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.\n" +
 		fmt.Sprintf("  The first %d bytes are read; a cut capture yields the commands before the cut, and\n", ParsedCommandsLimit) +
 		"  one that does not parse yields an empty list.",
 	ToolResultTextPath: "`gen_ai.tool.call.result` as text, only on read-type tool\n" +

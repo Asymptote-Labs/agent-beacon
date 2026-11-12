@@ -203,7 +203,8 @@ never written to or read from the log, so a fixture sets the source field, not t
   earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`
   (0-based) and `nested` (inside `$(...)`, `<(...)` or a shell's script: its `-c` text, or
   the here-document it reads, which are read too).
-  Other here-document bodies and strings are not commands.
+  Other here-document bodies and strings are not commands. A declaration is one (spec
+  v1.3): `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.
   The first 4096 bytes are read; a cut capture yields the commands before the cut, and
   one that does not parse yields an empty list.
 - `e.gen_ai.system_instructions_text`: `gen_ai.system_instructions` as text: the `content` of each

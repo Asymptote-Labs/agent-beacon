@@ -179,7 +179,13 @@ the steps in both orders still fires once. A single event never satisfies two st
   `spec: threat-rules/v1.2` or later) is derived under the same rules (computed, never read
   from input). It is `command.command`, its first 4096 bytes, read as a bash command line: a
   list with one entry per simple command, and per compound command that carries
-  redirections, in walk order (each statement, then the statements inside it). Each entry
+  redirections, in walk order (each statement, then the statements inside it). Since v1.3 a
+  declaration (`export`, `declare`, `typeset`, `readonly`, `local`) is an entry too: the
+  builtin is its first word, and each option and each `NAME`, `NAME=value` or `NAME+=value`
+  after it is one word, whose value is unknown when the value's is (and for an array or an
+  indexed assignment), so `export HISTFILE=/dev/null` has `name` `export` and `args`
+  `HISTFILE=/dev/null`. An assignment that is a statement by itself is not a declaration and
+  is, as before, an entry with no words and the assignment in `env`. Each entry
   has `name` (the base name of the first word after the wrappers `command`, `builtin`,
   `exec`, `nohup`, `time`, `sudo` and `env` with their options and `NAME=value` words, and,
   since v1.3, `timeout`, `nice`, `ionice`, `stdbuf`, `doas`, `torsocks`, `proxychains` and
@@ -248,7 +254,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   The writes are the targets of the command's output redirections (`>`, `>|`, `&>` and
   `>&file` are `write`, `>>` and `&>>` are `append`; a path under `/dev/` and the target of
   `>&` when its value is unknown, which may be a descriptor, are left out), and the operands
-  of the command `name` names: `rm`, `unlink` and `git rm` (`delete`), `touch`, `truncate`,
+  of the command `name` names: `rm`, `unlink` and `git rm` (`delete`), `shred` (`write`, or
+  `delete` with `-u`), `touch`, `truncate`,
   `tee` (`write`, or `append` with `-a`), in-place `sed`, `gsed` and `perl` (`edit`), `cp`
   and `install` (`write`, the destination), `ln` (`link`) and `mv` and `git mv` (`move_from`
   for each source, `move_to` for the destination). A destination that is a directory (the
