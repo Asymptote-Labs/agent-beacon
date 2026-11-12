@@ -1,6 +1,6 @@
 id: package-install-from-untrusted-source
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 2
+version: 3
 title: Package installed from a URL, git ref or non-default index
 description: >
   A package manager installs code from somewhere other than its default public
@@ -13,9 +13,9 @@ description: >
   onto the machine. A private index the organization runs will also fire; that is
   reviewable, not noise. The installer is found by what the line runs, so pip under
   sudo, by path or inside `bash -c` fires and an install line quoted in a commit
-  message or a here-document does not; a line the parser cannot vouch for (see
-  command_unread), and one whose installer has a word with a variable in it, is
-  matched on its text.
+  message or a here-document does not. The text pattern (untrusted_install_source) is
+  asked only of the text that reaches a command the parser cannot see into
+  (unread_text), and of a line whose installer has a word with a variable in it.
 severity: medium
 status: stable
 posture: detect
@@ -26,11 +26,12 @@ taxonomy:
 
 # The installer is a parsed command and its sources are whole words of it: a requirement
 # that is a URL, an option that names another index, an index option whose URL is not the
-# default host. The host test is the one of the text patterns, which spell out "any host
-# but pypi.org" (and the npm and yarn registries) because RE2 has no negative lookahead.
+# default host. The host test is the one of the text patterns (untrusted_install_source,
+# rules/concepts/package-sources.predicates.yaml).
 # A word with a variable in it (git+https://$HOST/x.git, --extra-index-url=$MIRROR) has no
 # known value, so c.args holds it as an empty word. The text patterns therefore also decide
-# for a line where one of the package managers has such a word, not only for an unread line.
+# for a line where one of the package managers has such a word, not only for the text that
+# reaches a command the parser cannot see into.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
@@ -48,20 +49,11 @@ match: >
       c.name == "cargo" && c.args.matches("(?m)^install$") && c.args.matches("(?m)^--git(=|$)") ||
       c.name == "gem" && c.args.matches("(?m)^install$") && c.args.matches("(?m)^(--source|--clear-sources)(=|$)")
     ) ||
-    ((
-    (
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s['\\\"]?(git\\+|[\\w.\\[\\],-]+\\s*@\\s*(git\\+)?(https?|ssh|git|file)://|(https?|ssh|git)://[^\\s'\\\"]*\\.(whl|tar\\.gz|tgz|tar\\.bz2|zip|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(--extra-index-url|--trusted-host)(\\s|=)") ||
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(-i|--index-url|--index|--default-index)(\\s+|=)['\\\"]?([\\w.-]+=)?['\\\"]?(http://|https://[^\\s/'\\\"?#]*@|https://([^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#y][^\\s/:'\\\"?#]*|y(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#i][^\\s/:'\\\"?#]*|i(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))([:/'\\\"?#]|\\s|$))")
-    ) || (
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b[^;&|\\n]*?\\s['\\\"]?(@?[\\w./-]+@)?(git\\+|github:|gitlab:|bitbucket:|gist:|git://|ssh://|https?://[^\\s'\\\"]*\\.(tgz|tar\\.gz|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b[^;&|\\n]*?\\s--registry(\\s+|=)['\\\"]?(http://|https://[^\\s/'\\\"?#]*@|https://([^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#e][^\\s/:'\\\"?#]*|e(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g(|[^\\s/:'\\\"?#i][^\\s/:'\\\"?#]*|i(|[^\\s/:'\\\"?#s][^\\s/:'\\\"?#]*|s(|[^\\s/:'\\\"?#t][^\\s/:'\\\"?#]*|t(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#y][^\\s/:'\\\"?#]*|y(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#ny][^\\s/:'\\\"?#]*|n(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#m][^\\s/:'\\\"?#]*|m(|[^\\s/:'\\\"?#j][^\\s/:'\\\"?#]*|j(|[^\\s/:'\\\"?#s][^\\s/:'\\\"?#]*|s(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))|y(|[^\\s/:'\\\"?#a][^\\s/:'\\\"?#]*|a(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#n][^\\s/:'\\\"?#]*|n(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#k][^\\s/:'\\\"?#]*|k(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#c][^\\s/:'\\\"?#]*|c(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#m][^\\s/:'\\\"?#]*|m([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))))))))))))))([:/'\\\"?#]|\\s|$))")
-    ) ||
-    e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(cargo\\s+install\\s+([^;&|\\n]*\\s)?--git\\b|gem\\s+install\\s+([^;&|\\n]*\\s)?(--source|--clear-sources)\\b)")
-    ) && (command_unread(e) ||
+    unread_text(e, t, untrusted_install_source(t)) ||
+    (untrusted_install_source(e.command.command) &&
       e.command.parsed_commands.exists(c,
         c.name.matches("^(pip[0-9.]*|pipx|uv|python[0-9.]*|poetry|npm|pnpm|yarn|bun|cargo|gem)$") &&
-        c.argv.exists(a, a == ""))))
+        c.argv.exists(a, a == "")))
   )
 
 emit:
@@ -403,4 +395,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "pip install \"$PKG\" && echo 'next: pip install git+https://github.com/someone/helper.git'" }
+        session: { id: s1 }
+  - name: pip_git_url_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'cd app && pip install git+https://github.com/someone/helper.git'" }
+        session: { id: s1 }
+  - name: install_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'ci: drop the mirror; pip install --extra-index-url https://pkgs.example.test/simple x is gone' && ./run-tests.sh" }
         session: { id: s1 }

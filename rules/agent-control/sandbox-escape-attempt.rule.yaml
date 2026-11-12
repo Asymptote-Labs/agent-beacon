@@ -1,6 +1,6 @@
 id: sandbox-escape-attempt
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 2
+version: 3
 title: Sandbox-escape primitives invoked in an agent session
 description: >
   A command.executed event invokes a primitive commonly used to escape a container
@@ -21,8 +21,8 @@ description: >
   command, by absolute path or inside `bash -c`, and its own options, those
   before the program it runs), so the same words in a commit message or a
   here-document do not fire. The boundary anchoring and the enumerated
-  combinations are those of the text pattern, which applies to a line the parser
-  cannot vouch for (see command_unread).
+  combinations are those of the text pattern, which is asked only of the text that
+  reaches a command the parser cannot see into (unread_text).
 severity: critical
 status: experimental
 posture: detect
@@ -43,11 +43,10 @@ match: >
       c.name == "chroot" && c.args.matches("\\A(-[^\\n]*\\n)*/[^\\n/]") ||
       c.name == "pivot_root"
     ) ||
-    ((e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*nsenter\\b\\s+(?:--?(?:t|m|p|i|u|a|r|target|pid|mount|net|ipc|uts|all)\\b\\s*\\S*\\s*)+") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*unshare\\b\\s+(?:-[mnpiCAr]+|-U[mnpiCAr]+|-[mnpiCAr]+U|--(?:mount|net|ipc|uts|pid|all|cgroup))\\b") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*chroot\\b\\s+/[^\\s;&|/][^;&|]*") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*pivot_root\\b")) &&
-      command_unread(e))
+    unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*nsenter\\b\\s+(?:--?(?:t|m|p|i|u|a|r|target|pid|mount|net|ipc|uts|all)\\b\\s*\\S*\\s*)+") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*unshare\\b\\s+(?:-[mnpiCAr]+|-U[mnpiCAr]+|-[mnpiCAr]+U|--(?:mount|net|ipc|uts|pid|all|cgroup))\\b") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*chroot\\b\\s+/[^\\s;&|/][^;&|]*") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*pivot_root\\b")))
   )
 
 emit:
@@ -261,4 +260,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "unshare -U --map-root-user python3 -m http.server -p 8000" }
+        session: { id: s1 }
+  - name: nsenter_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'sudo nsenter -t 1 -m -p sh'" }
+        session: { id: s1 }
+  - name: nsenter_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: the escape is sudo nsenter -t 1 -m -p sh' && ./run-tests.sh" }
         session: { id: s1 }

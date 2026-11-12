@@ -1,6 +1,6 @@
 id: git-history-rewrite
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: Git history rewritten (filter-branch / filter-repo / interactive rebase)
 description: >
   A history-rewriting git subcommand was invoked: filter-branch,
@@ -17,8 +17,9 @@ description: >
   is found by what the line runs: a git command, also under sudo, by
   path, inside `bash -c` or after git's own options (`git -C dir commit
   --amend`), whose subcommand and words say so. The same words in a
-  commit message, an echo or a here-document do not fire. A line the
-  parser cannot vouch for (see command_unread) is matched on its text.
+  commit message, an echo or a here-document do not fire. The text patterns
+  are asked of the text that reaches a command the parser cannot see into
+  (unread_text).
 severity: medium
 status: experimental
 posture: detect
@@ -37,11 +38,10 @@ match: >
       c.name == "git" && c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*(?:filter-(?:branch|repo)|rebase\\n(?:[^\\n]*\\n)*?(?:-[rqvnfmp]*i[rqvnfmp]*|--interactive)|commit\\n(?:[^\\n]*\\n)*?--amend|replace\\n(?:--?[A-Za-z][^\\n]*\\n)*?(?:--edit|--graft|--convert-graft-file))(?:\\n|\\z)") ||
       c.name.matches("^git-filter-(branch|repo)$")
     ) ||
-    ((e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bfilter-(branch|repo)\\b") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\brebase\\b[^;&|]*(\\s-i\\b|\\s--interactive\\b)") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bcommit\\b[^;&|]*\\s--amend\\b") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\breplace\\b\\s+(--edit|--graft|--convert-forkpoint)")) &&
-      command_unread(e))
+    unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bfilter-(branch|repo)\\b") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\brebase\\b[^;&|]*(\\s-i\\b|\\s--interactive\\b)") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bcommit\\b[^;&|]*\\s--amend\\b") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\breplace\\b\\s+(--edit|--graft|--convert-forkpoint)")))
   )
 
 emit:
@@ -185,4 +185,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git log --oneline --grep='commit --amend' | head -5" }
+        session: { id: s1 }
+  - name: amend_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./release.sh 'cd repo; git commit --amend --no-edit'" }
+        session: { id: s1 }
+  - name: rebase_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: avoid sudo git rebase -i on main' && ./run-tests.sh" }
         session: { id: s1 }

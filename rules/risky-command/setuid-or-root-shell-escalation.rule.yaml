@@ -1,6 +1,6 @@
 id: setuid-or-root-shell-escalation
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: Setuid bit installed or interactive root shell requested
 description: >
   A command either installs the setuid bit on a file (chmod u+s or +s, chmod with a
@@ -12,9 +12,9 @@ description: >
   what the line runs: chmod whose first operand is such a mode, su with the operand
   root or with nothing but a login option (`-`, `-l`, `--login`), or pkexec, also under
   sudo, by absolute path or inside `bash -c`, so the same words in a commit message or
-  a here-document do not fire and `su someuser` does not match. A line the parser
-  cannot vouch for (see command_unread) is matched on its text, where each command is
-  anchored to the command position.
+  a here-document do not fire and `su someuser` does not match. Where the parser
+  cannot see into a command, the text that reaches that command is matched instead
+  (unread_text), where each command is anchored to the command position.
 severity: high
 status: stable
 posture: detect
@@ -33,11 +33,10 @@ match: >
       c.name == "su" && c.args.matches("(?m)^root$|\\A(-|-l|--login)\\z") ||
       c.name == "pkexec"
     ) ||
-    ((e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+-\\s*$") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)pkexec\\b")) &&
-      command_unread(e))
+    unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
+      t.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
+      t.matches("(?i)(^|[;&|]\\s*)su\\s+-\\s*$") ||
+      t.matches("(?i)(^|[;&|]\\s*)pkexec\\b")))
   )
 
 emit:
@@ -193,5 +192,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "sudo chmod 0755 /usr/local/bin/helper" }
+        session: { id: s1 }
+  - name: setuid_chmod_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'cd /opt; chmod u+s /opt/helper'" }
+        session: { id: s1 }
+  - name: setuid_chmod_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'fix; chmod u+s /opt/helper removed' && ./run-tests.sh" }
         session: { id: s1 }
 

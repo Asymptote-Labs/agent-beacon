@@ -1,6 +1,6 @@
 id: git-config-exec-injection
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+version: 5
 title: Git config sets a code-execution directive
 description: >
   A command sets a git directive that turns an ordinary git operation into code
@@ -11,8 +11,8 @@ description: >
   name appearing in a commit message, a path, or a read does not fire. The command is
   found by what the line runs: a git command, also under sudo, by path, inside
   `bash -c` or after git's own options, whose words are a directive and the value it
-  is set to. A directive with no value after it is a read. A line the parser cannot
-  vouch for (see command_unread) is matched on its text.
+  is set to. A directive with no value after it is a read. The text pattern is asked
+  only of the text that reaches a command the parser cannot see into (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -41,14 +41,13 @@ match: >
         a.matches("(?i)^[\"']?core\\.fsmonitor=") && !a.matches("(?i)^[\"']?core\\.fsmonitor=[\"']?(true|false)[\"']?$") ||
         a.matches("(?i)^[\"']?alias\\.[a-z0-9_-]+=[\"']?\\s*!"))
     )) ||
-    (e.command.command.matches("(?i)\\bgit\\b") &&
-      e.command.command.matches("(?i)(\\bgit\\s+config\\b|\\bgit\\s+(-[a-z]+\\s+)*-c\\s)") &&
-      !e.command.command.matches("(?i)--(get|unset|list|get-regexp|get-all)\\b") && (
-        e.command.command.matches("(?i)(core\\.sshcommand|diff\\.external|filter\\.[a-z0-9_-]+\\.(clean|smudge|process))") ||
-        (e.command.command.matches("(?i)\\bcore\\.fsmonitor\\b") && !e.command.command.matches("(?i)\\bcore\\.fsmonitor[=\\s]+[\"']?(true|false)\\b")) ||
-        e.command.command.matches("(?i)\\balias\\.[a-z0-9_-]+[=\\s]+[\"']?\\s*!")
-      ) &&
-      command_unread(e))
+    unread_text(e, t, t.matches("(?i)\\bgit\\b") &&
+      t.matches("(?i)(\\bgit\\s+config\\b|\\bgit\\s+(-[a-z]+\\s+)*-c\\s)") &&
+      !t.matches("(?i)--(get|unset|list|get-regexp|get-all)\\b") && (
+        t.matches("(?i)(core\\.sshcommand|diff\\.external|filter\\.[a-z0-9_-]+\\.(clean|smudge|process))") ||
+        (t.matches("(?i)\\bcore\\.fsmonitor\\b") && !t.matches("(?i)\\bcore\\.fsmonitor[=\\s]+[\"']?(true|false)\\b")) ||
+        t.matches("(?i)\\balias\\.[a-z0-9_-]+[=\\s]+[\"']?\\s*!")
+      ))
   )
 
 emit:
@@ -188,4 +187,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git config --global alias.unstage 'reset HEAD --' && git config user.name dev" }
+        session: { id: s1 }
+  - name: directive_set_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'git config core.sshCommand /opt/tools/ssh-wrap'" }
+        session: { id: s1 }
+  - name: directive_set_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: the installer runs git config core.sshCommand for you' && ./run-tests.sh" }
         session: { id: s1 }

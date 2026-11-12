@@ -1,6 +1,6 @@
 id: approval-bypass-via-renamed-binary
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+version: 5
 title: Denied dangerous command re-invoked via a renamed copy of the binary
 description: >
   An approval for a destructive or high-impact shell command was explicitly denied
@@ -23,9 +23,10 @@ description: >
   therefore do not correlate. Both steps find the dangerous action by what the
   command line runs: the denied request and the executed line are read as bash, so
   rm under sudo, by absolute path or inside `bash -c` counts and the same words in
-  a commit message or a here-document do not. A line the parser cannot vouch for
-  (see command_unread) is matched on its text, by the command-position reading
-  above. A fork bomb and a redirection to a disk device are matched on the text of
+  a commit message or a here-document do not. Where the parser cannot see into a
+  command, the text that reaches that command is matched instead (unread_text), by
+  the command-position reading above. A fork bomb and a redirection to a disk
+  device are matched on the text of
   the denied request, since neither is a command with words. Negative fixtures
   cover denials with no follow-up, follow-ups in a different session, unrelated
   benign commands, and those argument-position and tar/find/ffmpeg shapes.
@@ -65,8 +66,7 @@ correlation:
             c.name == "chmod" && c.args.matches("(?m)^(-[A-Za-z]*R[A-Za-z]*|--recursive)$") && c.args.matches("(?m)^0?777$") ||
             size(c.argv) > 1 && c.argv[0].matches("(^|/)sudo$") && c.argv[1].matches("^(-[A-Za-z]*s[A-Za-z]*|--shell)$")
           ) ||
-          (e.command.command.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:^|[;&|(`]|(?:\\b(?:ba|z|da|k)?sh(?:\\s+-[a-z]+)*\\s+-c\\s+|\\beval\\s+)[\"'])\\s*(?:[a-z_][a-z0-9_]*=[^;&|\\s]*\\s+|(?:sudo|doas|env|nohup|exec|command|nice|time|xargs|timeout|stdbuf|setsid|eval)(?:\\s+(?:-[^;&|\\s]*(?:\\s+[a-z0-9_][^;&|\\s/]*)?|[0-9][^;&|\\s]*))*\\s+)*(?:/tmp/|/var/tmp/|\\$\\(mktemp[^)]*\\))[^;&|\\s\"'`]*(?:\\s+[^;&|\\s]+)*?\\s+-[dfirv]*(?:r[dfirv]*f|f[dfirv]*r)[dfirv]*(?:[\\s\"'`)]|$)|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)") &&
-            command_unread(e))
+          unread_text(e, t, t.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:^|[;&|(`]|(?:\\b(?:ba|z|da|k)?sh(?:\\s+-[a-z]+)*\\s+-c\\s+|\\beval\\s+)[\"'])\\s*(?:[a-z_][a-z0-9_]*=[^;&|\\s]*\\s+|(?:sudo|doas|env|nohup|exec|command|nice|time|xargs|timeout|stdbuf|setsid|eval)(?:\\s+(?:-[^;&|\\s]*(?:\\s+[a-z0-9_][^;&|\\s/]*)?|[0-9][^;&|\\s]*))*\\s+)*(?:/tmp/|/var/tmp/|\\$\\(mktemp[^)]*\\))[^;&|\\s\"'`]*(?:\\s+[^;&|\\s]+)*?\\s+-[dfirv]*(?:r[dfirv]*f|f[dfirv]*r)[dfirv]*(?:[\\s\"'`)]|$)|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)"))
         )
 
 emit:
@@ -493,4 +493,24 @@ tests:
         session: { id: s1 }
       - event: { action: command.executed }
         command: { command: "rm -rf /tmp/rm" }
+        session: { id: s1 }
+  - name: denied_then_dangerous_text_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'chmod -R 777 /tmp/stage'" }
+        session: { id: s1 }
+  - name: denied_then_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'never chmod -R 777 /tmp/stage' && ./run-tests.sh" }
         session: { id: s1 }

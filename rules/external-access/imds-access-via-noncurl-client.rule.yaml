@@ -1,6 +1,6 @@
 id: imds-access-via-noncurl-client
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 2
+version: 3
 title: Cloud metadata endpoint accessed via non-curl HTTP client
 description: >
   A command reaches a cloud instance metadata endpoint (AWS IMDS
@@ -16,8 +16,8 @@ description: >
   fire under sudo, inside `bash -c` and by path. Script code that calls an HTTP
   library or a PowerShell web cmdlet is content and is matched as text wherever it
   stands, including a script written to a file; an interpreter or /dev/tcp that is
-  only named is matched as text on a line the parser cannot vouch for (see
-  command_unread), so naming python and the address in a commit message or in
+  only named is asked of the text that reaches a command the parser cannot see into
+  (unread_text), so naming python and the address in a commit message or in
   notes does not fire.
 severity: high
 status: stable
@@ -32,8 +32,8 @@ taxonomy:
 # take it back: version 1 let any mention of curl silence it. A path with a variable
 # (`/dev/tcp/$H/80`) may stand for the target, so there the text decides.
 # An interpreter the line runs with the target among its words is a parsed fact. Every
-# interpreter leaves its line to command_unread, so the text alternative below would match
-# these too; the parsed one says it without leaning on that.
+# interpreter is a command the parser cannot see into, so the text alternative below
+# (unread_text) would match these too; the parsed one says it without leaning on that.
 # Library and cmdlet names are code inside a script, which is content: they stay text and
 # are not gated, because the script may be written to a file here and run later by a line
 # that names no target.
@@ -50,8 +50,7 @@ match: >
         c.name.matches("^(python(3(\\.[0-9]+)?)?|ruby|perl|php|node|deno|bun)$") &&
         c.argv_raw.exists(a, cloud_metadata_target(a))) ||
       e.command.command.matches("(?i)(invoke-webrequest|invoke-restmethod|\\biwr\\b|urllib|requests\\.get|net/http|httpx|Net::HTTP|file_get_contents)") ||
-      (e.command.command.matches("(?i)(\\b(python3?|ruby|perl|php|node|deno|bun)\\b|\\bcurl\\.exe\\b|/dev/tcp/)") &&
-        command_unread(e))
+      unread_text(e, t, t.matches("(?i)(\\b(python3?|ruby|perl|php|node|deno|bun)\\b|\\bcurl\\.exe\\b|/dev/tcp/)"))
     )
   )
 
@@ -194,5 +193,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "cat < /dev/tcp/127.0.0.1/8080" }
+        session: { id: s1 }
+  - name: socket_line_piped_to_a_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'exec 3<>/dev/tcp/169.254.169.254/80' | sh" }
+        session: { id: s1 }
+  - name: interpreter_and_address_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: python must not reach 169.254.169.254' && ./run-tests.sh" }
         session: { id: s1 }
 

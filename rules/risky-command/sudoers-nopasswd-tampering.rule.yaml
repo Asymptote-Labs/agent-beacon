@@ -1,6 +1,6 @@
 id: sudoers-nopasswd-tampering
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 3
+version: 4
 title: Sudoers / NOPASSWD privilege rule tampered or probed
 description: >
   A command writes to the sudoers configuration (/etc/sudoers or /etc/sudoers.d/),
@@ -17,8 +17,8 @@ description: >
   sudoers file or a file under a sudoers.d directory, or writes a file whose name has
   no dot in it, which is what a drop-in must be (sudo skips a name with a dot) and
   what a grant staged in /tmp or under a variable looks like. So a grant quoted in a
-  commit message, or written into NOTES.md, does not fire. A line the parser cannot
-  vouch for (see command_unread) is matched on its text.
+  commit message, or written into NOTES.md, does not fire. The text pattern is asked
+  of the text that reaches a command the parser cannot see into (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -50,12 +50,11 @@ match: >
         c.file_writes.exists(f, f.path.matches("(?i)(^|/)sudoers(\\.d/.+)?$")) ||
         c.file_writes.exists(f, f.op in ["write", "append", "move_to"] && !f.path.matches("(^|/)[^/]*\\.[^/]*$")) ||
         c.env.exists(k, c.env[k].matches("(?i)(^|/)sudoers(\\.d/\\S+)?$")))) ||
-    ((e.command.command.matches("(?i)(>>?\\s*|\\btee\\b[^;&|<]*\\s)/etc/sudoers(\\.d)?\\b") ||
-      e.command.command.matches("(?i)/etc/sudoers\\.d/[^\\s]+") ||
-      e.command.command.matches("(?i)\\bvisudo\\b") ||
-      e.command.command.matches("(?i)\\bNOPASSWD\\s*:") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)sudo\\s+(-[a-z]+\\s+)*-n\\s+(-[a-z]+\\s+)*-l\\b")) &&
-      command_unread(e))
+    unread_text(e, t, (t.matches("(?i)(>>?\\s*|\\btee\\b[^;&|<]*\\s)/etc/sudoers(\\.d)?\\b") ||
+      t.matches("(?i)/etc/sudoers\\.d/[^\\s]+") ||
+      t.matches("(?i)\\bvisudo\\b") ||
+      t.matches("(?i)\\bNOPASSWD\\s*:") ||
+      t.matches("(?i)(^|[;&|]\\s*)sudo\\s+(-[a-z]+\\s+)*-n\\s+(-[a-z]+\\s+)*-l\\b")))
   )
 
 emit:
@@ -255,5 +254,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "ls -la /etc/sudoers.d/" }
+        session: { id: s1 }
+  - name: visudo_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./bootstrap.sh 'sudo visudo -cf /tmp/agent'" }
+        session: { id: s1 }
+  - name: visudo_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: the bootstrap no longer runs sudo visudo -cf /tmp/agent' && ./run-tests.sh" }
         session: { id: s1 }
 

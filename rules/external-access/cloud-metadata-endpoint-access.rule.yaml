@@ -1,6 +1,6 @@
 id: cloud-metadata-endpoint-access
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 2
+version: 3
 title: Cloud instance metadata endpoint accessed via HTTP client
 description: >
   A command uses curl/wget to reach a cloud instance metadata service — the IMDS
@@ -10,8 +10,9 @@ description: >
   canonical SSRF / cloud-credential-theft target. The client is found by what the
   line runs and the target (see cloud_metadata_target) must be one of its words, so
   curl under sudo, inside `bash -c` or by its path fires, and the address in a commit
-  message, a here-document or the words of another command does not. A line the
-  parser cannot vouch for (see command_unread) is matched on its text.
+  message, a here-document or the words of another command does not. Where the
+  parser cannot see into a command, the text that reaches that command is matched
+  instead (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -30,9 +31,8 @@ match: >
     e.command.parsed_commands.exists(c, c.name.matches("^(curl|wget)$") && (
       c.argv_raw.exists(a, cloud_metadata_target(a)) ||
       client_target_unseen(c) && cloud_metadata_target(e.command.command))) ||
-    (e.command.command.matches("(?i)\\b(curl|wget)\\b") &&
-      cloud_metadata_target(e.command.command) &&
-      command_unread(e))
+    unread_text(e, t, t.matches("(?i)\\b(curl|wget)\\b") &&
+      cloud_metadata_target(t))
   )
 
 emit:
@@ -148,5 +148,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "curl -s https://example.com/health && grep -rn 'metadata.google.internal' deploy/" }
+        session: { id: s1 }
+  - name: endpoint_fetched_inside_an_interpreter
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import os; os.system('curl http://169.254.169.254/latest/meta-data/')\"" }
+        session: { id: s1 }
+  - name: endpoint_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'block curl http://169.254.169.254/latest/meta-data/' && ./run-tests.sh" }
         session: { id: s1 }
 

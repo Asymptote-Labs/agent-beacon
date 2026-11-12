@@ -1,6 +1,6 @@
 id: shell-escape-via-interactive-tool
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: Shell escape via an interactive tool (GTFObins-style)
 description: >
   A command uses a known shell-escape idiom — spawning a shell through awk
@@ -10,8 +10,8 @@ description: >
   execution. The tool is found by what the line runs, and the escape among its own
   words, so the tool under sudo, by path or inside `bash -c` fires and the idiom
   quoted in a commit message or a here-document does not. Every one of these tools
-  runs something the parser does not read, so a line that runs one, like any other
-  line the parser cannot vouch for (see command_unread), is also matched on its text.
+  runs something the parser does not read, so the idiom is also asked of the text that
+  reaches one, or any other command the parser cannot see into (unread_text).
 severity: medium
 status: stable
 posture: detect
@@ -35,15 +35,15 @@ match: >
       c.name.matches("^(tar|gtar|bsdtar)$") && c.args.matches("(?mi)^--checkpoint-action=exec") ||
       c.name.matches("^(ssh|scp|sftp)$") && c.args.matches("(?mi)^-o\\n?ProxyCommand(\\s*=|\\s+)")
     ) ||
-    ((
-      e.command.command.matches("(?i)\\bawk\\b.*BEGIN\\s*\\{\\s*system\\s*\\(") ||
-      e.command.command.matches("(?i)\\bperl\\b\\s+-e\\b.*\\b(system|exec)\\b.*(/bin/)?(ba|z)?sh") ||
-      e.command.command.matches("(?i)\\bpython[0-9.]*\\b.*\\bpty\\.spawn\\s*\\(") ||
-      e.command.command.matches("(?i)\\b(vim|vi|view|nvim)\\b\\s+-c\\s+[\"']?:\\s*(!|shell|py\\b)") ||
-      e.command.command.matches("(?i)\\bfind\\b.*-exec\\s+(/bin/|/usr/bin/)?(ba|z)?sh\\b") ||
-      e.command.command.matches("(?i)\\btar\\b.*--checkpoint-action=exec") ||
-      e.command.command.matches("(?i)\\b(ssh|scp|sftp)\\b.*-o\\s*[\"']?ProxyCommand(\\s*=|\\s+)")
-    ) && command_unread(e))
+    unread_text(e, t, (
+      t.matches("(?i)\\bawk\\b.*BEGIN\\s*\\{\\s*system\\s*\\(") ||
+      t.matches("(?i)\\bperl\\b\\s+-e\\b.*\\b(system|exec)\\b.*(/bin/)?(ba|z)?sh") ||
+      t.matches("(?i)\\bpython[0-9.]*\\b.*\\bpty\\.spawn\\s*\\(") ||
+      t.matches("(?i)\\b(vim|vi|view|nvim)\\b\\s+-c\\s+[\"']?:\\s*(!|shell|py\\b)") ||
+      t.matches("(?i)\\bfind\\b.*-exec\\s+(/bin/|/usr/bin/)?(ba|z)?sh\\b") ||
+      t.matches("(?i)\\btar\\b.*--checkpoint-action=exec") ||
+      t.matches("(?i)\\b(ssh|scp|sftp)\\b.*-o\\s*[\"']?ProxyCommand(\\s*=|\\s+)")
+    ))
   )
 
 emit:
@@ -205,4 +205,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "ssh -o ProxyJump=bastion.example host uptime" }
+        session: { id: s1 }
+  - name: escape_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./jail-run.sh 'tar cf /dev/null x --checkpoint=1 --checkpoint-action=exec=/bin/sh'" }
+        session: { id: s1 }
+  - name: escape_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: tar --checkpoint-action=exec is a shell escape' && ./run-tests.sh" }
         session: { id: s1 }

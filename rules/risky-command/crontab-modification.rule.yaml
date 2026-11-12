@@ -1,6 +1,6 @@
 id: crontab-modification
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: Crontab modified (user, system, or spool)
 description: >
   A persistent-scheduling primitive was modified: the user crontab
@@ -14,8 +14,9 @@ description: >
   absolute path or inside `bash -c`, that edits (-e), removes (-r) or
   installs (a file operand, `-`, or no operand at all, which reads
   standard input), so a `crontab -l` list, or crontab in a commit
-  message or a here-document, does not fire. A line the parser cannot
-  vouch for (see command_unread) is matched on its text. A file event
+  message or a here-document, does not fire. The text pattern is asked
+  only of the text that reaches a command the parser cannot see into
+  (unread_text). A file event
   is matched on its path, so a `cat /etc/crontab` read does not fire.
 severity: high
 status: experimental
@@ -35,9 +36,8 @@ match: >
         c.args.matches("(?m)^-[is]*[er]") ||
         c.args.matches("\\A(-u(\\n.*|.+)(\\n|\\z))?(-|[^-\\n].*)?\\z"))
     ) ||
-    ((e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*crontab\\b[^;&|]*(\\s-e\\b|\\s-[a-z]*r\\b|\\s-\\s+[a-zA-Z0-9_./-]+|\\s-\\s*$|\\b[^;&|]*\\|\\s*crontab\\b)") ||
-      e.command.command.matches("(?i)(^|[;&|(]\\s*|\\bsudo\\s+)\\s*crontab(\\s+-u\\s*[^\\s;&|]+)?\\s+[a-zA-Z0-9_./~][a-zA-Z0-9_./~-]*\\s*($|[;&|)])")) &&
-      command_unread(e))
+    unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*crontab\\b[^;&|]*(\\s-e\\b|\\s-[a-z]*r\\b|\\s-\\s+[a-zA-Z0-9_./-]+|\\s-\\s*$|\\b[^;&|]*\\|\\s*crontab\\b)") ||
+      t.matches("(?i)(^|[;&|(]\\s*|\\bsudo\\s+)\\s*crontab(\\s+-u\\s*[^\\s;&|]+)?\\s+[a-zA-Z0-9_./~][a-zA-Z0-9_./~-]*\\s*($|[;&|)])")))
   )) || (
     e.event.action in ["file.modified", "file.created", "file.edited"] && (
       e.file.path.matches("(?i)(^|/)etc/crontab$") ||
@@ -206,4 +206,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "sudo crontab -u deploy -l | grep backup" }
+        session: { id: s1 }
+  - name: crontab_remove_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'sudo crontab -r'" }
+        session: { id: s1 }
+  - name: crontab_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'ops: we ran sudo crontab -r by mistake' && ./run-tests.sh" }
         session: { id: s1 }

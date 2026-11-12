@@ -1,6 +1,6 @@
 id: high-risk-approval-allowed-without-reason
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+version: 6
 title: High-risk action approved with an empty approval reason
 description: >
   An approval was granted (event.action approval.allowed) for a high-risk operation —
@@ -15,10 +15,10 @@ description: >
   catalog (rules/concepts/credential-stores.catalog.yaml). The approved command is
   found by what its line runs (rm also under sudo, by absolute path or inside
   `bash -c`; sudo as the wrapper of a command), so the same words in a commit
-  message or a here-document do not make an approval high-risk. A line the parser
-  cannot vouch for (see command_unread) is matched on its text. Anything under ~/.aws counts
-  as well as the catalog's credential files, since the config there can name a command that
-  hands over credentials (credential_process).
+  message or a here-document do not make an approval high-risk. The text pattern is
+  asked of the text that reaches a command the parser cannot see into (unread_text).
+  Anything under ~/.aws counts as well as the catalog's credential files, since the config
+  there can name a command that hands over credentials (credential_process).
 severity: high
 status: stable
 posture: detect
@@ -39,7 +39,7 @@ match: >
     dangerous_command(e) ||
     e.command.parsed_commands.exists(c,
       c.argv.exists(a, a.matches("(^|/)sudo$")) && (c.argv[0].matches("(^|/)sudo$") || !c.args.matches("(?m)^(.*/)?sudo$"))) ||
-    (e.command.command.matches("(?i)\\bsudo\\b") && command_unread(e)) ||
+    unread_text(e, t, t.matches("(?i)\\bsudo\\b")) ||
     credential_path(e.file.path) ||
     e.file.path.matches("(?i)(\\.github/workflows/|\\.gitlab-ci\\.yml$|/auth\\.|/security\\.|(^|[/\\\\])\\.aws[/\\\\])")
   )
@@ -165,6 +165,20 @@ tests:
     events:
       - event: { action: approval.allowed }
         command: { command: "which sudo && rm -r build/cache" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: sudo_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "./deploy.sh 'sudo systemctl restart app'" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: sudo_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "git commit -m 'docs: the installer no longer needs sudo' && ./run-tests.sh" }
         approval: { decision: "allow", required: true, reason: "" }
         session: { id: s1 }
 

@@ -1,6 +1,6 @@
 id: world-writable-chmod
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+version: 6
 title: chmod grants world-writable or full permissions
 description: >
   A command makes a file or tree world-writable — an octal mode whose "other" digit
@@ -9,9 +9,9 @@ description: >
   ugo+rwx). Owner- or group-only grants (u+w, g=rw) are intentionally excluded because
   they are not world-writable. The command is found by what the line runs: chmod, also
   under sudo, by absolute path or inside `bash -c`, whose first operand is such a mode,
-  so chmod in a commit message or a here-document does not fire. A line the parser
-  cannot vouch for (see command_unread) is matched on its text, where chmod is anchored
-  to the acting command position.
+  so chmod in a commit message or a here-document does not fire. Where the parser
+  cannot see into a command, the text that reaches that command is matched instead
+  (unread_text), where chmod is anchored to the acting command position.
 severity: medium
 status: stable
 posture: detect
@@ -26,8 +26,7 @@ match: >
     e.command.parsed_commands.exists(c,
       c.name == "chmod" &&
       c.args.matches("\\A(-[^\\n]*\\n|\\n)*([0-7]?[0-7]{2}[2367]|[ugoa,+=rwxXst-]*[oa][ugoa]*[+=][rwxXst]*w[ugoa,+=rwxXst-]*)(\\n|\\z)")) ||
-    (e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([0-7]?[0-7]{2}[2367](\\s|$)|([ugoa]*[oa][ugoa]*)[+=][rwx]*w[rwx]*\\b)") &&
-      command_unread(e))
+    unread_text(e, t, t.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([0-7]?[0-7]{2}[2367](\\s|$)|([ugoa]*[oa][ugoa]*)[+=][rwx]*w[rwx]*\\b)"))
   )
 
 emit:
@@ -201,4 +200,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "chmod 644 777" }
+        session: { id: s1 }
+  - name: chmod_777_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'cd /srv; chmod -R 777 app'" }
+        session: { id: s1 }
+  - name: chmod_777_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'fix; chmod -R 777 app removed' && ./run-tests.sh" }
         session: { id: s1 }

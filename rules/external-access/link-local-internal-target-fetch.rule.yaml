@@ -1,6 +1,6 @@
 id: link-local-internal-target-fetch
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 2
+version: 3
 title: HTTP client fetch of a link-local or internal-only address
 description: >
   A command uses curl/wget to fetch an explicit link-local (169.254.0.0/16) or
@@ -11,7 +11,8 @@ description: >
   what the line runs and the target (see cloud_metadata_link_local_target) must be
   one of its words, so curl under sudo, inside `bash -c` or by its path fires, and
   the URL in a commit message, a here-document or the words of another command does
-  not. A line the parser cannot vouch for (see command_unread) is matched on its text.
+  not. The text pattern is asked only of the text that reaches a command the parser
+  cannot see into (unread_text).
 severity: medium
 status: stable
 posture: detect
@@ -29,9 +30,8 @@ match: >
     e.command.parsed_commands.exists(c, c.name.matches("^(curl|wget)$") && (
       c.argv_raw.exists(a, cloud_metadata_link_local_target(a)) ||
       client_target_unseen(c) && cloud_metadata_link_local_target(e.command.command))) ||
-    (e.command.command.matches("(?i)\\b(curl|wget)\\b") &&
-      cloud_metadata_link_local_target(e.command.command) &&
-      command_unread(e))
+    unread_text(e, t, t.matches("(?i)\\b(curl|wget)\\b") &&
+      cloud_metadata_link_local_target(t))
   )
 
 emit:
@@ -127,5 +127,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "curl -s --interface fe80::1%en0 https://example.com/health" }
+        session: { id: s1 }
+  - name: fetch_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'curl -s http://169.254.170.2/v2/credentials/abc'" }
+        session: { id: s1 }
+  - name: url_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: curl http://169.254.170.2/v2/credentials is blocked by the proxy' && ./run-tests.sh" }
         session: { id: s1 }
 

