@@ -214,7 +214,8 @@ func otlpForwardFlags(forward *endpointconfig.OTLPForward) string {
 var errSetupCancelled = fmt.Errorf("setup cancelled; nothing was installed. Run `beacon endpoint install` again when you are ready, or set %s=0 to install without the guided setup", onboardingEnvEnabled)
 
 func runEndpointInstall(cmd *cobra.Command, args []string) error {
-	selection, err := resolveEndpointTargets(endpointOpts.harnesses, harness.DiscoverAll())
+	discovered := harness.DiscoverAll()
+	selection, err := resolveEndpointTargets(endpointOpts.harnesses, discovered)
 	if err != nil {
 		return err
 	}
@@ -236,6 +237,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(false, serviceKind, selection.OTLP, selection.Hooks))
 	}
+	installEvents := startInstallTelemetry(discovered)
 	// Asked once, on an interactive install, before anything is written to disk. Every
 	// non-interactive path (package postinstall, MDM, CI) is gated out inside.
 	onboarded, err := maybeRunOnboarding(cmd)
@@ -293,20 +295,22 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	// Read recent history from the agents' own session stores so the dashboard has sessions
 	// in it before any agent runs again. Local only, bounded, and never a reason to fail the
 	// install; a connect below ships what it wrote rather than sweeping again.
-	backfilled := false
+	var backfill *endpointBackfillResult
 	if endpointBackfillEnabled() {
 		backfillOut := cmd.OutOrStdout()
 		if summary != nil {
 			backfillOut = &summary.backfill
 		}
-		reportEndpointBackfill(backfillOut, runEndpointBackfill(result.LogPath, endpointUserMode()))
-		backfilled = true
+		swept := runEndpointBackfill(result.LogPath, endpointUserMode())
+		reportEndpointBackfill(backfillOut, swept)
+		backfill = &swept
 	} else {
 		recordSkippedBackfill(cmd.ErrOrStderr(), endpointUserMode())
 	}
 	finishCloudSetup(cmd, onboarded, connectAfterInstall, summary, func() error {
-		return connectEndpointFor(cmd, endpointUserMode(), result.LogPath, backfilled, summary)
+		return connectEndpointFor(cmd, endpointUserMode(), result.LogPath, backfill != nil, summary)
 	})
+	installEvents.completed(selection, backfill)
 	return nil
 }
 
@@ -533,7 +537,8 @@ func runEndpointUninstall(cmd *cobra.Command, args []string) error {
 }
 
 func runEndpointRepair(cmd *cobra.Command, args []string) error {
-	selection, err := resolveEndpointTargets(endpointOpts.harnesses, harness.DiscoverAll())
+	discovered := harness.DiscoverAll()
+	selection, err := resolveEndpointTargets(endpointOpts.harnesses, discovered)
 	if err != nil {
 		return err
 	}
