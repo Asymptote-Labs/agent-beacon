@@ -30,6 +30,9 @@ type DeviceInfo struct {
 	Arch          string `json:"arch"`
 	BeaconVersion string `json:"beacon_version"`
 	InstallMode   string `json:"install_mode"`
+	// PrivacyMode is the mode this connect forwards in (managedprivacy.Standard or MetadataOnly),
+	// so the dashboard can show it before the first event arrives. Connect sets it.
+	PrivacyMode string `json:"privacy_mode,omitempty"`
 }
 
 // EnrollOptions configures one enrollment round trip.

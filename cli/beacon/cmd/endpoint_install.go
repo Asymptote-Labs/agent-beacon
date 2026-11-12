@@ -19,6 +19,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/spf13/cobra"
@@ -315,6 +316,10 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	finishCloudSetup(cmd, onboarded, connectAfterInstall, summary, func() error {
 		return connectEndpointFor(cmd, endpointUserMode(), result.LogPath, backfill != nil, summary)
 	})
+	if backfill != nil {
+		// After the connect, which decides whether these sessions stay local.
+		recordLocalTraces(telemetry.TraceSourceBackfill, endpointUserMode(), *backfill)
+	}
 	installEvents.completed(selection, backfill)
 	return nil
 }

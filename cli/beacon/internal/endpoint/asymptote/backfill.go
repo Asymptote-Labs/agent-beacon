@@ -36,6 +36,9 @@ type BackfillResult struct {
 	Path   string `json:"path"`
 	Events int    `json:"events"`
 	Bytes  int64  `json:"bytes"`
+	// Sessions counts the distinct agent sessions (harness and session id) the staged events
+	// belong to.
+	Sessions int `json:"sessions"`
 	// Trimmed is set when older events in the window were left out to stay under MaxBytes.
 	Trimmed bool `json:"trimmed,omitempty"`
 }
@@ -62,11 +65,13 @@ func StageBackfill(logPath string, opts BackfillOptions) (BackfillResult, error)
 	}
 	paths := writer.RetainedLogPaths(logPath)
 	var lines [][]byte
+	var sessions []string
 	var total int64
 	// Oldest file first so the staged lines keep the log's order.
 	for i := len(paths) - 1; i >= 0; i-- {
-		err := scanBackfillLines(paths[i], opts.Since, func(line []byte) {
+		err := scanBackfillLines(paths[i], opts.Since, func(line []byte, session string) {
 			lines = append(lines, line)
+			sessions = append(sessions, session)
 			total += int64(len(line)) + 1
 		})
 		if err != nil {
@@ -82,6 +87,7 @@ func StageBackfill(logPath string, opts BackfillOptions) (BackfillResult, error)
 		if drop > 0 {
 			result.Trimmed = true
 			lines = lines[drop:]
+			sessions = sessions[drop:]
 		}
 	}
 	if len(lines) == 0 {
@@ -99,6 +105,13 @@ func StageBackfill(logPath string, opts BackfillOptions) (BackfillResult, error)
 	}
 	result.Events = len(lines)
 	result.Bytes = int64(len(data))
+	distinct := map[string]bool{}
+	for _, session := range sessions {
+		if session != "" {
+			distinct[session] = true
+		}
+	}
+	result.Sessions = len(distinct)
 	return result, nil
 }
 
@@ -117,11 +130,17 @@ func RemoveBackfill(logPath string) error {
 type backfillLine struct {
 	Timestamp string `json:"timestamp"`
 	Harness   struct {
+		Name             string `json:"name"`
 		CollectionMethod string `json:"collection_method"`
 	} `json:"harness"`
+	Session *struct {
+		ID string `json:"id"`
+	} `json:"session"`
 }
 
-func scanBackfillLines(path string, since time.Time, keep func([]byte)) error {
+// scanBackfillLines passes keep each session-store line at or after since, with the session it
+// belongs to as "<harness>\x00<id>", or "" when the line names none.
+func scanBackfillLines(path string, since time.Time, keep func(line []byte, session string)) error {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -144,7 +163,11 @@ func scanBackfillLines(path string, since time.Time, keep func([]byte)) error {
 				continue
 			}
 		}
-		keep(append([]byte(nil), raw...))
+		session := ""
+		if line.Session != nil && line.Session.ID != "" {
+			session = line.Harness.Name + "\x00" + line.Session.ID
+		}
+		keep(append([]byte(nil), raw...), session)
 	}
 	return scanner.Err()
 }

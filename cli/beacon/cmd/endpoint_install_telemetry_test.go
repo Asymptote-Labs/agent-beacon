@@ -15,6 +15,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/spf13/cobra"
 )
 
@@ -236,5 +237,85 @@ func TestDetectedAndConfiguredNames(t *testing.T) {
 	got = configuredTargetNames(endpointTargetSelection{OTLP: []string{"claude", "gemini"}, Hooks: []string{"claude", "cursor"}})
 	if !reflect.DeepEqual(got, []string{"claude", "cursor", "gemini"}) {
 		t.Errorf("configured = %v", got)
+	}
+}
+
+// recordTraces swaps the trace seams: what recordLocalTraces would send, on an endpoint that is or
+// is not connected to Beacon Cloud.
+func recordTraces(t *testing.T, connected bool) *[]string {
+	t.Helper()
+	calls := new([]string)
+	oldRecord, oldConnected := telemetryRecordTraces, traceEndpointConnected
+	telemetryRecordTraces = func(source string, traces []telemetry.Trace) {
+		for _, trace := range traces {
+			*calls = append(*calls, source+":"+trace.Harness+"/"+trace.ID)
+		}
+	}
+	traceEndpointConnected = func(bool) bool { return connected }
+	t.Cleanup(func() { telemetryRecordTraces, traceEndpointConnected = oldRecord, oldConnected })
+	return calls
+}
+
+func TestScheduledSessionSyncRecordsLocalTraces(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		scheduled bool
+		connected bool
+		want      []string
+	}{
+		{"scheduled local", true, false, []string{"live:codex/s1"}},
+		{"scheduled connected", true, true, nil},
+		{"manual", false, false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testenv.SetHome(t, t.TempDir())
+			calls := recordTraces(t, tc.connected)
+			oldOpts, oldSweep, oldScheduled := endpointOpts, runSessionSweep, endpointSessionsOpts.scheduled
+			t.Cleanup(func() {
+				endpointOpts, runSessionSweep, endpointSessionsOpts.scheduled = oldOpts, oldSweep, oldScheduled
+			})
+			endpointOpts.userMode, endpointOpts.systemMode = true, false
+			endpointSessionsOpts.scheduled = tc.scheduled
+			runSessionSweep = func(string, bool, bool) endpointBackfillResult {
+				return endpointBackfillResult{Sessions: []sweptSession{{Harness: "codex", ID: "s1"}}}
+			}
+			cmd := &cobra.Command{}
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			enableSessionSyncConfig(t, true)
+			if err := runEndpointSessionsSync(cmd, nil); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(*calls, tc.want) {
+				t.Fatalf("recorded %v, want %v", *calls, tc.want)
+			}
+		})
+	}
+}
+
+func TestInstallRecordsBackfillTracesOnlyWhenLocal(t *testing.T) {
+	for _, connected := range []bool{false, true} {
+		recordEndpointLifecycle(t)
+		recordTelemetry(t)
+		calls := recordTraces(t, connected)
+		stubBackfill(t, 1<<20, 1<<19, sessionRunner("Codex CLI", "codex", []string{"c"}, 1))
+		logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+		endpointLifecycleInstall = func(lifecycle.InstallOptions) (lifecycle.InstallResult, error) {
+			return lifecycle.InstallResult{LogPath: logPath}, nil
+		}
+		endpointOpts.harnesses = "codex"
+		cmd := &cobra.Command{}
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		if _, err := captureStdout(t, func() error { return runEndpointInstall(cmd, nil) }); err != nil {
+			t.Fatal(err)
+		}
+		var want []string
+		if !connected {
+			want = []string{"backfill:codex/c"}
+		}
+		if !reflect.DeepEqual(*calls, want) {
+			t.Fatalf("connected=%t: recorded %v, want %v", connected, *calls, want)
+		}
 	}
 }
