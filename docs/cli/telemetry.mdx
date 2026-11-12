@@ -74,8 +74,13 @@ shown and the identified ID. Deleting the file resets both.
 | `cli_email_submitted` | `beacon endpoint install` is given an email without a sign-in, followed by `$create_alias` and `$set` | `email_source` (`flag` or `env`), `email_domain_kind` (`work` or `free`); never the address |
 | `cli_install_started` | `beacon endpoint install` begins (not on `--dry-run`) | `setup_path` (`wizard`, `agent`, `ci`, `package`, or `noninteractive`), `detected_harnesses` (the runtime names discovery found), `is_first_for_device` |
 | `cli_install_completed` | `beacon endpoint install` succeeds, after hooks, skills, the session backfill and any Beacon Cloud connect | `destination` (`local` or `cloud`), `harnesses_configured` (the install targets), `backfill_session_count`, `duration_ms`, `is_first_for_device` |
+| `cli_trace_recorded` | A local-only endpoint records an agent session for the first time, from the install's session backfill or the scheduled session sync. At most 50 a run; not sent when the endpoint forwards to Beacon Cloud | `harness` (the runtime's name, such as `claude_code`), `source` (`backfill` or `live`), `is_first_for_device` |
 
 `backfill_session_count` is the number of sessions the install's [session backfill](/cli/endpoint-install#session-backfill)
 wrote records for, counted from the runtime log the backfill wrote; it is `0` when the
 backfill is off. The system packages' install scripts set `BEACON_INSTALL_SOURCE=package`,
 which is how `setup_path` tells a package install apart.
+
+To send each session once, the CLI keeps truncated SHA-256 hashes of the sessions it has reported in
+`~/.beacon/telemetry-sessions.json` (mode `0600`, at most 5,000). It never stores or sends session
+IDs. A system scheduled sync that runs without a home directory sends nothing.

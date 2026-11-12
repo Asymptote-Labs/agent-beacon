@@ -41,6 +41,8 @@ const (
 	// RuntimeIngestPath and InventoryIngestPath are appended to the ingest URL.
 	RuntimeIngestPath   = "/v1/ingest/runtime"
 	InventoryIngestPath = "/v1/ingest/inventory"
+	// BackfillReportPath is where a connect reports how much session history it staged.
+	BackfillReportPath = "/v1/ingest/backfill"
 	// CredentialCheckPath answers 200 or 401 for a bearer device key. Vector's
 	// sink healthcheck sends its auth header, so pointing it here makes a revoked
 	// key visible at startup. HealthPath is the unauthenticated liveness probe.

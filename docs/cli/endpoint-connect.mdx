@@ -71,6 +71,14 @@ the dashboard collapses a re-sent event on it. A privacy-mode change clears the 
 replaces the staged file, so the backfill is resent in the new mode. `disconnect` removes the file.
 `--no-backfill` or `BEACON_BACKFILL=0` connects without uploading any history.
 
+Once the connect has finished, Beacon also tells Beacon Cloud how much history it staged: one
+`POST /v1/ingest/backfill` with `{"session_count": N, "event_count": M}`, authenticated with the
+device key like the forwarder's uploads, so the dashboard can show that history is on its way. It
+carries counts only, is sent on every connect (zeros when nothing was staged), and never fails the
+connect: an older server that does not know the path, a busy server, or no network are all ignored
+after at most one retry and three seconds. Enrollment also sends the device's privacy mode
+(`standard` or `metadata_only`).
+
 The backfill is a one-time upload per connect. With the
 [scheduled session sync](/cli/endpoint-install#scheduled-session-sync) on, the job keeps reading the
 session stores every 15 minutes, and the forwarder ships what it writes as ordinary new runtime

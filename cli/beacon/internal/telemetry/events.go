@@ -146,3 +146,24 @@ const (
 	EmailDomainWork = "work"
 	EmailDomainFree = "free"
 )
+
+// EventTraceRecorded is sent once per agent session a local-only endpoint records for the first
+// time, from the install's session backfill and the scheduled session sync. An endpoint that
+// forwards to Beacon Cloud does not send it: the cloud counts its own sessions.
+const EventTraceRecorded = "cli_trace_recorded"
+
+// Trace event properties.
+const (
+	// PropHarness is the runtime's normalized harness name, as the runtime log carries it.
+	PropHarness = "harness"
+	// PropSource says how the session was found, a TraceSource value.
+	PropSource = "source"
+)
+
+// Values of source.
+const (
+	// TraceSourceBackfill is the install's read of recent session history.
+	TraceSourceBackfill = "backfill"
+	// TraceSourceLive is the scheduled session sync, reading sessions as they happen.
+	TraceSourceLive = "live"
+)
