@@ -105,10 +105,44 @@ func TestValues(t *testing.T) {
 	}
 	held := 0
 	for i := range m.shards {
-		held += len(m.shards[i].cur.values) + len(m.shards[i].prev.values)
+		for _, g := range m.shards[i].ring {
+			held += len(g.values)
+		}
 	}
 	if held != 0 {
 		t.Errorf("%d long values held after the only one was replaced", held)
+	}
+}
+
+// A key is forgotten before it expires only when live keys fill the store: in a steady state of
+// keys written at a constant rate and expiring a TTL later, with the live ones at 70% of the limit,
+// every key written within the last TTL and never read since is still held.
+func TestKeepsLiveKeysUntilFull(t *testing.T) {
+	const (
+		limit = shards * 2000
+		ttl   = 1000 // ms
+		live  = limit * 7 / 10
+	)
+	m := NewMemory(limit)
+	start := time.Unix(1000, 0)
+	now := start
+	m.now = func() time.Time { return now }
+	ctx := context.Background()
+	written := 0
+	for ms := range 4 * ttl {
+		now = start.Add(time.Duration(ms) * time.Millisecond)
+		for ; written < (ms+1)*live/ttl; written++ {
+			_, _ = m.Add(ctx, Entry{fmt.Sprint("k", written), []byte{1}, ttl * time.Millisecond})
+		}
+	}
+	lost, from := 0, written-live+live/ttl // the keys written within the last TTL
+	for i := from; i < written; i++ {
+		if vals, _ := m.Get(ctx, fmt.Sprint("k", i)); vals[0] == nil {
+			lost++
+		}
+	}
+	if lost > 0 {
+		t.Errorf("%d of %d live keys forgotten with live keys at 70%% of the limit", lost, written-from)
 	}
 }
 
