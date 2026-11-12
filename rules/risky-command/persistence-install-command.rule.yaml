@@ -1,6 +1,6 @@
 id: persistence-install-command
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+version: 5
 title: Command installs scheduled-job or service persistence
 description: >
   A command installs persistence that runs outside any agent sandbox at login,
@@ -23,15 +23,12 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
-# crontab installs when its words are an optional `-u user` and at most one operand. A
-# file under ~ or held in a variable is an empty word of args, and no word at all is an
-# install from standard input (`crontab <<EOF`, `... | crontab`), so both forms match.
+# crontab installs when its words are an optional `-u user` and at most one operand
+# (crontab_installs, rules/concepts/scheduling.predicates.yaml).
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
-      c.name == "crontab" && (
-        c.args.matches("(?m)^-[is]*e") ||
-        c.args.matches("\\A(-u(\\n.*|.+)(\\n|\\z))?(-|[^-\\n].*)?\\z")) ||
+      crontab_installs(c) ||
       c.name == "systemctl" && c.args.matches("(?m)^enable$") ||
       c.name == "launchctl" && c.args.matches("\\A(load|bootstrap|enable)(\\n|\\z)")
     ) ||

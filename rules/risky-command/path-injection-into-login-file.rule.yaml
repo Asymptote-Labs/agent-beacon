@@ -1,6 +1,6 @@
 id: path-injection-into-login-file
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 4
+version: 5
 title: PATH shadowing entry written to a shell startup file
 description: >
   A command writes a PATH line into a shell startup or login file, by redirecting or
@@ -25,6 +25,9 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
+# Which file is a startup file is one definition (shell_startup_file,
+# rules/concepts/sensitive-files.predicates.yaml), and so is a redirection into one written
+# in text (shell_startup_file_redirect).
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)\\bPATH\\s*\\+?=\\s*[\"']?([^\\s;&|\"']*:)?(/tmp|/var/tmp|/dev/shm)(/[^\\s:;&|\"']*)?(:|[\"'\\s]|$)") ||
@@ -33,9 +36,8 @@ match: >
     e.command.command.matches("(?i)\\bset\\s+-[gxU]+\\s+PATH\\b[^;&|]*\\s((/tmp|/var/tmp|/dev/shm)(/[^\\s;&|\"']*)?|\\.)([\"'\\s]|$)")
   ) && (
     e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "edit"] &&
-      f.path.matches("(?i)(^|/)(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|profile\\.d/[^/]+)$"))) ||
-    unread_text(e, t, t.matches("(?i)(>>?|\\btee\\b)\\s*([^|;&]*[\\s/])?(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|profile\\.d/[^\\s;&|\"']+)([\"'\\s]|$)"))
+      f.op in ["write", "append", "edit"] && shell_startup_file(f.path))) ||
+    unread_text(e, t, shell_startup_file_redirect(t))
   )
 
 emit:
