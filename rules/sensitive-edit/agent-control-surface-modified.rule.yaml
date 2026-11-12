@@ -1,6 +1,6 @@
 id: agent-control-surface-modified
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+version: 6
 title: Agent control surface (settings / hooks / MCP config / plugins) modified
 description: >
   The agent wrote a file that constrains or wires its own runtime or another agent's:
@@ -17,10 +17,11 @@ description: >
   sandbox, widen auto-approval, register a hook, or wire in a new MCP server or plugin
   that runs on every future session. The command is found by what the line runs: a
   command one of whose writes (c.file_writes, which keeps a path under `~` or a variable
-  as written) is one of these paths, or a download, clone or rsync that lands on one, so
-  `sudo cp` and cp inside `bash -c` fire and a path named in a commit message, a
-  here-document or a sed script does not. The text patterns are asked of the text that
-  reaches a command the parser cannot see into (unread_text).
+  as written, and includes where a download is saved and the directory an archive or a
+  clone lands in) is one of these paths, so `sudo cp` and cp inside `bash -c` fire and a
+  path named in a commit message, a here-document or a sed script does not. The text
+  patterns are asked of the text that reaches a command the parser cannot see into
+  (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -36,8 +37,7 @@ match: >
   ) || (
     e.event.action == "command.executed" && (
       e.command.parsed_commands.exists(c,
-        c.file_writes.exists(f, f.op in ["write", "append", "truncate", "edit", "move_to", "link"] && agent_control_surface(f.path)) ||
-        agent_control_surface_download(c)) ||
+        c.file_writes.exists(f, f.op in ["write", "append", "truncate", "edit", "move_to", "link"] && agent_control_surface(f.path))) ||
       unread_text(e, t, (
       t.matches("(?i)((^|[^-=>\\n])>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?-i\\S*\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)(['\"]([^'\"\\n;|]*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\][^'\"\\n;|]*)?)['\"]|(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\]([^\\s;&|'\"<>\\\\]|\\\\.)*)?))($|[\\s;&|)<>])") ||
       t.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s(['\"]([^'\"\\n;|]*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\][^'\"\\n;|]*)?)['\"]|(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\]([^\\s;&|'\"<>\\\\]|\\\\.)*)?))(\\s+([0-9]*|&)>{1,2}&?\\s*[^\\s;&|]*|\\s+#[^\\n]*)*\\s*($|[;&|)\\n])")

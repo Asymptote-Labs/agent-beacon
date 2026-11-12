@@ -63,11 +63,22 @@ func (c Command) FileEffects() []FileEffect {
 // command wrote, for a caller that goes on to find that file. A write is asked what it names:
 // ~/.ssh/authorized_keys names a login's authorized keys whatever the home directory is. Every
 // effect is a write, in the same order.
+//
+// A write may also be a directory, written with a trailing slash: the one an archive is
+// extracted into (tar -x -C, unzip -d), a repository is cloned into (git clone, gh repo clone)
+// or rsync copies a directory's contents into. Which files land there is not on the command
+// line, so it is no effect; the directory the command runs in is "./".
 func (c Command) FileWrites() []FileEffect {
-	if c.Evaluated() {
+	if c.WritesAreEffects() {
 		return c.FileEffects()
 	}
 	return c.fileEffects(true)
+}
+
+// WritesAreEffects reports whether FileWrites is exactly FileEffects for the command: every
+// word of it is known, and it puts no files into a directory.
+func (c Command) WritesAreEffects() bool {
+	return c.Evaluated() && !c.writesInto()
 }
 
 // Evaluated reports whether every word and redirection target of the command is known, so that
@@ -451,6 +462,21 @@ func (c Command) commandTargets(written bool) []FileEffect {
 		}
 	case "sed", "perl", "gsed":
 		return effectsOf(inPlaceFiles(name, args), OpEdit, written)
+	case "curl":
+		return curlOutputs(args, written)
+	case "wget":
+		return wgetOutputs(args, written)
+	case "dd":
+		return ddOutput(args, written)
+	case "scp", "rsync":
+		return copiedHere(name, args, written)
+	}
+	// A directory an archive is extracted or a repository is cloned into is a write, not an
+	// effect: which files land there is not on the command line.
+	if written {
+		if dir, ok := c.intoDirectory(name, args); ok {
+			return []FileEffect{{Path: dir, Op: OpWrite}}
+		}
 	}
 	return nil
 }

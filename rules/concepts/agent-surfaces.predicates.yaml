@@ -6,18 +6,14 @@
 # under any directory, a home directory or a variable included, and only for the whole path:
 # `.claude/settings.json.bak` is not the settings file.
 #
-# What a command writes is the parser's to say, and it says so for redirections, tee, sed -i,
-# cp, mv, install and ln. It does not read where a download or a clone lands, so
-# agent_surface_download names those words, and the two predicates after it ask whether one of
-# them is a control or an instruction file. Those words are only had as written
-# (c.argv_raw), with their quotes and an attached --output=, and the rule language cannot
-# take a quote off a string. So that each list of files is written once, the two path
-# predicates also accept a path inside one pair of quotes and after an attached option
-# (`--output=`), which no path of a file event or of c.file_writes has.
+# What a command writes is the parser's to say: a redirection, tee, sed -i, cp, mv, install,
+# ln, a download's output file (curl -o, wget -O), the destination of scp and rsync, and the
+# directory an archive is extracted or a repository is cloned into, which it writes with a
+# trailing slash. So a rule asks one question of every write.
 library: agent-surfaces
-version: 1
+version: 2
 spec: threat-rules/v1.3
-description: The files that steer a coding agent, as a path and as the place a download lands.
+description: The files that steer a coding agent, as a path.
 
 definitions:
   - name: agent_control_surface
@@ -26,11 +22,11 @@ definitions:
       The path names a file that constrains or wires an agent's runtime: a settings, hooks or
       MCP configuration file, or a plugin or extension directory or something under it. It
       may be under any directory, a home directory (`~`) or a variable included. A path that
-      only holds one of these names (a backup beside the file) does not count. A word of a
-      command as written is accepted too: the path may be in quotes and may follow an
-      attached option (--output=).
+      only holds one of these names (a backup beside the file) does not count. A directory a
+      command puts files into (`~/.gemini/extensions/ext/`, as c.file_writes writes it) is one
+      when it is, or is under, a plugin or extension directory.
     body: >
-      path.matches("(?is)^(--?[a-z-]+=)?['\"]?(.*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\].*)?)['\"]?$")
+      path.matches("(?is)^(.*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\].*)?)$")
     tests:
       - name: settings_under_home
         match: agent_control_surface(e.file.path)
@@ -68,12 +64,42 @@ definitions:
         events:
           - event: { action: file.modified }
             file: { path: "fixtures/sample.mcp.json" }
-      - name: a_quoted_word_of_a_command
-        match: agent_control_surface(e.file.path)
+      - name: hooks_downloaded_to_a_quoted_variable_path
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
         verdict: match
         events:
-          - event: { action: file.modified }
-            file: { path: "\"$HOME/.cursor/hooks.json\"" }
+          - event: { action: command.executed }
+            command: { command: "wget -q -O \"$HOME/.cursor/hooks.json\" https://host.example/hooks.json" }
+      - name: an_attached_output_option
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "wget --output-document=.mcp.json https://host.example/m.json" }
+      - name: a_plugin_cloned_under_home
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git clone https://host.example/someone/ext ~/.gemini/extensions/ext" }
+      - name: an_extension_unzipped_into_place
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "unzip -o helper.zip -d ~/.gemini/extensions/helper" }
+      - name: a_config_downloaded_elsewhere
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -fsSL -o /tmp/mcp.json https://host.example/configs/.mcp.json" }
+      - name: a_download_to_standard_output
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -fsSL https://host.example/configs/.mcp.json | head -5" }
 
   - name: agent_instruction_surface
     params: [path]
@@ -82,10 +108,11 @@ definitions:
       AGENTS.md, GEMINI.md and the like), or a runtime's rules, skills, commands, prompts,
       agents or workflows directory or something under it. It may be under any directory, a
       home directory (`~`) or a variable included. A path that only holds one of these names
-      (a backup beside the file) does not count. A word of a command as written is accepted
-      too: the path may be in quotes and may follow an attached option (--output=).
+      (a backup beside the file) does not count. A directory a command puts files into
+      (`~/.claude/skills/`, as c.file_writes writes it) is one when it is, or is under, one of
+      those directories.
     body: >
-      path.matches("(?is)^(--?[a-z-]+=)?['\"]?(.*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\].*)?)['\"]?$")
+      path.matches("(?is)^(.*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\].*)?)$")
     tests:
       - name: a_guidance_file
         match: agent_instruction_surface(e.file.path)
@@ -123,137 +150,39 @@ definitions:
         events:
           - event: { action: file.modified }
             file: { path: "docs/not-claude.md" }
-      - name: an_attached_option_of_a_command
-        match: agent_instruction_surface(e.file.path)
-        verdict: match
-        events:
-          - event: { action: file.modified }
-            file: { path: "--output='.cursor/rules/boot.mdc'" }
-
-  - name: agent_surface_download
-    params: [c, w]
-    description: >
-      The word w, one of c.argv_raw, may name where the parsed command c puts what it fetches,
-      which the parser does not list among the command's writes: a word of curl or wget with
-      an output option (-o, -O, --output, --output-document) that is neither a URL nor an
-      upload (@file); the URL of curl -O, whose last part is the file's name; a word of git
-      clone that is not a URL; the last word of rsync. It says which words to ask about, not
-      that the word is a path: a caller asks that of the word.
-    body: >
-      c.name.matches("^(curl|wget)$") &&
-        c.args.matches("(?m)^(-[A-Za-z]*[oO]|--output|--output-document)$|^--output(-document)?=") &&
-        !w.matches("^['\"]?([A-Za-z][A-Za-z0-9+.-]*://|@)") ||
-      c.name == "curl" && c.args.matches("(?m)^(-[A-Za-z]*O|--remote-name)$") &&
-        w.matches("^['\"]?[A-Za-z][A-Za-z0-9+.-]*://") ||
-      c.name == "git" && c.args.matches("(?m)^clone$") &&
-        !w.matches("^['\"]?[A-Za-z][A-Za-z0-9+.-]*://") ||
-      c.name == "rsync" && size(c.argv_raw) > 1 && w == c.argv_raw[size(c.argv_raw) - 1]
-    tests:
-      - name: the_output_file_of_a_download
-        match: e.command.parsed_commands.exists(c, c.argv_raw.exists(a, agent_surface_download(c, a) && a == "~/notes/today.txt"))
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "curl -fsSL https://host.example/today.txt -o ~/notes/today.txt" }
-      - name: the_address_of_a_download_saved_elsewhere
-        match: e.command.parsed_commands.exists(c, c.argv_raw.exists(a, agent_surface_download(c, a) && a.matches("today\\.txt$")))
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "wget -O /tmp/t https://host.example/today.txt" }
-      - name: the_address_of_a_download_named_after_it
-        match: e.command.parsed_commands.exists(c, c.argv_raw.exists(a, agent_surface_download(c, a) && a.matches("today\\.txt$")))
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "curl -sSO https://host.example/today.txt" }
-      - name: a_file_that_is_uploaded
-        match: e.command.parsed_commands.exists(c, c.argv_raw.exists(a, agent_surface_download(c, a) && a.matches("today\\.txt$")))
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "curl -o /tmp/reply.json --data-binary @notes/today.txt https://host.example/upload" }
-      - name: the_directory_of_a_clone
-        match: e.command.parsed_commands.exists(c, c.argv_raw.exists(a, agent_surface_download(c, a) && a == "~/src/notes"))
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "git clone --depth 1 https://host.example/team/notes ~/src/notes" }
-      - name: the_source_of_a_sync
-        match: e.command.parsed_commands.exists(c, c.argv_raw.exists(a, agent_surface_download(c, a) && a == "~/notes/"))
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "rsync -a ~/notes/ /mnt/backup/notes/" }
-      - name: a_download_to_standard_output
-        match: e.command.parsed_commands.exists(c, c.argv_raw.exists(a, agent_surface_download(c, a)))
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "curl -fsSL https://host.example/today.txt | head -5" }
-
-  - name: agent_control_surface_download
-    params: [c]
-    description: >
-      A parsed command fetches something to a control file or directory: one of the words
-      agent_surface_download names is, as written, an agent_control_surface.
-    body: >
-      c.argv_raw.exists(a, agent_surface_download(c, a) && agent_control_surface(a))
-    tests:
-      - name: hooks_downloaded_to_a_quoted_variable_path
-        match: e.command.parsed_commands.exists(c, agent_control_surface_download(c))
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "wget -q -O \"$HOME/.cursor/hooks.json\" https://host.example/hooks.json" }
-      - name: an_attached_output_option
-        match: e.command.parsed_commands.exists(c, agent_control_surface_download(c))
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "wget --output-document=.mcp.json https://host.example/m.json" }
-      - name: a_plugin_cloned_under_home
-        match: e.command.parsed_commands.exists(c, agent_control_surface_download(c))
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "git clone https://host.example/someone/ext ~/.gemini/extensions/ext" }
-      - name: a_config_downloaded_elsewhere
-        match: e.command.parsed_commands.exists(c, agent_control_surface_download(c))
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "curl -fsSL -o /tmp/mcp.json https://host.example/configs/.mcp.json" }
-
-  - name: agent_instruction_surface_download
-    params: [c]
-    description: >
-      A parsed command fetches something to an instruction file or directory: one of the
-      words agent_surface_download names is, as written, an agent_instruction_surface.
-    body: >
-      c.argv_raw.exists(a, agent_surface_download(c, a) && agent_instruction_surface(a))
-    tests:
       - name: a_rule_downloaded_to_a_rules_directory
-        match: e.command.parsed_commands.exists(c, agent_instruction_surface_download(c))
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
         verdict: match
         events:
           - event: { action: command.executed }
-            command: { command: "curl -fsSL https://host.example/r.md -o .windsurf/rules/r.md" }
+            command: { command: "curl -fsSL https://host.example/r.md --output='.cursor/rules/boot.mdc'" }
       - name: skills_synced_under_home
-        match: e.command.parsed_commands.exists(c, agent_instruction_surface_download(c))
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
         verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "rsync -a /tmp/skills/ \"$HOME/.claude/skills/\"" }
       - name: a_guidance_file_downloaded_under_its_own_name
-        match: e.command.parsed_commands.exists(c, agent_instruction_surface_download(c))
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
         verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "curl -sSO https://host.example/team/AGENTS.md" }
+      - name: skills_unpacked_from_an_archive
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "tar -xzf skills.tgz -C ~/.claude/skills" }
       - name: skills_synced_out_of_home
-        match: e.command.parsed_commands.exists(c, agent_instruction_surface_download(c))
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
         verdict: no_match
         events:
           - event: { action: command.executed }
             command: { command: "rsync -a ~/.claude/skills/ /mnt/backup/skills/" }
+      - name: a_guidance_file_downloaded_under_another_name
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "wget -O /tmp/t https://host.example/team/AGENTS.md" }

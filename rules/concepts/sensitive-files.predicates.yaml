@@ -13,8 +13,9 @@
 #
 # Without the second half `echo key >> ~/.ssh/authorized_keys` is not seen at all: a shell
 # command is no file event. What a command writes is the parser's to say (a redirection, tee,
-# sed -i, cp, mv, install, ln, dd, truncate), so a file named in an argument, a commit message
-# or a here-document is not a write.
+# sed -i, cp, mv, install, ln, dd, the file a download is saved to, the destination of scp
+# and rsync), so a file named in an argument, a commit message or a here-document is not a
+# write.
 #
 # Each predicate answers for a path under any directory, a home directory or a variable
 # included.
@@ -38,6 +39,24 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "cat /tmp/id.pub >> ~/.ssh/authorized_keys" }
+      - name: a_key_file_downloaded_into_place
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, ssh_trust_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -fsSL https://x.example/k.pub -o ~/.ssh/authorized_keys" }
+      - name: a_key_file_copied_from_another_host
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, ssh_trust_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp build@host.example:keys/authorized_keys ~/.ssh/" }
+      - name: a_key_file_uploaded
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, ssh_trust_file(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp ~/.ssh/authorized_keys build@host.example:backup/" }
       - name: a_key_only_read
         match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, ssh_trust_file(f.path)))
         verdict: no_match

@@ -135,8 +135,9 @@ func parsedCommand(c shellcmd.Command, reads []shellcmd.FileRead) asymptoteobser
 		}
 	}
 	pc.FileEffects = parsedFileEffects(c.FileEffects())
-	// A command whose words are all known writes exactly its effects.
-	if pc.FileWrites = pc.FileEffects; !c.Evaluated() {
+	// A command whose words are all known, and that puts no files into a directory, writes
+	// exactly its effects.
+	if pc.FileWrites = pc.FileEffects; !c.WritesAreEffects() {
 		pc.FileWrites = parsedFileEffects(c.FileWrites())
 	}
 	if len(reads) > 0 {
