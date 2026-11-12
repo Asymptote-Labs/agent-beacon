@@ -11,19 +11,21 @@ import (
 )
 
 // gc tunes the garbage collector. The call path allocates quickly against a small live heap, so
-// at Go's default (GOGC=100) the collector runs constantly: marking was a quarter of all CPU under
-// load, and a higher percentage made the gateway a quarter faster. The memory limit caps what that
-// trade can cost: near it, the collector runs as often as it must. GOGC and GOMEMLIMIT in the
-// environment win over both.
+// at Go's default (GOGC=100) the collector runs often: on 2 vCPU it cost 2-9% of throughput, and
+// p99 rose from about 1.1 ms to 1.5 ms. Twice that (200) costs nothing measurable and holds a
+// third to a half less memory than 400 did, which a sidecar keeps for its whole life; 400 was
+// chosen when the call path allocated five times what it does now. The memory limit caps the
+// trade: near it, the collector runs as often as it must. GOGC and GOMEMLIMIT in the environment
+// win over both.
 type gc struct {
-	// Percent is heap growth over the live heap before a collection, as GOGC (default 400).
+	// Percent is heap growth over the live heap before a collection, as GOGC (default 200).
 	Percent int `yaml:"percent"`
 	// MemoryLimit is a soft limit on the process's memory, in GOMEMLIMIT's syntax ("6GiB").
 	// Default: 80% of the container's memory limit (cgroup v2) when there is one, else none.
 	MemoryLimit string `yaml:"memory_limit"`
 }
 
-const defaultGCPercent = 400
+const defaultGCPercent = 200
 
 // apply sets the collector up and returns the memory limit in effect, 0 when there is none.
 func (g gc) apply(log *slog.Logger) (int64, error) {

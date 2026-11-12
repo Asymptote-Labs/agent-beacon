@@ -13,9 +13,10 @@ admin: 127.0.0.1:4029
 
 # Garbage collector. The call path allocates quickly against a small live heap; collecting less
 # often (percent, as GOGC) buys throughput with memory, and the limit (as GOMEMLIMIT) caps the
-# trade. GOGC and GOMEMLIMIT in the environment win.
+# trade. 200 costs no throughput against 400 and holds a third to a half less memory; 100 holds
+# about a third less again, for 2-9% of throughput. GOGC and GOMEMLIMIT in the environment win.
 # gc:
-#   percent: 400                     # default
+#   percent: 200                     # default
 #   memory_limit: 6GiB               # default: 80% of the container's limit (cgroup v2), else none
 
 # One entry per gateway attachment. `type` picks the adapter; the other keys are its config.
