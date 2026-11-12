@@ -582,6 +582,24 @@ func TestAnswersFirst(t *testing.T) {
 	}
 }
 
+// An analysis still reading its call after Handle returns holds what the adapter says the bodies
+// keep in memory, once, not their lengths: a pooled payload holding both bodies, larger than either.
+func TestAnswerFirstHoldsBodyBytes(t *testing.T) {
+	g := &gate{entered: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}, 1)}
+	p := New(Config{Analyzers: []Analyzer{g}})
+	defer p.Close()
+	payload := make([]byte, 4096)
+	n := copy(payload, `{"messages":[{"role":"user","content":"hi"}]}`)
+	c := &gateway.Call{Gateway: "g", ID: "c", Phase: gateway.PhaseResponse, Protocol: llm.OpenAIChat,
+		Body: payload[:n], RequestBody: payload[:n], BodyBytes: int64(cap(payload))}
+	p.Handle(context.Background(), c)
+	<-g.entered
+	if s := p.Stats(); s.BodyBytes != int64(cap(payload)) {
+		t.Errorf("while analysis runs: body_bytes %d, want the payload's %d", s.BodyBytes, cap(payload))
+	}
+	close(g.release)
+}
+
 // observer records what it was shown and adds a record of its own.
 type observer struct{ seen []Observation }
 

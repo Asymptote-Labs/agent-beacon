@@ -74,10 +74,14 @@ func DiscardBody(r *http.Request, limit int64) {
 }
 
 // BodySize is what an HTTP adapter reserves at admission for a body it reads up to limit bytes of:
-// its declared length, or limit when the length is unknown (chunked) or over the limit.
+// the buffer ReadBody reads a body of that declared length into, which a pooled buffer rounds up,
+// or limit when the length is unknown (chunked) or over the limit.
 func BodySize(r *http.Request, limit int64) int64 {
 	if r.ContentLength < 0 || r.ContentLength > limit {
 		return limit
+	}
+	if class, pooled := bodyClass(r.ContentLength); pooled {
+		return 1 << class
 	}
 	return r.ContentLength
 }
@@ -119,11 +123,18 @@ const (
 
 var bodyPools [maxBodyClass - minBodyClass + 1]sync.Pool
 
+// bodyClass is the size class of a pooled buffer for n bytes, and false when such a buffer is not
+// pooled.
+func bodyClass(n int64) (int, bool) {
+	class := max(bits.Len64(uint64(n-1)), minBodyClass)
+	return class, n > 0 && class <= maxBodyClass
+}
+
 // bodyBuffer returns a buffer of length n and the func that returns it to its pool, at most once
 // however often it is called: a buffer pooled twice would be handed to two calls at once.
 func bodyBuffer(n int64) ([]byte, func()) {
-	class := max(bits.Len64(uint64(n-1)), minBodyClass)
-	if n == 0 || class > maxBodyClass {
+	class, pooled := bodyClass(n)
+	if !pooled {
 		return make([]byte, n), func() {}
 	}
 	pool := &bodyPools[class-minBodyClass]

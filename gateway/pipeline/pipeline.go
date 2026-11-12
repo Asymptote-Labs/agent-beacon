@@ -204,9 +204,13 @@ func (p *Pipeline) Handle(ctx context.Context, c *gateway.Call) gateway.Verdict 
 	// The adapter releases its reservation for the body when Handle returns; the analysis
 	// still reading it holds the bytes again until it ends, with the request body a reply
 	// carries. The two overlap, so the budget is briefly counted twice rather than ever not at
-	// all. What is held is the buffers' capacity: an adapter may hand over a slice of a larger
-	// buffer, which stays in memory as long as the slice is read.
-	held := p.bodies.hold(int64(cap(c.Body) + cap(c.RequestBody)))
+	// all. What is held is what the bodies keep in memory, as the adapter states it: a pooled
+	// buffer may hold both bodies, and more than either.
+	n := c.BodyBytes
+	if n <= 0 {
+		n = int64(len(c.Body) + len(c.RequestBody))
+	}
+	held := p.bodies.hold(n)
 	p.pending.Add(1)
 	go func() {
 		defer p.pending.Done()

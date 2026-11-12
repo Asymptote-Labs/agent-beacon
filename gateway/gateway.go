@@ -81,6 +81,11 @@ type Call struct {
 	// RequestBody again, which may be after Handle returns. An adapter that reads bodies into
 	// pooled buffers returns them here (ReadBody); nothing derived from a body refers to it.
 	Release func()
+	// BodyBytes, when set, is the memory Body and RequestBody keep until Release: the buffers
+	// they are slices of, each counted once (one pooled buffer may hold both, and more than
+	// either). A Handler still reading the bodies after Handle returns counts it against its
+	// body budget until then; unset, it counts the bodies' lengths.
+	BodyBytes int64
 }
 
 // Client is what the gateway knows about who made the call.

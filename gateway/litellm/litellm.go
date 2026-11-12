@@ -125,7 +125,16 @@ func (a *adapter) guardrail(w http.ResponseWriter, r *http.Request, h gateway.Ha
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	c.Release, handed = free, true
+	// A request built over its payload keeps the payload until the pipeline has read it. Any other
+	// body (a reply, a texts-only request, one the payload had no room for) is a copy and refers
+	// to none of the payload, which goes back to the pool at once.
+	if len(body) > 0 && len(c.Body) > 0 && &c.Body[0] == &body[0] {
+		c.Release, c.BodyBytes = free, int64(cap(body))
+	} else {
+		free()
+		c.BodyBytes = int64(cap(c.Body) + cap(c.RequestBody))
+	}
+	handed = true
 	writeVerdict(w, h.Handle(r.Context(), c))
 }
 

@@ -173,7 +173,8 @@ func (a *adapter) handler(h gateway.Handler) http.Handler {
 			writeReply(w, reply{Verdict: true})
 			return
 		}
-		c.Release, handed = free, true
+		// Body and RequestBody are both slices of the one payload buffer.
+		c.Release, c.BodyBytes, handed = free, int64(cap(body)), true
 		writeVerdict(w, h.Handle(r.Context(), c))
 	})
 	return mux
