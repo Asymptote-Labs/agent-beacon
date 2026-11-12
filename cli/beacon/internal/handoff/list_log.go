@@ -3,51 +3,41 @@ package handoff
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
-// ListWithLog includes sessions retained only in the runtime log. A store's
-// metadata wins, including subagent status, even when a filter hides that entry.
+// LogReadError identifies a runtime-log read failure separately from store errors.
+type LogReadError struct {
+	Path string
+	Err  error
+}
+
+func (e *LogReadError) Error() string { return fmt.Sprintf("runtime log %s: %v", e.Path, e.Err) }
+func (e *LogReadError) Unwrap() error { return e.Err }
+
+// ListWithLog merges runtime stores with log-only sessions before filtering and
+// sorting. Store metadata wins even when a filter hides the stored entry.
 func ListWithLog(sources []Source, logPath string, filter Filter) ([]Session, error) {
-	var combined []Source
+	stored, storeErr := List(sources, Filter{Harness: filter.Harness, IncludeSubagents: true})
 	seen := map[string]bool{}
-	for _, source := range sources {
-		if filter.Harness != "" && source.Harness() != filter.Harness {
+	for _, session := range stored {
+		seen[session.Harness+"\x00"+session.ID] = true
+	}
+	logged, logErr := LogSessions(logPath, Filter{Harness: filter.Harness, IncludeSubagents: true})
+	for _, session := range logged {
+		key := session.Harness + "\x00" + session.ID
+		if seen[key] {
 			continue
 		}
-		sessions, err := source.List()
-		combined = append(combined, listedSource{source.Harness(), sessions, err})
-		for _, s := range sessions {
-			seen[s.Harness+"\x00"+s.ID] = true
-		}
+		seen[key] = true
+		session.FromLog = true
+		// With no prompt or parent link, log-only child runtimes cannot otherwise
+		// be distinguished. Keep promptless sessions behind the subagents opt-in.
+		session.Subagent = strings.TrimSpace(session.Title) == ""
+		stored = append(stored, session)
 	}
-	logged, logErr := LogSessions(logPath, Filter{Harness: filter.Harness})
-	byHarness := map[string][]Session{}
-	var names []string
-	for _, s := range logged {
-		if seen[s.Harness+"\x00"+s.ID] {
-			continue
-		}
-		if _, ok := byHarness[s.Harness]; !ok {
-			names = append(names, s.Harness)
-		}
-		byHarness[s.Harness] = append(byHarness[s.Harness], s)
-	}
-	for _, name := range names {
-		combined = append(combined, listedSource{name, byHarness[name], nil})
-	}
-	sessions, err := List(combined, filter)
 	if logErr != nil {
-		logErr = fmt.Errorf("runtime log %s: %w", logPath, logErr)
-		return sessions, errors.Join(err, logErr)
+		logErr = &LogReadError{Path: logPath, Err: logErr}
 	}
-	return sessions, err
+	return filterSessions(stored, filter), errors.Join(storeErr, logErr)
 }
-
-type listedSource struct {
-	harness  string
-	sessions []Session
-	err      error
-}
-
-func (s listedSource) Harness() string          { return s.harness }
-func (s listedSource) List() ([]Session, error) { return s.sessions, s.err }
