@@ -526,18 +526,19 @@ func (f *flow) assign(shell int32, name string, value []string) {
 // writes records the files c writes with what it took in: the target of a redirection of its
 // standard output, and the files its own words name (cp's and install's destination, tee's files,
 // mv's destination, which holds what its sources held). Writing nothing that was read into a file
-// clears it, and so does deleting or truncating it.
+// clears it, and so does deleting or truncating it. A file is named as it is written, as a read
+// is, so what is copied to ~/x is what a later read of ~/x takes in.
 func (f *flow) writes(c *Command, name string, taken []string) {
 	// With nothing taken in and no file holding anything, only a move leaves something to follow.
 	if len(taken) == 0 && f.files == nil && name != "mv" && name != "git" {
 		return
 	}
 	for _, r := range c.Redirects {
-		if path, op, ok := redirectTarget(r); ok && (r.Fd == "" || r.Fd == "1" || r.Op == "&>" || r.Op == "&>>") {
+		if path, op, ok := redirectTarget(r, true); ok && (r.Fd == "" || r.Fd == "1" || r.Op == "&>" || r.Op == "&>>") {
 			f.write(path, taken, op == OpAppend)
 		}
 	}
-	effects := c.commandTargets()
+	effects := c.commandTargets(true)
 	if len(effects) == 0 {
 		return
 	}

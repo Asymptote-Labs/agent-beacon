@@ -20,7 +20,7 @@
       "type": "string",
       "pattern": "^threat-rules/v[0-9]+(\\.[0-9]+)?$",
       "default": "threat-rules/v1",
-      "description": "Minimum Threat Rules spec version the rule needs. Required when the rule uses a later feature: threat-rules/v1.1 or later for correlation.order, threat-rules/v1.2 or later for e.command.parsed_commands, threat-rules/v1.3 or later for its args, file_reads, script_sends and socket_redirects and for a call to a predicate. Engines skip a rule whose spec is newer than they support."
+      "description": "Minimum Threat Rules spec version the rule needs. Required when the rule uses a later feature: threat-rules/v1.1 or later for correlation.order, threat-rules/v1.2 or later for e.command.parsed_commands, threat-rules/v1.3 or later for its args, file_reads, file_writes, script_sends and socket_redirects and for a call to a predicate. Engines skip a rule whose spec is newer than they support."
     },
     "version": {
       "type": "integer",

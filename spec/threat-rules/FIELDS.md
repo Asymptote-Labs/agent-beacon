@@ -189,7 +189,9 @@ never written to or read from the log, so a fixture sets the source field, not t
   passed, "" when it depends on an expansion, glob or `~`; and as written), `args` (spec
   v1.3: the words after the name, one per line, so `c.args.matches("(?m)^auth\ntoken$")`
   asks for two whole words that follow each other), `env` (NAME=value prefixes),
-  `file_effects` (`{path, op}`), `file_reads` (spec v1.3, `{path, via}`: the files whose
+  `file_effects` (`{path, op}`), `file_writes` (spec v1.3, `{path, op}`: the files it
+  writes with each path as written, so a write to `~/.bashrc` or `$HOME/.netrc`, which
+  `file_effects` leaves out, is listed), `file_reads` (spec v1.3, `{path, via}`: the files whose
   content it takes in, each as written without its quotes, so `~/.aws/credentials` and
   `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one
   that reaches its standard input by a redirection or a pipe, `argument` for one a

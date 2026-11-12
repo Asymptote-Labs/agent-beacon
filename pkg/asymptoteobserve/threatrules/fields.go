@@ -143,7 +143,9 @@ var derivedFieldDocs = map[string]string{
 		"  passed, \"\" when it depends on an expansion, glob or `~`; and as written), `args` (spec\n" +
 		"  v1.3: the words after the name, one per line, so `c.args.matches(\"(?m)^auth\\ntoken$\")`\n" +
 		"  asks for two whole words that follow each other), `env` (NAME=value prefixes),\n" +
-		"  `file_effects` (`{path, op}`), `file_reads` (spec v1.3, `{path, via}`: the files whose\n" +
+		"  `file_effects` (`{path, op}`), `file_writes` (spec v1.3, `{path, op}`: the files it\n" +
+		"  writes with each path as written, so a write to `~/.bashrc` or `$HOME/.netrc`, which\n" +
+		"  `file_effects` leaves out, is listed), `file_reads` (spec v1.3, `{path, via}`: the files whose\n" +
 		"  content it takes in, each as written without its quotes, so `~/.aws/credentials` and\n" +
 		"  `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one\n" +
 		"  that reaches its standard input by a redirection or a pipe, `argument` for one a\n" +

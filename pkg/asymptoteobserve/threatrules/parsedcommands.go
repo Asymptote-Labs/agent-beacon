@@ -11,7 +11,7 @@ import (
 const ParsedCommandsPath = "command.parsed_commands"
 
 // v1_3Fields are the fields of a parsed command that spec v1.3 added.
-var v1_3Fields = []string{"args", "file_reads", "script_sends", "socket_redirects"}
+var v1_3Fields = []string{"args", "file_reads", "file_writes", "script_sends", "socket_redirects"}
 
 // ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
 // to the retained command line, so a longer value (from an in-process caller) is cut there too.
@@ -34,7 +34,8 @@ const maxShellDepth = 2
 //     for a word whose value depends on an expansion, glob or leading tilde; argv_raw as written.
 //   - args is shellcmd's ArgsText: the words of argv after name, one per line.
 //   - env maps each NAME=value assignment before the command to its value ("" when unknown).
-//   - file_effects are shellcmd's file effects of the command: {path, op}.
+//   - file_effects are shellcmd's file effects of the command: {path, op}. file_writes are its
+//     file writes: the same, and the ones whose path is only known as written.
 //   - file_reads are shellcmd's file reads of the command: {path, via}, each path as written.
 //     script_sends are the paths of those an inline script opens inside a call that sends them.
 //   - socket_redirects are shellcmd's socket redirections of the command: {path, op}.
@@ -102,11 +103,10 @@ func parsedCommand(c shellcmd.Command, reads []shellcmd.FileRead) asymptoteobser
 			pc.Env[as.Name] = as.Value.Text
 		}
 	}
-	if effects := c.FileEffects(); len(effects) > 0 {
-		pc.FileEffects = make([]asymptoteobserve.ParsedFileEffect, len(effects))
-		for i, e := range effects {
-			pc.FileEffects[i] = asymptoteobserve.ParsedFileEffect{Path: e.Path, Op: string(e.Op)}
-		}
+	pc.FileEffects = parsedFileEffects(c.FileEffects())
+	// A command whose words are all known writes exactly its effects.
+	if pc.FileWrites = pc.FileEffects; !c.Evaluated() {
+		pc.FileWrites = parsedFileEffects(c.FileWrites())
 	}
 	if len(reads) > 0 {
 		pc.FileReads = make([]asymptoteobserve.ParsedFileRead, len(reads))
@@ -118,4 +118,15 @@ func parsedCommand(c shellcmd.Command, reads []shellcmd.FileRead) asymptoteobser
 		}
 	}
 	return pc
+}
+
+func parsedFileEffects(effects []shellcmd.FileEffect) []asymptoteobserve.ParsedFileEffect {
+	if len(effects) == 0 {
+		return nil
+	}
+	out := make([]asymptoteobserve.ParsedFileEffect, len(effects))
+	for i, e := range effects {
+		out[i] = asymptoteobserve.ParsedFileEffect{Path: e.Path, Op: string(e.Op)}
+	}
+	return out
 }

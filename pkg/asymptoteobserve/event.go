@@ -216,6 +216,10 @@ type ParsedCommand struct {
 	Env map[string]string `cel:"env"`
 	// FileEffects are the files the command evidently writes, and how.
 	FileEffects []ParsedFileEffect `cel:"file_effects"`
+	// FileWrites are the files the command evidently writes, and how, with every path as
+	// written without its quotes, also where the value depends on an expansion (~/.bashrc,
+	// $HOME/.ssh/authorized_keys), which FileEffects leaves out. Every effect is a write.
+	FileWrites []ParsedFileEffect `cel:"file_writes"`
 	// FileReads are the files whose content the command evidently takes in, and how: directly
 	// (what it prints, searches, copies, archives or sends), on its standard input, or written
 	// into one of its words by a substitution. A path is as written without its quotes, also
@@ -239,7 +243,8 @@ type ParsedCommand struct {
 }
 
 // ParsedFileEffect is a file a parsed command evidently writes. Op is one of write, append,
-// touch, truncate, edit, delete, move_from, move_to, link.
+// touch, truncate, edit, delete, move_from, move_to, link. In FileEffects Path is a path whose
+// value is known; in FileWrites it is the path as written.
 type ParsedFileEffect struct {
 	Path string `cel:"path"`
 	Op   string `cel:"op"`
