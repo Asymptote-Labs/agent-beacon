@@ -376,6 +376,184 @@ func TestRedactStringIsIdempotent(t *testing.T) {
 	}
 }
 
+// An Authorization header names a scheme and then the credential. For a scheme the header rule
+// does not list, the label rules took the scheme word for the value and stopped at the blank, so
+// the scheme was replaced and the credential after it stayed: `Authorization: [REDACTED] <key>`.
+// Elasticsearch (ApiKey, the scheme docs/log-forwarding/elastic.mdx has people type), Okta (SSWS),
+// Discord (Bot), Splunk HEC and Kerberos (Negotiate) all send theirs this way.
+func TestRedactStringAuthorizationCredentialAfterAnyScheme(t *testing.T) {
+	const credential = "VnVhQ2ZHY0JDZGJrUW0tZTVhT3g6dWkybHAyYXhUTm1zeWFrdzl0dk5udw=="
+	for input, want := range map[string]string{
+		"Authorization: ApiKey " + credential:                                         "Authorization: [REDACTED]",
+		"Authorization: SSWS " + credential:                                           "Authorization: [REDACTED]",
+		"Authorization: Bot " + credential:                                            "Authorization: [REDACTED]",
+		"Authorization: Splunk " + credential:                                         "Authorization: [REDACTED]",
+		"Authorization: sso-key " + credential:                                        "Authorization: [REDACTED]",
+		"authorization=ApiKey " + credential:                                          "authorization=[REDACTED]",
+		"Proxy-Authorization: Negotiate " + credential:                                "Proxy-Authorization: [REDACTED]",
+		`curl -H "Authorization: ApiKey ` + credential + `" https://es.example:9200/`: `curl -H "Authorization: [REDACTED]" https://es.example:9200/`,
+		"curl -H 'Authorization: SSWS " + credential + "' https://example.okta.com":   "curl -H 'Authorization: [REDACTED]' https://example.okta.com",
+		"headers:\n  Authorization: ApiKey " + credential + "\n  Accept: json":        "headers:\n  Authorization: [REDACTED]\n  Accept: json",
+		// Quoted whole, the value was already one marker; the two forms now agree.
+		`{"Authorization": "ApiKey ` + credential + `"}`: `{"Authorization": "[REDACTED]"}`,
+		// A variable reference after the scheme goes with it, as it does after Bearer.
+		`-H "Authorization: ApiKey $ES_API_KEY"`: `-H "Authorization: [REDACTED]"`,
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+		if strings.Contains(got, credential) {
+			t.Errorf("RedactString(%q) kept the credential: %q", input, got)
+		}
+		if twice := RedactString(got); twice != got {
+			t.Errorf("RedactString is not idempotent:\nonce  %q\ntwice %q", got, twice)
+		}
+	}
+
+	// The schemes the header rule lists keep their name, as before: detection rules match on what
+	// kind of credential a line held.
+	for input, want := range map[string]string{
+		"Authorization: Bearer " + credential:                "Authorization: Bearer [REDACTED]",
+		"Authorization: Basic " + credential:                 "Authorization: Basic [REDACTED]",
+		"Authorization: Token " + credential:                 "Authorization: Token [REDACTED]",
+		"Authorization: Digest " + credential:                "Authorization: Digest [REDACTED]",
+		"Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.e30.sig": "Authorization: Bearer eyJ[REDACTED]",
+		`{"authorization": "Basic dXNlcjpwYXNz"}`:            `{"authorization": "Basic [REDACTED]"}`,
+	} {
+		if got := RedactString(input); got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	// A credential sent with no scheme is the first word, and is still the one replaced. Reading
+	// it as a scheme to keep would leave it in the text whenever something follows it on the line,
+	// so the word after it goes too, unless it is a comment. A long flag that names no secret goes
+	// with it; replacing it hides nothing.
+	for input, want := range map[string]string{
+		"Authorization: " + credential:                     "Authorization: [REDACTED]",
+		"Authorization: sk-live-abcdef0123456789 # prod":   "Authorization: [REDACTED] # prod",
+		"AUTHORIZATION=abcdef0123456789 --verbose":         "AUTHORIZATION=[REDACTED]",
+		"Authorization: $TOKEN extra":                      "Authorization: [REDACTED] extra",
+		"authorization: " + credential + "\nnext: line":    "authorization: [REDACTED]\nnext: line",
+		"-H 'Authorization: " + credential + "' -H 'A: b'": "-H 'Authorization: [REDACTED]' -H 'A: b'",
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+		if twice := RedactString(got); twice != got {
+			t.Errorf("RedactString is not idempotent:\nonce  %q\ntwice %q", got, twice)
+		}
+	}
+
+	// A flag or a secret label after the first word is the next item on the line, not a credential.
+	// Taken as one, the secret it introduces would stay: `--token x` lost `--token`, and the flag
+	// rule never saw `x`. Each of these is redacted as it was before the rule existed.
+	for input, want := range map[string]string{
+		"AUTHORIZATION=abc --token hunter2hunter2":           "AUTHORIZATION=[REDACTED] --token [REDACTED]",
+		"AUTHORIZATION=abc --password hunter2hunter2":        "AUTHORIZATION=[REDACTED] --password [REDACTED]",
+		"AUTHORIZATION=abc -u admin:hunter2hunter2":          "AUTHORIZATION=[REDACTED] -u admin:hunter2hunter2",
+		"authorization: abc password: hunter2hunter2":        "authorization: [REDACTED] password: [REDACTED]",
+		`authorization: abc password="hunter2 hunter2"`:      `authorization: [REDACTED] password="[REDACTED]"`,
+		"AUTHORIZATION=abc PASSWORD=hunter2hunter2":          "AUTHORIZATION=[REDACTED] PASSWORD=[REDACTED]",
+		`authorization: abc "api_key": "hunter2hunter2"`:     `authorization: [REDACTED] "api_key": "[REDACTED]"`,
+		"Authorization: ApiKey --api-key hunter2hunter2":     "Authorization: [REDACTED] --api-key [REDACTED]",
+		"Authorization: ApiKey abc --api-key hunter2hunter2": "Authorization: [REDACTED] --api-key [REDACTED]",
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+		if strings.Contains(got, "hunter2hunter2") && !strings.Contains(input, "-u admin:") {
+			t.Errorf("RedactString(%q) kept the secret after the authorization value: %q", input, got)
+		}
+		if twice := RedactString(got); twice != got {
+			t.Errorf("RedactString is not idempotent:\nonce  %q\ntwice %q", got, twice)
+		}
+	}
+
+	// A base64url credential can start with `-`. It is not a flag, and goes with its scheme.
+	for _, input := range []string{"Authorization: SSWS -Xq9abcdefghijklmnopqrstuv", "Authorization: ApiKey -_abcdefghijklmnop"} {
+		if got := RedactString(input); got != "Authorization: [REDACTED]" {
+			t.Errorf("RedactString(%q) = %q, want the scheme and the credential replaced", input, got)
+		}
+	}
+
+	// A scheme that sends a list of auth-params has every parameter replaced with it; Digest, a
+	// listed scheme, keeps its name. Nothing is left of the list behind a marker.
+	for input, want := range map[string]string{
+		`Authorization: Hawk id="dh37fgj492je", ts="1353832234", nonce="j4h3g2", mac="6R4rV5iE+NPoym+WwjeHzjAGXUtLNIxmo1vpMofpLAE="`:                                                                                    "Authorization: [REDACTED]",
+		"Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20240101/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=fe5f80f77d5fa3beca038a248ff027d0445342fe2855ddc963176630326f1024": "Authorization: [REDACTED]",
+		`Authorization: Digest username="alice", realm="api", nonce="dcd98b7102dd2f0e", response="6629fae49393a05397450978507c4ef1"`:                                                                                    "Authorization: Digest [REDACTED]",
+		"Authorization: Custom user=alice,secret=s3cr3tvalue": "Authorization: [REDACTED]",
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+		if twice := RedactString(got); twice != got {
+			t.Errorf("RedactString is not idempotent:\nonce  %q\ntwice %q", got, twice)
+		}
+	}
+
+	// A copy of the credential elsewhere in the text goes too, as an assigned value's copies do.
+	for _, scheme := range []string{"ApiKey", "Bearer"} {
+		input := "Authorization: " + scheme + " " + credential + " ; echo " + credential
+		if got := RedactString(input); strings.Contains(got, credential) {
+			t.Errorf("RedactString(%q) kept a copy of the credential: %q", input, got)
+		}
+	}
+	// The word after a bare key in prose is no credential, and its copies stay.
+	if got := RedactString("Authorization: required everywhere. Everywhere means everywhere"); !strings.Contains(got, "means everywhere") {
+		t.Errorf("a prose word after Authorization: was removed as a copy: %q", got)
+	}
+
+	// The same header reaches the log through an event's command line.
+	event := NewEvent(NewEventOptions{Action: "command.executed", Harness: HarnessInfo{Name: "claude_code"}})
+	event.Command = &CommandInfo{Command: `curl -H "Authorization: ApiKey ` + credential + `" https://es.example:9200/`}
+	if got := SanitizeEvent(event, 64*1024).Command.Command; strings.Contains(got, credential) {
+		t.Errorf("SanitizeEvent kept the credential in command.command: %s", got)
+	}
+}
+
+// A command held as a JSON-encoded string (a tool's arguments, a raw payload) quotes its arguments
+// with `\"`. An unquoted value ends at the backslash that escapes the closing quote, so redaction
+// leaves the escape in place and the text still decodes. Every unquoted value took the backslash,
+// an Authorization credential, a labeled value or a URL parameter's alike, and left a bare quote
+// that ended the string early.
+func TestRedactStringKeepsJSONEncodedCommandsValid(t *testing.T) {
+	const credential = "VnVhQ2ZHY0JDZGJrUW0tZTVhT3g6dWkybHAyYXhUTm1zeWFrdzl0dk5udw=="
+	for command, want := range map[string]string{
+		`curl -H "Authorization: ApiKey ` + credential + `" https://es.example:9200/`: `curl -H "Authorization: [REDACTED]" https://es.example:9200/`,
+		`curl -H "Authorization: SSWS ` + credential + `" https://es.example:9200/`:   `curl -H "Authorization: [REDACTED]" https://es.example:9200/`,
+		`curl -H "Authorization: Bearer ` + credential + `" https://es.example:9200/`: `curl -H "Authorization: Bearer [REDACTED]" https://es.example:9200/`,
+		`curl -H "Authorization: Basic ` + credential + `" https://es.example:9200/`:  `curl -H "Authorization: Basic [REDACTED]" https://es.example:9200/`,
+		`curl -H "Authorization: Token ` + credential + `" https://es.example:9200/`:  `curl -H "Authorization: Token [REDACTED]" https://es.example:9200/`,
+		`curl -H "Authorization: Digest ` + credential + `" https://es.example:9200/`: `curl -H "Authorization: Digest [REDACTED]" https://es.example:9200/`,
+		`curl -H "X-Api-Key: ` + credential + `" https://es.example:9200/`:            `curl -H "X-Api-Key: [REDACTED]" https://es.example:9200/`,
+		`curl -d "token=` + credential + `" https://es.example:9200/`:                 `curl -d "token=[REDACTED]" https://es.example:9200/`,
+		`curl "https://es.example:9200/?api_key=` + credential + `"`:                  `curl "https://es.example:9200/?api_key=[REDACTED]"`,
+	} {
+		encoded, err := json.Marshal(map[string]string{"command": command})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := RedactString(string(encoded))
+		var decoded map[string]string
+		if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+			t.Errorf("redaction broke the JSON: %v\n  in:  %s\n  out: %s", err, encoded, got)
+			continue
+		}
+		if decoded["command"] != want {
+			t.Errorf("decoded command = %q, want %q", decoded["command"], want)
+		}
+		if twice := RedactString(got); twice != got {
+			t.Errorf("RedactString is not idempotent:\nonce  %q\ntwice %q", got, twice)
+		}
+	}
+}
+
 // A URL whose user name is a secret-named label, with `&` in its password and a query string after
 // it. `x-access-token:` is a label, not a query parameter, so `&` is part of its value, which runs
 // to the whitespace over the host and the query string, as any label's unquoted value does; the
@@ -474,6 +652,20 @@ var redactIdempotenceInputs = []string{
 	"config dump\napi_key=sk-abcdefghijklmnopqrstuvwxyz0123\nOPENAI sk-abcdefghijklmnopqrstuvwxyz0123",
 	`{"token": "opaque-session-value-9", "password": "hunter2hunter2"}`,
 	"Authorization: Bearer abc.def.ghi and --password hunter2hunter2",
+	// A scheme the header rule does not list, with more after the credential on the line.
+	"Authorization: ApiKey VnVhQ2ZHY0JDZGJrUW0tZTVhT3g6dWkybHAyYXhUTm1zeWFrdzl0dk5udw== and more after it",
+	"Authorization: Hawk id=dh37fgj492je, ts=1353832234, mac=6R4rV5iENPoymWwjeHzjAGXUtLNIxmo1vpMofpLAE=",
+	"Proxy-Authorization: Negotiate YIIabcdef Authorization: SSWS 00abcdefghij Authorization: a b c d",
+	// A flag or a secret label after the first word, and a header in a JSON-encoded command.
+	"AUTHORIZATION=abc --token hunter2hunter2 authorization: abc password: hunter2hunter2",
+	`{"command":"curl -H \"Authorization: ApiKey VnVhQ2ZHY0JDZGJr\" -H \"Authorization: Bearer abcdef0123456789\" https://x/"}`,
+	// A short scheme and credential leave a marker the capture of copies must not read as a scheme
+	// on the next pass (found by FuzzRedactIsIdempotent).
+	"AUTHORIZATION=A 0 00000000",
+	// A credential copied elsewhere, a dash-led credential, and parameter lists with quoted values.
+	"Authorization: ApiKey Zm9vYmFyYmF6cXV4MTIz ; echo Zm9vYmFyYmF6cXV4MTIz",
+	"Authorization: SSWS -Xq9abcdefghijklmnop --token hunter2hunter2",
+	`Authorization: Digest username="alice", response="6629fae4", Authorization: Hawk id="x", mac="y"`,
 	"postgres://app:pa55w0rd@db/app",
 	"curl -u admin:hunter2hunter2 -H 'Cookie: sid=abcdef123456789' https://x",
 	"curl -b 'sessionid=abcdef123456789' --cookie sid=abcdef123456789 https://x",

@@ -1,20 +1,17 @@
 package cmd
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/devinsession"
+	endpointintegrations "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/spf13/cobra"
 )
 
@@ -141,6 +138,9 @@ func watchEndpointDevin(ctx context.Context, cmd *cobra.Command, opts devinsessi
 		interval = 5 * time.Second
 	}
 	for {
+		// Coverage is rebuilt every tick: a session the hooks start recording after the watch began
+		// would otherwise be missing from it, and every tick would record it a second time.
+		opts.LiveCoverage = endpointDevinLiveCoverage(opts.LogPath)
 		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, devinsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Devin CLI sync error: %v\n", err)
@@ -175,64 +175,10 @@ func reportEndpointDevinSweep(cmd *cobra.Command, summary devinsession.Summary) 
 	}
 }
 
-// endpointDevinLiveCoverage finds, per Devin session id, the earliest hook event the retained
-// runtime log holds. The poll sweep uses it to skip what the hooks already recorded: a session
-// the hooks never saw is collected whole, while a covered one keeps only the events the hook
-// payload cannot carry.
-//
-// Every retained archive is read because coverage can sit several rotations back on a busy
-// machine; a missing file is simply not evidence. The scan decodes only the three fields it
-// needs, so a runtime.jsonl of any size costs a line at a time, and only lines that could be a
-// Devin event are unmarshalled.
-func endpointDevinLiveCoverage(logPath string) map[string]time.Time {
-	coverage := map[string]time.Time{}
-	for _, path := range writer.RetainedLogPaths(logPath) {
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if !bytes.Contains(line, []byte("devin")) {
-				continue
-			}
-			var event struct {
-				Timestamp string `json:"timestamp"`
-				Harness   struct {
-					Name             string `json:"name"`
-					CollectionMethod string `json:"collection_method"`
-				} `json:"harness"`
-				Session struct {
-					ID string `json:"id"`
-				} `json:"session"`
-			}
-			if json.Unmarshal(line, &event) != nil {
-				continue
-			}
-			name := asymptoteobserve.NormalizeHarnessName(event.Harness.Name)
-			if (name != "devin-cli" && name != "devin") || event.Harness.CollectionMethod != asymptoteobserve.CollectionMethodHook {
-				continue
-			}
-			sessionID := strings.TrimSpace(event.Session.ID)
-			if sessionID == "" {
-				continue
-			}
-			ts, err := asymptoteobserve.ParseTimestamp(event.Timestamp)
-			if err != nil {
-				continue
-			}
-			if earliest, ok := coverage[sessionID]; !ok || ts.Before(earliest) {
-				coverage[sessionID] = ts
-			}
-		}
-		_ = f.Close()
-	}
-	if len(coverage) == 0 {
-		return nil
-	}
-	return coverage
+// endpointDevinLiveCoverage is the live hook coverage of each Devin session in the retained runtime
+// log, under either platform spelling, for the sync command and the backfill runner alike.
+func endpointDevinLiveCoverage(logPath string) sessionsync.LiveCoverage {
+	return endpointintegrations.HookCoverage(logPath, "devin", "devin-cli", "devin")
 }
 
 type devinSessionStatus struct {

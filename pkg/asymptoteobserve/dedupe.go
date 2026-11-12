@@ -217,8 +217,9 @@ func mayDuplicate(line, session []byte, action string) bool {
 	return bytes.Contains(line, session) && containsFold(line, action)
 }
 
-// containsFold reports whether s holds needle, which is lower case ASCII, in any case.
-func containsFold(s []byte, needle string) bool {
+// containsFold reports whether s holds needle, which is lower case ASCII, in any case. A window
+// of len(needle) bytes folds to an ASCII needle only byte for byte, so ASCII folding is all of it.
+func containsFold[S ~string | ~[]byte](s S, needle string) bool {
 	if needle == "" {
 		return true
 	}
@@ -227,7 +228,14 @@ func containsFold(s []byte, needle string) bool {
 		upper = first - 'a' + 'A'
 	}
 	for i := 0; i+len(needle) <= len(s); i++ {
-		if (s[i] == first || s[i] == upper) && bytes.EqualFold(s[i:i+len(needle)], []byte(needle)) {
+		if s[i] != first && s[i] != upper {
+			continue
+		}
+		match := true
+		for j := 1; j < len(needle) && match; j++ {
+			match = asciiLower(s[i+j]) == asciiLower(needle[j])
+		}
+		if match {
 			return true
 		}
 	}

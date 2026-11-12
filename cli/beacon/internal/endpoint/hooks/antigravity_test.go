@@ -42,14 +42,14 @@ func TestInstallAntigravityHooksPreservesNonBeaconBlocks(t *testing.T) {
 		t.Fatal(err)
 	}
 	managed := blocks["beacon-endpoint"]
-	if len(managed) != 4 {
-		t.Errorf("managed hook events = %v, want four lifecycle and tool events", managed)
+	if len(managed) != 5 {
+		t.Errorf("managed hook events = %v, want five lifecycle and tool events", managed)
 	}
 	type handler struct {
 		Type    string `json:"type"`
 		Command string `json:"command"`
 	}
-	for event, suffix := range map[string]string{"SessionStart": " session-start", "Stop": " stop"} {
+	for event, suffix := range map[string]string{"SessionStart": " session-start", "PreInvocation": " prompt-submit", "Stop": " stop"} {
 		var handlers []handler
 		if err := json.Unmarshal(managed[event], &handlers); err != nil {
 			t.Errorf("%s must be a direct handler list: %v", event, err)

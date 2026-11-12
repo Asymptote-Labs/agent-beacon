@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/antigravitysession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
@@ -148,6 +149,10 @@ var endpointBackfillRunners = func() []endpointBackfillRunner {
 			s, err := groksession.CollectOnce(groksession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveGrokStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
+		{Name: "Antigravity CLI", Sync: "beacon endpoint antigravity sync", State: func(m bool) []string { return []string{resolveAntigravityStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
+			s, err := antigravitysession.CollectOnce(antigravitysession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveAntigravityStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget, LiveCoverage: endpointAntigravityLiveCoverage(r.LogPath)})
+			return s.EventsEmitted, err
+		}, SQLite: true},
 		{Name: "Harness²", Sync: "beacon endpoint harness2 sync", State: func(m bool) []string { return []string{resolveHarness2StatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			opts := harness2session.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHarness2StatePath("", r.UserMode), Since: r.Since, Budget: r.Budget}
 			opts.ExtraRoots = harness2BackfillExtraRoots(r.UserMode)
@@ -287,6 +292,7 @@ func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration
 		_ = os.Remove(sessionSyncFloorPath(userMode))
 	} else {
 		sweep.Floors = readSessionSyncFloors(userMode)
+		floorRuntimesAddedSinceTheSkip(userMode, sweep.Floors)
 	}
 	return runEndpointBackfillUnlocked(logPath, userMode, sweep)
 }
@@ -296,6 +302,61 @@ func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration
 type endpointSweep struct {
 	Floors            map[string]time.Time
 	ThrottleSnapshots bool
+}
+
+// floorRuntimesAddedSinceTheSkip gives every runtime a skipped backfill did not floor, because an
+// upgrade added it later, the earliest recorded floor, and records it. The operator opted out of
+// the window before then for every runtime, not only the ones that existed at the time. The floor
+// is persisted rather than derived per sweep: the first floored sweep saves the runtime's cursors,
+// and a derived floor would then lapse and let the next sweep read the window the skip excluded.
+// A runtime with cursors reads on from them and gets none, as in recordSkippedBackfill. Without
+// recorded floors, nothing was skipped and nothing changes.
+func floorRuntimesAddedSinceTheSkip(userMode bool, floors map[string]time.Time) {
+	var earliest time.Time
+	for _, floor := range floors {
+		if earliest.IsZero() || floor.Before(earliest) {
+			earliest = floor
+		}
+	}
+	if earliest.IsZero() || !floorUnreadRuntimes(userMode, floors, earliest) {
+		return
+	}
+	// Unwritten, the floor still holds for this sweep; the next one derives it again only while
+	// the runtime has no cursors, which is the best a sweep that cannot write its state can do.
+	_ = writeSessionSyncFloors(userMode, floors)
+}
+
+// floorUnreadRuntimes sets at as the floor of every runtime with neither a floor nor cursors, and
+// reports whether it set any.
+func floorUnreadRuntimes(userMode bool, floors map[string]time.Time, at time.Time) bool {
+	changed := false
+	withSweepHome(userMode, func() {
+		for _, runner := range endpointBackfillRunners() {
+			if _, ok := floors[runner.Name]; ok || runnerHasCursors(runner, userMode) {
+				continue
+			}
+			floors[runner.Name] = at
+			changed = true
+		}
+	})
+	return changed
+}
+
+func writeSessionSyncFloors(userMode bool, floors map[string]time.Time) error {
+	path := sessionSyncFloorPath(userMode)
+	data, _ := json.Marshal(sessionSyncFloors{NotBefore: floors})
+	tmp := path + ".tmp"
+	err := os.MkdirAll(filepath.Dir(path), 0o700)
+	if err == nil {
+		err = os.WriteFile(tmp, append(data, '\n'), 0o600)
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
 }
 
 // endpointSnapshotInterval is how often the scheduled system session sync copies a SQLite store
@@ -356,32 +417,10 @@ func recordSkippedBackfill(out io.Writer, userMode bool) {
 		return
 	}
 	floors := readSessionSyncFloors(userMode)
-	now := endpointBackfillNow().UTC()
-	changed := false
-	withSweepHome(userMode, func() {
-		for _, runner := range endpointBackfillRunners() {
-			if _, ok := floors[runner.Name]; ok || runnerHasCursors(runner, userMode) {
-				continue
-			}
-			floors[runner.Name] = now
-			changed = true
-		}
-	})
-	if !changed {
+	if !floorUnreadRuntimes(userMode, floors, endpointBackfillNow().UTC()) {
 		return
 	}
-	path := sessionSyncFloorPath(userMode)
-	data, _ := json.Marshal(sessionSyncFloors{NotBefore: floors})
-	tmp := path + ".tmp"
-	err := os.MkdirAll(filepath.Dir(path), 0o700)
-	if err == nil {
-		err = os.WriteFile(tmp, append(data, '\n'), 0o600)
-	}
-	if err == nil {
-		err = os.Rename(tmp, path)
-	}
-	if err != nil {
-		_ = os.Remove(tmp)
+	if err := writeSessionSyncFloors(userMode, floors); err != nil {
 		fmt.Fprintf(out, "Warning: could not record the skipped session backfill (%v); a scheduled session sync may read the last %d days.\n", err, int(endpointBackfillWindow/(24*time.Hour)))
 	}
 }

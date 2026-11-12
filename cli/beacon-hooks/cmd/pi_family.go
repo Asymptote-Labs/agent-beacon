@@ -288,11 +288,7 @@ func (f piFamily) baseFields(input map[string]interface{}, sessionID string) map
 }
 
 func (f piFamily) promptEvent(fields map[string]interface{}, prompt, source string) normalizedEvent {
-	fields["prompt"] = map[string]interface{}{"text": prompt}
-	fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
-		"input": map[string]interface{}{"messages": asymptoteobserve.TextInputMessages(prompt)},
-	})
-	fields["content"] = retainedContentFields(prompt)
+	setPromptFields(fields, prompt)
 	if source != "" {
 		// These runtimes distinguish interactive input from input delivered over their RPC surface
 		// or injected by another extension. Retained because "a human typed this" and "a script

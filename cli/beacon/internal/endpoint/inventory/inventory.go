@@ -22,6 +22,8 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/launchpkg"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -80,7 +82,26 @@ type Options struct {
 	IncludeContents bool
 	// MaxContentBytes caps retained content per file. Zero uses DefaultMaxContentBytes.
 	MaxContentBytes int
+	// LauncherEnv is where MCP servers' launchers look for registry and index settings beyond
+	// the scanned home's own config files: the environment and working directory they inherit,
+	// and whether the system's files count. Nil reads the home's and the system's files only,
+	// which is all a scheduled job, whose environment is not the user's shell, can know. Every
+	// inventory snapshot is scanned that way, so a server's package_registry does not depend on
+	// which command took the snapshot. Its Home is always the scanned home.
+	LauncherEnv *launchpkg.RegistryEnv
+	// ResolvePackages answers which package each server runs. The answer reads the launcher
+	// config the user chose (an npmrc's userconfig, a project, a server's PATH), so it must be
+	// read with that user's rights, never root's: the system job, which scans as root, passes one
+	// that runs as the console user. Nil resolves in this process, which a confined scan never
+	// does: there every package is held back as private.
+	ResolvePackages func(launchpkg.RegistryEnv, []launchpkg.Query) ([]launchpkg.Answer, error)
 }
+
+// PackageRegistry values: where a server's launcher fetches the package it runs.
+const (
+	PackageRegistryPublic  = "public"
+	PackageRegistryPrivate = "private"
+)
 
 type Result struct {
 	GeneratedAt string      `json:"generated_at"`
@@ -139,11 +160,25 @@ type MCPServer struct {
 	ParserStatus    string                 `json:"parser_status"`
 	Redaction       string                 `json:"redaction"`
 	Definition      map[string]interface{} `json:"definition,omitempty"`
-	// ProjectDirs are the directories of the projects whose entry in a runtime's own config
+	// Package is the npm or PyPI package the server's launch command runs from the public
+	// registry, as Beacon Intel looks it up (npm:<name> or pypi:<name>, no version), and
+	// PackageRegistry is "public". When the command, its env or the launcher config the scan
+	// read points that ecosystem at another registry or index, PackageRegistry is "private" and
+	// Package is left out, since the name may be private too. Both are empty for anything else
+	// (a binary, a script, a remote URL).
+	Package         string `json:"package,omitempty"`
+	PackageRegistry string `json:"package_registry,omitempty"`
+	// PrivatePackage names the package when PackageRegistry is "private". In memory only, for
+	// Beacon Intel's check by name, which the caller must opt into; never serialized.
+	PrivatePackage string `json:"-"`
+	// Launch is the redacted definition, kept whether or not contents are captured, so a reader
+	// such as Beacon Intel can tell which program a server runs without the record carrying its
+	// arguments. In memory only; never serialized.
+	Launch map[string]interface{} `json:"-"`
+	// projectDirs are the directories of the projects whose entry in a runtime's own config
 	// declares the server (Claude Code's ~/.claude.json projects.<path>.mcpServers), which the
-	// runtime starts it in. In memory only, for readers such as Beacon Intel that must read the
-	// config a launcher finds there; never serialized, so the inventory record is unchanged.
-	ProjectDirs []string `json:"-"`
+	// runtime starts it in, so its launcher reads the config it finds there.
+	projectDirs []string
 }
 
 type candidate struct {
@@ -185,11 +220,73 @@ func Scan(opts Options) Result {
 	co := contentOptions{include: opts.IncludeContents, maxBytes: opts.MaxContentBytes}
 	for _, item := range filterCandidates(withoutProjectScope(candidates(home, wd), wd), opts.Runtimes) {
 		config, servers := inspectCandidate(item, redaction, co)
+		if item.scope == ScopeProject {
+			// The runtime starts a server its project's config declares in that project, so the
+			// launcher reads the project's own registry config.
+			for i := range servers {
+				if len(servers[i].projectDirs) == 0 {
+					servers[i].projectDirs = []string{wd}
+				}
+			}
+		}
 		result.Configs = append(result.Configs, config)
 		result.MCPServers = append(result.MCPServers, servers...)
 	}
+	resolvePackages(result.MCPServers, home, opts)
 	result.Skills = scanSkills(home, wd, redaction, opts.Runtimes, co)
 	return result
+}
+
+// resolvePackages names the npm or PyPI package each server runs and where its launcher fetches
+// it from, with the home Scan resolved. A resolver that fails holds every package back as private:
+// a name Beacon could not check may be a private one.
+func resolvePackages(servers []MCPServer, home string, opts Options) {
+	if len(servers) == 0 {
+		return
+	}
+	env := launchpkg.RegistryEnv{System: true}
+	if opts.LauncherEnv != nil {
+		env = *opts.LauncherEnv
+	}
+	env.Home = home
+	queries := make([]launchpkg.Query, len(servers))
+	for i, s := range servers {
+		queries[i] = launchpkg.Query{Launch: s.Launch, ProjectDirs: s.projectDirs}
+	}
+	resolve := opts.ResolvePackages
+	if resolve == nil && !sessionfs.Confined(home) {
+		resolve = func(env launchpkg.RegistryEnv, queries []launchpkg.Query) ([]launchpkg.Answer, error) {
+			return launchpkg.ResolveAll(env, queries), nil
+		}
+	}
+	var answers []launchpkg.Answer
+	if resolve != nil {
+		if got, err := resolve(env, queries); err == nil && len(got) == len(queries) {
+			answers = got
+		}
+	}
+	for i := range servers {
+		if answers != nil {
+			if answers[i].OK {
+				servers[i].RecordPackage(answers[i].Package)
+			}
+			continue
+		}
+		if p, ok := launchpkg.FromCommand(launchpkg.Command(servers[i].Launch)); ok {
+			p.Private = true
+			servers[i].RecordPackage(p)
+		}
+	}
+}
+
+// RecordPackage records the package a server runs. A package from a private registry or index
+// keeps its name in memory only (PrivatePackage): the name may be private too.
+func (s *MCPServer) RecordPackage(p launchpkg.Package) {
+	if p.Private {
+		s.Package, s.PackageRegistry, s.PrivatePackage = "", PackageRegistryPrivate, p.Ref
+		return
+	}
+	s.Package, s.PackageRegistry, s.PrivatePackage = p.Ref, PackageRegistryPublic, ""
 }
 
 // withoutProjectScope drops project-scoped candidates when there is no working directory to
@@ -893,8 +990,8 @@ func serversFromProjects(item candidate, projects map[string]interface{}, redact
 		found := serversFromNestedMCPBlocks(item, nested, redaction, co)
 		if filepath.IsAbs(dir) {
 			for i := range found {
-				if len(found[i].ProjectDirs) == 0 {
-					found[i].ProjectDirs = []string{dir}
+				if len(found[i].projectDirs) == 0 {
+					found[i].projectDirs = []string{dir}
 				}
 			}
 		}
@@ -981,6 +1078,7 @@ func serverFromDefinition(item candidate, name string, def map[string]interface{
 	if command != "" {
 		server.CommandNameHash = hashString(filepath.Base(command))
 	}
+	server.Launch = redactedDef
 	if co.include {
 		server.Definition = redactedDef
 	}
@@ -1025,7 +1123,7 @@ func dedupeServers(servers []MCPServer) []MCPServer {
 		key := server.Runtime + "\x00" + server.SourcePathHash + "\x00" + server.ServerNameHash + "\x00" + server.DefinitionHash
 		if i, ok := seen[key]; ok {
 			// The same definition in several projects is one entry, started in each of them.
-			out[i].ProjectDirs = mergeDirs(out[i].ProjectDirs, server.ProjectDirs)
+			out[i].projectDirs = mergeDirs(out[i].projectDirs, server.projectDirs)
 			continue
 		}
 		seen[key] = len(out)

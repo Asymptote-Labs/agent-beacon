@@ -345,6 +345,12 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 	if path == "" && platformFlag == goosePlatform {
 		path = gooseToolPath(toolName, toolInput)
 	}
+	// Antigravity names a file tool's target TargetFile (its write and replace tools) or
+	// SearchDirectory (find_by_name), neither in the shared list above. Asked after it for the Kiro
+	// reason, from the vocabulary the session-store collector reads too.
+	if path == "" && platformFlag == "antigravity" {
+		path = asymptoteobserve.AntigravityToolPath(toolInput)
+	}
 	if path != "" {
 		fields["file"] = map[string]interface{}{
 			"path":      path,
@@ -1030,13 +1036,8 @@ func actionForTool(hookEvent, toolName string, toolInput, toolResponse map[strin
 		}
 	}
 	if platformFlag == "antigravity" {
-		switch lower {
-		case "run_command":
-			return "command.executed"
-		case "view_file", "list_dir", "grep_search", "find_by_name":
-			return "file.read"
-		case "edit_file", "write_file", "apply_patch":
-			return "file.modified"
+		if action := asymptoteobserve.AntigravityToolAction(toolName); action != "" {
+			return action
 		}
 	}
 	switch {

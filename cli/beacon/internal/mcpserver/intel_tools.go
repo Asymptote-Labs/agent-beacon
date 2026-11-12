@@ -11,6 +11,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/agentskills"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/launchpkg"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/intelapi"
 )
@@ -27,8 +28,11 @@ func defaultIntelClient() (*intelapi.Client, error) {
 	return intel.New("beacon-mcp/" + version.GetVersion() + " (+https://beacon.sh)")
 }
 
+// defaultInventory scans what the agent asking has configured. The agent starts every launcher
+// with this process's environment and in its project, so their registry settings apply too.
 func defaultInventory(includeProject bool) inventory.Result {
-	opts := inventory.Options{IncludeContents: true, SkipProjectScope: !includeProject}
+	env := launchpkg.CurrentRegistryEnv()
+	opts := inventory.Options{SkipProjectScope: !includeProject, LauncherEnv: &env}
 	if includeProject {
 		if wd, err := os.Getwd(); err == nil {
 			opts.WorkingDir = wd
@@ -110,8 +114,8 @@ func (s *Server) registerIntelTools() {
 	s.register(Tool{
 		Name: "intel_check_installed",
 		Description: "Check the MCP servers and skills configured on this machine against Beacon Intel, the way a dependency audit checks a lockfile. " +
-			"Beacon reads each runtime's own config (Claude Code, Cursor, Codex, and the rest Beacon supports) and by default sends only public identifiers: npm and PyPI packages, from the public registries, named in a server's launch command. " +
-			"Names that may be private (a server's configured name, a package from a private registry or index, skill names) are listed as skipped unless the user agrees to include_private_names. " +
+			"Beacon reads each runtime's own config (Claude Code, Cursor, Codex, and the rest Beacon supports) and by default sends only identifiers it can read exactly: npm and PyPI packages, from the public registries, named in a server's launch command, and the skill:<owner>/<repo>#<name> key of a skill the skills CLI installed from GitHub. " +
+			"Names that may be private (a server's configured name, a package from a private registry or index, the name of any other skill) are listed as skipped unless the user agrees to include_private_names. " +
 			"Paths, URLs, environment and other arguments never leave the machine. " +
 			fmt.Sprintf("Use dry_run to see exactly what would be sent without sending it. Read a concerning result in full with %s.", intelToolNames.GetArtifact),
 		InputSchema: checkInstalledSchema(),
@@ -121,7 +125,7 @@ func (s *Server) registerIntelTools() {
 
 func checkInstalledSchema() map[string]interface{} {
 	schema := objectSchema(map[string]interface{}{
-		"include_private_names": map[string]interface{}{"type": "boolean", "description": "Also send names that may be private: servers' configured names, packages from a private registry or index, and skill names. Off by default; set it only when the user agrees."},
+		"include_private_names": map[string]interface{}{"type": "boolean", "description": "Also send names that may be private: servers' configured names, packages from a private registry or index, and the names of skills with no GitHub source. Off by default; set it only when the user agrees."},
 		"include_project":       map[string]interface{}{"type": "boolean", "description": "Also read project-scoped config in the server's working directory (default true)."},
 		"dry_run":               map[string]interface{}{"type": "boolean", "description": "List what would be sent, and send nothing."},
 	}, nil)
@@ -195,13 +199,8 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 	} else {
 		inv = defaultInventory(a.includeProject)
 	}
-	registryEnv := s.registryEnv
-	if registryEnv == nil {
-		registryEnv = intel.CurrentRegistryEnv
-	}
 	items, skipped := intel.FromInventory(inv, intel.FromInventoryOptions{
 		IncludePrivateNames: a.includePrivateNames,
-		Registries:          intel.LocalRegistries(registryEnv()),
 		BeaconSkill:         beaconSkill(agentskills.Names()),
 	})
 	report := installedReport{Sent: make([]intelapi.CheckItem, len(items)), Skipped: skipped}
@@ -249,7 +248,7 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 			// A package from a private registry or index is matched against the public package
 			// that shares its name, which may be a different artifact too.
 			byName := item.Basis == intel.BasisSkillName || item.Basis == intel.BasisServerName ||
-				item.Basis == intel.BasisPrivateNPM || item.Basis == intel.BasisPrivatePyPI || outcome.MatchedBy == "text"
+				intel.IsPrivateBasis(item.Basis) || outcome.MatchedBy == "text"
 			if outcome.Status == "matched" && byName {
 				result.NameOnly = true
 				result.Guidance = nameOnlyGuidance + result.Guidance

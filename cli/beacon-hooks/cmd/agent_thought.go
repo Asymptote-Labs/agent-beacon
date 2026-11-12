@@ -68,6 +68,18 @@ func retainedContentFields(text string) map[string]interface{} {
 	return asymptoteobserve.RetainedContentFields(text, asymptoteobserve.DefaultStringLimit)
 }
 
+// setPromptFields records prompt on fields the one way every hook path does: prompt.text, the
+// semconv gen_ai.input.messages a message-oriented reader looks for, and the content marker that
+// says the text was retained. The marker's hash is also how a session-store sync recognizes a
+// prompt the hooks already recorded, so every path has to build it from the same text.
+func setPromptFields(fields map[string]interface{}, prompt string) {
+	fields["prompt"] = map[string]interface{}{"text": prompt}
+	fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
+		"input": map[string]interface{}{"messages": asymptoteobserve.TextInputMessages(prompt)},
+	})
+	fields["content"] = retainedContentFields(prompt)
+}
+
 // retainedDiffFields puts diff, its diff_hash and its diff_bytes into file and
 // returns the content marker for it, all from one redaction of diff at the
 // limit retainedContentFields uses, so diff_hash and diff_bytes always equal the

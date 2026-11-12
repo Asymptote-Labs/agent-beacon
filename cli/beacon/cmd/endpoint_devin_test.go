@@ -15,8 +15,9 @@ import (
 )
 
 // endpointDevinLiveCoverage scans the retained log for the earliest hook event per Devin
-// session: hook events from either platform spelling count, poll events and other harnesses do
-// not, and a malformed line or a rotated archive neither stops nor fools the scan.
+// session and the content hash of each hook prompt: hook events from either platform spelling
+// count, poll events and other harnesses do not, and a malformed line or a rotated archive neither
+// stops nor fools the scan.
 func TestEndpointDevinLiveCoverage(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "runtime.jsonl")
@@ -26,7 +27,8 @@ func TestEndpointDevinLiveCoverage(t *testing.T) {
 	lines := []string{
 		`{"timestamp":"2026-10-01T10:00:00Z","harness":{"name":"devin-cli","collection_method":"poll"},"session":{"id":"sess-poll"}}`,
 		`{"timestamp":"2026-10-01T10:00:00Z","harness":{"name":"claude_code","collection_method":"hook"},"session":{"id":"sess-claude"}}`,
-		hook("sess-1", "2026-10-02T10:00:00Z"),
+		`{"timestamp":"2026-10-02T10:00:00Z","harness":{"name":"devin-cli","collection_method":"hook"},"session":{"id":"sess-1"},"event":{"action":"prompt.submitted"},"content":{"hash":"prompt-hash"}}`,
+		`{"timestamp":"2026-10-02T10:00:01Z","harness":{"name":"devin-cli","collection_method":"poll"},"session":{"id":"sess-1"},"event":{"action":"prompt.submitted"},"content":{"hash":"poll-hash"}}`,
 		hook("sess-1", "2026-10-01T09:00:00Z"), // the earliest wins
 		`{malformed devin line`,
 		`{"timestamp":"2026-10-01T10:00:00Z","harness":{"name":"devin","collection_method":"hook"},"session":{"id":"sess-legacy"}}`,
@@ -41,28 +43,31 @@ func TestEndpointDevinLiveCoverage(t *testing.T) {
 	}
 
 	coverage := endpointDevinLiveCoverage(logPath)
-	if len(coverage) != 3 {
-		t.Fatalf("coverage = %v, want three hook-covered sessions", coverage)
+	if len(coverage.From) != 3 {
+		t.Fatalf("coverage = %v, want three hook-covered sessions", coverage.From)
 	}
-	if got := coverage["sess-1"]; !got.Equal(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)) {
+	if got := coverage.From["sess-1"]; !got.Equal(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)) {
 		t.Fatalf("sess-1 coverage = %s, want the earliest hook event", got)
 	}
-	if _, ok := coverage["sess-legacy"]; !ok {
+	if !coverage.RecordedPrompt("sess-1", "prompt-hash") || coverage.RecordedPrompt("sess-1", "poll-hash") {
+		t.Fatalf("prompts = %v, want the hook prompt's hash and not the poll prompt's", coverage.Prompts)
+	}
+	if _, ok := coverage.From["sess-legacy"]; !ok {
 		t.Fatal("the legacy devin platform spelling was not counted as live coverage")
 	}
-	if got := coverage["sess-archived"]; !got.Equal(time.Date(2026, 9, 15, 8, 0, 0, 0, time.UTC)) {
+	if got := coverage.From["sess-archived"]; !got.Equal(time.Date(2026, 9, 15, 8, 0, 0, 0, time.UTC)) {
 		t.Fatalf("sess-archived coverage = %s", got)
 	}
 	for _, absent := range []string{"sess-poll", "sess-claude"} {
-		if _, ok := coverage[absent]; ok {
+		if _, ok := coverage.From[absent]; ok {
 			t.Fatalf("%s counted as hook coverage though it is not a devin hook event", absent)
 		}
 	}
 }
 
 func TestEndpointDevinLiveCoverageWithoutALog(t *testing.T) {
-	if got := endpointDevinLiveCoverage(filepath.Join(t.TempDir(), "runtime.jsonl")); got != nil {
-		t.Fatalf("coverage = %v, want nil for a missing log", got)
+	if got := endpointDevinLiveCoverage(filepath.Join(t.TempDir(), "runtime.jsonl")); got.From != nil || got.Prompts != nil {
+		t.Fatalf("coverage = %+v, want none for a missing log", got)
 	}
 }
 

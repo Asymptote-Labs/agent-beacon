@@ -642,11 +642,7 @@ func isFileEditTool(platform, toolName string) bool {
 			strings.Contains(lower, "patch")
 	}
 	if platform == "antigravity" {
-		lower := strings.ToLower(toolName)
-		return strings.Contains(lower, "edit") ||
-			strings.Contains(lower, "write") ||
-			strings.Contains(lower, "create") ||
-			strings.Contains(lower, "patch")
+		return asymptoteobserve.AntigravityToolAction(toolName) == "file.modified"
 	}
 	if platform == "qwen" {
 		return isQwenFileEditTool(toolName)

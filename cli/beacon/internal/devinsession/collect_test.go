@@ -15,6 +15,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 )
 
 // The store's real DDL, verbatim: a fixture must break if this collector drifts from the schema
@@ -665,7 +666,7 @@ func TestLiveCoverageSuppressesWhatHooksAlreadyRecorded(t *testing.T) {
 	}), 1700000300, nil)
 
 	opts := collectOptions(p)
-	opts.LiveCoverage = map[string]time.Time{"s1": cutover}
+	opts.LiveCoverage = sessionsync.LiveCoverage{From: map[string]time.Time{"s1": cutover}}
 	summary, err := CollectOnce(opts)
 	if err != nil {
 		t.Fatalf("CollectOnce: %v", err)
