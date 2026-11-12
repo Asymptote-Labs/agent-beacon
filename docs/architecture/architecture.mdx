@@ -5,9 +5,9 @@ description: "How Beacon collects, normalizes, stores, correlates, and detects a
 
 ## Overview
 
-Beacon is the open-source telemetry layer for AI agents wherever they run: on laptops, in the browser, inside application code, in [CI](/concepts/core-concepts#ci-telemetry), and in [provider-managed cloud sandboxes](/concepts/core-concepts#cloud-agent-telemetry). Each surface reports activity differently, so Beacon extends OpenTelemetry where a runtime emits it and instruments custom hooks, plugins, and adapters where it does not, then normalizes what it captures into a single [event model](/telemetry-schema/event-schema).
+Beacon is the open-source telemetry layer for AI agents wherever they run: on laptops, in the browser, inside application code, in [CI](/concepts/core-concepts#ci-telemetry), in [provider-managed cloud sandboxes](/concepts/core-concepts#cloud-agent-telemetry), and at the [LLM gateways](/runtimes/llm-gateway) that carry agents' model traffic. Each surface reports activity differently, so Beacon extends OpenTelemetry where a runtime emits it and instruments custom hooks, plugins, and adapters where it does not, then normalizes what it captures into a single [event model](/telemetry-schema/event-schema).
 
-<img src="/images/beacon-architecture.png" alt="Beacon architecture. Six source surfaces (local agents, browser, agents in code, CI pipelines, cloud agents, and third-party AI SaaS) feed a Beacon layer that collects, normalizes, stores, correlates, and detects. The resulting unified AI telemetry flows to observability, SIEM, search, data platform, object storage, and security platform destinations." />
+<img src="/images/beacon-architecture.png" alt="Beacon architecture. Seven source surfaces (local agents, browser, agents in code, CI pipelines, cloud agents, LLM gateways, and third-party AI SaaS) feed a Beacon layer that collects, normalizes, stores, correlates, and detects. The resulting unified AI telemetry flows to observability, SIEM, search, data platform, object storage, and security platform destinations." />
 
 The diagram reads top to bottom in three bands:
 
@@ -17,7 +17,7 @@ The diagram reads top to bottom in three bands:
 | **Beacon** | The pipeline that turns surface-specific signals into unified AI telemetry: [collect](#collect), [normalize](#normalize), [store](#store), [correlate](#correlate), [detect](#detect) |
 | **Destinations** | Customer-owned systems that consume the normalized stream |
 
-The endpoint architecture is local-first. Collection, normalization, storage, correlation, and detection all run on the machine, and nothing leaves it unless you configure forwarding. CI and cloud-agent paths reuse the same event model through surface-specific setup rather than a persistent endpoint service.
+The endpoint architecture is local-first. Collection, normalization, storage, correlation, and detection all run on the machine, and nothing leaves it unless you configure forwarding. CI, cloud-agent, and LLM gateway paths reuse the same event model through surface-specific setup rather than a persistent endpoint service.
 
 ## Collection surfaces
 
@@ -28,6 +28,7 @@ The endpoint architecture is local-first. Collection, normalization, storage, co
 | [Agents in code](#agents-in-code) | [Observe SDK](/concepts/core-concepts#observe-sdk) instrumentation exporting OpenTelemetry spans | Customer-managed OTLP collector or hosted Observe |
 | [CI pipelines](#ci-pipelines) | Temporary collector wrapped around the job | Completed `runtime.jsonl` as a build artifact or upload |
 | [Cloud agents](#cloud-agents) | Sandbox hooks running `beacon-hooks` inside the provider environment | `/tmp/beacon/runtime.jsonl`, uploaded per run to customer-managed storage |
+| [LLM gateways](#llm-gateways) | `beacon-gateway` attached to the gateway's guardrail or `ext_proc` hook, decoding each model call | JSONL in the runtime schema on the gateway host, marked `harness.collection_method: gateway` |
 
 ### Local agents
 
@@ -50,6 +51,12 @@ Ephemeral build jobs do not install a persistent service. [`beacon ci exec`](/cl
 ### Cloud agents
 
 Provider-managed cloud agents run `beacon-hooks` inside the sandbox, write `/tmp/beacon/runtime.jsonl`, and upload a compressed per-run snapshot directly to customer-managed Google Cloud Storage or Amazon S3. This path uses neither the persistent endpoint collector nor Vector. See [`beacon cloud`](/cli/cloud), [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents), and [Cursor Cloud Agents](/runtimes/cursor-cloud-agents).
+
+### LLM gateways
+
+Teams that route agents' model traffic through an LLM gateway can record it there, with nothing installed on developer machines. `beacon-gateway` attaches to the gateway's hook (the LiteLLM and Portkey guardrail callouts, or the Envoy `ext_proc` filter used by Envoy, Envoy Gateway, and Istio), decodes Anthropic Messages, OpenAI Chat Completions, and OpenAI Responses calls, and writes events in the same schema with `harness.collection_method: gateway`. Its `endpoint` is the gateway host and its `user` is the identity the gateway resolved.
+
+A gateway sees the conversation as the model receives it: system prompt, tool catalog, user turns and tool results on the way in, and the model's text, token counts, and tool calls on the way out. It sees a tool call before the harness acts on it, so a rule can judge a read or a command before it happens. It does not see the agent's own lifecycle (approvals, hooks, files written without a tool call), so gateway events complement endpoint collection rather than replace it. See [LLM Gateways](/runtimes/llm-gateway).
 
 <Note>
   Third-party AI SaaS appears on the diagram as a source category. The open-source build ships no collection path for it today: Beacon does not authenticate to SaaS accounts or read their audit logs. See [Scope boundaries](#scope-boundaries).
@@ -138,7 +145,7 @@ See [SIEM forwarding](/log-forwarding) for destination-specific setup.
 
 ## End-to-end flow
 
-1. A supported runtime emits activity through hooks, a plugin, OTLP, a session store, or the SDK.
+1. A supported runtime emits activity through hooks, a plugin, OTLP, a session store, or the SDK, or its model calls pass through an LLM gateway.
 2. Beacon receives the signal locally and attaches endpoint and harness context.
 3. Beacon normalizes surface-specific payloads into the endpoint event schema.
 4. Beacon writes the event to the active `runtime.jsonl` file.

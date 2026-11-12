@@ -3,7 +3,7 @@ title: "System Architecture"
 description: "Compare the open-source Agent Beacon architecture with the Beacon Cloud architecture"
 ---
 
-Beacon supports two architecture paths: the open-source [Agent Beacon](/concepts/core-concepts#agent-beacon) architecture, which collects local, browser, in-code, [CI](/concepts/core-concepts#ci-telemetry), and [cloud telemetry](/concepts/core-concepts#cloud-agent-telemetry) on customer-controlled infrastructure, and the [Beacon Cloud](/concepts/core-concepts#beacon-cloud) architecture for centralized visibility, governance, detections, and investigations.
+Beacon supports two architecture paths: the open-source [Agent Beacon](/concepts/core-concepts#agent-beacon) architecture, which collects local, browser, in-code, [CI](/concepts/core-concepts#ci-telemetry), [cloud](/concepts/core-concepts#cloud-agent-telemetry), and [LLM gateway](/runtimes/llm-gateway) telemetry on customer-controlled infrastructure, and the [Beacon Cloud](/concepts/core-concepts#beacon-cloud) architecture for centralized visibility, governance, detections, and investigations.
 
 <Columns cols={2}>
   <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
@@ -18,7 +18,7 @@ Beacon supports two architecture paths: the open-source [Agent Beacon](/concepts
 
 | Architecture | Use when |
 | --- | --- |
-| Open Source Architecture | You want [open-source telemetry](/concepts/core-concepts#beacon) for supported local, CI, and cloud agent surfaces, with customer-controlled records and forwarding. |
+| Open Source Architecture | You want [open-source telemetry](/concepts/core-concepts#beacon) for supported local, CI, cloud agent, and LLM gateway surfaces, with customer-controlled records and forwarding. |
 | Beacon Cloud Architecture | You want [managed ingest](/concepts/core-concepts#beacon-cloud), retention, search, detections, fleet visibility, identity mapping, approval visibility, SSO, RBAC, audit trails, and investigation workflows. |
 
 ## Related
