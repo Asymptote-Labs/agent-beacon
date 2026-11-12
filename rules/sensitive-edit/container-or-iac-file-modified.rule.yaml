@@ -1,5 +1,6 @@
 id: container-or-iac-file-modified
-version: 2
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 3
 title: Container or IaC file modified (Dockerfile / compose / Terraform / K8s / Helm)
 description: >
   The agent modified a container, orchestration, or infrastructure-as-code
@@ -21,23 +22,42 @@ taxonomy:
   owasp_llm: LLM03
   mitre_atlas: AML.T0011
 
+# Which file is one definition (container_or_iac_file,
+# rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
+# path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv).
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] && (
-    e.file.path.matches("(?i)(^|/)dockerfile(\\.prod|\\.dev|\\.local|\\.test|\\.staging|\\.debug|\\.alpine|\\.nginx|\\.node|\\.python|\\.go|\\.rust|\\.java|\\.base|\\.builder|\\.runtime|\\.ci|\\.prod|\\.pr[a-z0-9]+)?$") ||
-    e.file.path.matches("(?i)(^|/)containerfile(\\.prod|\\.dev|\\.local|\\.test|\\.staging|\\.debug|\\.alpine|\\.nginx|\\.node|\\.python|\\.go|\\.rust|\\.java|\\.base|\\.builder|\\.runtime|\\.ci|\\.pr[a-z0-9]+)?$") ||
-    e.file.path.matches("(?i)(^|/)docker-compose(-[^/]+)?\\.(yml|yaml)$") ||
-    e.file.path.matches("(?i)(^|/)[^/]+\\.tf$") ||
-    e.file.path.matches("(?i)(^|/)[^/]+\\.tfstate(\\.[0-9]+)?$") ||
-    e.file.path.matches("(?i)(^|/)kubernetes(-[^/]+)?\\.(yml|yaml)$") ||
-    e.file.path.matches("(?i)(^|/)k8s(-[^/]+)?\\.(yml|yaml)$") ||
-    e.file.path.matches("(?i)(^|/)kustomization\\.(yml|yaml)$") ||
-    e.file.path.matches("(?i)(^|/)values\\.(yml|yaml)$")
+  (
+    e.event.action in ["file.modified", "file.created", "file.edited"] &&
+    container_or_iac_file(e.file.path)
+  ) || (
+    e.event.action == "command.executed" &&
+    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
+      container_or_iac_file(f.path)))
   )
 
 emit:
   reason: "Container or IaC file modified (Dockerfile / compose / Terraform / K8s manifest / Helm values)"
 
 tests:
+  - name: dockerfile_line_appended_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'USER root' >> Dockerfile" }
+        session: { id: s1 }
+  - name: terraform_edited_in_place_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i 's/0.0.0.0\\/32/0.0.0.0\\/0/' infra/network.tf" }
+        session: { id: s1 }
+  - name: image_only_built
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker build -f Dockerfile.prod -t app . && terraform -chdir=infra plan" }
+        session: { id: s1 }
   - name: modify_dockerfile
     verdict: match
     events:

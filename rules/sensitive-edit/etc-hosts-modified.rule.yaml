@@ -1,5 +1,6 @@
 id: etc-hosts-modified
-version: 2
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 3
 title: /etc/hosts or hosts.allow/deny modified
 description: >
   The agent modified a system name resolution file: /etc/hosts (the
@@ -20,16 +21,42 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0011
 
+# Which file is one definition (hosts_file, rules/concepts/sensitive-files.predicates.yaml),
+# asked of a file event's path and of every path a shell command writes (c.file_writes: a
+# redirection, tee, sed -i, cp, mv).
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] && (
-    e.file.path.matches("(?i)(^|/)etc/hosts$") ||
-    e.file.path.matches("(?i)(^|/)etc/hosts\\.(allow|deny)$")
+  (
+    e.event.action in ["file.modified", "file.created", "file.edited"] &&
+    hosts_file(e.file.path)
+  ) || (
+    e.event.action == "command.executed" &&
+    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
+      hosts_file(f.path)))
   )
 
 emit:
   reason: "/etc/hosts or hosts.allow/deny modified (local DNS hijack or ACL change)"
 
 tests:
+  - name: entry_added_through_sudo_tee
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo '10.0.0.5 registry.npmjs.org' | sudo tee -a /etc/hosts" }
+        session: { id: s1 }
+  - name: entry_added_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sh -c 'echo \"10.0.0.5 pypi.org\" >> /etc/hosts'" }
+        session: { id: s1 }
+  - name: table_only_searched
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -n localhost /etc/hosts" }
+        session: { id: s1 }
   - name: modify_etc_hosts
     verdict: match
     events:
