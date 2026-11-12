@@ -1,6 +1,7 @@
 package portkey
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -123,6 +124,24 @@ func TestWebhookCalls(t *testing.T) {
 				t.Errorf("ID = %q, want hash of request.json", c.ID)
 			}
 		})
+	}
+}
+
+// The call id covers the whole body: a change anywhere in a long request.json, before the stretch
+// at its end the second CRC covers as well as in it, gives another id, and the same bytes the
+// same one.
+func TestCallIDCoversWholeBody(t *testing.T) {
+	body := []byte(strings.Repeat("x", 3*callTail))
+	id := callID(body)
+	if callID(bytes.Clone(body)) != id {
+		t.Fatal("equal bodies, different ids")
+	}
+	for _, at := range []int{0, callTail, len(body) - callTail, len(body) - 1} {
+		changed := bytes.Clone(body)
+		changed[at] = 'y'
+		if callID(changed) == id {
+			t.Errorf("a change at byte %d of %d kept the id", at, len(body))
+		}
 	}
 }
 

@@ -319,15 +319,22 @@ func (a *adapter) call(env *envelope) (*gateway.Call, bool) {
 // in both phases. Two calls with byte-identical bodies share an id, and a mutator guardrail that
 // rewrites request.json before the response phase breaks the match. The digest needs to be the
 // same on every replica, not unforgeable: a client that makes two of its own calls collide only
-// confuses which of its reads were already reported. Two hardware CRCs and the length cost a
-// fraction of a SHA-256 over a body of a megabyte.
+// confuses which of its reads were already reported.
+//
+// It is the length, a hardware CRC of the whole body, and a second, of its last callTail bytes:
+// two bodies of one length that differ there (as a session's calls do, each ending in the turn it
+// adds) must match both, and two that differ only earlier must match the first. A second CRC of
+// the whole body cost as much as the first, a fifth of a Portkey call.
 func callID(requestJSON []byte) string {
 	var sum [16]byte
 	binary.BigEndian.PutUint32(sum[0:], crc32.Checksum(requestJSON, castagnoli))
-	binary.BigEndian.PutUint32(sum[4:], crc32.ChecksumIEEE(requestJSON))
+	binary.BigEndian.PutUint32(sum[4:], crc32.ChecksumIEEE(requestJSON[max(0, len(requestJSON)-callTail):]))
 	binary.BigEndian.PutUint64(sum[8:], uint64(len(requestJSON)))
 	return "portkey-" + hex.EncodeToString(sum[:])
 }
+
+// callTail is how much of the end of request.json callID's second CRC covers.
+const callTail = 64 << 10
 
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
 
