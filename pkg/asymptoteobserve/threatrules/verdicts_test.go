@@ -2,6 +2,7 @@ package threatrules
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -66,6 +67,26 @@ func TestSnapshotDiffShowsWhatAChangeDid(t *testing.T) {
 	}
 	if same := before.Diff(before); same.Changed() || same.Compared != 3 {
 		t.Errorf("a snapshot against itself: %+v", same)
+	}
+}
+
+// A change is counted in events. A label is cut at 200 bytes, so two long command lines that
+// begin alike have one label, and a rule that stops matching both lost two events: counting
+// labels reported 850 for a rule that had lost 1,264.
+func TestSnapshotDiffCountsEventsThatShareALabel(t *testing.T) {
+	long := "curl https://example.com/" + strings.Repeat("a", 220)
+	events := []asymptoteobserve.Event{commandEvent(long + " --one"), commandEvent(long + " --two")}
+	before, err := TakeSnapshot([]*Rule{snapshotRule(t, "sender", `match: 'e.command.command.matches("^curl ")'`+"\n")}, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := TakeSnapshot([]*Rule{snapshotRule(t, "sender", `match: 'e.command.command.matches("^wget ")'`+"\n")}, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff := before.Diff(after)
+	if len(diff.Changes) != 1 || len(diff.Changes[0].Lost) != 2 || diff.Changes[0].Lost[0] != diff.Changes[0].Lost[1] {
+		t.Errorf("diff = %+v, want sender to lose two events with the same label", diff)
 	}
 }
 

@@ -210,12 +210,8 @@ func printSnapshotDiff(out io.Writer, diff threatrules.SnapshotDiff) {
 		if rulesDiffOpts.summary {
 			continue
 		}
-		for _, label := range c.Gained {
-			fmt.Fprintf(out, "  + %s\n", label)
-		}
-		for _, label := range c.Lost {
-			fmt.Fprintf(out, "  - %s\n", label)
-		}
+		printLabels(out, "+", c.Gained)
+		printLabels(out, "-", c.Lost)
 	}
 	if len(diff.Changes) > 0 {
 		fmt.Fprintln(out)
@@ -225,6 +221,23 @@ func printSnapshotDiff(out io.Writer, diff threatrules.SnapshotDiff) {
 		fmt.Fprintf(out, "; %d event(s) only before and %d only after were not compared", diff.OnlyBefore, diff.OnlyAfter)
 	}
 	fmt.Fprintln(out)
+}
+
+// printLabels lists the sorted labels of the events a matcher gained or lost. Events that share
+// a label (a long command line is cut) are listed once with their number.
+func printLabels(out io.Writer, sign string, labels []string) {
+	for i := 0; i < len(labels); {
+		n := 1
+		for i+n < len(labels) && labels[i+n] == labels[i] {
+			n++
+		}
+		if n > 1 {
+			fmt.Fprintf(out, "  %s %s (%d events)\n", sign, labels[i], n)
+		} else {
+			fmt.Fprintf(out, "  %s %s\n", sign, labels[i])
+		}
+		i += n
+	}
 }
 
 func init() {

@@ -169,7 +169,8 @@ type MatcherChange struct {
 	// earlier has. Gained and Lost then list every event it matches.
 	Added, Removed bool
 	// Gained are the labels of the events it matches now and did not, and Lost of those it
-	// matched and does not, each sorted and listed once.
+	// matched and does not, sorted, one per event: two events may have the same label (a long
+	// command line is cut, and events differ in more than their label), and each counts.
 	Gained, Lost []string
 }
 
@@ -225,10 +226,8 @@ func (before *Snapshot) Diff(after *Snapshot) SnapshotDiff {
 	}
 	diff.OnlyAfter = len(after.Events) - diff.Compared
 	for _, c := range changes {
-		for _, labels := range []*[]string{&c.Gained, &c.Lost} {
-			slices.Sort(*labels)
-			*labels = slices.Compact(*labels)
-		}
+		slices.Sort(c.Gained)
+		slices.Sort(c.Lost)
 		diff.Changes = append(diff.Changes, *c)
 	}
 	sort.Slice(diff.Changes, func(i, j int) bool { return diff.Changes[i].Matcher < diff.Changes[j].Matcher })
