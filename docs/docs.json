@@ -405,7 +405,8 @@
               "cli/git",
               "cli/token-usage",
               "cli/pricing",
-              "cli/version"
+              "cli/version",
+              "cli/telemetry"
             ]
           }
         ]

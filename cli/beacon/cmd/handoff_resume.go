@@ -62,7 +62,7 @@ var (
 	handoffLaunchDetached           = handoff.LaunchDetached
 	handoffIsTerminal               = func() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) }
 	handoffStdin          io.Reader = os.Stdin
-	handoffExit                     = os.Exit
+	handoffExit                     = exitProcess
 	handoffExecutable               = os.Executable
 )
 

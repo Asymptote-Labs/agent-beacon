@@ -8,6 +8,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
@@ -44,6 +45,9 @@ func TestMain(m *testing.M) {
 	// the developer's browser; tests that check the opening stub this themselves.
 	onboardingOpenDashboard = func(string) error { return nil }
 	_ = os.Unsetenv(account.APIURLEnv)
+	// No command under test sends telemetry or writes its state, whatever version a test sets; a
+	// test of an event swaps the capture seam instead.
+	_ = os.Setenv(telemetry.EnvTelemetry, "0")
 	shareAutoCloud = func() (bool, string) { return false, "" }
 	// The dashboard commands must not depend on the system config of the machine running the tests.
 	dashboardSystemDisabled = func() (bool, error) { return false, nil }
