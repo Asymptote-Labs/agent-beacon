@@ -2,7 +2,6 @@ package beaconjsonexporter
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -25,82 +24,22 @@ func (w jsonlWriter) append(event beaconEvent) error {
 	if err != nil {
 		return err
 	}
-	if len(data) > w.maxEventBytes {
-		event.Raw = nil
-		event.Message = asymptoteobserve.TruncateString(event.Message, 1024)
-		event.Truncated = true
-		data, err = json.Marshal(event)
-		if err != nil {
-			return err
-		}
-	}
-	if len(data) > w.maxEventBytes {
-		// Retained content is the next thing to go after raw, mirroring the hook
-		// writer's compactEndpointContent. Before this path existed the only step
-		// past dropping raw was the hard error below, which was survivable while
-		// no OTLP event carried a turn's text and is not now that they do.
-		compactRetainedContent(&event)
-		data, err = json.Marshal(event)
-		if err != nil {
-			return err
-		}
-	}
-	if len(data) > w.maxEventBytes {
-		return fmt.Errorf("event exceeds maximum size after truncation: %d bytes", len(data))
-	}
-	// Stamped last, over the bytes that are actually about to be written, so a
-	// size fallback above cannot leave the ID describing an event that no longer
-	// exists. Marshalling twice is the cost of an identity derived from the
-	// event rather than asserted about it. An event already at the size limit
-	// keeps its bytes and goes without one.
+	var stamp func(id string) ([]byte, error)
 	if event.Event.ID == "" {
-		event.Event.ID = asymptoteobserve.EventIDForLine(data)
-		stamped, err := json.Marshal(event)
-		if err != nil {
-			return err
+		stamp = func(id string) ([]byte, error) {
+			event.Event.ID = id
+			return json.Marshal(event)
 		}
-		if len(stamped) <= w.maxEventBytes {
-			data = stamped
-		}
+	}
+	data, err = asymptoteobserve.FitEventLine(data, w.maxEventBytes, stamp)
+	if err != nil {
+		return err
 	}
 	_, dirMode, _ := asymptoteobserve.RuntimeLogModes(w.path)
 	if err := os.MkdirAll(filepath.Dir(w.path), dirMode); err != nil {
 		return err
 	}
 	return appendJSONL(w.path, append(data, '\n'), w.rotateBytes, w.rotateArchives)
-}
-
-// compactRetainedContent drops an event's retained text and records that it did,
-// so a reader can still tell what the event was about and that its content was
-// held back rather than never captured. The hash and byte count in the content
-// marker describe the whole redacted text and stay put.
-func compactRetainedContent(event *beaconEvent) {
-	if event.File != nil {
-		event.File.Diff = ""
-	}
-	if event.Command != nil {
-		event.Command.Output = ""
-	}
-	if event.Prompt != nil {
-		event.Prompt.Text = ""
-	}
-	if event.GenAI != nil {
-		event.GenAI.Input = nil
-		event.GenAI.Output = nil
-		if event.GenAI.Tool != nil && event.GenAI.Tool.Call != nil {
-			event.GenAI.Tool.Call.Arguments = nil
-			event.GenAI.Tool.Call.Result = nil
-		}
-		// An event whose only gen_ai content was the turn text drops the object
-		// rather than writing "gen_ai":{}.
-		if beaconevent.IsZeroJSON(event.GenAI) {
-			event.GenAI = nil
-		}
-	}
-	if event.Content != nil {
-		event.Content.Included = false
-		event.Content.Truncated = true
-	}
 }
 
 func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {

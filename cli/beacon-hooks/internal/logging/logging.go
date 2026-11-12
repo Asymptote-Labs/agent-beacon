@@ -559,43 +559,23 @@ func writeEndpointJSONFile(path string, event map[string]interface{}) error {
 	return deliverEndpointLine(path, data)
 }
 
-// encodeEndpointLine is the line an endpoint event is written as: sanitized, cut down to the
-// 64 KiB event limit, and stamped with its event.id.
+// encodeEndpointLine is the line an endpoint event is written as: sanitized, then fitted to the
+// event size limit and stamped with its event.id the way every writer does (FitEventLine).
 func encodeEndpointLine(event map[string]interface{}) ([]byte, error) {
 	data, err := json.Marshal(sanitizeEndpointMap(event))
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > 64*1024 {
-		event["field_truncated"] = true
-		event["raw"] = nil
-		event["message"] = truncateEndpoint(fmt.Sprint(event["message"]), 1024)
-		data, err = json.Marshal(sanitizeEndpointMap(event))
-		if err != nil {
-			return nil, err
+	var stamp func(id string) ([]byte, error)
+	if info, ok := event["event"].(map[string]interface{}); ok {
+		if id, _ := info["id"].(string); strings.TrimSpace(id) == "" {
+			stamp = func(id string) ([]byte, error) {
+				info["id"] = id
+				return json.Marshal(sanitizeEndpointMap(event))
+			}
 		}
 	}
-	if len(data) > 64*1024 {
-		compactEndpointContent(event)
-		data, err = json.Marshal(sanitizeEndpointMap(event))
-		if err != nil {
-			return nil, err
-		}
-	}
-	if len(data) > 64*1024 {
-		event = minimalEndpointEvent(event)
-		data, err = json.Marshal(sanitizeEndpointMap(event))
-		if err != nil {
-			return nil, err
-		}
-	}
-	if len(data) > 64*1024 {
-		return nil, fmt.Errorf("endpoint event exceeds 64 KiB after metadata fallback")
-	}
-	// Stamped last, over the bytes that are actually about to be written, so
-	// none of the size fallbacks above can leave the ID describing an event that
-	// no longer exists.
-	return withEndpointEventID(event, data)
+	return asymptoteobserve.FitEventLine(data, asymptoteobserve.DefaultMaxEventBytes, stamp)
 }
 
 // EndpointIngest delivers to the system log through the collector when the endpoint is in the
@@ -636,89 +616,6 @@ func deliverEndpointLine(path string, data []byte) error {
 	})
 }
 
-// withEndpointEventID fills event.id on an event assembled as a map and returns
-// its re-marshalled line. line must be the marshalled form of event with no ID
-// on it, which is what EventIDForLine is derived from.
-func withEndpointEventID(event map[string]interface{}, line []byte) ([]byte, error) {
-	info, ok := event["event"].(map[string]interface{})
-	if !ok {
-		return line, nil
-	}
-	if id, _ := info["id"].(string); strings.TrimSpace(id) != "" {
-		return line, nil
-	}
-	info["id"] = asymptoteobserve.EventIDForLine(line)
-	data, err := json.Marshal(sanitizeEndpointMap(event))
-	if err != nil {
-		return nil, err
-	}
-	// An event already at the size limit keeps its bytes and goes without an ID:
-	// the limit is a hard contract, and refusing to write an event over forty
-	// bytes of identity would be the worse trade.
-	if len(data) > 64*1024 {
-		return line, nil
-	}
-	return data, nil
-}
-
-func compactEndpointContent(event map[string]interface{}) {
-	if file, ok := event["file"].(map[string]interface{}); ok {
-		delete(file, "diff")
-	}
-	if command, ok := event["command"].(map[string]interface{}); ok {
-		delete(command, "output")
-	}
-	if genAI, ok := event["gen_ai"].(map[string]interface{}); ok {
-		delete(genAI, "input")
-		delete(genAI, "output")
-		if tool, ok := genAI["tool"].(map[string]interface{}); ok {
-			if call, ok := tool["call"].(map[string]interface{}); ok {
-				delete(call, "arguments")
-				delete(call, "result")
-			}
-		}
-	}
-	if content, ok := event["content"].(map[string]interface{}); ok {
-		content["included"] = false
-		content["truncated"] = true
-	}
-}
-
-func minimalEndpointEvent(event map[string]interface{}) map[string]interface{} {
-	out := map[string]interface{}{"field_truncated": true}
-	for _, key := range []string{
-		"timestamp", "sequence", "vendor", "product", "schema_version", "event", "severity",
-		"endpoint", "user", "harness", "origin", "run", "session", "trace",
-		"error", "tool", "file", "command", "mcp", "approval", "policy",
-		"content", "destination", "health", "model", "repository",
-		"branch", "message",
-	} {
-		if value, ok := event[key]; ok && value != nil {
-			out[key] = value
-		}
-	}
-	if genAI, ok := event["gen_ai"].(map[string]interface{}); ok {
-		summary := map[string]interface{}{}
-		for _, key := range []string{"operation", "usage", "response", "provider"} {
-			if value := genAI[key]; value != nil {
-				summary[key] = value
-			}
-		}
-		if tool, ok := genAI["tool"].(map[string]interface{}); ok {
-			toolSummary := map[string]interface{}{"name": tool["name"], "type": tool["type"]}
-			if call, ok := tool["call"].(map[string]interface{}); ok {
-				toolSummary["call"] = map[string]interface{}{"id": call["id"]}
-			}
-			summary["tool"] = toolSummary
-		}
-		if len(summary) > 0 {
-			out["gen_ai"] = summary
-		}
-	}
-	out["message"] = truncateEndpoint(fmt.Sprint(out["message"]), 1024)
-	return out
-}
-
 // EndpointLogConfigured reports whether this process has a runtime log to write to. Without one,
 // EndpointEvent records nothing and returns nil, so a caller reporting what it recorded checks this
 // rather than reading a nil error as a write.
@@ -752,10 +649,6 @@ func sanitizeEndpointSlice(input []interface{}) []interface{} {
 		RedactSecrets: true,
 		StringLimit:   asymptoteobserve.DefaultStringLimit,
 	})
-}
-
-func truncateEndpoint(value string, limit int) string {
-	return asymptoteobserve.TruncateString(value, limit)
 }
 
 // Keep this file-mode contract mirrored with the endpoint CLI and beaconjson exporter; the rotation
