@@ -79,8 +79,6 @@ type Call struct {
 // tool names and argument keys of Claude Code, Codex, omp and OpenCode. Bindings key on the tool
 // name, not the harness, because the names do not collide.
 func Bind(name, arguments string) Call {
-	var args map[string]any
-	_ = json.Unmarshal([]byte(arguments), &args)
 	c := Call{Name: name}
 	switch {
 	case strings.HasPrefix(name, "mcp__"):
@@ -89,9 +87,9 @@ func Bind(name, arguments string) Call {
 		c.Server, c.Tool, _ = strings.Cut(strings.TrimPrefix(name, "mcp__"), "__")
 	case name == "Bash" || name == "bash" || name == "shell" || name == "local_shell" || name == "exec_command":
 		c.Kind = Shell
-		c.Command = command(args)
+		c.Command = command(parseArgs(arguments))
 	case name == "Read" || name == "read" || name == "view_image":
-		target := firstString(args, "file_path", "filePath", "path")
+		target := firstString(parseArgs(arguments), "file_path", "filePath", "path")
 		if isURL(target) {
 			// omp's read takes a URL as well as a path and returns the page.
 			c.Kind, c.URL = Fetch, target
@@ -100,9 +98,21 @@ func Bind(name, arguments string) Call {
 		}
 	case name == "WebFetch" || name == "webfetch" || name == "fetch" || name == "web_fetch":
 		c.Kind = Fetch
-		c.URL = firstString(args, "url")
+		c.URL = firstString(parseArgs(arguments), "url")
 	}
 	return c
+}
+
+// parseArgs decodes a call's JSON arguments, nil when they are not an object. Only the kinds that
+// read an argument decode them: a tool definition binds with none, and an MCP or unknown call's
+// arguments are never read.
+func parseArgs(arguments string) map[string]any {
+	if arguments == "" {
+		return nil
+	}
+	var args map[string]any
+	_ = json.Unmarshal([]byte(arguments), &args)
+	return args
 }
 
 // command reads a shell call's command: a string, or Codex's argv list.

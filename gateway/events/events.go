@@ -136,9 +136,11 @@ func (b *builder) request() {
 		newTools[toolKey{tool.Name, tool.Description}] = true
 	}
 	resent := b.t.WantsResent()
+	// Joining a system message's text copies it (a system prompt is tens of KB), so it is done
+	// only when the session has new system text or an analyzer reads resent content.
 	for i := range r.Messages {
 		m := &r.Messages[i]
-		if m.Role != llm.RoleSystem {
+		if m.Role != llm.RoleSystem || len(newSystem) == 0 && !resent {
 			continue
 		}
 		text := m.Text()

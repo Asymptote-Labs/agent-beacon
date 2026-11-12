@@ -198,9 +198,11 @@ func (a *adapter) call(req request) (*gateway.Call, error) {
 	case "response":
 		c.Phase = gateway.PhaseResponse
 		c.Body, err = responseBody(req)
-		// LiteLLM names the session by its trace id on both phases. A reply payload that also
-		// carries the request's messages hands them on, for a reply without one.
-		if err == nil && nullable(req.StructuredMessages) != nil {
+		// LiteLLM names the session by its trace id on both phases, and the pipeline reads a
+		// reply's request only when nothing names its session: a reply payload that also carries
+		// the request's messages hands them on only for a reply without a trace id, rather than
+		// copying the whole conversation into a body nothing reads.
+		if err == nil && req.TraceID == "" && nullable(req.StructuredMessages) != nil {
 			c.RequestBody, err = requestBody(req)
 		}
 	default:
