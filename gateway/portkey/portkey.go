@@ -117,6 +117,8 @@ type envelope struct {
 	RequestType string                    `json:"requestType"`
 	Metadata    map[string]jsontext.Value `json:"metadata"`
 	EventType   string                    `json:"eventType"`
+	// requestMessages are request.json's message array's elements, as the walk split them.
+	requestMessages [][]byte
 }
 
 // decodeOptions decode the envelope with encoding/json's (v1) semantics in one pass: v1's decoder
@@ -184,7 +186,9 @@ func (a *adapter) handler(h gateway.Handler) http.Handler {
 // are taken as bytes of the payload, neither decoded nor validated here (the codec validates what
 // it reads); the other members the adapter reads are decoded as encoding/json (v1) decodes them,
 // names matched case-insensitively and the last of duplicates winning. Decoding the whole payload
-// validated and copied the conversation, and the reply, only for the codec to read them again.
+// validated and copied the conversation, and the reply, only for the codec to read them again. The
+// walk splits request.json's messages into their elements as it passes them, which the codec
+// takes rather than walking them again.
 func decodeEnvelope(body []byte, env *envelope) error {
 	raws := [2]*jsontext.Value{&env.Request.JSON, &env.Response.JSON}
 	phase := func(name string) int {
@@ -205,10 +209,21 @@ func decodeEnvelope(body []byte, env *envelope) error {
 	}
 	small := append(make([]byte, 0, 1024), '{')
 	var phases [2][]byte // the request and response objects' other members
-	err := jsonscan.Members(body, func(name string) bool { return phase(name) >= 0 }, func(parent, name string, value []byte) error {
+	enter := func(name string) bool { return phase(name) >= 0 }
+	// request.json is walked through, and its messages array split.
+	split := func(array bool, path ...string) bool {
+		if len(path) < 2 || phase(path[0]) != 0 || !strings.EqualFold(path[1], "json") {
+			return false
+		}
+		return !array && len(path) == 2 || array && len(path) == 3 && path[2] == "messages"
+	}
+	err := jsonscan.Split(body, enter, split, func(parent, name string, value []byte, elems [][]byte) error {
 		if p := phase(parent); p >= 0 {
 			if strings.EqualFold(name, "json") {
 				*raws[p] = value
+				if p == 0 {
+					env.requestMessages = elems
+				}
 			} else if strings.EqualFold(name, "isStreamingRequest") {
 				if phases[p] == nil {
 					phases[p] = []byte{'{'}
@@ -278,7 +293,7 @@ func (a *adapter) call(env *envelope) (*gateway.Call, bool) {
 	switch env.EventType {
 	case "beforeRequestHook":
 		c.Phase = gateway.PhaseRequest
-		c.Body = env.Request.JSON
+		c.Body, c.BodyMessages = env.Request.JSON, env.requestMessages
 	case "afterRequestHook":
 		if isNull(env.Response.JSON) {
 			return nil, false

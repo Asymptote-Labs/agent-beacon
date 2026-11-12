@@ -6,12 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
 	"github.com/asymptote-labs/agent-beacon/gateway/internal/gatewaytest"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
+	"github.com/asymptote-labs/agent-beacon/gateway/llm/codec"
 )
 
 type fakeHandler struct {
@@ -121,6 +123,31 @@ func TestWebhookCalls(t *testing.T) {
 				t.Errorf("ID = %q, want hash of request.json", c.ID)
 			}
 		})
+	}
+}
+
+// A request-phase call hands on the messages of request.json as the walk of the payload split
+// them, for the codec to take rather than walk again: decoding with them is decoding without.
+func TestRequestCarriesSplitMessages(t *testing.T) {
+	req := `{"model":"gpt-4o","messages":[{"role":"system","content":"s"}, {"role":"user","content":"list files"} ],"stream":false}`
+	h := &fakeHandler{}
+	post(t, Config{}, h, "", payload("beforeRequestHook", "chatComplete", req, `null`, false))
+	if len(h.calls) != 1 {
+		t.Fatalf("%d calls", len(h.calls))
+	}
+	c := h.calls[0]
+	if len(c.BodyMessages) != 2 || string(c.BodyMessages[1]) != `{"role":"user","content":"list files"}` {
+		t.Fatalf("split %q", c.BodyMessages)
+	}
+	for i, e := range c.BodyMessages {
+		if at := cap(c.Body) - cap(e); at < 0 || at+len(e) > len(c.Body) || &c.Body[at] != &e[0] {
+			t.Fatalf("message %d is not a slice of the body", i)
+		}
+	}
+	want, werr := codec.SkimRequest(c.Protocol, c.Body)
+	got, gerr := codec.SkimSplitRequest(c.Protocol, c.Body, c.BodyMessages)
+	if werr != nil || gerr != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("skimmed with the split %+v (%v), without %+v (%v)", got, gerr, want, werr)
 	}
 }
 

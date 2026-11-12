@@ -309,7 +309,7 @@ func decode(c *gateway.Call) error {
 		if c.Body == nil {
 			return errors.New("request call carries no content")
 		}
-		r, err := codec.SkimRequest(c.Protocol, c.Body)
+		r, err := codec.SkimSplitRequest(c.Protocol, c.Body, c.BodyMessages)
 		if err != nil {
 			return fmt.Errorf("decode request: %w", err)
 		}

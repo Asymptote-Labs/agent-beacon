@@ -32,11 +32,73 @@ func Object(b []byte, yield func(name string, value []byte) error) error {
 // the whole value and walking it again reads the bytes once: a gateway envelope's request object
 // holds the whole conversation. enter may be nil.
 func Members(b []byte, enter func(name string) bool, yield func(parent, name string, value []byte) error) error {
-	end, err := object(b, ws(b, 0), "", enter, yield)
+	return Split(b, enter, nil, func(parent, name string, value []byte, _ [][]byte) error { return yield(parent, name, value) })
+}
+
+// Split is Members, splitting an array it passes into its elements in the same pass. split is
+// asked about each array or object value on the way, by kind and by its path of member names from
+// the top (unescaped): an array it accepts is split, into elements that alias b (bracket-matched,
+// as Elements finds them); an object it accepts is walked through, still yielded whole, so that an
+// array inside it can be split. A member is yielded with the elements of the last array split
+// within its value, if any. Finding where an array ends walks each of its elements already, so
+// splitting it costs nothing more, and spares a reader of the elements, such as the codec, walking
+// the array again. split may be nil.
+func Split(b []byte, enter func(name string) bool, split func(array bool, path ...string) bool, yield func(parent, name string, value []byte, elems [][]byte) error) error {
+	end, err := object(b, ws(b, 0), func(name string, start int) (int, error) {
+		if enter != nil && start < len(b) && b[start] == '{' && enter(name) {
+			return object(b, start, func(member string, start int) (int, error) {
+				return yieldValue(b, start, split, yield, name, member)
+			})
+		}
+		return yieldValue(b, start, split, yield, "", name)
+	})
 	if err != nil {
 		return err
 	}
 	return trailing(b, end)
+}
+
+// yieldValue finds the end of the value at b[start] of member name (under parent), splitting
+// what split asks for, and yields it.
+func yieldValue(b []byte, start int, split func(array bool, path ...string) bool, yield func(parent, name string, value []byte, elems [][]byte) error, parent, name string) (int, error) {
+	var (
+		end   int
+		elems [][]byte
+		err   error
+	)
+	switch {
+	case split == nil:
+		end, err = skipValue(b, start)
+	case parent == "":
+		end, elems, err = value(b, start, []string{name}, split)
+	default:
+		end, elems, err = value(b, start, []string{parent, name}, split)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return end, yield(parent, name, b[start:end], elems)
+}
+
+// value returns the index just past the value at b[i], at path, and the elements of the last
+// array within it that split asks to split.
+func value(b []byte, i int, path []string, split func(array bool, path ...string) bool) (end int, elems [][]byte, err error) {
+	if i >= len(b) || (b[i] != '[' && b[i] != '{') || !split(b[i] == '[', path...) {
+		end, err = skipValue(b, i)
+		return end, nil, err
+	}
+	if b[i] == '[' {
+		end, err = elements(b, i, func(e []byte) bool { elems = append(elems, e); return true })
+		return end, elems, err
+	}
+	end, err = object(b, i, func(name string, start int) (int, error) {
+		end, e, err := value(b, start, append(path[:len(path):len(path)], name), split)
+		if e != nil {
+			elems = e
+		}
+		return end, err
+	})
+	return end, elems, err
 }
 
 // errFound stops a walk once FirstString has its member.
@@ -111,32 +173,38 @@ func MemberStart(b []byte, name string, before func(name, value []byte)) (int, b
 // yield returns false. It reads only as far as the element yield stops at; elements are bracket-
 // matched, not validated.
 func Elements(b []byte, i int, yield func(elem []byte) bool) error {
+	_, err := elements(b, i, yield)
+	return err
+}
+
+// elements is Elements, returning the index just past the array when yield never stops it.
+func elements(b []byte, i int, yield func(elem []byte) bool) (int, error) {
 	if i >= len(b) || b[i] != '[' {
-		return errSyntax
+		return 0, errSyntax
 	}
 	i = ws(b, i+1)
 	if i < len(b) && b[i] == ']' {
-		return nil
+		return i + 1, nil
 	}
 	for {
 		end, err := skipValue(b, i)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if !yield(b[i:end]) {
-			return nil
+			return end, nil
 		}
 		i = ws(b, end)
 		if i >= len(b) {
-			return errSyntax
+			return 0, errSyntax
 		}
 		switch b[i] {
 		case ',':
 			i = ws(b, i+1)
 		case ']':
-			return nil
+			return i + 1, nil
 		default:
-			return errSyntax
+			return 0, errSyntax
 		}
 	}
 }
@@ -145,9 +213,10 @@ func Elements(b []byte, i int, yield func(elem []byte) bool) error {
 // matched brackets, or a literal. It does not validate what is inside.
 func ValueEnd(b []byte, i int) (int, error) { return skipValue(b, i) }
 
-// object walks the object starting at b[i] == '{', yielding its members under parent, and returns
-// the index just past it. Only the top level (parent "") enters members.
-func object(b []byte, i int, parent string, enter func(string) bool, yield func(parent, name string, value []byte) error) (int, error) {
+// object walks the object starting at b[i] == '{', calling member with each member's name,
+// unescaped, and the offset of its value, which member returns the end of; it returns the index
+// just past the object.
+func object(b []byte, i int, member func(name string, start int) (int, error)) (int, error) {
 	if i >= len(b) || b[i] != '{' {
 		return 0, errSyntax
 	}
@@ -171,13 +240,7 @@ func object(b []byte, i int, parent string, enter func(string) bool, yield func(
 		if i >= len(b) || b[i] != ':' {
 			return 0, errSyntax
 		}
-		start := ws(b, i+1)
-		if parent == "" && enter != nil && start < len(b) && b[start] == '{' && enter(string(name)) {
-			end, err = object(b, start, string(name), nil, yield)
-		} else if end, err = skipValue(b, start); err == nil {
-			err = yield(parent, string(name), b[start:end])
-		}
-		if err != nil {
+		if end, err = member(string(name), ws(b, i+1)); err != nil {
 			return 0, err
 		}
 		i = ws(b, end)

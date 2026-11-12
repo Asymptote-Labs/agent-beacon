@@ -56,6 +56,14 @@ import (
 //   - Nesting: in the body, members sit one level deep and elements two. The scan gives up on
 //     any value nested deeper than maxPlanDepth, far inside jsontext's limit, so validating a
 //     value alone never accepts what the body's depth would reject.
+//   - A split the caller made (SkimSplitRequest) stands in for the boundary scan of the array
+//     only where it is exactly that array's elements: each a slice of the body, the first just
+//     after the bracket and whitespace, each next one after whitespace, a comma and whitespace,
+//     the last followed by whitespace and the closing bracket, which is the array's syntax as the
+//     scan checks it. Its elements are then extents like the scan's, with one check the scan
+//     made and the caller need not have: on a miss each must be one value nesting no deeper than
+//     maxPlanDepth (scanValue), before it is validated. A split that does not match is ignored
+//     and the array scanned as usual.
 // Whenever any of this fails, or the planned decode reports any error, SkimRequest skims the
 // original body plainly, which also reports the error a plain skim reports.
 //
@@ -207,9 +215,19 @@ func resetSkimMemo() {
 
 var errInvalidElement = errors.New("skim: invalid message")
 
-// add skims one array element. validated reports that the decoder already validated it in
-// place; an element cut out by a plan is validated here, on a miss, before anything else.
-func (sk *skimmer) add(raw []byte, validated bool) error {
+// elemSource is how an element of the message array reached the skim.
+type elemSource uint8
+
+const (
+	fromDecoder elemSource = iota // read by the decoder, which validated it in place
+	fromPlan                      // cut out by planSkim's boundary scan
+	fromSplit                     // split by the caller (SkimSplitRequest)
+)
+
+// add skims one array element. An element the decoder did not read is validated here, on a miss,
+// before anything else; one the caller split is first checked as the boundary scan checks
+// what it cuts.
+func (sk *skimmer) add(raw []byte, from elemSource) error {
 	if len(raw) > math.MaxUint32 {
 		return sk.skim(raw, 0, false)
 	}
@@ -217,7 +235,12 @@ func (sk *skimmer) add(raw []byte, validated bool) error {
 	if e, ok := memoGet(key, len(raw)); ok {
 		return sk.replay(&e, raw)
 	}
-	if !validated && !jsontext.Value(raw).IsValid(decodeOptions) {
+	if from == fromSplit {
+		if end, depth := scanValue(raw, 0); end != len(raw) || depth > maxPlanDepth {
+			return errInvalidElement
+		}
+	}
+	if from != fromDecoder && !jsontext.Value(raw).IsValid(decodeOptions) {
 		return errInvalidElement
 	}
 	return sk.skim(raw, key, true)
@@ -344,8 +367,10 @@ func (sk *skimmer) replay(e *memoEntry, raw []byte) error {
 type skimPlan struct {
 	shell []byte // the body with what was cut replaced by placeholders
 	// cutMessages reports that the message array was cut: its elements are elems, extents of the
-	// body, and its placeholder "[]" ends at messagesEnd in the shell.
+	// body, and its placeholder "[]" ends at messagesEnd in the shell. split reports that elems
+	// are the caller's split rather than the boundary scan's.
 	cutMessages bool
+	split       bool
 	messagesEnd int
 	elems       [][]byte
 	cuts        []skimCut
@@ -384,8 +409,9 @@ type span struct {
 
 // planSkim cuts body for a memoized skim of protocol p, or returns nil when there is nothing
 // worth cutting or the body does not look like an object the scan follows exactly. It never
-// decides validity; see the soundness notes above.
-func planSkim(body []byte, p llm.Protocol, seeds *memoSeedSet) *skimPlan {
+// decides validity; see the soundness notes above. split, when not nil, is the caller's split of
+// the message array, taken for it when it matches (checkSplit).
+func planSkim(body []byte, p llm.Protocol, seeds *memoSeedSet, split [][]byte) *skimPlan {
 	members, array := memoMembers[p], arrayMember(p)
 	var (
 		spans  []span
@@ -421,8 +447,9 @@ func planSkim(body []byte, p llm.Protocol, seeds *memoSeedSet) *skimPlan {
 			arrayI = start
 			// The array is cut whether or not its messages are cached: the shell then holds
 			// only the rest of the body, and the elements are validated one by one instead.
-			plan.elems, i = scanArray(body, start)
-			if i < 0 {
+			if end := checkSplit(body, start, split); end >= 0 {
+				plan.elems, i, plan.split = split, end, true
+			} else if plan.elems, i = scanArray(body, start); i < 0 {
 				return nil
 			}
 			plan.cutMessages = true
@@ -528,6 +555,36 @@ func scanArray(body []byte, start int) (elems [][]byte, end int) {
 			return nil, -1
 		}
 	}
+}
+
+// checkSplit returns the offset just past the array at body[start] when elems are exactly its
+// elements: slices of body, in order, separated by the array's own syntax. It returns -1 when they
+// are not, or there are none.
+func checkSplit(body []byte, start int, elems [][]byte) int {
+	if len(elems) == 0 {
+		return -1
+	}
+	i := skipWS(body, start+1)
+	for k, e := range elems {
+		at := cap(body) - cap(e)
+		if len(e) == 0 || at != i || at+len(e) > len(body) || &body[at] != &e[0] {
+			return -1
+		}
+		if i = skipWS(body, at+len(e)); i >= len(body) {
+			return -1
+		}
+		if k == len(elems)-1 {
+			if body[i] != ']' {
+				return -1
+			}
+			return i + 1
+		}
+		if body[i] != ',' {
+			return -1
+		}
+		i = skipWS(body, i+1)
+	}
+	return -1
 }
 
 // errPlan reports a planned skim whose placeholders are not where the plan put them.

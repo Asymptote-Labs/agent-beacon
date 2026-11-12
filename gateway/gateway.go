@@ -77,6 +77,11 @@ type Call struct {
 	// it exactly as it named the request's, so the reply joins its request's session without
 	// waiting for the request's analysis or asking the store.
 	RequestBody []byte
+	// BodyMessages, when set, are the elements of the message array in a request's Body, in order,
+	// as slices of Body, split by an adapter that walked them while reading its own payload. The
+	// pipeline decodes Body without walking the array again; the split is checked against Body,
+	// not trusted, and one that does not match is ignored (codec.SkimSplitRequest).
+	BodyMessages [][]byte
 	// Release, when set, is called by the Handler once, when it will read nothing of Body or
 	// RequestBody again, which may be after Handle returns. An adapter that reads bodies into
 	// pooled buffers returns them here (ReadBody); nothing derived from a body refers to it.

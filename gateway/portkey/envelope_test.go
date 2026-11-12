@@ -25,6 +25,7 @@ func TestDecodeEnvelopeMatchesFullDecode(t *testing.T) {
 		if err := json.Unmarshal([]byte(body), &want, decodeOptions); err != nil {
 			t.Fatalf("%s: full decode: %v", body, err)
 		}
+		got.requestMessages = nil // the walk's split of the messages, which no decode makes
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s:\n got %+v\nwant %+v", body, got, want)
 		}

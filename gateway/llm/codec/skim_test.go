@@ -552,7 +552,7 @@ func TestSkimMemoSession(t *testing.T) {
 			for _, bad := range []synth.Bad{synth.Benign, synth.Injection} {
 				body := synthRequest(s, p, k, bad)
 				if k > 2 {
-					plan := planSkim(body, p, memoSeeds[p])
+					plan := planSkim(body, p, memoSeeds[p], nil)
 					if plan == nil || !plan.cutMessages || len(plan.cuts) == 0 {
 						t.Fatalf("%s turn %d: history or tools did not hit the memo: %+v", p, k, plan)
 					}
@@ -602,7 +602,7 @@ func TestSkimMemoInvalid(t *testing.T) {
 		} {
 			resetSkimMemo()
 			compareSkim(t, p, []byte(valid))
-			if plan := planSkim([]byte(valid), p, memoSeeds[p]); plan == nil || !plan.cutMessages {
+			if plan := planSkim([]byte(valid), p, memoSeeds[p], nil); plan == nil || !plan.cutMessages {
 				t.Fatalf("%s: the warmed body is not planned", p)
 			}
 			body := []byte(skimBody(p, inner))
@@ -720,7 +720,7 @@ func TestSkimMemoResent(t *testing.T) {
 		// Warm, the tools and system prompt come from the memo, a system message's parts too.
 		resetSkimMemo()
 		compareSkim(t, p, prev)
-		plan := planSkim(body, p, memoSeeds[p])
+		plan := planSkim(body, p, memoSeeds[p], nil)
 		if plan == nil || !plan.cutMessages || len(plan.cuts) != len(memoMembers[p]) {
 			t.Fatalf("%s: plan %+v", p, plan)
 		}
