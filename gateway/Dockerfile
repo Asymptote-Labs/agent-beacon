@@ -23,8 +23,14 @@ LABEL org.opencontainers.image.title="beacon-gateway" \
 
 COPY linux/${TARGETARCH}/beacon-gateway /usr/local/bin/beacon-gateway
 
-# The default configuration writes gateway-events.jsonl in the working directory; the nonroot
-# user's home is the one directory it can write. Mount a volume or pass -config for anything else.
+# Without -config the gateway listens on the container's loopback: the LiteLLM callout on
+# 127.0.0.1:4019, the admin listener on 127.0.0.1:4029. That is where a sidecar in the same pod
+# reaches it. A published port (-p) or a gateway in another container cannot: for those, mount a
+# configuration whose adapter listens on 0.0.0.0, on a network you trust, since the callout takes
+# any caller. The default configuration writes gateway-events.jsonl in the working directory, the
+# one directory the nonroot user can write; mount a volume for anything else.
 WORKDIR /home/nonroot
-USER nonroot
+# Numeric, as the base sets it: Kubernetes verifies runAsNonRoot only for a numeric user, and
+# refuses to start an image whose user is a name.
+USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/beacon-gateway"]

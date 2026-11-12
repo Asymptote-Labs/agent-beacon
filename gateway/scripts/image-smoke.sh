@@ -1,9 +1,9 @@
 #!/bin/sh
-# Smoke-tests a beacon-gateway image: it reports the expected version, starts on its built-in
-# configuration, answers a LiteLLM guardrail call with no action (observe only), counts the call on
-# /stats without a failure, records the call's prompt in gateway-events.jsonl, and is still running
-# at the end. CI runs it on the image it builds, release-gateway.yml on the image it pushed, by
-# digest.
+# Smoke-tests a beacon-gateway image: it reports the expected version, runs as a numeric non-root
+# user, starts on its built-in configuration, answers a LiteLLM guardrail call with no action
+# (observe only), counts the call on /stats without a failure, records the call's prompt in
+# gateway-events.jsonl, and is still running at the end. CI runs it on the image it builds,
+# release-gateway.yml on the image it pushed, by digest.
 #
 #   sh gateway/scripts/image-smoke.sh <image> [expected-version]
 #
@@ -46,6 +46,12 @@ got_version=$(echo "$line" | awk '{print $2}')
 if [ -n "$want_version" ] && [ "$got_version" != "$want_version" ]; then
 	fail "image is version $got_version, expected $want_version"
 fi
+# Kubernetes verifies runAsNonRoot only against a numeric user: a name keeps the pod from starting
+# under the restricted Pod Security profile, and Docker, which accepts one, would never show it.
+user=$(docker image inspect -f '{{.Config.User}}' "$image")
+case "${user%%:*}" in
+'' | 0 | *[!0-9]*) fail "the image's user is '$user'; it must be a numeric, non-root uid" ;;
+esac
 
 cid=$(docker run -d "$image")
 gwcurl -fsS --retry 20 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:4029/healthz ||

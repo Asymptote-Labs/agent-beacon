@@ -5,7 +5,11 @@
 # gateway/Dockerfile). CI runs it on every change and release-gateway.yml publishes what it builds,
 # so the two never build differently.
 #
-#   sh gateway/scripts/release-build.sh [out-dir]     (default: gateway/dist)
+#   sh gateway/scripts/release-build.sh [out-dir]     (default: gateway/dist, emptied first)
+#
+# Only the default directory is emptied before a build: it is this script's own, and git ignores
+# it. A directory passed in must be new or empty, so a mistaken argument (., $HOME) is refused
+# rather than deleted.
 #
 # The version comes from the source (cmd/beacon-gateway/version.go), the commit and build date from
 # git: the build date is the commit's, so building one commit twice stamps the same values. On Linux
@@ -26,7 +30,12 @@ epoch=$(git log -1 --format=%ct HEAD)
 build_date=$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ HEAD)
 ldflags="-s -w -X main.commit=$commit -X main.buildDate=$build_date"
 
-rm -rf "$out"
+if [ -z "${1:-}" ]; then
+	rm -rf "$out"
+elif [ -e "$out" ] && [ -n "$(ls -A "$out")" ]; then
+	echo "release-build: $out is not empty; pass a new or empty directory" >&2
+	exit 1
+fi
 mkdir -p "$out/image"
 # GNU tar can write the same bytes for the same files; bsdtar (macOS) cannot, which only matters for
 # CI and the release, both on Linux. COPYFILE_DISABLE keeps macOS's ._ metadata files out.
