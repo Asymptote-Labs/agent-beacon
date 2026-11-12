@@ -234,17 +234,36 @@ the steps in both orders still fires once. A single event never satisfies two st
   `name` is the carrier: the words after the options of `xargs`; the words of each `-exec`,
   `-execdir`, `-ok` and `-okdir` of `find` up to its `;` or `+`; the words after the host of
   `ssh`, after the container of `docker exec`, `podman exec` and `nerdctl exec`, and after
-  `--` of `kubectl exec`; the string of `su -c`; the words of `eval` and `watch`; and the
-  action of `trap`. The words of `xargs`, `find` and the exec commands are read as written;
+  `--` of `kubectl exec`; the string of `su -c`; the words of `eval` and `watch`; the
+  action of `trap`; and the words after a wrapper that runs its command somewhere else and
+  so leaves it without a `name` (`sudo -i`, `sudo -D dir`, `sudo -R root`, `env -C dir`,
+  `uv run --directory dir`). The words of `xargs`, `find`, the exec commands and such a
+  wrapper are read as written;
   the others as the shell passes them on, because a shell reads them again. Those commands
   run where the carrier puts them (another host, a container, once per file); their words
-  are still what runs. A command line handed on is read at most three levels deep (two
+  are still what runs. The same holds for the script a pipe sends a shell that is given
+  neither `-c` nor a script file and no input redirection, when every command of the stage
+  before it prints its own words: `echo` (with `-e`, `\n` and `\t` are characters), `printf`
+  with a format whose only directives are `%s`, `%b` and `%%`, and `cat` given a
+  here-document or here-string and no file, each with every word known and no output
+  redirection (`echo 'rm -rf /' | sh`, `cat <<'EOF' | sudo bash`); and for the command lines
+  the inline script of `python`, `node`, `bun`, `deno`, `ruby` or `php` (its `-c`/`-e`
+  value, or the here-document it reads) runs through `os.system`, `os.popen`,
+  `subprocess.run`/`call`/`check_call`/`check_output`/`Popen`/`getoutput`,
+  `child_process`'s `exec`/`execFile`/`spawn` and their `Sync` forms, Ruby's `system`,
+  `exec`, `spawn`, backticks and `%x(..)`, and PHP's `system`, `exec`, `shell_exec`,
+  `passthru`, `popen` and `proc_open`, when the command is written out: a string literal is
+  a command line, a list of string literals its words, and an element or a further argument
+  that is not a literal is a word whose value is unknown. A literal the language fills in
+  (an f-string, `${..}`, `#{..}`) or that is an operand of an expression is not read.
+  A command line handed on is read at most three levels deep (two
   before v1.3). Since v1.3 the words after the `-Command` (`-c`) option of `powershell` or
   `pwsh`, joined with spaces as PowerShell joins them, are read the same way, where
   PowerShell and bash agree on a command and its words
   (`powershell -Command "Get-StoredCredential -Target x"`). Other here-document bodies, what
   a pipe sends a
-  shell, and the strings of other commands are not read as commands. A command line that
+  shell from any other command, a script file, and the rest of an interpreter's code are
+  not read as commands. A command line that
   ends early (an unclosed
   quote, here-document, substitution or compound command) yields the commands before the
   point where it became incomplete; one that does not parse yields the empty list, so a
@@ -289,9 +308,22 @@ the steps in both orders still fires once. A single event never satisfies two st
   and `install` (`write`, the destination), `ln` (`link`) and `mv` and `git mv` (`move_from`
   for each source, `move_to` for the destination). A destination that is a directory (the
   last of three or more operands, one written with a trailing slash, the value of `-t`) is
-  reported as the directory joined with each source's base name. A command that writes a
-  file named by an option this list does not read (`curl -o`, `dd of=`) reports nothing for
-  it. The reference derivation is `shellcmd.FileWrites`.
+  reported as the directory joined with each source's base name. Since v1.3 (in
+  `file_effects` too, when the path is known) they are also: the file of each `-o` or
+  `--output` of `curl`, and with `-O` or `--remote-name` the name each URL ends in, under
+  `--output-dir`; the file of `-O` or `--output-document` of `wget`, or else the name each
+  URL ends in, under `-P`, and nothing for a recursive download or `--spider`; the `of=`
+  file of `dd`; and, when the last operand of `scp` or `rsync` is on this host, that
+  operand, or each source's base name under it as for `cp`. Standard output (`-`) and a path
+  under `/dev/` are no file.
+
+  `file_writes` alone also lists a directory a command puts files into, as the directory
+  with one trailing slash and `op` `write`, because which files land there is not on the
+  command line: where `tar` (`gtar`, `bsdtar`) extracts (`-C`, `--directory`, else `./`),
+  where `unzip` extracts (`-d`, else `./`), the directory `git clone` or `gh repo clone`
+  creates (its second operand, else the repository's name), and the destination of `rsync`
+  for a source written with a trailing slash. The reference derivation is
+  `shellcmd.FileWrites`.
 - `file_reads` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) is a field of each `parsed_commands` entry: the files whose content the command
   evidently takes in, a list of `{path, via}`. `path` is the word as written with its quotes
@@ -426,11 +458,15 @@ the steps in both orders still fires once. A single event never satisfies two st
   The reference derivation is `shellcmd.SocketRedirects`.
 - `runs_read` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) on an entry of `e.command.parsed_commands` is true when the command hands a command
-  line to another program to run (a shell's `-c` script or the here-document it reads, and
-  the command line of a carrier, above) and the engine read that command line to its end,
-  so that its commands follow the entry in the list. It is false when the command hands
+  line to another program to run (a shell's `-c` script, the here-document it reads or the
+  literal script a pipe sends it, the command line of a carrier, and the command of a
+  wrapper that runs it somewhere else, above) and the engine read that command line to its
+  end, so that its commands follow the entry in the list. It is false when the command hands
   none on, when the command line is not a known word (`bash -c "$CMD"`), when it does not
-  parse to its end, and when it is nested deeper than the engine reads. A rule uses it to
+  parse to its end, and when it is nested deeper than the engine reads. It is false for a
+  shell that follows a word which is not a wrapper (`"$TOOL" sh -c 'id'`), whose script is
+  listed all the same, and for an interpreter whose inline script runs commands that are
+  listed: a script can run what its text does not show. A rule uses it to
   tell a program whose commands answer for themselves from one it cannot see into.
   For `xargs` and `find` it says only that the command they run is listed: that command's
   operands come from a pipe or from what `find` matches, which the entry does not hold.
@@ -677,10 +713,16 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
   directory is unknown (`~/bin/tool`), without a Windows executable's suffix and after a
   PowerShell assignment; `command -v` names no command. A shell's
   here-document or here-string script is read as commands the way its `-c` script is, and so
-  is the command line `xargs`, `find -exec`, `ssh`, `docker exec`, `kubectl exec`, `su -c`,
-  `eval`, `watch` and `trap` hand on, and a PowerShell's `-Command` script, three levels
-  deep. A declaration (`export`) is an
-  entry. [Predicates](#predicates): named expressions a rule calls, defined by the pack's
+  are the command line `xargs`, `find -exec`, `ssh`, `docker exec`, `kubectl exec`, `su -c`,
+  `eval`, `watch` and `trap` hand on, the command a wrapper runs somewhere else
+  (`sudo -i`, `env -C`), the script a pipe sends a shell from a stage that prints its own
+  words (`echo 'cmd' | sh`), a PowerShell's `-Command` script, and the commands an
+  interpreter's inline script runs through a
+  call with literal arguments (`os.system("..")`), three levels deep. A declaration
+  (`export`) is an entry. `file_effects` and `file_writes` list the file a download saves
+  (`curl -o`, `wget -O`), `dd of=`, and the local destination of `scp` and `rsync`;
+  `file_writes` also lists the directory an archive or a clone lands in.
+  [Predicates](#predicates): named expressions a rule calls, defined by the pack's
   definitions files.
 - **v1.2**: the derived field `e.command.parsed_commands`.
 - **v1.1**: `correlation.order` (`sequence` default, or `any` for order-insensitive steps),

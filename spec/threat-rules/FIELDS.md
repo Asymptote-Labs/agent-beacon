@@ -192,7 +192,9 @@ never written to or read from the log, so a fixture sets the source field, not t
   asks for two whole words that follow each other), `env` (NAME=value prefixes),
   `file_effects` (`{path, op}`), `file_writes` (spec v1.3, `{path, op}`: the files it
   writes with each path as written, so a write to `~/.bashrc` or `$HOME/.netrc`, which
-  `file_effects` leaves out, is listed), `file_reads` (spec v1.3, `{path, via}`: the files whose
+  `file_effects` leaves out, is listed; a download's output file and the destination of
+  `scp` and `rsync` are writes, and so is the directory an archive or a clone lands in,
+  written with a trailing slash), `file_reads` (spec v1.3, `{path, via}`: the files whose
   content it takes in, each as written without its quotes, so `~/.aws/credentials` and
   `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one
   that reaches its standard input by a redirection or a pipe, `argument` for one a
@@ -202,16 +204,19 @@ never written to or read from the log, so a fixture sets the source field, not t
   are not data), `socket_redirects` (spec v1.3, `{path, op}`: its redirections to or from
   bash's `/dev/tcp/host/port` and `/dev/udp/host/port`, also through a descriptor an
   earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`
-  (0-based), `nested` (inside `$(...)`, `<(...)`, a shell's script or what a carrier
-  runs), `runs_read` (spec v1.3: true when the command hands a command line to another
-  program and that command line was read to its end, so its commands follow it in the
-  list: a shell's `-c` text or the here-document it reads, and the command of `xargs`,
-  `find -exec`, `ssh host`, `docker exec`, `kubectl exec --`, `su -c`, `eval`, `watch` and
-  `trap`) and `span` (spec v1.3: the part of the line that can decide what the command
-  runs, for a rule that must match text because the command is a program it cannot see
-  into: its own words, redirections and here-documents, starting earlier when an earlier
-  stage of its pipeline, a command that wrote a file, or a variable the line may have
-  set reaches it, and covering the loop or the line when it is in a loop or a function).
+  (0-based), `nested` (inside `$(...)`, `<(...)`, a shell's script or what a carrier or an
+  inline script runs), `runs_read` (spec v1.3: true when the command hands a command line
+  to another program and that command line was read to its end, so its commands follow it
+  in the list: a shell's `-c` text, the here-document it reads or the literal script a
+  pipe sends it, the command of `xargs`, `find -exec`, `ssh host`, `docker exec`,
+  `kubectl exec --`, `su -c`, `eval`, `watch` and `trap`, and the command behind
+  `sudo -i` or `env -C`; never for an interpreter, though the commands its inline script
+  runs through `os.system("..")` and the like are listed) and `span` (spec v1.3: the part
+  of the line that can decide what the command runs, for a rule that must match text
+  because the command is a program it cannot see into: its own words, redirections and
+  here-documents, with the earlier stages of its pipeline and the commands before it that
+  wrote a file, the line from its start when a variable the line may have set reaches it,
+  and the loop or the line when it is in a loop or a function).
   Other here-document bodies and strings are not commands. A declaration is one (spec
   v1.3): `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.
   The first 4096 bytes are read; a cut capture yields the commands before the cut, and

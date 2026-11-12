@@ -145,7 +145,9 @@ var derivedFieldDocs = map[string]string{
 		"  asks for two whole words that follow each other), `env` (NAME=value prefixes),\n" +
 		"  `file_effects` (`{path, op}`), `file_writes` (spec v1.3, `{path, op}`: the files it\n" +
 		"  writes with each path as written, so a write to `~/.bashrc` or `$HOME/.netrc`, which\n" +
-		"  `file_effects` leaves out, is listed), `file_reads` (spec v1.3, `{path, via}`: the files whose\n" +
+		"  `file_effects` leaves out, is listed; a download's output file and the destination of\n" +
+		"  `scp` and `rsync` are writes, and so is the directory an archive or a clone lands in,\n" +
+		"  written with a trailing slash), `file_reads` (spec v1.3, `{path, via}`: the files whose\n" +
 		"  content it takes in, each as written without its quotes, so `~/.aws/credentials` and\n" +
 		"  `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one\n" +
 		"  that reaches its standard input by a redirection or a pipe, `argument` for one a\n" +
@@ -155,16 +157,19 @@ var derivedFieldDocs = map[string]string{
 		"  are not data), `socket_redirects` (spec v1.3, `{path, op}`: its redirections to or from\n" +
 		"  bash's `/dev/tcp/host/port` and `/dev/udp/host/port`, also through a descriptor an\n" +
 		"  earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`\n" +
-		"  (0-based), `nested` (inside `$(...)`, `<(...)`, a shell's script or what a carrier\n" +
-		"  runs), `runs_read` (spec v1.3: true when the command hands a command line to another\n" +
-		"  program and that command line was read to its end, so its commands follow it in the\n" +
-		"  list: a shell's `-c` text or the here-document it reads, and the command of `xargs`,\n" +
-		"  `find -exec`, `ssh host`, `docker exec`, `kubectl exec --`, `su -c`, `eval`, `watch` and\n" +
-		"  `trap`) and `span` (spec v1.3: the part of the line that can decide what the command\n" +
-		"  runs, for a rule that must match text because the command is a program it cannot see\n" +
-		"  into: its own words, redirections and here-documents, starting earlier when an earlier\n" +
-		"  stage of its pipeline, a command that wrote a file, or a variable the line may have\n" +
-		"  set reaches it, and covering the loop or the line when it is in a loop or a function).\n" +
+		"  (0-based), `nested` (inside `$(...)`, `<(...)`, a shell's script or what a carrier or an\n" +
+		"  inline script runs), `runs_read` (spec v1.3: true when the command hands a command line\n" +
+		"  to another program and that command line was read to its end, so its commands follow it\n" +
+		"  in the list: a shell's `-c` text, the here-document it reads or the literal script a\n" +
+		"  pipe sends it, the command of `xargs`, `find -exec`, `ssh host`, `docker exec`,\n" +
+		"  `kubectl exec --`, `su -c`, `eval`, `watch` and `trap`, and the command behind\n" +
+		"  `sudo -i` or `env -C`; never for an interpreter, though the commands its inline script\n" +
+		"  runs through `os.system(\"..\")` and the like are listed) and `span` (spec v1.3: the part\n" +
+		"  of the line that can decide what the command runs, for a rule that must match text\n" +
+		"  because the command is a program it cannot see into: its own words, redirections and\n" +
+		"  here-documents, with the earlier stages of its pipeline and the commands before it that\n" +
+		"  wrote a file, the line from its start when a variable the line may have set reaches it,\n" +
+		"  and the loop or the line when it is in a loop or a function).\n" +
 		"  Other here-document bodies and strings are not commands. A declaration is one (spec\n" +
 		"  v1.3): `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.\n" +
 		fmt.Sprintf("  The first %d bytes are read; a cut capture yields the commands before the cut, and\n", ParsedCommandsLimit) +
