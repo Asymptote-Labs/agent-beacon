@@ -1,5 +1,6 @@
 id: package-install-from-untrusted-source
-version: 1
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 2
 title: Package installed from a URL, git ref or non-default index
 description: >
   A package manager installs code from somewhere other than its default public
@@ -10,7 +11,11 @@ description: >
   run with the agent's permissions, and these sources skip the registry's name
   ownership, so an injected instruction that names one is a direct supply-chain path
   onto the machine. A private index the organization runs will also fire; that is
-  reviewable, not noise.
+  reviewable, not noise. The installer is found by what the line runs, so pip under
+  sudo, by path or inside `bash -c` fires and an install line quoted in a commit
+  message or a here-document does not; a line the parser cannot vouch for (see
+  command_unread), and one whose installer has a word with a variable in it, is
+  matched on its text.
 severity: medium
 status: stable
 posture: detect
@@ -19,8 +24,31 @@ taxonomy:
   owasp_llm: LLM03
   mitre_atlas: AML.T0011
 
+# The installer is a parsed command and its sources are whole words of it: a requirement
+# that is a URL, an option that names another index, an index option whose URL is not the
+# default host. The host test is the one of the text patterns, which spell out "any host
+# but pypi.org" (and the npm and yarn registries) because RE2 has no negative lookahead.
+# A word with a variable in it (git+https://$HOST/x.git, --extra-index-url=$MIRROR) has no
+# known value, so c.args holds it as an empty word. The text patterns therefore also decide
+# for a line where one of the package managers has such a word, not only for an unread line.
 match: >
   e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c,
+      (c.name.matches("^(pip[0-9.]*|pipx)$") && c.args.matches("(?m)^install$") ||
+       c.name == "uv" && c.args.matches("(?m)^(pip|tool)\\ninstall$|^add$") ||
+       c.name.matches("^python[0-9.]*$") && c.args.matches("(?m)^-m\\npip\\ninstall$") ||
+       c.name == "poetry" && c.args.matches("(?m)^add$")) &&
+      (c.args.matches("(?mi)^(git\\+|[\\w.\\[\\],-]+\\s*@\\s*(git\\+)?(https?|ssh|git|file)://|(https?|ssh|git)://\\S*\\.(whl|tar\\.gz|tgz|tar\\.bz2|zip|git)(#\\S*)?$)") ||
+       c.args.matches("(?m)^(--extra-index-url|--trusted-host)(=|$)") ||
+       c.args.matches("(?mi)^(-i|--index-url|--index|--default-index)(\\n|=)['\\\"]?([\\w.-]+=)?['\\\"]?(http://|https://[^\\s/'\\\"?#]*@|https://([^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#y][^\\s/:'\\\"?#]*|y(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#i][^\\s/:'\\\"?#]*|i(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))([:/'\\\"?#]|\\s|$))")) ||
+      (c.name.matches("^(npm|pnpm|bun)$") && c.args.matches("(?m)^(install|i|add|ci)$") ||
+       c.name == "yarn" && c.args.matches("(?m)^add$")) &&
+      (c.args.matches("(?mi)^(@?[\\w./-]+@)?(git\\+|github:|gitlab:|bitbucket:|gist:|git://|ssh://|https?://\\S*\\.(tgz|tar\\.gz|git)(#\\S*)?$)") ||
+       c.args.matches("(?mi)^--registry(\\n|=)['\\\"]?(http://|https://[^\\s/'\\\"?#]*@|https://([^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#e][^\\s/:'\\\"?#]*|e(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g(|[^\\s/:'\\\"?#i][^\\s/:'\\\"?#]*|i(|[^\\s/:'\\\"?#s][^\\s/:'\\\"?#]*|s(|[^\\s/:'\\\"?#t][^\\s/:'\\\"?#]*|t(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#y][^\\s/:'\\\"?#]*|y(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#ny][^\\s/:'\\\"?#]*|n(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#m][^\\s/:'\\\"?#]*|m(|[^\\s/:'\\\"?#j][^\\s/:'\\\"?#]*|j(|[^\\s/:'\\\"?#s][^\\s/:'\\\"?#]*|s(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))|y(|[^\\s/:'\\\"?#a][^\\s/:'\\\"?#]*|a(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#n][^\\s/:'\\\"?#]*|n(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#k][^\\s/:'\\\"?#]*|k(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#c][^\\s/:'\\\"?#]*|c(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#m][^\\s/:'\\\"?#]*|m([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))))))))))))))([:/'\\\"?#]|\\s|$))")) ||
+      c.name == "cargo" && c.args.matches("(?m)^install$") && c.args.matches("(?m)^--git(=|$)") ||
+      c.name == "gem" && c.args.matches("(?m)^install$") && c.args.matches("(?m)^(--source|--clear-sources)(=|$)")
+    ) ||
+    ((
     (
       e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s['\\\"]?(git\\+|[\\w.\\[\\],-]+\\s*@\\s*(git\\+)?(https?|ssh|git|file)://|(https?|ssh|git)://[^\\s'\\\"]*\\.(whl|tar\\.gz|tgz|tar\\.bz2|zip|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
       e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(--extra-index-url|--trusted-host)(\\s|=)") ||
@@ -30,6 +58,10 @@ match: >
       e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b[^;&|\\n]*?\\s--registry(\\s+|=)['\\\"]?(http://|https://[^\\s/'\\\"?#]*@|https://([^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#e][^\\s/:'\\\"?#]*|e(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g(|[^\\s/:'\\\"?#i][^\\s/:'\\\"?#]*|i(|[^\\s/:'\\\"?#s][^\\s/:'\\\"?#]*|s(|[^\\s/:'\\\"?#t][^\\s/:'\\\"?#]*|t(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#y][^\\s/:'\\\"?#]*|y(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#ny][^\\s/:'\\\"?#]*|n(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#m][^\\s/:'\\\"?#]*|m(|[^\\s/:'\\\"?#j][^\\s/:'\\\"?#]*|j(|[^\\s/:'\\\"?#s][^\\s/:'\\\"?#]*|s(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))|y(|[^\\s/:'\\\"?#a][^\\s/:'\\\"?#]*|a(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#n][^\\s/:'\\\"?#]*|n(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#k][^\\s/:'\\\"?#]*|k(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#c][^\\s/:'\\\"?#]*|c(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#m][^\\s/:'\\\"?#]*|m([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))))))))))))))([:/'\\\"?#]|\\s|$))")
     ) ||
     e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(cargo\\s+install\\s+([^;&|\\n]*\\s)?--git\\b|gem\\s+install\\s+([^;&|\\n]*\\s)?(--source|--clear-sources)\\b)")
+    ) && (command_unread(e) ||
+      e.command.parsed_commands.exists(c,
+        c.name.matches("^(pip[0-9.]*|pipx|uv|python[0-9.]*|poetry|npm|pnpm|yarn|bun|cargo|gem)$") &&
+        c.argv.exists(a, a == ""))))
   )
 
 emit:
@@ -287,4 +319,88 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git clone https://github.com/someone/helper.git" }
+        session: { id: s1 }
+  - name: pip_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -H pip install git+https://github.com/someone/helper.git" }
+        session: { id: s1 }
+  - name: pip_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'pip install --extra-index-url https://pkgs.example.test/simple internal-utils'" }
+        session: { id: s1 }
+  - name: pip_by_absolute_path_with_a_custom_index
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/local/bin/pip3 install -i https://pkgs.example.test/simple x" }
+        session: { id: s1 }
+  - name: pip_with_an_option_before_install
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip --no-cache-dir install git+https://github.com/someone/helper.git" }
+        session: { id: s1 }
+  - name: npm_under_sudo_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sh -c 'npm install -g github:someone/helper'" }
+        session: { id: s1 }
+  - name: npm_custom_registry_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'npm i helper --registry https://npm.example.test'" }
+        session: { id: s1 }
+  - name: pip_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'cd app && pip install git+https://github.com/someone/helper.git'" }
+        session: { id: s1 }
+  - name: install_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'ci: drop the mirror; pip install --extra-index-url https://pkgs.example.test/simple x is gone'" }
+        session: { id: s1 }
+  - name: install_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nDo not copy this from the old wiki; pip install git+https://github.com/someone/helper.git\nEOF" }
+        session: { id: s1 }
+  - name: publish_to_a_custom_registry_is_not_an_install
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "npm publish --registry https://npm.example.test" }
+        session: { id: s1 }
+  - name: pip_download_from_a_git_url_is_not_an_install
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip download git+https://github.com/someone/helper.git" }
+        session: { id: s1 }
+  - name: pip_git_url_with_a_variable_in_it
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install \"git+https://github.com/$ORG/helper.git\"" }
+        session: { id: s1 }
+  - name: pip_extra_index_held_by_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install --extra-index-url=\"$MIRROR\" internal-utils" }
+        session: { id: s1 }
+  - name: pip_package_held_by_a_variable
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install \"$PKG\" && echo 'next: pip install git+https://github.com/someone/helper.git'" }
         session: { id: s1 }
