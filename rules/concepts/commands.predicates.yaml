@@ -47,11 +47,12 @@ definitions:
       command line it is given is one too when the parser read that command line to its end
       (c.runs_read), because its commands are then entries of their own and answer for
       themselves: a shell with a -c script or a here-document, ssh with a command, docker
-      exec, kubectl exec --, su -c, eval, watch and trap. xargs and find -exec are not: the
-      parser lists the command they run, but its operands come from a pipe or from what find
-      matches, so `find /home -name .zsh_history | xargs cat` is not told by `cat` alone. A
-      variable that names a program to run (GIT_SSH_COMMAND, EDITOR) is asked of the line by
-      command_unread, not here.
+      exec, kubectl exec --, su -c, eval, watch and trap, and a wrapper that runs its command
+      somewhere else (sudo -i, env -C), which has no name of its own. xargs and find -exec
+      are not: the parser lists the command they run, but its operands come from a pipe or
+      from what find matches, so `find /home -name .zsh_history | xargs cat` is not told by
+      `cat` alone. A variable that names a program to run (GIT_SSH_COMMAND, EDITOR) is asked
+      of the line by command_unread, not here.
 
       A program that runs a word of its own as a command line in some uses is listed with that
       use as its exception: ip netns exec, apt -o (an APT::…::Pre-Invoke), rpm --eval, gem open,
@@ -85,6 +86,7 @@ definitions:
       c.name in ["gpg", "gpg2", "openssl", "keytool", "bq", "gsutil", "terraform", "tofu", "terragrunt", "pulumi", "supabase", "vercel", "dropdb", "createdb"] ||
       c.name in ["mysqladmin", "redis-cli"] ||
       (c.name == "" ? size(c.argv) > 0 && (
+         c.runs_read ||
          c.argv[0].matches("^(.*/)?env$") &&
            (size(c.argv) == 1 || size(c.argv) == 2 && c.argv[1] in ["-0", "--null", "-i", "--ignore-environment"]) ||
          size(c.argv) > 1 && c.argv[0] == "command" && c.argv[1] in ["-v", "-V"]) :
@@ -138,6 +140,24 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "env -u HOME ./deploy.sh" }
+      - name: a_command_run_after_a_login
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sudo -i systemctl restart web && sudo -D /srv chown -R app ." }
+      - name: a_project_script_run_after_a_login
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sudo -i ./deploy.sh" }
+      - name: a_login_shell_with_no_command
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sudo -i" }
       - name: asking_what_a_name_is
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
         verdict: match

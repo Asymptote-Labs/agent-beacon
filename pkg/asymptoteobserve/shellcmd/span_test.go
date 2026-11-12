@@ -86,6 +86,17 @@ func TestWithScriptsReadsCarriers(t *testing.T) {
 		{`printf '%d\n' 3 | sh`, []string{"printf", "sh"}},
 		{`bash deploy.sh`, []string{"bash"}},
 		{`xargs`, []string{"xargs"}},
+		// A wrapper that runs its command somewhere else has no name; its command is listed.
+		{`sudo -i rm -rf /var/lib/app`, []string{"*", "rm"}},
+		{`sudo -u deploy --login bash -c 'id; whoami'`, []string{"*", "bash*", "id", "whoami"}},
+		{`sudo -D /srv FOO=1 systemctl restart web`, []string{"*", "systemctl"}},
+		{`timeout 30 env -C /srv/app git push --force`, []string{"*", "git"}},
+		{`uv run --directory tools pytest -q`, []string{"*", "pytest"}},
+		// Not when the wrapper runs none, or the script's shell follows a word nobody knows.
+		{`sudo -i`, []string{""}},
+		{`sudo -l rm -rf /`, []string{""}},
+		{`uv run -m pytest -q`, []string{""}},
+		{`"$TOOL" sh -c 'id'`, []string{"", "id"}},
 	} {
 		commands, err := Parse(tc.command)
 		if err != nil {

@@ -299,6 +299,26 @@ var (
 		blocking:     "mhV",
 		blockingLong: []string{"--directory", "--module", "--help", "--version"},
 	}
+	// The same wrappers read for a command they run somewhere else (movedCommand): the
+	// options that move it take their value or are plain flags, and the ones that run no
+	// command still stop the reading.
+	wrapperSudoMoved = wrapperSpec{
+		optionSpec:   optionSpec{short: wrapperSudo.short + "DR", long: append(slices.Clone(wrapperSudo.long), "--chdir", "--chroot")},
+		blocking:     "lveKV",
+		blockingLong: []string{"--list", "--validate", "--edit", "--remove-timestamp", "--version", "--help"},
+		assignments:  true,
+	}
+	wrapperEnvMoved = wrapperSpec{
+		optionSpec:   optionSpec{short: "uC", long: []string{"--unset", "--chdir"}},
+		blocking:     "S",
+		blockingLong: []string{"--split-string"},
+		assignments:  true,
+	}
+	wrapperUvRunMoved = wrapperSpec{
+		optionSpec:   optionSpec{short: wrapperUvRun.short, long: append(slices.Clone(wrapperUvRun.long), "--directory")},
+		blocking:     "mhV",
+		blockingLong: []string{"--module", "--help", "--version"},
+	}
 )
 
 // afterOptions returns the words after a wrapper's own options. ok is false when one of them

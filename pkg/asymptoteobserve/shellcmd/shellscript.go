@@ -297,11 +297,13 @@ var powershellValueOptions = []string{
 }
 
 // isRunner is a cheap test for a word that may name a program that is handed a command line: a
-// shell, or one of the programs Carried reads.
+// shell, one of the programs Carried reads, or a wrapper that can run its command somewhere
+// else.
 func isRunner(word string) bool {
 	switch ProgramName(word) {
 	case "sh", "bash", "zsh", "dash", "ksh",
-		"xargs", "find", "ssh", "docker", "podman", "nerdctl", "kubectl", "su", "eval", "watch", "trap":
+		"xargs", "find", "ssh", "docker", "podman", "nerdctl", "kubectl", "su", "eval", "watch", "trap",
+		"sudo", "env", "uv":
 		return true
 	}
 	return isPowerShell(word)
@@ -392,7 +394,7 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		// A carrier's command line comes first: `find -exec sh -c .. \; -exec rm {} +` runs
 		// two, and Script would read the shell's alone. Its operands are not that line's $1.
 		script, ok := c.Carried()
-		onStdin, zero := false, -1
+		carried, onStdin, zero := ok, false, -1
 		if !ok {
 			if script, zero, ok = c.script(); ok {
 				// A script read from the shell's standard input leaves none for its commands.
@@ -409,7 +411,9 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 			at := len(x.out)
 			x.out[at-1].scripted, x.out[at-1].scriptOnStdin = true, onStdin
 			x.out[at-1].scriptZero = int32(zero + 1)
-			x.out[at-1].runsRead = err == nil
+			// A shell after other words (`tool sh -c ..`) runs the script, and the words
+			// before it run what this package does not know.
+			x.out[at-1].runsRead = err == nil && (carried || isShell(c.Name()))
 			x.add(sub, int32(at), depth-1)
 		}
 	}
@@ -432,6 +436,9 @@ func (c Command) RunsRead() bool { return c.runsRead }
 //     words after `--`.
 //   - su: the string of -c. eval and watch: their words, which the shell reads as one
 //     command line. trap: the action before its signals.
+//   - a wrapper that runs its command somewhere else, which leaves the command without a
+//     name (Unwrapped): the words after `sudo -i`, `sudo -D dir`, `sudo -R root`, `env -C dir`
+//     and `uv run --directory dir`.
 //
 // The words of xargs, find and the exec commands are passed on as they are and are returned as
 // written, so a quoted word stays one word; the others are returned as the shell passes them
@@ -443,6 +450,8 @@ func (c Command) RunsRead() bool { return c.runsRead }
 func (c Command) Carried() (script string, ok bool) {
 	name, args := c.run()
 	switch name {
+	case "":
+		return c.movedCommand()
 	case "xargs":
 		rest, _ := afterOptions(args, &carrierXargs)
 		return joinWords(rest, true)
@@ -492,6 +501,49 @@ func (c Command) Carried() (script string, ok bool) {
 		if len(args) >= 2 && args[0].Known && args[0].Text != "" && !strings.HasPrefix(args[0].Text, "-") {
 			return args[0].Text, true
 		}
+	}
+	return "", false
+}
+
+// movedCommand returns the words a wrapper runs as a command somewhere else: after a login
+// (sudo -i), in another directory (sudo -D, env -C, uv run --directory) or under another root
+// (sudo -R). Unwrapped gives such a command no name, because its paths are not this
+// directory's; its words are still what runs.
+func (c Command) movedCommand() (string, bool) {
+	words := c.Argv
+	for len(words) > 0 {
+		spec, skip := wrapperOf(words)
+		if spec == nil {
+			return "", false
+		}
+		rest, ok := afterOptions(words[skip:], spec)
+		if !ok {
+			var moved *wrapperSpec
+			switch spec {
+			case &wrapperSudo:
+				moved = &wrapperSudoMoved
+			case &wrapperEnv:
+				moved = &wrapperEnvMoved
+			case &wrapperUvRun:
+				moved = &wrapperUvRunMoved
+			default:
+				return "", false
+			}
+			if rest, ok = afterOptions(words[skip:], moved); !ok {
+				return "", false
+			}
+			if moved.assignments {
+				rest = afterAssignments(rest)
+			}
+			return joinWords(rest, true)
+		}
+		if spec.assignments {
+			rest = afterAssignments(rest)
+		}
+		if len(rest) < spec.operands {
+			return "", false
+		}
+		words = rest[spec.operands:]
 	}
 	return "", false
 }
