@@ -24,8 +24,9 @@ Every event mapped from a session record is marked `harness.collection_method=po
 reads committed records after the fact, so this path cannot hold, approve, deny, or delay
 a tool call and does not synthesize approval events. Reading is local and offline. A sweep
 also drains workspace spools: hook events that a sandboxed DeepSeek session staged in
-`<workspace>/.beacon/dsh-spool/` are appended with the `harness.collection_method=hook`
-label they were captured under, so the two sources stay distinguishable in the log.
+`<workspace>/.beacon/spool/deepseek_harness/` (or the older `<workspace>/.beacon/dsh-spool/`)
+are appended with the `harness.collection_method=hook` label they were captured under, so the
+two sources stay distinguishable in the log. See [`beacon endpoint spool`](/cli/endpoint-spool).
 
 ## Commands
 
@@ -79,9 +80,11 @@ as corruption.
 
 Each sweep also drains workspace spools. When DeepSeek Harness runs hooks
 inside its session sandbox, a hook that cannot write the runtime log stages the
-event in `<workspace>/.beacon/dsh-spool/<session>/`, a directory only your
+event in the [workspace spool](/cli/endpoint-spool),
+`<workspace>/.beacon/spool/deepseek_harness/<session>/`, a directory only your
 account can read; the sweep appends those events to the runtime log and
-removes them from the spool. The report says how many landed:
+removes them from the spool. Spools an earlier hook left in
+`<workspace>/.beacon/dsh-spool/<session>/` are drained too. The report says how many landed:
 
 ```text
 dsh sync: 3 sessions, 1 changed, 12 events, 0 errors

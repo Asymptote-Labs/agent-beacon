@@ -11,8 +11,8 @@ import (
 
 // A hook that cannot write the runtime log records nothing, and on DeepSeek Harness that is the
 // normal state of a sandboxed session rather than a fault (#605): the harness confines hook
-// commands to the session workspace, so ~/.beacon is unreachable. A session-scoped dsh logger
-// would stage the event in the workspace spool instead (see spool_test.go); these cases run
+// commands to the session workspace, so ~/.beacon is unreachable. A session-scoped logger of any
+// harness would stage the event in the workspace spool instead (see spool_test.go); these cases run
 // without a session id, where no spool applies, so the loss is reported -- which is also the
 // shape every non-workspace-write sandbox ends up in when the spool write fails too. The hook
 // still exits 0 -- a telemetry failure must never become a block -- which makes stderr the only

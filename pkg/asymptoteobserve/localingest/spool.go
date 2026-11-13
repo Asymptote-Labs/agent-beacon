@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -63,7 +64,39 @@ func (s Spool) openNamedLock(name string) (*os.File, error) {
 	}
 	// MkdirAll leaves an existing directory's mode alone and is masked by the umask.
 	_ = os.Chmod(s.Dir, SpoolDirMode)
-	return os.OpenFile(filepath.Join(s.Dir, name), os.O_CREATE|os.O_RDWR, SpoolFileMode)
+	return openSpoolFile(filepath.Join(s.Dir, name), os.O_CREATE|os.O_RDWR, SpoolFileMode)
+}
+
+// openSpoolFile opens one of a spool's files, but never through a link at its name, never
+// blocking on a FIFO, and only when it is a regular file. A spool can sit where others write -- a
+// workspace spool is in a directory the sandboxed agent and a checked-out repository can write --
+// so an entry named pending.jsonl is not trusted to be the spool: a planted link would point a
+// drain's reads and an append at another file, and a FIFO would hang the writer.
+func openSpoolFile(path string, flag int, perm os.FileMode) (*os.File, error) {
+	f, err := os.OpenFile(path, flag|openNoFollow|openNonBlock, perm)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("localingest: %s is not a regular file", path)
+	}
+	return f, nil
+}
+
+// readSpoolFile reads one of a spool's files under openSpoolFile's rules.
+func readSpoolFile(path string) ([]byte, error) {
+	f, err := openSpoolFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 // Append adds lines to the spool and returns how many were dropped because the spool is full or
@@ -73,7 +106,7 @@ func (s Spool) Append(lines [][]byte) (dropped int, err error) {
 		return 0, nil
 	}
 	err = s.withLock(func() (err error) {
-		f, err := os.OpenFile(s.FilePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, SpoolFileMode)
+		f, err := openSpoolFile(s.FilePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, SpoolFileMode)
 		if err != nil {
 			return err
 		}
@@ -128,7 +161,7 @@ func (s Spool) Drain(maxLines int, send func(lines [][]byte) (int, error)) (n in
 	if maxLines <= 0 {
 		return 0, nil
 	}
-	if _, err := os.Stat(s.FilePath()); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Lstat(s.FilePath()); errors.Is(err, os.ErrNotExist) {
 		return 0, nil
 	}
 	drainFile, err := s.openNamedLock(spoolDrainLockName)
@@ -144,7 +177,7 @@ func (s Spool) Drain(maxLines int, send func(lines [][]byte) (int, error)) (n in
 
 	var batch [][]byte
 	if err := s.withLock(func() error {
-		data, err := os.ReadFile(s.FilePath())
+		data, err := readSpoolFile(s.FilePath())
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil
@@ -173,7 +206,7 @@ func (s Spool) Drain(maxLines int, send func(lines [][]byte) (int, error)) (n in
 		return 0, sendErr
 	}
 	if err := s.withLock(func() error {
-		data, err := os.ReadFile(s.FilePath())
+		data, err := readSpoolFile(s.FilePath())
 		if err != nil {
 			return err
 		}
@@ -210,7 +243,7 @@ func (s Spool) withLock(fn func() error) (err error) {
 
 // Pending reports how many events are spooled and their size.
 func (s Spool) Pending() (lines int, size int64, err error) {
-	data, err := os.ReadFile(s.FilePath())
+	data, err := readSpoolFile(s.FilePath())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, 0, nil

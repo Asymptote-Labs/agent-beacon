@@ -87,6 +87,21 @@ func TestBuildConfigKeepsSessionSyncUntilChanged(t *testing.T) {
 	}
 }
 
+// A repair or upgrade rewrites config.json from buildConfig; the operator's spool roots survive it.
+func TestBuildConfigKeepsWorkspaceSpoolRoots(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	// Absolute on this platform: Load drops a root that is not, and "/srv" is not on Windows.
+	root := filepath.Join(t.TempDir(), "sandboxes", "*")
+	data, err := json.Marshal(map[string]any{"user_mode": true, "log_path": "/tmp/runtime.jsonl", "workspace_spool_roots": []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeInventoryConfig(t, true, string(data))
+	if cfg := buildConfig(InstallOptions{UserMode: true}); len(cfg.WorkspaceSpoolRoots) != 1 || cfg.WorkspaceSpoolRoots[0] != root {
+		t.Fatalf("buildConfig dropped workspace_spool_roots: %v", cfg.WorkspaceSpoolRoots)
+	}
+}
+
 // A user-mode job carries the store-locating variables set at install, including the ones only a
 // session-store collector reads.
 func TestSessionSyncJobEnvCarriesCollectorVariables(t *testing.T) {

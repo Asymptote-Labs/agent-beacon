@@ -194,6 +194,13 @@ func buildDoctorResult(status lifecycle.Status, generatedAt time.Time) doctorRes
 	if check, ok := gitHookBudgetCheck(status.LogPath, generatedAt); ok {
 		checks = append(checks, check)
 	}
+	var spoolRoots []string
+	if cfg, err := endpointconfig.Load(status.RuntimeLog.EffectiveUserMode); err == nil {
+		spoolRoots = cfg.WorkspaceSpoolRoots
+	}
+	if check, ok := doctorWorkspaceSpoolCheck(status.LogPath, spoolRoots); ok {
+		checks = append(checks, check)
+	}
 	result := doctorResult{
 		Status:      aggregateCheckStatus(checks),
 		Checks:      checks,

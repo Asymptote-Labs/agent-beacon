@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
@@ -234,6 +235,33 @@ func TestLoadIgnoresLegacyContentRetention(t *testing.T) {
 	}
 	if strings.Contains(string(data), "content_retention") {
 		t.Fatalf("saved config unexpectedly preserved legacy content_retention: %s", string(data))
+	}
+}
+
+// Load keeps absolute spool roots and globs of them, and drops the rest without failing.
+func TestLoadKeepsOnlyValidWorkspaceSpoolRoots(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	path := filepath.Join(home, UserConfigPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	abs := filepath.Join(home, "sandboxes")
+	glob := filepath.Join(abs, "*")
+	roots := []string{abs, glob, "relative/ws", "", filepath.Join(abs, "[")}
+	data, err := json.Marshal(map[string]any{"user_mode": true, "workspace_spool_roots": roots})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(true)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := loaded.WorkspaceSpoolRoots; len(got) != 2 || got[0] != abs || got[1] != glob {
+		t.Fatalf("WorkspaceSpoolRoots = %q, want [%q %q]", got, abs, glob)
 	}
 }
 

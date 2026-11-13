@@ -50,12 +50,41 @@ func spoolTestLine(t *testing.T, event schema.Event) []byte {
 // stage appends lines to sessionID's spool in workspace the way a sandboxed hook does.
 func stage(t *testing.T, workspace, sessionID string, lines ...[]byte) {
 	t.Helper()
-	dir, ok := asymptoteobserve.DSHSpoolDir(workspace, sessionID)
+	dir, ok := asymptoteobserve.WorkspaceSpoolDir(workspace, Harness, sessionID)
 	if !ok {
 		t.Fatalf("unsafe test session id %q", sessionID)
 	}
+	stageIn(t, dir, lines...)
+}
+
+func stageIn(t *testing.T, dir string, lines ...[]byte) {
+	t.Helper()
 	if dropped, err := (localingest.Spool{Dir: dir}).Append(lines); err != nil || dropped != 0 {
 		t.Fatalf("stage: dropped %d, err %v", dropped, err)
+	}
+}
+
+// A spool an earlier hook left in .beacon/dsh-spool/<session> is still drained, once.
+func TestDrainSessionSpoolDrainsTheLegacyDSHSpool(t *testing.T) {
+	workspace := t.TempDir()
+	opts := spoolTestOpts(t)
+	ref := spoolTestRef("sess-legacy-1", workspace)
+	legacy, ok := asymptoteobserve.LegacyDSHSpoolDir(workspace, ref.ID)
+	if !ok {
+		t.Fatal("unsafe test session id")
+	}
+	stageIn(t, legacy, spoolTestLine(t, spoolTestEvent(t, ref.ID, "session.started")))
+	stage(t, workspace, ref.ID, spoolTestLine(t, spoolTestEvent(t, ref.ID, "prompt.submitted")))
+
+	var summary Summary
+	if err := drainSessionSpool(ref, opts, &summary); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if summary.SpoolEvents != 2 || summary.SpoolRejected != 0 {
+		t.Fatalf("SpoolEvents/SpoolRejected = %d/%d, want 2/0", summary.SpoolEvents, summary.SpoolRejected)
+	}
+	if pending := SpoolPendingBytes(ref); pending != 0 {
+		t.Errorf("spools still hold %d bytes after the drain", pending)
 	}
 }
 
@@ -330,19 +359,21 @@ func TestCollectOnceStopsTheDrainWhenTheBudgetIsSpent(t *testing.T) {
 	}
 }
 
-// An append the writer refuses for any other reason fails the session's drain; what landed before
-// it is counted and the refused event stays staged.
-func TestCollectOnceCountsSpoolEventsAppendedBeforeDrainFailure(t *testing.T) {
+// A staged event the writer would refuse as invalid is rejected and removed, never left at the
+// head of the spool to fail every later drain; the events around it are delivered. (A writer error,
+// such as a spent budget, still stops the drain with the rest staged.)
+func TestCollectOnceRejectsAnInvalidSpoolEventWithoutBlockingTheRest(t *testing.T) {
 	root := t.TempDir()
 	workspace := t.TempDir()
 	writeSession(t, filepath.Join(root, "sessions", "s-partial-drain"), SessionFileJSON,
 		record("session", map[string]interface{}{"id": "s-partial-drain", "cwd": workspace}),
 	)
 	invalid := spoolTestEvent(t, "s-partial-drain", "prompt.submitted")
-	invalid.Vendor = ""
+	invalid.Severity = ""
 	stage(t, workspace, "s-partial-drain",
 		spoolTestLine(t, spoolTestEvent(t, "s-partial-drain", "session.started")),
 		spoolTestLine(t, invalid),
+		spoolTestLine(t, spoolTestEvent(t, "s-partial-drain", "session.ended")),
 	)
 
 	opts := CollectOptions{
@@ -353,14 +384,14 @@ func TestCollectOnceCountsSpoolEventsAppendedBeforeDrainFailure(t *testing.T) {
 		UserMode:  true,
 	}
 	summary, err := CollectOnce(opts)
-	if err == nil {
-		t.Fatal("CollectOnce succeeded despite the invalid second spool event")
+	if err != nil {
+		t.Fatalf("CollectOnce: %v", err)
 	}
-	if summary.SpoolEvents != 1 {
-		t.Fatalf("SpoolEvents = %d, want 1 event appended before the drain failed", summary.SpoolEvents)
+	if summary.SpoolEvents != 2 || summary.SpoolRejected != 1 {
+		t.Fatalf("SpoolEvents/SpoolRejected = %d/%d, want 2/1", summary.SpoolEvents, summary.SpoolRejected)
 	}
-	if SpoolPendingBytes(spoolTestRef("s-partial-drain", workspace)) == 0 {
-		t.Fatal("the refused event was taken out of the spool")
+	if SpoolPendingBytes(spoolTestRef("s-partial-drain", workspace)) != 0 {
+		t.Fatal("the invalid event was left in the spool")
 	}
 }
 
