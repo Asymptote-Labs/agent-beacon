@@ -11,7 +11,9 @@ a cloud sandbox. The install script from
 writes these hooks at Build time without committing them. Use `print-hooks`
 when you want the hooks committed to `.cursor/hooks.json` instead, or to merge
 Beacon's entries into a hooks file the repository already commits. Committed
-project hooks also run in every local Cursor session on the repository.
+project hooks also run in every local Cursor session on the repository, where
+they run `/tmp/beacon/bin/beacon-hooks` from a world-writable directory: on a
+shared machine, whoever creates that file has it run as each developer.
 
 ```bash title="Command syntax"
 beacon cloud cursor print-hooks

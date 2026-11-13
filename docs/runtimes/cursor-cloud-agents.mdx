@@ -428,10 +428,13 @@ git push
 ```
 
 Cursor also runs a repository's project hooks in local sessions, so everyone
-who opens the repository in Cursor runs committed hooks too. On their machines
-`/tmp/beacon/bin/beacon-hooks` does not exist, and Cursor lets the call through.
-If the repository already commits its own `.cursor/hooks.json`, add Beacon's
-entries to it.
+who opens the repository in Cursor runs committed hooks too, and those hooks run
+`/tmp/beacon/bin/beacon-hooks` from a world-writable directory. On a machine
+where another user or process can create that file, it runs with the
+developer's permissions on every hook. Keep the hooks uncommitted, with the
+install script, unless every machine that opens the repository is trusted. The
+same applies to Beacon entries added to a `.cursor/hooks.json` the repository
+already commits.
 
 ## Security note
 
