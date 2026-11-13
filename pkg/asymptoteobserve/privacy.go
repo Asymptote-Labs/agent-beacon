@@ -454,10 +454,11 @@ func isAuthSchemeName(word string) bool {
 //   - The second word is not a credential but the next item on the line: a flag named for a secret
 //     (`--token`, `--password=`) or a secret label and its separator (`password:`, `PASSWORD=`,
 //     `"api_key":`), whose own rule then redacts what it introduces; a short option (`-u`), whose
-//     value a command's own rule reads, as curl's; or a `#` comment. Taken as the credential,
-//     these would be replaced and the secret after them would stay. Any other word goes: a
-//     credential can start with `-` (base64url), and a long flag that names no secret is safe to
-//     replace.
+//     value a command's own rule reads, as curl's; a `#` comment; or the opening of a command
+//     substitution (`$(cat`), which is a command and not its output. Taken as the credential,
+//     these would be replaced and the secret after them would stay, or the command that read
+//     it would go. Any other word goes: a credential can start with `-` (base64url), and a
+//     long flag that names no secret is safe to replace.
 //
 // A list of auth-params, which holds a comma, is never kept: the rule takes it whole, values
 // included, so no label in it has a value left to lose.
@@ -474,6 +475,13 @@ func keepAuthorizationValue(value string) bool {
 	}
 	second := fields[1]
 	if second[0] == '#' || len(second) == 2 && second[0] == '-' && second[1] != '-' {
+		return true
+	}
+	// The second word opens a command substitution: the credential is what that command
+	// prints when the line runs, and the text holds the command (isSubstitutionOpening).
+	// Left alone here, the first word is replaced by the label rule, as it was before this
+	// rule existed, since it may be a credential sent with no scheme; the command stays.
+	if isSubstitutionOpening(second) {
 		return true
 	}
 	if flag, _, _ := strings.Cut(second, "="); IsSecretFlag(flag) {

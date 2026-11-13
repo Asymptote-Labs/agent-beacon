@@ -507,6 +507,33 @@ func TestRedactStringAuthorizationCredentialAfterAnyScheme(t *testing.T) {
 		}
 	}
 
+	// A command substitution after the first word is a command, not the credential it prints.
+	// Taken as the credential, its opening went and the rest stayed, so the line no longer
+	// parsed and no longer said which command read the secret. The first word still goes: it
+	// may be a credential sent with no scheme. What the command is given is left to the rules
+	// for it, and anything that is not a plain substitution is replaced as before.
+	for input, want := range map[string]string{
+		`curl -H "Authorization: ApiKey $(cat ~/.aws/credentials)" https://es.example:9200/`:       `curl -H "Authorization: [REDACTED] $(cat ~/.aws/credentials)" https://es.example:9200/`,
+		`curl -H "Authorization: SSWS $(security find-generic-password -s okta -w)" https://x.io/`: `curl -H "Authorization: [REDACTED] $(security find-generic-password -s okta -w)" https://x.io/`,
+		`curl -H "Authorization: Splunk $(<~/.splunk-token)" https://hec.example:8088/`:            `curl -H "Authorization: [REDACTED] $(<~/.splunk-token)" https://hec.example:8088/`,
+		`curl -H "Authorization: hunter2hunter2 $(cat ~/.x)" https://api.example/`:                 `curl -H "Authorization: [REDACTED] $(cat ~/.x)" https://api.example/`,
+		`curl -H "Authorization: ApiKey $(pass show --token hunter2hunter2 es)" https://x.io/`:     `curl -H "Authorization: [REDACTED] $(pass show --token [REDACTED] es)" https://x.io/`,
+		`curl -H "Authorization: ApiKey $((1+2))" https://api.example/`:                            `curl -H "Authorization: [REDACTED]" https://api.example/`,
+		`curl -H "Authorization: ApiKey $(a;echo" https://api.example/`:                            `curl -H "Authorization: [REDACTED]" https://api.example/`,
+		`curl -H "Authorization: ApiKey $ES_API_KEY" https://api.example/`:                         `curl -H "Authorization: [REDACTED]" https://api.example/`,
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+		if strings.Contains(got, "hunter2hunter2") {
+			t.Errorf("RedactString(%q) kept a secret beside the substitution: %q", input, got)
+		}
+		if twice := RedactString(got); twice != got {
+			t.Errorf("RedactString is not idempotent:\nonce  %q\ntwice %q", got, twice)
+		}
+	}
+
 	// A base64url credential can start with `-`. It is not a flag, and goes with its scheme.
 	for _, input := range []string{"Authorization: SSWS -Xq9abcdefghijklmnopqrstuv", "Authorization: ApiKey -_abcdefghijklmnop"} {
 		if got := RedactString(input); got != "Authorization: [REDACTED]" {
