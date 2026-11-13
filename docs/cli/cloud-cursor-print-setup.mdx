@@ -1,46 +1,46 @@
 ---
 title: "beacon cloud cursor print-setup"
-description: "Print a Cursor cloud agent binary setup script"
+description: "Print a Cursor cloud environment install script that installs Beacon and its hooks"
 ---
 
 ## Command overview
 
-`beacon cloud cursor print-setup` prints a Cursor cloud agent setup script for
-installing Beacon binaries in the cloud sandbox.
+`beacon cloud cursor print-setup` prints the install script for a Cursor cloud
+agent environment. Paste it into the environment's **Install script** field.
 
 ```bash title="Command syntax"
-beacon cloud cursor print-setup
-```
-
-Paste the generated script into the Cursor cloud environment setup step. It
-installs `beacon` and `beacon-hooks` into `/tmp/beacon/bin`.
-
-The generated script does not write or merge `.cursor/hooks.json`. Generate
-project hooks with [`beacon cloud cursor print-hooks`](/cli/cloud-cursor-print-hooks),
-commit `.cursor/hooks.json` to the repository, then start Cursor Cloud Agents
-from a commit that contains that file.
-
-Cursor Cloud Agents run the committed `beforeSubmitPrompt` project hook after
-the cloud environment is available, so Beacon can capture and immediately
-upload prompt events. `sessionStart` and `sessionEnd` remain unavailable in
-Cursor Cloud. Beacon refreshes the uploaded `runtime.jsonl` object as supported
-hook events run. See
-[Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support)
-for the current platform support list.
-
-## Examples
-
-Print setup for a specific Beacon release:
-
-```bash title="Print setup for a specific Beacon release"
 beacon cloud cursor print-setup --version vX.Y.Z
 ```
 
-Replace `vX.Y.Z` with the desired release tag. Cursor Cloud prompt capture
-requires a release containing the committed `beforeSubmitPrompt` hook and
-immediate upload behavior. Until that release exists, build the branch
-containing the change in the cloud environment instead of downloading an older
-release.
+Cursor runs the install script when it creates a Build, before any agent
+starts. The script:
+
+- downloads `beacon-hooks` from the release you name into `/tmp/beacon/bin`,
+- writes Beacon's project hooks to `.cursor/hooks.json` in the checkout, with
+  the hook set [`beacon cloud cursor print-hooks`](/cli/cloud-cursor-print-hooks)
+  prints,
+- lists `.cursor/hooks.json` in `.git/info/exclude`, so agents never see it as a
+  change to commit,
+- leaves the repository alone if it commits its own `.cursor/hooks.json`.
+
+The Build keeps the binary and the hooks, so every agent in the environment
+starts with them. Nothing is committed, and the hooks never run in local Cursor
+sessions. An agent started before the environment's first Build runs without
+them and is not recorded.
+
+`--safe-hooks` leaves out the shell and edit hooks (`beforeShellExecution`,
+`afterShellExecution`, `afterFileEdit`), so you can prove the upload works
+before the agent's commands and edits pass through Beacon.
+
+## Examples
+
+Print the install script for a specific Beacon release:
+
+```bash title="Print the install script for a specific Beacon release"
+beacon cloud cursor print-setup --version vX.Y.Z
+```
+
+Replace `vX.Y.Z` with the latest Beacon release tag.
 
 ## Related
 
@@ -49,9 +49,9 @@ release.
     Review cloud command group behavior.
   </Card>
   <Card title="beacon cloud cursor print-hooks" icon="plug" href="/cli/cloud-cursor-print-hooks">
-    Print project-level Cursor hook settings for a cloud sandbox.
+    Print the project hooks, to commit them yourself.
   </Card>
   <Card title="Cursor Cloud Agents" icon="cloud" href="/runtimes/cursor-cloud-agents">
-    Configure Cursor cloud agent telemetry and GCS or S3 upload end to end.
+    Configure Cursor cloud agent telemetry end to end.
   </Card>
 </Columns>

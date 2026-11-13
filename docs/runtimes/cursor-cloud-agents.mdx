@@ -1,50 +1,54 @@
 ---
 title: "Cursor Cloud Agents"
-description: "Capture Cursor cloud agent telemetry and forward cloud-agent runtime logs to customer-managed Google Cloud Storage or Amazon S3"
+description: "Capture Cursor cloud agent telemetry and send each session log to object storage you own or to Beacon Cloud, with nothing committed to your repository"
 ---
 
 ## Overview
 
-Use this integration to capture Cursor cloud-agent activity and upload each
-session log to your own Google Cloud Storage or Amazon S3 bucket. It is meant
-for testing cloud-agent telemetry without running a hosted Beacon backend.
+Use this integration to capture what Cursor cloud agents do and send each
+session log to a Google Cloud Storage or Amazon S3 bucket you own, or to
+[Beacon Cloud](/deployment/managed). Nothing is committed to your repository,
+and nothing changes for developers who use Cursor on their own machines.
 
 This flow depends on the Beacon CLI. You run `beacon cloud` commands from your
-workstation to create the object-storage upload path, generate project hooks to
-commit to your repository, and generate the setup script that installs Beacon
-binaries in the Cursor cloud sandbox.
-
-<Info>
-  If you're interested in leveraging this telemetry ingest across your
-  enterprise, [Beacon Cloud](/deployment/managed) is designed for
-  production cloud-agent telemetry ingest at scale.
-</Info>
+workstation to create a bucket upload path and to generate the install script
+that sets up Beacon inside each Cursor cloud environment.
 
 ## How it works
 
-Cursor Cloud Agents run in Cursor's cloud environment, so Beacon cannot use the
-long-running endpoint agent that local installs use. Instead, commit
-project-level Cursor hooks to `.cursor/hooks.json` and use the setup script to
-install Beacon binaries in the sandbox. During a cloud-agent session, those
-hooks write `/tmp/beacon/runtime.jsonl`; Beacon refreshes the corresponding GCS
-or S3 object as supported Cursor hook events run.
+Cursor cloud agents run in VMs that Cursor manages, so Beacon cannot use the
+long-running endpoint agent that local installs use. Beacon runs inside the VM
+instead:
+
+1. Each Cursor environment has an install script. Cursor runs it when it
+   creates a Build, the prepared VM that every agent in the environment starts
+   from.
+2. Beacon's install script, from `beacon cloud cursor print-setup`, downloads
+   `beacon-hooks` to `/tmp/beacon/bin` and writes Beacon's hooks to
+   `.cursor/hooks.json` in the checkout. It lists that file in
+   `.git/info/exclude`, so agents never see it as a change to commit.
+3. The Build keeps both, so every agent starts with Beacon's hooks in place.
+   During a session the hooks write `/tmp/beacon/runtime.jsonl` and upload it
+   as they run: to a bucket as one object per agent, rewritten as the session
+   grows, or to Beacon Cloud as new lines.
 
 ```mermaid
 flowchart LR
-  CursorCloud["Cursor Cloud Agents"] --> Hooks["Beacon hooks in sandbox"]
+  Install["Install script, run at Build"] --> Hooks["Beacon hooks in the VM"]
+  CursorCloud["Cursor cloud agent"] --> Hooks
   Hooks --> RuntimeLog["/tmp/beacon/runtime.jsonl"]
-  RuntimeLog --> Storage["Customer-managed GCS or S3 bucket"]
+  RuntimeLog --> Storage["Your GCS or S3 bucket"]
+  RuntimeLog --> Managed["Beacon Cloud"]
 ```
 
 The setup has four parts:
 
-1. Create a dedicated GCS or S3 upload path with Beacon.
-2. Add Beacon cloud telemetry environment variables to the Cursor cloud environment.
-3. Commit Beacon's project-level Cursor hooks to `.cursor/hooks.json`.
-4. Run a Beacon-generated setup script inside the Cursor cloud environment to
-   install `/tmp/beacon/bin/beacon` and `/tmp/beacon/bin/beacon-hooks`.
+1. Create a GCS or S3 upload path with Beacon, or get a device key for Beacon Cloud.
+2. Add Beacon's upload settings to Cursor as secrets.
+3. Create a Cursor environment with Beacon's install script and let its first Build finish.
+4. Run a cloud agent and check the session log.
 
-Each Cursor cloud agent conversation writes one readable JSONL object:
+With a bucket, each Cursor cloud agent writes one readable JSONL object:
 
 ```text
 gs://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-cursor_cloud-<cursor_conversation_id>.jsonl.gz
@@ -56,9 +60,10 @@ or:
 s3://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-cursor_cloud-<cursor_conversation_id>.jsonl.gz
 ```
 
-Beacon uses Cursor's `conversation_id` hook field as the default `run_id` for
-Cursor Cloud telemetry. If you set `BEACON_RUN_ID` yourself, Beacon preserves
-that value instead.
+The object is named after the conversation that uploaded first, normally the
+agent's. Beacon uses Cursor's `conversation_id` hook field as the default
+`run_id` for Cursor cloud telemetry. If you set `BEACON_RUN_ID` yourself, Beacon
+preserves that value instead.
 
 ### Cloud agents started from Cursor desktop
 
@@ -77,20 +82,20 @@ you read older endpoint data.
 
 ## Prerequisites
 
-- Beacon CLI `v1.0.3` or later for direct S3 upload. Cursor Cloud prompt capture
-  requires the branch containing this change until a release includes it.
+- The latest Beacon CLI on your workstation.
 - For GCS: `gcloud` installed and authenticated to a project where you can
   create buckets, service accounts, IAM bindings, and service account keys.
 - For S3: AWS CLI installed and authenticated to an account where you can
   create buckets, IAM users, inline policies, and access keys.
 - `jq` on the verification workstation.
-- Cursor Cloud Agent access for the repository you want to test.
+- Cursor cloud agent access for the repository, and permission to create a
+  cloud agent environment for it.
 - A Cursor cloud environment with outbound access to:
-  - `oauth2.googleapis.com`
-  - `storage.googleapis.com`
-  - `s3.<region>.amazonaws.com`
-  - `github.com`
-  - `*.githubusercontent.com`
+  - For Beacon Cloud: the ingest host from your device key hand-off
+  - For GCS: `oauth2.googleapis.com` and `storage.googleapis.com`
+  - For S3: `s3.<region>.amazonaws.com`
+  - `github.com` and `*.githubusercontent.com`, where the install script
+    downloads Beacon
 
 Install or upgrade Beacon before you start:
 
@@ -103,16 +108,26 @@ brew upgrade beacon
 beacon version
 ```
 
-Authenticate `gcloud` and select your project:
+For GCS, authenticate `gcloud` and select your project:
 
 ```bash
 gcloud auth login
 gcloud config set project <your-gcp-project>
 ```
 
-## 1. Create the object storage upload path
+## 1. Choose where session logs go
 
-Choose GCS or S3 for the cloud-agent session logs.
+Send session logs to a bucket you own (GCS or S3) or to Beacon Cloud.
+
+### Beacon Cloud
+
+To send Cursor cloud sessions to [Beacon Cloud](/deployment/managed), where they
+appear next to your endpoints' sessions, [contact us](https://asymptotelabs.ai/contact)
+for a device key. A cloud VM has no browser, so it cannot run
+[`beacon endpoint connect`](/cli/endpoint-connect). The key is minted for the
+environment and bound to your organization, and it is listed under **Devices**
+on the dashboard like any laptop and revocable from there. You receive three
+values for step 2: `BEACON_CLOUD_UPLOAD=asymptote`, the ingest URL, and the key.
 
 ### GCS
 
@@ -203,17 +218,19 @@ the selected bucket prefix.
 Copy the printed values. Treat `AWS_ACCESS_KEY_ID` and
 `AWS_SECRET_ACCESS_KEY` as sensitive and redact them from screenshots and logs.
 
-## 2. Configure Cursor Cloud Agents
+## 2. Add the upload settings to Cursor
 
-Open your Cursor Cloud Agent environment for the repository.
+In [cursor.com/dashboard/cloud-agents](https://cursor.com/dashboard/cloud-agents),
+open **Secrets** and add the values for your destination. User secrets reach
+every cloud agent you start, and team secrets reach your team's. Cursor gives
+secrets only to agents started after you add them.
 
-Add these environment variables:
+For Beacon Cloud, add:
 
 ```bash
-BEACON_ORIGIN=cloud
-BEACON_RUN_PROVIDER=cursor_cloud
-BEACON_RUN_EPHEMERAL=true
-BEACON_CLOUD_USER_ID_HASH=<stable-user-or-test-id>
+BEACON_CLOUD_UPLOAD=asymptote
+BEACON_CLOUD_INGEST_URL=<ingest-url-from-your-hand-off>
+BEACON_CLOUD_DEVICE_KEY=<device-key-from-your-hand-off>
 ```
 
 For GCS, add:
@@ -235,87 +252,62 @@ AWS_ACCESS_KEY_ID=<access-key-id-from-setup>
 AWS_SECRET_ACCESS_KEY=<secret-access-key-from-setup>
 ```
 
-<Frame caption="Configure network access and Beacon runtime secrets for Cursor Cloud Agents.">
-  <img src="/images/cursor-cloud-agents/cursor-cloud-agent-config.png" alt="Cursor Cloud Agents settings showing network allowlist entries and Beacon runtime secrets for object-storage upload." />
-</Frame>
+Optionally, set `BEACON_CLOUD_USER_ID_HASH` to a stable id for the person or
+test; Beacon records it as `user.uid`. Beacon's hooks set `BEACON_ORIGIN=cloud`,
+`BEACON_RUN_PROVIDER=cursor_cloud`, and `BEACON_RUN_EPHEMERAL=true` themselves.
 
-If your Cursor cloud environment restricts outbound network access, allow:
+If your Cursor environment restricts outbound network access, allow the hosts
+listed under [Prerequisites](#prerequisites).
 
-```text
-oauth2.googleapis.com
-storage.googleapis.com
-s3.<region>.amazonaws.com
-github.com
-*.githubusercontent.com
-```
+## 3. Create the Cursor environment
 
-## 3. Commit Cursor project hooks
-
-Cursor Cloud Agents load project hooks from `.cursor/hooks.json` at repository
-checkout and task start. Generate the hook file locally, commit it, and push it
-before starting cloud agents:
-
-```bash
-mkdir -p .cursor
-beacon cloud cursor print-hooks \
-  --binary-path /tmp/beacon/bin/beacon-hooks \
-  --log-path /tmp/beacon/runtime.jsonl > .cursor/hooks.json
-git add .cursor/hooks.json
-git commit -m "Add Beacon Cursor Cloud hooks"
-git push
-```
-
-<Warning>
-  Do not rely on generating `.cursor/hooks.json` from inside the Cursor Cloud
-  setup script. Cursor Cloud may load project hooks before the setup script
-  creates files in the VM. Committing `.cursor/hooks.json` makes the hook config
-  available when the agent starts.
-</Warning>
-
-## 4. Add the setup script
-
-Generate the setup script for your Beacon release:
+Generate the install script for the latest Beacon release:
 
 ```bash
 beacon cloud cursor print-setup --version vX.Y.Z
 ```
 
-Replace `vX.Y.Z` with a release tag that contains Cursor Cloud prompt capture.
-Until that release exists, use the source-build path below; `v1.0.3` supports
-direct S3 upload but predates the prompt hook.
+Replace `vX.Y.Z` with the latest Beacon release tag. The script:
 
-Paste the generated script into the Cursor cloud environment setup step. The
-script:
+- downloads `beacon-hooks` to `/tmp/beacon/bin`,
+- writes Beacon's hooks to `.cursor/hooks.json` in the checkout and lists that
+  file in `.git/info/exclude`,
+- leaves the repository's own `.cursor/hooks.json` alone if it commits one.
 
-- installs `beacon` and `beacon-hooks` in `/tmp/beacon/bin`,
-- does not modify `.cursor/hooks.json`,
-- expects project hooks to already be committed in the repository.
+Then create the environment:
 
-<Frame caption="Paste the generated Beacon setup script into the Cursor cloud environment update script.">
-  <img src="/images/cursor-cloud-agents/cursor-environment-script.png" alt="Cursor cloud environment configuration showing a Beacon setup script in the update script field and Beacon runtime secrets below it." />
-</Frame>
+1. In [cursor.com/dashboard/cloud-agents](https://cursor.com/dashboard/cloud-agents),
+   open **Environments** and create one for your repository.
+2. Paste the script into **Install script**.
+3. Wait for the first Build to finish on the environment's **Builds** tab. A
+   successful Build's log ends with `Beacon wrote <repository>/.cursor/hooks.json`.
 
-<Tip>
-  If you are testing unreleased Beacon changes from a branch, build `beacon` and
-  `beacon-hooks` from that branch in the setup script instead of using
-  `print-setup --version`.
-</Tip>
+<Warning>
+  An agent started before the environment's first Build runs on Cursor's
+  default image, where the install script has not run, so Beacon records nothing
+  for it. Start agents once the first Build has finished.
+</Warning>
 
-## 5. Run a cloud agent task
+If your repository commits a `.cursor/environment.json`, Cursor takes the
+install script from that file and the dashboard field is read-only. Save the
+script in the repository, for example as `.cursor/beacon-install.sh`, and run it
+from the file's `install` command. The hooks are still written at Build time and
+stay out of the repository.
 
-Start a Cursor cloud agent task that uses tools so the environment becomes
-writable and project hooks become active. For example:
+`--safe-hooks` leaves out the shell and edit hooks (`beforeShellExecution`,
+`afterShellExecution`, `afterFileEdit`), so you can prove the upload works before
+the agent's commands and edits pass through Beacon.
+
+## 4. Run a cloud agent task
+
+Start a cloud agent in the environment with a task that uses tools. For example:
 
 ```text
 Read the README, run pwd && ls, create a tiny temporary markdown note under
-/tmp or in the repo, then summarize what you did.
+/tmp, then summarize what you did.
 ```
 
-Beacon captures observed prompt submissions, tool use, shell execution, file
-reads and edits, subagent lifecycle events, and compaction events where Cursor
-exposes hook payloads.
-
-Then submit a prompt-only follow-up with a unique marker:
+Then send a prompt-only follow-up with a unique marker:
 
 ```text
 BEACON_PROMPT_SMOKE_<unique-id>
@@ -324,18 +316,14 @@ Do not inspect files or run tools. Reply exactly: PROMPT CAPTURE TEST COMPLETE
 ```
 
 <Note>
-  Beacon captures prompt text through Cursor Cloud's `beforeSubmitPrompt`
-  project hook and uploads that event immediately. Commit `.cursor/hooks.json`
-  before starting the run so the prompt hook is available when the cloud
-  environment starts. Cursor can perform early read-only or bootstrap work
-  before project hooks become active, so the initial launch prompt may be
-  absent; follow-up prompts are captured once hooks are running.
-  `sessionStart` and `sessionEnd` remain unavailable. See
-  [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support)
-  for the current platform support list.
+  Cursor runs fewer hooks in an agent's first turn, so the launch prompt is not
+  recorded. The follow-up prompt is. See [What Beacon records](#what-beacon-records).
 </Note>
 
-## 6. Verify object storage upload
+## 5. Verify the session log
+
+For Beacon Cloud, open the dashboard's sessions view. The session appears under
+the environment's device a minute or two after the agent's turn ends.
 
 For GCS, list the uploaded session objects:
 
@@ -401,6 +389,53 @@ harness.name=cursor
 run.provider=cursor_cloud
 ```
 
+## What Beacon records
+
+From an agent's second turn on, Beacon records prompts, the agent's reasoning
+and replies, shell commands with their output and exit codes, file reads and
+edits, tool and MCP calls, subagent start and stop, compaction, and the end of
+each turn with its status (`completed`, `aborted`, or `error`).
+
+Cursor runs fewer hooks in cloud agents than in its desktop app, which leaves
+these gaps:
+
+- **First turn.** During an agent's first turn Cursor runs only the tool,
+  shell, file, and turn-end hooks. That turn's prompt, reasoning, and reply, and
+  the start and stop of any subagent it launches, are not recorded.
+- **Subagents.** A subagent's own events carry its own conversation id, so they
+  appear as a separate session. The agent's session records the subagent's start
+  and stop (from the second turn on), but nothing in Cursor's cloud hook
+  payloads ties the subagent's events back to the agent that started it.
+- **Web search.** Searches the agent runs did not fire any hook in our tests,
+  so they are not recorded.
+- **Session start and end.** Cursor does not run `sessionStart` or `sessionEnd`
+  in cloud agents. See [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support).
+
+## Committing the hooks instead
+
+To keep Beacon's hooks in the repository, generate them, commit them, and keep
+the install script for the binary. The script sees the committed file and
+leaves it alone:
+
+```bash
+mkdir -p .cursor
+beacon cloud cursor print-hooks \
+  --binary-path /tmp/beacon/bin/beacon-hooks \
+  --log-path /tmp/beacon/runtime.jsonl > .cursor/hooks.json
+git add .cursor/hooks.json
+git commit -m "Add Beacon Cursor Cloud hooks"
+git push
+```
+
+Cursor also runs a repository's project hooks in local sessions, so everyone
+who opens the repository in Cursor runs committed hooks too, and those hooks run
+`/tmp/beacon/bin/beacon-hooks` from a world-writable directory. On a machine
+where another user or process can create that file, it runs with the
+developer's permissions on every hook. Keep the hooks uncommitted, with the
+install script, unless every machine that opens the repository is trusted. The
+same applies to Beacon entries added to a `.cursor/hooks.json` the repository
+already commits.
+
 ## Security note
 
 The self-serve flows create a dedicated GCS service account with
@@ -415,16 +450,19 @@ sensitive telemetry.
 
 ## Troubleshooting
 
-### The bucket is empty
+### Nothing arrives
 
-Confirm the Cursor setup script ran and installed binaries, and confirm the
-repository checkout includes committed project hooks:
+Confirm the environment has a successful Build and that the agent started after
+it. Then ask the agent to run:
 
 ```bash
-ls -la /tmp/beacon/bin
-ls -la .cursor
-sed -n '1,160p' .cursor/hooks.json
+ls -la /tmp/beacon/bin .cursor
+grep -v '^#' .git/info/exclude
 ```
+
+`/tmp/beacon/bin/beacon-hooks` and `.cursor/hooks.json` should both exist, and
+the exclude list should name `.cursor/hooks.json`. If they don't, the agent ran
+without Beacon's install script: check the Build's log.
 
 Confirm hooks wrote telemetry:
 
@@ -433,9 +471,10 @@ ls -l /tmp/beacon/runtime.jsonl
 head /tmp/beacon/runtime.jsonl
 ```
 
-If `runtime.jsonl` exists but object storage is empty, check network access and
-credentials. The cloud sandbox must reach the GCS OAuth/storage endpoints or
-the regional S3 endpoint selected by `BEACON_CLOUD_UPLOAD=s3`.
+If `runtime.jsonl` exists but nothing arrives, check network access and
+credentials. The cloud VM must reach the Beacon Cloud ingest host, the GCS
+OAuth and storage endpoints, or the regional S3 endpoint, depending on where
+you send logs.
 
 If `runtime.jsonl` does not exist, confirm the task used a Cursor Cloud
 supported hook surface such as prompt submission, a file read, shell command,
@@ -445,13 +484,13 @@ its [Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-
 
 ### Cursor tries to commit hook settings
 
-The setup script should not modify `.cursor/hooks.json`. If a cloud agent shows
-changes to `.cursor/hooks.json`, update the setup script to `v0.0.56` or later
-and remove older commands that ran `beacon cloud cursor install-hooks` inside
-the VM.
+Beacon's install script lists `.cursor/hooks.json` in `.git/info/exclude`. If an
+agent shows `.cursor/hooks.json` as a change, the environment's install script
+predates that: regenerate it with `beacon cloud cursor print-setup` and paste it
+into the environment again.
 
 ```bash
-git diff -- .cursor/hooks.json
+git status --short -- .cursor
 ```
 
 ## Related

@@ -30,6 +30,11 @@ func TestRenderCursorCloudHooks(t *testing.T) {
 		`"subagentStart"`,
 		`"subagentStop"`,
 		`"preCompact"`,
+		`"afterAgentThought"`,
+		`agent-thought`,
+		`"afterAgentResponse"`,
+		`agent-response`,
+		`"stop"`,
 		`BEACON_ORIGIN=cloud`,
 		`BEACON_RUN_PROVIDER=cursor_cloud`,
 		`'/tmp/beacon/bin/beacon-hooks' --platform cursor`,
@@ -38,7 +43,7 @@ func TestRenderCursorCloudHooks(t *testing.T) {
 			t.Fatalf("rendered hooks missing %q:\n%s", want, got)
 		}
 	}
-	for _, unsupported := range []string{`"preToolUse"`, `"sessionStart"`, `"sessionEnd"`, `"stop"`} {
+	for _, unsupported := range []string{`"preToolUse"`, `"sessionStart"`, `"sessionEnd"`} {
 		if strings.Contains(got, unsupported) {
 			t.Fatalf("rendered cursor cloud hooks should not contain %q:\n%s", unsupported, got)
 		}
@@ -60,6 +65,9 @@ func TestRenderCursorCloudSafeHooks(t *testing.T) {
 		`"postToolUse"`,
 		`"subagentStart"`,
 		`"preCompact"`,
+		`"afterAgentThought"`,
+		`"afterAgentResponse"`,
+		`"stop"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered safe hooks missing %q:\n%s", want, got)
@@ -75,22 +83,42 @@ func TestRenderCursorCloudSafeHooks(t *testing.T) {
 	}
 }
 
-func TestRenderCursorCloudSetupInstallsBinariesOnly(t *testing.T) {
-	got := renderCursorCloudSetup("v0.0.50")
+func TestRenderCursorCloudSetupWritesExcludedHooks(t *testing.T) {
+	got, err := renderCursorCloudSetup("v1.3.60", false)
+	if err != nil {
+		t.Fatalf("render cursor cloud setup: %v", err)
+	}
 	for _, want := range []string{
-		`BEACON_VERSION="v0.0.50"`,
-		`tar -xzf "/tmp/beacon/${ARCHIVE}" -C /tmp/beacon/bin`,
-		`Beacon binaries installed in /tmp/beacon/bin`,
-		`beacon cloud cursor print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .cursor/hooks.json`,
+		`BEACON_VERSION="v1.3.60"`,
+		`tar -xzf "/tmp/beacon/${ARCHIVE}" -C /tmp/beacon/bin beacon-hooks`,
+		`cat > "$REPO_ROOT/.cursor/hooks.json" <<'BEACON_HOOKS'`,
+		`"afterAgentThought"`,
+		`BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=cursor_cloud`,
+		`grep -qxF '.cursor/hooks.json' "$EXCLUDE" 2>/dev/null || echo '.cursor/hooks.json' >> "$EXCLUDE"`,
+		// The common directory's exclude file, which git reads in a linked worktree too, and no
+		// failure (under set -e) outside a git checkout.
+		`EXCLUDE="$(git -C "$REPO_ROOT" rev-parse --git-path info/exclude 2>/dev/null || true)"`,
+		// A repository's own committed hooks are never overwritten.
+		`git -C "$REPO_ROOT" ls-files --error-unmatch .cursor/hooks.json`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered setup missing %q:\n%s", want, got)
 		}
 	}
-	for _, forbidden := range []string{`beacon cloud cursor install-hooks`, `--hooks-json`, `.git/info/exclude`} {
-		if strings.Contains(got, forbidden) {
-			t.Fatalf("cursor setup should not rewrite project hooks with %q:\n%s", forbidden, got)
-		}
+	// The heredoc's terminator must stand on its own line, or the hooks file swallows the script.
+	if !strings.Contains(got, "}\nBEACON_HOOKS\n") {
+		t.Fatalf("hooks heredoc is not terminated on its own line:\n%s", got)
+	}
+
+	safe, err := renderCursorCloudSetup("v1.3.60", true)
+	if err != nil {
+		t.Fatalf("render safe cursor cloud setup: %v", err)
+	}
+	if strings.Contains(got, "--absolute-git-dir") {
+		t.Fatalf("setup must not find info/exclude through the worktree's own git dir:\n%s", got)
+	}
+	if strings.Contains(safe, `"beforeShellExecution"`) {
+		t.Fatalf("--safe-hooks setup should leave out the shell hooks:\n%s", safe)
 	}
 }
 

@@ -202,6 +202,13 @@ func CursorCloudHookRefs(opts CursorCloudOptions) map[string][]HookRef {
 		"preCompact": {
 			{Command: prefix + " cursor-event"},
 		},
+		// The agent's reasoning, its replies and the end of each turn. The Cursor desktop app also
+		// runs the user-level afterAgentThought hook for a cloud agent it shows, which the endpoint
+		// leaves unrecorded (cursorRelaysCloudAgent in beacon-hooks), so these are where a cloud
+		// agent's reasoning is recorded. stop also uploads the log once the turn is over.
+		"afterAgentThought":  {{Command: prefix + " agent-thought"}},
+		"afterAgentResponse": {{Command: prefix + " agent-response"}},
+		"stop":               {{Command: prefix + " stop"}},
 	}
 	if !opts.SafeHooks {
 		refs["beforeShellExecution"] = []HookRef{{Command: prefix + " pre-tool"}}
