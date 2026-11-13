@@ -3,6 +3,7 @@ package threatrules
 import (
 	"reflect"
 	"time"
+	"unsafe"
 
 	"github.com/google/cel-go/interpreter"
 
@@ -30,12 +31,19 @@ func (in *eventInput) activation(derived bool) *eventActivation {
 	return in.plain
 }
 
-// eventActivation binds one event to the variable rules address it by, and caches the canonical
-// forms of the strings prefilters look at (see prefilter.go), so every rule that matches a regex
-// on a field shares one canonicalization of it.
+// eventActivation binds one event to the variable rules address it by, and holds what the scan
+// has worked out of the event's texts (textatoms.go), so every rule that matches a pattern on a
+// field shares one reading of it.
 type eventActivation struct {
-	e      any
-	canons map[string]string // a string a prefilter looked at -> its canonical form
+	e any
+	// texts are the texts a pattern was asked of; lastText is the one asked of last. atoms is
+	// the automaton they are read with, and textSlab and bitSlab what is left of the allocation
+	// their records and bit sets are cut from.
+	texts    map[string]*textAtoms
+	lastText *textAtoms
+	atoms    *automaton
+	textSlab []textAtoms
+	bitSlab  []uint64
 	// The class of sizes the event is within (matcher.go), measured on first use.
 	measured bool
 	sizes    sizeClass
@@ -59,17 +67,48 @@ func (a *eventActivation) ResolveName(name string) (any, bool) {
 
 func (a *eventActivation) Parent() interpreter.Activation { return nil }
 
-func (a *eventActivation) canon(s string) string {
-	if c, ok := a.canons[s]; ok {
-		return c
+// atomsOf returns what the scan knows of a text of the event: its atoms, read on first use, and
+// the patterns run on it. Calls come in runs on the same text (every pattern a rule asks of one
+// word), so the last answer is tried first, by the text's address rather than its bytes.
+func (a *eventActivation) atomsOf(s string) *textAtoms {
+	if t := a.lastText; t != nil && len(s) == len(t.text) && unsafe.StringData(s) == unsafe.StringData(t.text) {
+		return t
 	}
-	if a.canons == nil {
-		a.canons = map[string]string{}
+	t, ok := a.texts[s]
+	if !ok {
+		if a.texts == nil {
+			a.texts = map[string]*textAtoms{}
+		}
+		t = a.readText(s)
+		a.texts[s] = t
 	}
-	c := canon(s)
-	a.canons[s] = c
-	return c
+	a.lastText = t
+	return t
 }
+
+// readText reads the atoms of a text the scan has not seen. An event has some twenty texts,
+// most of them words, and their records and bit sets are cut from one allocation for every
+// textsAtOnce of them.
+func (a *eventActivation) readText(s string) *textAtoms {
+	if a.atoms == nil {
+		a.atoms = atomsFor()
+	}
+	words := (a.atoms.n + 63) / 64
+	if len(a.textSlab) == 0 {
+		a.textSlab = make([]textAtoms, textsAtOnce)
+		a.bitSlab = make([]uint64, textsAtOnce*words)
+	}
+	t := &a.textSlab[0]
+	t.text, t.auto, t.present = s, a.atoms, a.bitSlab[:words:words]
+	a.textSlab, a.bitSlab = a.textSlab[1:], a.bitSlab[words:]
+	if !a.atoms.read(s, true, t.present) {
+		clear(t.present)
+		a.atoms.read(t.canonical(), false, t.present)
+	}
+	return t
+}
+
+const textsAtOnce = 16
 
 // class returns the smallest size class holding every string and list a rule can read of the
 // activation's event, worked out on first use, and false when none does.

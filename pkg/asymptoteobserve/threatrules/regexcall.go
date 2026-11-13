@@ -2,6 +2,7 @@ package threatrules
 
 import (
 	"regexp"
+	"sync"
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -20,19 +21,61 @@ var prefilteredMatches = &interpreter.RegexOptimization{
 	Function:   interpreter.MatchesRegexOptimization.Function,
 	RegexIndex: interpreter.MatchesRegexOptimization.RegexIndex,
 	Factory: func(call interpreter.InterpretableCall, pattern string) (interpreter.InterpretableCall, error) {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
+		p := compiledPattern(pattern)
+		if p == nil {
 			return call, nil
 		}
-		pf, err := compilePrefilter(pattern)
-		if err != nil {
-			return call, nil
-		}
-		if pf.op == pfTrue {
-			pf = nil
-		}
-		return &matchesCall{id: call.ID(), function: call.Function(), overload: call.OverloadID(), args: call.Args(), re: re, pf: pf}, nil
+		return &matchesCall{id: call.ID(), function: call.Function(), overload: call.OverloadID(), args: call.Args(), re: p.re, pf: p.pf}, nil
 	},
+}
+
+// pattern is a compiled pattern and its prefilter, nil when the pattern implies no literal.
+type pattern struct {
+	re *regexp.Regexp
+	pf *prefilter
+}
+
+// patterns holds every pattern compiled so far, by its text. A pack's expressions hold some
+// 1,700 matches() calls after its predicates are expanded, on a few hundred distinct patterns,
+// and an expression is planned twice, with and without cost tracking: compiled where it is
+// written, each pattern was compiled, and its prefilter derived, many times over. A compiled
+// pattern is immutable and safe to share.
+var patterns struct {
+	mu     sync.Mutex
+	byText map[string]*pattern // nil for a pattern that does not compile
+}
+
+// maxSharedPatterns bounds patterns; past it a pattern is compiled where it is written.
+const maxSharedPatterns = 8192
+
+// compiledPattern returns the compiled form of a pattern, or nil when it does not compile.
+func compiledPattern(text string) *pattern {
+	patterns.mu.Lock()
+	p, ok := patterns.byText[text]
+	patterns.mu.Unlock()
+	if ok {
+		return p
+	}
+	if re, err := regexp.Compile(text); err == nil {
+		if pf, err := compilePrefilter(text); err == nil {
+			if pf.op == pfTrue {
+				pf = nil
+			}
+			p = &pattern{re: re, pf: pf}
+		}
+	}
+	patterns.mu.Lock()
+	defer patterns.mu.Unlock()
+	if shared, ok := patterns.byText[text]; ok {
+		return shared
+	}
+	if patterns.byText == nil {
+		patterns.byText = map[string]*pattern{}
+	}
+	if len(patterns.byText) < maxSharedPatterns {
+		patterns.byText[text] = p
+	}
+	return p
 }
 
 // matchesCall is a matches() call with a constant pattern. It keeps the call's identity (id,
@@ -82,28 +125,37 @@ func (m *matchesCall) match(frame *interpreter.ExecutionFrame, vals []ref.Val) r
 	if !ok {
 		return types.NoSuchOverloadErr()
 	}
-	if m.pf != nil && !m.pf.holds(canonOf(frame, s)) {
+	act := eventActivationOf(frame)
+	if act == nil {
+		if m.pf != nil && !m.pf.holds(canon(s)) {
+			return types.False
+		}
+		return types.Bool(m.re.MatchString(s))
+	}
+	// The text's atoms are read once for the event, and so is each pattern that gets past its
+	// prefilter: every rule that asks the same of the same text shares the answer.
+	t := act.atomsOf(s)
+	if m.pf != nil && !m.pf.holdsIn(t) {
 		return types.False
 	}
-	return types.Bool(m.re.MatchString(s))
+	return types.Bool(t.matches(m.re))
 }
 
-// canonOf is canon(s), from the event activation's cache when a is or wraps one: every rule that
-// matches on a field then shares one canonicalization of it.
-func canonOf(a interpreter.Activation, s string) string {
+// eventActivationOf returns the event activation a is or wraps, or nil.
+func eventActivationOf(a interpreter.Activation) *eventActivation {
 	// The bound only guards against an activation chain that never ends; it is far deeper than
 	// any nesting of comprehensions a rule can write.
 	for range 64 {
 		switch x := a.(type) {
 		case nil:
-			return canon(s)
+			return nil
 		case *eventActivation:
-			return x.canon(s)
+			return x
 		case *interpreter.ExecutionFrame:
 			a = x.Activation
 		default:
 			a = a.Parent()
 		}
 	}
-	return canon(s)
+	return nil
 }
