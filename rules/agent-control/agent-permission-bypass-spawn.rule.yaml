@@ -1,6 +1,6 @@
 id: agent-permission-bypass-spawn
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+version: 5
 title: Agent runtime spawned with permission/approval gating disabled
 description: >
   A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
@@ -37,8 +37,8 @@ match: >
       agent_cli(c) &&
       c.args.matches("(?mi)^(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--full-auto|--yolo|--force)$|^--permission-mode[=\\n]bypasspermissions$|^(--sandbox|-s)[=\\n]danger-full-access$|^(--ask-for-approval|-a)[=\\n]never$")
     ) ||
-    unread_text(e, t, t.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b") &&
-      t.matches("(?i)(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--permission-mode[ =]+bypasspermissions|(--sandbox|(^|\\s)-s)[ =]+danger-full-access|--ask-for-approval[ =]+never|--full-auto|--yolo|(^|\\s)-a[ =]+never\\b|--force\\b)"))
+    unread_text(e, t, t.matches("(?i)(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--permission-mode[ =]+bypasspermissions|(--sandbox|(^|\\s)-s)[ =]+danger-full-access|--ask-for-approval[ =]+never|--full-auto|--yolo|(^|\\s)-a[ =]+never\\b|--force\\b)") &&
+      t.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b"))
   )
 
 emit:

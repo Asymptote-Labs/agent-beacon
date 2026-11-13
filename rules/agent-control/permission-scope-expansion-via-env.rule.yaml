@@ -1,6 +1,6 @@
 id: permission-scope-expansion-via-env
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: Agent runtime spawned with environment variables that elevate permissions
 description: >
   A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
@@ -46,8 +46,8 @@ match: >
           x.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)=")))
       )
     ) ||
-    unread_text(e, t, t.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+|([A-Z_][A-Z0-9_]*\\s*=\\S+\\s+)+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b") &&
-      t.matches("(?i)\\b((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)\\s*="))
+    unread_text(e, t, t.matches("(?i)\\b((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)\\s*=") &&
+      t.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+|([A-Z_][A-Z0-9_]*\\s*=\\S+\\s+)+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b"))
   )
 
 emit:
