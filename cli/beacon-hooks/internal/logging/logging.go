@@ -297,15 +297,19 @@ func (l *Logger) stageInWorkspaceSpool(event map[string]interface{}, logPath str
 	if err != nil {
 		return false
 	}
+	// <ws>/.beacon/spool, two levels above <harness>/<session>. Nothing is staged unless its
+	// .gitignore keeps the spool out of git (ensureSpoolGitignore).
+	spoolRoot := filepath.Dir(filepath.Dir(dir))
+	if !ensureSpoolGitignore(spoolRoot) {
+		return false
+	}
 	spool := localingest.Spool{Dir: dir}
 	pending, _, err := spool.Pending()
 	first := err != nil || pending == 0
 	if dropped, err := spool.Append([][]byte{line}); err != nil || dropped > 0 {
 		return false
 	}
-	ensureSpoolGitignore(filepath.Dir(filepath.Dir(dir)))
-	// <ws>/.beacon/spool, two levels above <harness>/<session>.
-	ensureSpoolGitExclude(filepath.Dir(filepath.Dir(dir)))
+	ensureSpoolGitExclude(spoolRoot)
 	if first {
 		reportStagedSession(os.Stderr, harness, l.sessionID, logPath, dir, workspace)
 	}

@@ -28,7 +28,10 @@ label the event was captured under. Hooks never stage:
   container as your own uid, or mount the ingest socket. Root that owns the
   workspace (a rootless container) stages as usual;
 - in a working directory that exists only on the sandbox's own root
-  filesystem, where the spool would disappear with the sandbox.
+  filesystem, where the spool would disappear with the sandbox;
+- next to a `.beacon/spool/.gitignore` that does not ignore everything there.
+  A repository can commit its own to switch the protection off; Beacon leaves
+  it alone and stages nothing beside it.
 
 The first event a session stages prints one note to the hook's stderr, naming
 the spool and a drain command for that one session and the log the hook writes:

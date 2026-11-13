@@ -220,6 +220,40 @@ func TestRootStagesOnlyInAWorkspaceItOwns(t *testing.T) {
 	}
 }
 
+// A cloned repository can commit its own .beacon/spool/.gitignore that does not ignore the spool.
+// Staged next to it, the session's prompts would go into the agent's next `git add -A`, so nothing
+// is staged and the event is reported as not recorded; the repository's file is left as it is.
+func TestNoStagingNextToAGitignoreThatDoesNotHideTheSpool(t *testing.T) {
+	isolateHookHome(t)
+	t.Setenv("BEACON_ENDPOINT_LOG", unwritableEndpointLog(t))
+	for name, content := range map[string]string{"empty": "", "negated": "*\n!*.jsonl\n"} {
+		t.Run(name, func(t *testing.T) {
+			workspace := t.TempDir()
+			gitignore := filepath.Join(workspace, ".beacon", "spool", ".gitignore")
+			if err := os.MkdirAll(filepath.Dir(gitignore), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(gitignore, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var writeErr error
+			captureStderr(t, func() {
+				writeErr = NewSessionLogger("tool-use", "opencode", "sess-gi").EndpointEvent("tool.invoked", "tool", "info", "next to a planted .gitignore",
+					map[string]interface{}{"session": map[string]interface{}{"id": "sess-gi", "working_directory": workspace}})
+			})
+			if writeErr == nil {
+				t.Fatal("an event next to a planted .gitignore was reported recorded")
+			}
+			if _, err := os.Stat(stagedSpoolFile(workspace, "opencode", "sess-gi")); !os.IsNotExist(err) {
+				t.Fatalf("an event was staged next to a .gitignore that does not hide it: %v", err)
+			}
+			if data, _ := os.ReadFile(gitignore); string(data) != content {
+				t.Fatalf("the repository's .gitignore was changed: %q", data)
+			}
+		})
+	}
+}
+
 // A share request is an action only Beacon writes, which every drain refuses. Staged, it would be
 // discarded and the session, already marked as requested, never shared; so it is not staged, the
 // write fails, and the caller takes its mark back.
