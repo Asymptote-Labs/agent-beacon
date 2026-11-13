@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	opencodeplugin "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/opencode"
@@ -32,6 +33,9 @@ type OpenCodeStatus struct {
 	// IgnoredPluginPaths are Beacon plugin copies OpenCode loads but never runs, because another
 	// copy with the same plugin ID loads before them. It includes PluginPath when that is one.
 	IgnoredPluginPaths []string `json:"ignored_plugin_paths,omitempty"`
+	// RemovedPluginPath is a Beacon plugin that install or uninstall removed from the default user
+	// config directory, because OPENCODE_CONFIG_DIR moves the one Beacon manages.
+	RemovedPluginPath string `json:"removed_plugin_path,omitempty"`
 }
 
 var opencodeRuntime = hookRuntime{
@@ -47,7 +51,13 @@ func InstallOpenCode(opts OpenCodeOptions) (OpenCodeStatus, error) {
 	if err != nil {
 		return OpenCodeStatus{}, err
 	}
-	return opencodeStatusFromRuntime(status), nil
+	removed, err := removeOverriddenOpenCodePlugin(opts.Level)
+	if err != nil {
+		return OpenCodeStatus{}, err
+	}
+	out := opencodeStatusFromRuntime(status)
+	out.RemovedPluginPath = removed
+	return out, nil
 }
 
 func UninstallOpenCode(opts OpenCodeOptions) (OpenCodeStatus, error) {
@@ -55,7 +65,41 @@ func UninstallOpenCode(opts OpenCodeOptions) (OpenCodeStatus, error) {
 	if err != nil {
 		return OpenCodeStatus{}, err
 	}
-	return opencodeStatusFromRuntime(status), nil
+	removed, err := removeOverriddenOpenCodePlugin(opts.Level)
+	if err != nil {
+		return OpenCodeStatus{}, err
+	}
+	out := opencodeStatusFromRuntime(status)
+	if removed != "" {
+		out.RemovedPluginPath = removed
+		out.Message += fmt.Sprintf("; also removed the Beacon plugin at %s", removed)
+	}
+	return out, nil
+}
+
+// removeOverriddenOpenCodePlugin removes Beacon's user-level plugin from the default config
+// directory when OPENCODE_CONFIG_DIR is set, and returns its path if there was one. A Beacon from
+// before OPENCODE_CONFIG_DIR was honored wrote it there. Once Beacon manages the copy under the
+// override, nothing reports this one any more, yet OpenCode 1.x still runs it beside the new copy,
+// duplicating every event, and keeps spawning a hook binary that uninstall removed.
+func removeOverriddenOpenCodePlugin(level Level) (string, error) {
+	if (level != "" && level != LevelUser) || os.Getenv("OPENCODE_CONFIG_DIR") == "" {
+		return "", nil
+	}
+	home, _ := os.UserHomeDir()
+	dir, err := opencodeDefaultConfigDir(home)
+	if err != nil {
+		return "", nil
+	}
+	path := filepath.Join(dir, "plugins", opencodePluginFileName)
+	if current, err := opencodePluginPath(level); err != nil || current == path {
+		return "", nil
+	}
+	removed, err := removeOpenCodePlugin(path)
+	if err != nil || !removed {
+		return "", err
+	}
+	return path, nil
 }
 
 func OpenCodeHookStatus(opts OpenCodeOptions) OpenCodeStatus {
@@ -80,7 +124,10 @@ func opencodeStatusFromRuntime(status runtimeStatus) OpenCodeStatus {
 			return out
 		}
 		data, err := os.ReadFile(out.PluginPath)
-		if err != nil || !strings.Contains(string(data), out.BinaryPath) || strings.Contains(string(data), "__BEACON_") {
+		// The plugin holds the hook command as a string literal written with %q, so a Windows
+		// path's backslashes appear doubled there.
+		quoted := strconv.Quote(out.BinaryPath)
+		if err != nil || !strings.Contains(string(data), quoted[1:len(quoted)-1]) || strings.Contains(string(data), "__BEACON_") {
 			out.Installed = false
 			out.Message = fmt.Sprintf("opencode plugin at %s does not reference the active Beacon hook binary", out.PluginPath)
 		}
@@ -284,6 +331,11 @@ func OpenCodeConfigDir(home string) (string, error) {
 	if dir := os.Getenv("OPENCODE_CONFIG_DIR"); dir != "" {
 		return filepath.Abs(dir)
 	}
+	return opencodeDefaultConfigDir(home)
+}
+
+// opencodeDefaultConfigDir is OpenCode's global config directory when OPENCODE_CONFIG_DIR is unset.
+func opencodeDefaultConfigDir(home string) (string, error) {
 	if base := os.Getenv("XDG_CONFIG_HOME"); base != "" {
 		abs, err := filepath.Abs(base)
 		if err != nil {

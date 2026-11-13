@@ -223,7 +223,12 @@ func TestOpenCodePluginPathHonorsOpenCodeConfigDir(t *testing.T) {
 // a second Beacon copy (a project install under a user install, or a stale one in plugin/) never
 // receives telemetry while its file looks installed.
 func TestOpenCodeStatusReportsCopiesOpenCodeNeverRuns(t *testing.T) {
-	home := t.TempDir()
+	// The backslash puts the hook binary on a path the plugin's string literal escapes, as every
+	// Windows path is.
+	home := filepath.Join(t.TempDir(), `back\slash`)
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
+	}
 	testenv.SetHome(t, home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("OPENCODE_CONFIG_DIR", "")
@@ -295,5 +300,53 @@ func TestOpenCodeStatusReportsCopiesOpenCodeNeverRuns(t *testing.T) {
 	status = OpenCodeHookStatus(OpenCodeOptions{Level: LevelUser, UserMode: true})
 	if status.Installed || !strings.Contains(status.Message, stale) {
 		t.Fatalf("user copy shadowed by %s reported as %+v", stale, status)
+	}
+}
+
+// A Beacon from before OPENCODE_CONFIG_DIR was honored wrote the user plugin to the default
+// directory. Nothing reports that copy once Beacon manages the one under the override, yet OpenCode
+// 1.x still runs it beside the new one, so install and uninstall both remove it.
+func TestOpenCodeInstallRemovesCopyFromOverriddenDefaultDir(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Chdir(t.TempDir())
+	stale := filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts")
+	leaveStale := func() {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(stale), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := installOpenCodePlugin(stale, "/old/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	custom := filepath.Join(t.TempDir(), "custom")
+	t.Setenv("OPENCODE_CONFIG_DIR", custom)
+	opts := OpenCodeOptions{Level: LevelUser, LogPath: filepath.Join(home, "runtime.jsonl"), UserMode: true}
+
+	leaveStale()
+	status, err := InstallOpenCode(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(custom, "plugins", "beacon.ts"); !status.Installed || status.PluginPath != want || status.RemovedPluginPath != stale {
+		t.Fatalf("install = %+v, want installed at %s and %s removed", status, want, stale)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("install left %s: %v", stale, err)
+	}
+
+	leaveStale()
+	if status, err = UninstallOpenCode(opts); err != nil {
+		t.Fatal(err)
+	}
+	if status.RemovedPluginPath != stale || !strings.Contains(status.Message, stale) {
+		t.Fatalf("uninstall = %+v, want %s removed", status, stale)
+	}
+	for _, path := range []string{stale, status.PluginPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("uninstall left %s: %v", path, err)
+		}
 	}
 }

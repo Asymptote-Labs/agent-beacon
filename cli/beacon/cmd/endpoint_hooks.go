@@ -154,6 +154,9 @@ func installEndpointHookTargetTo(report, notes io.Writer, name string, cfg endpo
 		if len(status.IgnoredPluginPaths) > 0 {
 			fmt.Fprintln(notes, status.Message)
 		}
+		if status.RemovedPluginPath != "" {
+			fmt.Fprintf(notes, "Removed the Beacon opencode plugin at %s: OPENCODE_CONFIG_DIR is set, so OpenCode 2.x never loads it, and OpenCode 1.x would run it beside the new one.\n", status.RemovedPluginPath)
+		}
 	case "cline":
 		status, err := endpointhooks.InstallCline(endpointhooks.ClineOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
