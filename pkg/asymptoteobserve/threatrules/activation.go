@@ -86,17 +86,18 @@ func (a *eventActivation) atomsOf(s string) *textAtoms {
 	return t
 }
 
-// readText reads the atoms of a text the scan has not seen. An event has some twenty texts,
-// most of them words, and their records and bit sets are cut from one allocation for every
-// textsAtOnce of them.
+// readText reads the atoms of a text the scan has not seen. The records and bit sets of an
+// event's texts are cut from a few allocations, each for as many texts as the event has had so
+// far: an event with no command line has a text or two, one with a long line has its words.
 func (a *eventActivation) readText(s string) *textAtoms {
 	if a.atoms == nil {
 		a.atoms = atomsFor()
 	}
 	words := (a.atoms.n + 63) / 64
 	if len(a.textSlab) == 0 {
-		a.textSlab = make([]textAtoms, textsAtOnce)
-		a.bitSlab = make([]uint64, textsAtOnce*words)
+		n := min(max(len(a.texts), 4), 32)
+		a.textSlab = make([]textAtoms, n)
+		a.bitSlab = make([]uint64, n*words)
 	}
 	t := &a.textSlab[0]
 	t.text, t.auto, t.present = s, a.atoms, a.bitSlab[:words:words]
@@ -107,8 +108,6 @@ func (a *eventActivation) readText(s string) *textAtoms {
 	}
 	return t
 }
-
-const textsAtOnce = 16
 
 // class returns the smallest size class holding every string and list a rule can read of the
 // activation's event, worked out on first use, and false when none does.

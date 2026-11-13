@@ -121,7 +121,13 @@ func (m *matchesCall) match(frame *interpreter.ExecutionFrame, vals []ref.Val) r
 	if len(vals) != 2 {
 		return types.NoSuchOverloadErr()
 	}
-	s, ok := vals[0].Value().(string)
+	// A string's Value is the string in an interface, which is an allocation for every call.
+	s, ok := "", false
+	if str, isString := vals[0].(types.String); isString {
+		s, ok = string(str), true
+	} else {
+		s, ok = vals[0].Value().(string)
+	}
 	if !ok {
 		return types.NoSuchOverloadErr()
 	}
