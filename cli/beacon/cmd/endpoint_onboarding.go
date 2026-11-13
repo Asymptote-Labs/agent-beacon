@@ -427,12 +427,7 @@ func onboardingEnabledByEnv() bool {
 // check already catches most of them; this is belt and braces for runners that
 // allocate a pty.
 func isCIEnvironment() bool {
-	for _, key := range []string{"CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "JENKINS_URL", "TEAMCITY_VERSION"} {
-		if strings.TrimSpace(os.Getenv(key)) != "" {
-			return true
-		}
-	}
-	return false
+	return onboarding.IsCIEnvironment(os.Getenv)
 }
 
 // onboardingAnswersFromEnv reads pre-supplied answers for a headless rollout.

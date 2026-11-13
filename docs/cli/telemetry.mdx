@@ -1,0 +1,72 @@
+---
+title: "CLI telemetry"
+description: "The product usage events the beacon CLI sends, and how to turn them off"
+---
+
+## Overview
+
+The `beacon` CLI sends a small number of product usage events to Beacon so we can see
+whether installs succeed and which setup paths people use. They go to
+`https://beacon.sh/ingest`, Beacon's proxy to PostHog.
+
+This is separate from the agent telemetry Beacon records. CLI telemetry never contains
+session content, prompts, responses, commands, file paths, repository names, hostnames
+or error messages. Your agent sessions stay where you send them: the local log, your own
+forwarding destination, or Beacon Cloud if you chose it.
+
+The first time telemetry is on, the CLI prints this line to stderr, once:
+
+```text
+Beacon sends CLI usage data (never prompts, code or file paths). Turn it off with BEACON_TELEMETRY=0. Learn more: https://docs.beacon.sh/cli/telemetry
+```
+
+## Turn it off
+
+Set either variable in the environment the CLI runs in:
+
+| Variable | Effect |
+|----------|--------|
+| `BEACON_TELEMETRY=0` | Turns CLI telemetry off. `false`, `no` and `off` work too. |
+| `DO_NOT_TRACK=1` | The [cross-tool convention](https://consoledonottrack.com). Any value other than `0` or `false` turns it off. |
+
+With telemetry off, the CLI sends nothing and writes no telemetry state. Development
+builds (`beacon version` prints `dev`) never send telemetry.
+
+Events are sent in the background and never slow down or fail a command: on exit the CLI
+waits at most 1.5 seconds for them, and any network error is ignored. The runtime hooks
+(`beacon-hooks`), the collector, shell completion and the git hook entry points never send
+CLI telemetry.
+
+## What every event carries
+
+| Property | Value |
+|----------|-------|
+| `product` | `beacon` |
+| `surface` | `cli` |
+| `beacon_version` | The CLI version |
+| `os`, `arch` | Operating system and CPU architecture, such as `darwin` and `arm64` |
+| `install_mode` | `user`, or `system` for `--system` commands and commands run as root |
+| `install_method` | `homebrew`, `package`, or `source` |
+| `is_ci` | Whether a CI marker such as `CI` or `GITHUB_ACTIONS` is set |
+| `invoking_agent` | The coding agent whose shell ran the command (`claude_code`, `cursor`, `codex`, `gemini_cli`, `opencode`, `cline`, a name from `AI_AGENT`), or `none` |
+
+## Identity
+
+Until the CLI knows who you are, events are sent under the machine's random install ID
+(`install_id` in `~/.beacon/profile.json`), the same ID the onboarding record uses, and
+they create no person profile.
+
+When you sign in (`beacon login` or the install wizard), the CLI links that install ID to
+you. Your email is sent once as a person property, never as an event property, and the ID
+it sends events under from then on is the SHA-256 of your lower-cased email. Events from a
+work email are grouped under its domain; personal mailbox domains such as `gmail.com` are
+not. Signing out with `beacon logout` does not unlink the machine.
+
+The CLI keeps this state in `~/.beacon/telemetry.json` (mode `0600`): when the notice was
+shown and the identified ID. Deleting the file resets both.
+
+## Events
+
+| Event | When | Properties |
+|-------|------|------------|
+| `$create_alias`, `$set` | The CLI learns your email | Your email, `has_beacon`, your Beacon account ID when signed in, and `first_product`/`first_surface` set once, all as person properties |
