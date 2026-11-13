@@ -181,6 +181,45 @@ func TestOtherHarnessStagesThenDrainsOnItsNextWrite(t *testing.T) {
 	}
 }
 
+// A rootful container sandbox runs the agent as uid 0 over the user's bind-mounted checkout. Staged
+// there, the spool would be root's 0700/0600 files the user could neither drain nor delete, so the
+// event is reported as not recorded instead. Root that owns the workspace (uid 0 in a rootless
+// container owns the mapped one) stages as any account does.
+func TestRootStagesOnlyInAWorkspaceItOwns(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() != 0 {
+		t.Skip("needs root")
+	}
+	isolateHookHome(t)
+	t.Setenv("BEACON_ENDPOINT_LOG", unwritableEndpointLog(t))
+	emit := func(session, workspace string) (error, string) {
+		var writeErr error
+		stderr := captureStderr(t, func() {
+			writeErr = NewSessionLogger("tool-use", "opencode", session).EndpointEvent("tool.invoked", "tool", "info", "as root",
+				map[string]interface{}{"session": map[string]interface{}{"id": session, "working_directory": workspace}})
+		})
+		return writeErr, stderr
+	}
+
+	users := t.TempDir()
+	if err := os.Chown(users, 1000, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if writeErr, stderr := emit("sess-root-1", users); writeErr == nil || !strings.Contains(stderr, "NOT recorded") {
+		t.Fatalf("root's unwritten event in another account's workspace = %v, stderr %q; want it reported as not recorded", writeErr, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(users, ".beacon")); !os.IsNotExist(err) {
+		t.Fatalf("root staged in another account's workspace: %v", err)
+	}
+
+	own := t.TempDir()
+	if writeErr, _ := emit("sess-root-2", own); writeErr != nil {
+		t.Fatalf("root did not stage in a workspace it owns: %v", writeErr)
+	}
+	if _, err := os.Stat(stagedSpoolFile(own, "opencode", "sess-root-2")); err != nil {
+		t.Fatalf("root's own workspace holds no spool: %v", err)
+	}
+}
+
 // A share request is an action only Beacon writes, which every drain refuses. Staged, it would be
 // discarded and the session, already marked as requested, never shared; so it is not staged, the
 // write fails, and the caller takes its mark back.

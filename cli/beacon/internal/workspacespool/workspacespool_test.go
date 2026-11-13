@@ -1,6 +1,7 @@
 package workspacespool
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -179,6 +180,30 @@ func TestDrainSessionSkipsALinkedSpoolDirectory(t *testing.T) {
 	}
 	if summary != (Summary{}) || pending(t, target) != 1 || PendingBytes(s) != 0 {
 		t.Fatalf("summary %+v, target holds %d lines; the linked spool was read", summary, pending(t, target))
+	}
+}
+
+// Spool.Append never lets a spool outgrow DefaultSpoolMaxBytes, so a larger pending.jsonl was
+// written by hand -- millions of junk lines, say, that would hold the sweep lock for hours. It is
+// left unread, and not reported as pending.
+func TestDrainSessionSkipsAnOversizeSpool(t *testing.T) {
+	ws := t.TempDir()
+	s := Session{Workspace: ws, Harness: "opencode", ID: "s1"}
+	spool := stage(t, s, line(t, testEvent("opencode", "s1", ws, "session.started")))
+	junk := bytes.Repeat([]byte("x\n"), int(localingest.DefaultSpoolMaxBytes/2)+1)
+	if err := os.WriteFile(spool.FilePath(), junk, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var events []schema.Event
+	var summary Summary
+	if err := DrainSession(s, collect(&events), &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary != (Summary{}) || PendingBytes(s) != 0 {
+		t.Fatalf("summary %+v, pending %d; an oversize spool was read", summary, PendingBytes(s))
+	}
+	if info, err := os.Stat(spool.FilePath()); err != nil || info.Size() != int64(len(junk)) {
+		t.Fatalf("the oversize spool changed: %v, %v", info, err)
 	}
 }
 

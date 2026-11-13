@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,9 +31,6 @@ import (
 
 // legacyDSHHarness is the harness whose hooks once staged in .beacon/dsh-spool/<session>.
 const legacyDSHHarness = "deepseek_harness"
-
-// drainBatch is how many staged lines one Spool.Drain call hands emit.
-const drainBatch = 256
 
 // knownTailBytes bounds how much of the runtime log KnownSessions reads: enough for the sessions
 // of recent days on a busy machine, without reading a whole rotation window on every sweep.
@@ -72,11 +70,12 @@ func (s Session) spoolDirs() []string {
 }
 
 // realSpool reports whether every component of dir below workspace (.beacon, spool, harness,
-// session) is a real directory and the spool file, if present, a regular file. The sandboxed agent
-// can write the workspace and knows its own session id, so it can plant
-// .beacon/spool/<harness>/<its-id> as a link to the account's own spool; a drain through it would
-// remove the lines it refuses from that spool. The workspace itself may be a link; it comes from
-// Beacon's own log or an operator's root.
+// session) is a real directory and the spool file, if present, a regular file no larger than a
+// spool can grow. The sandboxed agent can write the workspace and knows its own session id, so it
+// can plant .beacon/spool/<harness>/<its-id> as a link to the account's own spool; a drain through
+// it would remove the lines it refuses from that spool. Spool.Append never lets the file outgrow
+// DefaultSpoolMaxBytes, so a larger one was written by hand and is left unread. The workspace
+// itself may be a link; it comes from Beacon's own log or an operator's root.
 func realSpool(workspace, dir string) bool {
 	rel, err := filepath.Rel(filepath.Clean(workspace), dir)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
@@ -91,16 +90,20 @@ func realSpool(workspace, dir string) bool {
 		}
 	}
 	info, err := os.Lstat(localingest.Spool{Dir: dir}.FilePath())
-	return errors.Is(err, os.ErrNotExist) || (err == nil && info.Mode().IsRegular())
+	return errors.Is(err, os.ErrNotExist) || (err == nil && info.Mode().IsRegular() && info.Size() <= localingest.DefaultSpoolMaxBytes)
 }
 
-// DrainSession moves s's staged events through emit, in batches, counting them in summary.
+// DrainSession moves s's staged events through emit, counting them in summary.
 //
-// Delivery is at least once: a drain killed between emitting a batch and removing it from the
-// spool emits it again next time, the contract localingest.Spool keeps for every spool. An emit
-// error (a spent budget, a full retention window) stops the drain with the unsent rest left staged.
-// A refused line -- not admitted, undecodable, or not a valid event -- is removed with the batch,
-// since it would be refused on every later drain too and would block the lines behind it.
+// Each spool is drained in one pass: Spool.Drain reads it once, emit takes the lines in order, and
+// the remainder is rewritten once. A drain in small batches would re-read and rewrite the whole
+// file per batch. The file is at most DefaultSpoolMaxBytes (realSpool), so one read is bounded.
+//
+// Delivery is at least once: a drain killed between emitting and removing the lines emits them
+// again next time, the contract localingest.Spool keeps for every spool. An emit error (a spent
+// budget, a full retention window) stops the drain with the unsent rest left staged. A refused
+// line -- not admitted, undecodable, or not a valid event -- is removed with the rest, since it
+// would be refused on every later drain too and would block the lines behind it.
 //
 // Under sessionfs confinement (a root sweep) it does nothing: the drain writes and removes files
 // under a user's workspace, which root must not do on their behalf. The user's own sweep drains it.
@@ -118,36 +121,29 @@ func DrainSession(s Session, emit Emit, summary *Summary) error {
 }
 
 func drainSpool(spool localingest.Spool, s Session, emit Emit, summary *Summary, counted *bool) error {
-	for {
-		n, err := spool.Drain(drainBatch, func(lines [][]byte) (int, error) {
-			if !*counted {
-				*counted = true
-				summary.Sessions++
-			}
-			for i, line := range lines {
-				if !asymptoteobserve.AdmitStagedLine(line, s.Harness, s.ID) {
-					summary.Rejected++
-					continue
-				}
-				var event schema.Event
-				if err := json.Unmarshal(line, &event); err != nil || event.Validate() != nil {
-					summary.Rejected++
-					continue
-				}
-				if err := emit(event); err != nil {
-					return i, err
-				}
-				summary.Events++
-			}
-			return len(lines), nil
-		})
-		if err != nil {
-			return err
+	_, err := spool.Drain(math.MaxInt, func(lines [][]byte) (int, error) {
+		if !*counted {
+			*counted = true
+			summary.Sessions++
 		}
-		if n < drainBatch {
-			return nil
+		for i, line := range lines {
+			if !asymptoteobserve.AdmitStagedLine(line, s.Harness, s.ID) {
+				summary.Rejected++
+				continue
+			}
+			var event schema.Event
+			if err := json.Unmarshal(line, &event); err != nil || event.Validate() != nil {
+				summary.Rejected++
+				continue
+			}
+			if err := emit(event); err != nil {
+				return i, err
+			}
+			summary.Events++
 		}
-	}
+		return len(lines), nil
+	})
+	return err
 }
 
 // Drain drains each session. A stopped sweep (sessionsync.Stopped) ends it, since every later

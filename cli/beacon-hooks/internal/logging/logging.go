@@ -274,7 +274,8 @@ func recordActiveSession(event map[string]interface{}) {
 // The spool is a localingest.Spool, the store a restricted-mode hook already falls back to, not the
 // runtime log's writer: it is private to this account wherever the workspace lives, bounded, and
 // waits at most its short lock timeout for a drain under way, so a hook never holds the agent up
-// behind one.
+// behind one. A hook running as root never stages in a workspace another account owns
+// (rootInAnotherAccountsWorkspace): that account could never drain the root-owned files.
 func (l *Logger) stageInWorkspaceSpool(event map[string]interface{}, logPath string) bool {
 	if l == nil || l.sessionID == "" {
 		return false
@@ -289,7 +290,7 @@ func (l *Logger) stageInWorkspaceSpool(event map[string]interface{}, logPath str
 	dir, ok := asymptoteobserve.WorkspaceSpoolDir(workspace, harness, l.sessionID)
 	// A workspace on the sandbox's own root filesystem (a cwd the sandbox never mounted) would
 	// hold the spool only as long as the sandbox lives.
-	if !ok || asymptoteobserve.OnSandboxRoot(dir) || !spoolPathIsReal(dir, true) {
+	if !ok || rootInAnotherAccountsWorkspace(workspace) || asymptoteobserve.OnSandboxRoot(dir) || !spoolPathIsReal(dir, true) {
 		return false
 	}
 	line, err := encodeEndpointLine(event)
@@ -351,13 +352,15 @@ func spoolWorkspace(event map[string]interface{}) string {
 
 // spoolPathIsReal reports whether the components WorkspaceSpoolDir adds below the workspace --
 // .beacon, spool, <harness> and <session> -- are real directories and the spool file, if present,
-// a regular file. allowMissing lets components that do not exist yet pass, for a writer that
-// creates them.
+// a regular file no larger than a spool can grow. allowMissing lets components that do not exist
+// yet pass, for a writer that creates them.
 //
 // The sandboxed agent can write the workspace and knows its own session id, so it can plant the
 // session directory as a link to the account's own spool; the hook's drain, running outside the
-// sandbox, would then remove the lines it refuses from that spool. Lstat checks the components
-// themselves, from the session directory up, so a missing spool costs a drain one stat.
+// sandbox, would then remove the lines it refuses from that spool. Spool.Append never lets the
+// file outgrow DefaultSpoolMaxBytes, so a larger one was written by hand and is not read. Lstat
+// checks the components themselves, from the session directory up, so a missing spool costs a
+// drain one stat.
 func spoolPathIsReal(dir string, allowMissing bool) bool {
 	file := localingest.Spool{Dir: dir}.FilePath()
 	for i := 0; i < 4; i, dir = i+1, filepath.Dir(dir) {
@@ -373,7 +376,7 @@ func spoolPathIsReal(dir string, allowMissing bool) bool {
 		}
 	}
 	info, err := os.Lstat(file)
-	return err != nil || info.Mode().IsRegular()
+	return err != nil || (info.Mode().IsRegular() && info.Size() <= localingest.DefaultSpoolMaxBytes)
 }
 
 // ownSpoolDrainBatch bounds how many staged lines one hook delivers, so a long-sandboxed session's
@@ -399,14 +402,16 @@ var drainedOwnSpools sync.Map
 // real directories (spoolPathIsReal), and Spool.Drain skips without waiting when another drainer
 // holds the spool. Each admitted line is decoded and written again through encodeEndpointLine, as
 // every line this hook writes is -- redacted, size-capped and stamped -- never appended byte for
-// byte.
+// byte. Like staging, a hook running as root never drains in a workspace another account owns:
+// the rewrite would leave that account's pending.jsonl root's.
 func (l *Logger) drainOwnWorkspaceSpool(path string, event map[string]interface{}) {
 	if l == nil || l.sessionID == "" {
 		return
 	}
 	harness := asymptoteobserve.NormalizeHarnessName(l.platform)
-	dir, ok := asymptoteobserve.WorkspaceSpoolDir(spoolWorkspace(event), harness, l.sessionID)
-	if !ok {
+	workspace := spoolWorkspace(event)
+	dir, ok := asymptoteobserve.WorkspaceSpoolDir(workspace, harness, l.sessionID)
+	if !ok || rootInAnotherAccountsWorkspace(workspace) {
 		return
 	}
 	if _, done := drainedOwnSpools.LoadOrStore(dir, true); done || !spoolPathIsReal(dir, false) {

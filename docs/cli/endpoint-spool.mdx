@@ -23,6 +23,10 @@ label the event was captured under. Hooks never stage:
 
 - actions only Beacon writes, such as an auto-share request, which are reported
   as not recorded, as before;
+- as root in a workspace another account owns, such as a rootful container over
+  your checkout: you could neither drain nor delete root's files. Run the
+  container as your own uid, or mount the ingest socket. Root that owns the
+  workspace (a rootless container) stages as usual;
 - in a working directory that exists only on the sandbox's own root
   filesystem, where the spool would disappear with the sandbox.
 
@@ -118,7 +122,9 @@ line as untrusted:
 - **Links are never followed.** Every directory below the workspace must be a
   real directory and `pending.jsonl` a regular file, so a sandboxed agent cannot
   plant its session directory as a link to the account's own spool and have a
-  drain outside the sandbox empty it.
+  drain outside the sandbox empty it. A `pending.jsonl` larger than a spool can
+  grow (8 MiB) was written by hand and is left unread, so it cannot tie up a
+  sweep.
 - **Root never drains for a user.** Neither the system-mode sweep nor
   `beacon endpoint spool drain` drains as root.
 
