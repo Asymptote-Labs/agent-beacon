@@ -23,8 +23,9 @@ Cursor Cloud only runs command-based project hooks after the cloud VM starts.
 The generated hook set uses supported Cursor Cloud hooks such as
 `beforeSubmitPrompt`, `beforeReadFile`, `beforeShellExecution`, `afterShellExecution`,
 `afterFileEdit`, `postToolUse`, `postToolUseFailure`, `subagentStart`,
-`subagentStop`, and `preCompact`. It currently omits broad `preToolUse`,
-`sessionStart`, `sessionEnd`, and `stop`. See
+`subagentStop`, `preCompact`, `afterAgentThought`, `afterAgentResponse`, and
+`stop`. It currently omits broad `preToolUse`, `sessionStart`, and
+`sessionEnd`. `stop` also uploads the log at the end of each turn. See
 [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support)
 for the current platform support list.
 

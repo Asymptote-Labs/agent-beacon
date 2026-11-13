@@ -1,6 +1,16 @@
 {
   "version": 1,
   "hooks": {
+    "afterAgentResponse": [
+      {
+        "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=cursor_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/tmp/beacon/bin/beacon-hooks' --platform cursor agent-response"
+      }
+    ],
+    "afterAgentThought": [
+      {
+        "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=cursor_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/tmp/beacon/bin/beacon-hooks' --platform cursor agent-thought"
+      }
+    ],
     "afterFileEdit": [
       {
         "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=cursor_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/tmp/beacon/bin/beacon-hooks' --platform cursor post-tool"
@@ -40,6 +50,11 @@
     "preCompact": [
       {
         "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=cursor_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/tmp/beacon/bin/beacon-hooks' --platform cursor cursor-event"
+      }
+    ],
+    "stop": [
+      {
+        "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=cursor_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/tmp/beacon/bin/beacon-hooks' --platform cursor stop"
       }
     ],
     "subagentStart": [

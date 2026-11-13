@@ -30,6 +30,11 @@ func TestRenderCursorCloudHooks(t *testing.T) {
 		`"subagentStart"`,
 		`"subagentStop"`,
 		`"preCompact"`,
+		`"afterAgentThought"`,
+		`agent-thought`,
+		`"afterAgentResponse"`,
+		`agent-response`,
+		`"stop"`,
 		`BEACON_ORIGIN=cloud`,
 		`BEACON_RUN_PROVIDER=cursor_cloud`,
 		`'/tmp/beacon/bin/beacon-hooks' --platform cursor`,
@@ -38,7 +43,7 @@ func TestRenderCursorCloudHooks(t *testing.T) {
 			t.Fatalf("rendered hooks missing %q:\n%s", want, got)
 		}
 	}
-	for _, unsupported := range []string{`"preToolUse"`, `"sessionStart"`, `"sessionEnd"`, `"stop"`} {
+	for _, unsupported := range []string{`"preToolUse"`, `"sessionStart"`, `"sessionEnd"`} {
 		if strings.Contains(got, unsupported) {
 			t.Fatalf("rendered cursor cloud hooks should not contain %q:\n%s", unsupported, got)
 		}
@@ -60,6 +65,9 @@ func TestRenderCursorCloudSafeHooks(t *testing.T) {
 		`"postToolUse"`,
 		`"subagentStart"`,
 		`"preCompact"`,
+		`"afterAgentThought"`,
+		`"afterAgentResponse"`,
+		`"stop"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered safe hooks missing %q:\n%s", want, got)

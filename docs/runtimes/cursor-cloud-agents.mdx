@@ -77,8 +77,8 @@ you read older endpoint data.
 
 ## Prerequisites
 
-- Beacon CLI `v1.0.3` or later for direct S3 upload. Cursor Cloud prompt capture
-  requires the branch containing this change until a release includes it.
+- A current Beacon CLI release. Releases after `v1.3.60` also record the
+  agent's reasoning, its replies, and the end of each turn.
 - For GCS: `gcloud` installed and authenticated to a project where you can
   create buckets, service accounts, IAM bindings, and service account keys.
 - For S3: AWS CLI installed and authenticated to an account where you can
@@ -280,9 +280,7 @@ Generate the setup script for your Beacon release:
 beacon cloud cursor print-setup --version vX.Y.Z
 ```
 
-Replace `vX.Y.Z` with a release tag that contains Cursor Cloud prompt capture.
-Until that release exists, use the source-build path below; `v1.0.3` supports
-direct S3 upload but predates the prompt hook.
+Replace `vX.Y.Z` with the latest Beacon release tag.
 
 Paste the generated script into the Cursor cloud environment setup step. The
 script:
@@ -312,8 +310,9 @@ Read the README, run pwd && ls, create a tiny temporary markdown note under
 ```
 
 Beacon captures observed prompt submissions, tool use, shell execution, file
-reads and edits, subagent lifecycle events, and compaction events where Cursor
-exposes hook payloads.
+reads and edits, subagent lifecycle events, compaction events, the agent's
+reasoning and replies, and the end of each turn where Cursor exposes hook
+payloads.
 
 Then submit a prompt-only follow-up with a unique marker:
 
