@@ -257,8 +257,10 @@ func SanitizeEvent(event schema.Event, maxBytes int) schema.Event {
 // itself is asymptoteobserve.RotateRuntimeLog for all three.
 func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int, guard *RetentionGuard, budget *Budget) (err error) {
 	_, dirMode, _ := asymptoteobserve.RuntimeLogModes(path)
-	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
-		return err
+	if asymptoteobserve.RuntimeLogDirCreatable(path) {
+		if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
+			return err
+		}
 	}
 	lock, err := openRuntimeFileAs(path+".lock", path, os.O_CREATE|os.O_RDWR)
 	if err != nil {

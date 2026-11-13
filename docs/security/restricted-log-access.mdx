@@ -41,6 +41,20 @@ The event format and every field stay the same, so a parser, DCR transform or SI
 
 If the collector is stopped or restarting, a hook writes its events to a spool in that user's home, `~/.beacon/endpoint/spool` (`0700` directory, `0600` files), and returns at once, so the agent is never held up. The next event that user's hooks send delivers the spooled ones first. Each spool is capped at 8 MiB; events past that are dropped and counted rather than filling the disk. [`beacon endpoint doctor`](/cli/endpoint-doctor#runtime_log_access) reports a collector that is not answering on the socket and any events waiting in the caller's spool.
 
+### Agents in a sandbox
+
+A sandbox launcher such as bubblewrap usually leaves both the socket and the log out of the sandbox. To keep live hook events from such an agent, with the sending account recorded by the operating system, mount the collector's socket directory into the sandbox at the same path:
+
+```bash title="bubblewrap: give sandboxed hooks the collector"
+bwrap ... --bind /var/run/beacon-agent /var/run/beacon-agent ...
+```
+
+This works for a sandbox without its own user namespace, which is how bubblewrap runs when installed setuid. Such a sandbox builds its root filesystem on a tmpfs owned by the account it runs as, so `/`, `/var` and `/var/run` belong to that account inside it. Hooks accept parent directories owned by root or by their own account. Before sending anything, they also check that the process serving the socket is root. Sandboxes with their own user namespace are not covered.
+
+To also hold events while the collector restarts, mount the account's spool too: `--bind ~/.beacon/endpoint/spool ~/.beacon/endpoint/spool`, with the directory created beforehand (`0700`). The next event that gets through, from inside the sandbox or outside it, delivers what was held.
+
+A hook that can reach neither the socket nor a spool does not record the event. It prints `beacon-hooks: this event was NOT recorded` and the reason to the hook's stderr, and the agent carries on. On Linux, inside a sandbox whose root filesystem is a tmpfs owned by the account (bubblewrap's), a hook never puts the log or the spool on that filesystem; only directories the sandbox mounts take them. That holds even when a project bound under the home makes the home exist inside the sandbox, so events never go to files that disappear with the sandbox.
+
 ## Turn it on
 
 <Note>

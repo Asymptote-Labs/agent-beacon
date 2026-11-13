@@ -22,8 +22,8 @@ type Client struct {
 	SocketPath string
 	// Timeout bounds each connection, from dial to reply. Zero means DefaultClientTimeout.
 	Timeout time.Duration
-	// TrustedOwner is the uid the socket and its directory must belong to on Unix. Zero, the
-	// default, is root; tests set their own uid.
+	// TrustedOwner is the uid that must own the socket and its directory, and serve it, on Unix.
+	// Zero, the default, is root; tests set their own uid.
 	TrustedOwner int
 	// TrustedSID is, on Windows, one more account the pipe may belong to besides SYSTEM and
 	// Administrators, the only creators trusted otherwise. Empty in production; tests that serve a
@@ -156,7 +156,8 @@ func (c Client) sendBatch(lines [][]byte) (Response, error) {
 }
 
 // ErrUntrustedSocket is returned when something exists at the socket path but could have been put
-// there by someone other than root, or on Windows a pipe of that name was created by someone other
-// than SYSTEM or Administrators. A writer that sees it does not send there, because a socket or
-// pipe a user planted would receive every other user's events.
+// there by someone other than root, or is served by a process that is not root, or on Windows a pipe
+// of that name was created by someone other than SYSTEM or Administrators. A writer that sees it
+// does not send there, because a socket or pipe a user planted would receive every other user's
+// events.
 var ErrUntrustedSocket = errors.New("untrusted ingest socket")

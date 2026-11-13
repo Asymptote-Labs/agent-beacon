@@ -593,6 +593,59 @@ func TestClientRefusesUntrustedSockets(t *testing.T) {
 	})
 }
 
+// A sandbox without its own user namespace builds its root on a tmpfs the launching account owns, so
+// with the collector's socket directory bind-mounted in, the socket's ancestors belong to the
+// account sending. Those are trusted; an ancestor of any other account still is not.
+func TestClientTrustsSocketAncestorsOwnedByTheSender(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to give the socket's ancestors another owner")
+	}
+	const sender = 4242
+	h := startServer(t, nil)
+	ancestor := filepath.Dir(filepath.Dir(h.path))
+	if err := os.Chown(ancestor, sender, sender); err != nil {
+		t.Fatal(err)
+	}
+	prev := senderUID
+	t.Cleanup(func() { senderUID = prev })
+
+	senderUID = func() int { return sender }
+	if _, err := h.client.Send(lines(t, 1)); err != nil {
+		t.Fatalf("Send from the account owning the ancestor = %v", err)
+	}
+	senderUID = func() int { return sender + 1 }
+	if _, err := h.client.Send(lines(t, 1)); !errors.Is(err, ErrUntrustedSocket) {
+		t.Fatalf("Send from another account = %v, want ErrUntrustedSocket", err)
+	}
+	if h.rec.count() != 1 {
+		t.Fatalf("server received %d lines, want 1", h.rec.count())
+	}
+}
+
+// The path checks name who could have put the socket there; the kernel names who serves it. A
+// socket file and directory that look right are not enough when root does not serve them, which is
+// what an account that may rename the socket's ancestors could arrange in its own sandbox.
+func TestClientRefusesASocketItsOwnerDoesNotServe(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to give the socket another owner than its server")
+	}
+	const owner = 4242
+	h := startServer(t, nil)
+	for _, path := range []string{h.path, filepath.Dir(h.path)} {
+		if err := os.Lchown(path, owner, owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := h.client
+	c.TrustedOwner = owner
+	if _, err := c.Send(lines(t, 1)); !errors.Is(err, ErrUntrustedSocket) {
+		t.Fatalf("Send = %v, want ErrUntrustedSocket", err)
+	}
+	if h.rec.count() != 0 {
+		t.Fatal("sent to a socket its owner does not serve")
+	}
+}
+
 func TestListenSetsModesWhateverTheUmask(t *testing.T) {
 	old := syscall.Umask(0o077)
 	defer syscall.Umask(old)
