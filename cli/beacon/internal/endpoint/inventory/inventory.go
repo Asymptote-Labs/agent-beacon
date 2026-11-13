@@ -446,7 +446,8 @@ func copilotCandidates(home string) []candidate {
 	return []candidate{{runtime: "copilot_cli", path: shellProfilePath(home), scope: ScopeUser, format: formatMetadataOnly, kind: KindProfile}}
 }
 
-// opencodeCandidates resolves the user plugin through XDG_CONFIG_HOME, as OpenCode does.
+// opencodeCandidates resolves the user plugin through OPENCODE_CONFIG_DIR and XDG_CONFIG_HOME, as
+// OpenCode does.
 func opencodeCandidates(home, wd string) []candidate {
 	items := []candidate{}
 	if dir, err := hooks.OpenCodeConfigDir(home); err == nil {

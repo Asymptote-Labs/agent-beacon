@@ -402,6 +402,7 @@ func TestScanReadsOpenCodePluginFromXDGConfigHome(t *testing.T) {
 	home := t.TempDir()
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
 	writeFile(t, filepath.Join(xdg, "opencode", "plugins", "beacon.ts"), `// beacon-managed-opencode-plugin:v1`)
 
 	result := Scan(Options{HomeDir: home, WorkingDir: t.TempDir(), Now: fixedNow})
@@ -449,6 +450,7 @@ func TestScanReadsClaudeUserFilesFromClaudeConfigDir(t *testing.T) {
 
 func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
 	home := t.TempDir()
 	work := t.TempDir()
 	t.Setenv("SHELL", "/bin/bash")

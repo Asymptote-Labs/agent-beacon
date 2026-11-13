@@ -151,6 +151,9 @@ func installEndpointHookTargetTo(report, notes io.Writer, name string, cfg endpo
 			return err
 		}
 		fmt.Fprintf(report, "opencode plugin installed: %s\n", status.PluginPath)
+		if len(status.IgnoredPluginPaths) > 0 {
+			fmt.Fprintln(notes, status.Message)
+		}
 	case "cline":
 		status, err := endpointhooks.InstallCline(endpointhooks.ClineOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),

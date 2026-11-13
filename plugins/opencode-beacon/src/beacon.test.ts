@@ -705,6 +705,42 @@ describe("OpenCode 2.x plugin definition", () => {
     expect(payloads[10].properties.status.type).toBe("idle")
     expect(v2.disposed.sort()).toEqual(["session.prompt", "tool.execute.after", "tool.execute.before"])
   })
+
+  // OpenCode creates the first session in a location before the plugin subscribes to events, so
+  // session.created never arrives, and a default model is never "selected".
+  test("takes the session's model from the step when no session event names it", async () => {
+    const v2 = v2Context()
+    const cleanup = await BeaconDefinition.setup(v2.ctx as any)
+    const prompt = (messageID: string) =>
+      v2.fire("session.prompt", { sessionID: "ses_1", messageID, prompt: { text: "ok?" }, delivery: "immediate" })
+
+    await prompt("msg_user_1")
+    v2.emit("session.step.started", {
+      sessionID: "ses_1",
+      assistantMessageID: "msg_1",
+      agent: "build",
+      model: { id: "big-pickle", providerID: "opencode" },
+      started: 1,
+    })
+    v2.emit("session.text.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 0, text: "ok" })
+    v2.emit("session.step.ended", {
+      sessionID: "ses_1",
+      assistantMessageID: "msg_1",
+      finish: "stop",
+      cost: 0,
+      tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+    })
+    await nextTurn()
+    await prompt("msg_user_2")
+    await (cleanup as any)()
+
+    expect(payloads.map((item) => [item.type, item.model])).toEqual([
+      ["chat.message", ""],
+      ["message.part.updated", "opencode/big-pickle"],
+      ["message.updated", "opencode/big-pickle"],
+      ["chat.message", "opencode/big-pickle"],
+    ])
+  })
 })
 
 describe("direct-hook queue deadlines", () => {

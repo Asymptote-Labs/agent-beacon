@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 
 	opencodeplugin "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/opencode"
@@ -27,6 +29,9 @@ type OpenCodeStatus struct {
 	BinaryPath string `json:"binary_path,omitempty"`
 	PluginPath string `json:"plugin_path,omitempty"`
 	Message    string `json:"message,omitempty"`
+	// IgnoredPluginPaths are Beacon plugin copies OpenCode loads but never runs, because another
+	// copy with the same plugin ID loads before them. It includes PluginPath when that is one.
+	IgnoredPluginPaths []string `json:"ignored_plugin_paths,omitempty"`
 }
 
 var opencodeRuntime = hookRuntime{
@@ -80,7 +85,128 @@ func opencodeStatusFromRuntime(status runtimeStatus) OpenCodeStatus {
 			out.Message = fmt.Sprintf("opencode plugin at %s does not reference the active Beacon hook binary", out.PluginPath)
 		}
 	}
+	if out.Installed {
+		markIgnoredOpenCodePlugins(&out)
+	}
 	return out
+}
+
+// markIgnoredOpenCodePlugins reports the Beacon plugin copies OpenCode would never run. When the
+// copy this status describes is one of them, it is not active even though its file is in place.
+func markIgnoredOpenCodePlugins(out *OpenCodeStatus) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	home, _ := os.UserHomeDir()
+	loaded := opencodeLoadedPlugins(home, dir)
+	if len(loaded) < 2 && (len(loaded) == 0 || loaded[0] == out.PluginPath) {
+		return
+	}
+	running := loaded[0]
+	out.IgnoredPluginPaths = loaded[1:]
+	if running == out.PluginPath {
+		out.Message += fmt.Sprintf("; OpenCode never runs the other Beacon plugin copies at %s, because the one at %s loads first with the same plugin ID: remove them",
+			strings.Join(out.IgnoredPluginPaths, ", "), running)
+		return
+	}
+	out.Installed = false
+	out.Message = fmt.Sprintf("OpenCode never runs the Beacon plugin at %s: the copy at %s loads first with the same plugin ID, and OpenCode runs only that one. Remove one of them.",
+		out.PluginPath, running)
+}
+
+// opencodeSystemDir is OpenCode's platform system configuration directory
+// (packages/core/src/config/discovery.ts systemDirectory). A variable so tests never read the host's.
+var opencodeSystemDir = func() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "/Library/Application Support/opencode"
+	case "windows":
+		base := os.Getenv("ProgramData")
+		if base == "" {
+			base = `C:\ProgramData`
+		}
+		return filepath.Join(base, "opencode")
+	default:
+		return "/etc/opencode"
+	}
+}
+
+// opencodeLoadedPlugins returns the Beacon-managed plugin files OpenCode 2.x loads for a session
+// started in dir, in the order it loads them. Every copy defines plugin ID beacon.endpoint and
+// OpenCode runs only the first, dropping the rest without logging anything, so only the first
+// copy's hook command ever receives telemetry.
+//
+// The order follows OpenCode's config loading (packages/core/src/config.ts, config/discovery.ts and
+// plugin/source-directory.ts): the global config directory, then each .opencode directory from the
+// filesystem root down to dir, then the system directory; within one directory, the entries of
+// plugin/ and plugins/ sorted by path.
+func opencodeLoadedPlugins(home, dir string) []string {
+	global, err := OpenCodeConfigDir(home)
+	if err != nil {
+		global = ""
+	}
+	system := opencodeSystemDir()
+	roots := []string{}
+	if global != "" {
+		roots = append(roots, global)
+	}
+	roots = append(roots, opencodeProjectDirs(dir, global, system)...)
+	roots = append(roots, system)
+
+	var loaded []string
+	for _, root := range roots {
+		var entries []string
+		for _, name := range []string{"plugin", "plugins"} {
+			children, err := os.ReadDir(filepath.Join(root, name))
+			if err != nil {
+				continue
+			}
+			for _, child := range children {
+				entries = append(entries, filepath.Join(root, name, child.Name()))
+			}
+		}
+		sort.Strings(entries)
+		for _, entry := range entries {
+			if ext := filepath.Ext(entry); (ext == ".ts" || ext == ".js") && isOpenCodeInstalledAt(entry) {
+				loaded = append(loaded, entry)
+			}
+		}
+	}
+	return loaded
+}
+
+// opencodeProjectDirs lists the .opencode directories OpenCode reads for a session in dir,
+// outermost first. Like OpenCode, it reads none when dir is one of the global config roots, and
+// skips any that resolves to one.
+func opencodeProjectDirs(dir string, globalRoots ...string) []string {
+	resolve := func(path string) string {
+		if real, err := filepath.EvalSymlinks(path); err == nil {
+			return real
+		}
+		return filepath.Clean(path)
+	}
+	global := map[string]bool{}
+	for _, root := range globalRoots {
+		if root != "" {
+			global[resolve(root)] = true
+		}
+	}
+	if global[resolve(dir)] {
+		return nil
+	}
+	var dirs []string
+	for current := dir; ; {
+		candidate := filepath.Join(current, ".opencode")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() && !global[resolve(candidate)] {
+			dirs = append([]string{candidate}, dirs...)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return dirs
+		}
+		current = parent
+	}
 }
 
 func opencodeEmbeddedPluginSourcePath() string {
@@ -139,15 +265,25 @@ func opencodePluginPath(level Level) (string, error) {
 
 // OpenCodeConfigDir returns OpenCode's global config directory for the given home directory.
 //
-// OpenCode roots it at `$XDG_CONFIG_HOME/opencode` and falls back to `~/.config/opencode`
+// A non-empty OPENCODE_CONFIG_DIR wins. OpenCode 2.x uses it instead of the default directory
+// (packages/cli/src/index.ts and server-process.ts: `process.env.OPENCODE_CONFIG_DIR ? { config:
+// process.env.OPENCODE_CONFIG_DIR } : {}`), so a plugin left in the default directory never loads.
+// OpenCode 1.x reads it as one more config directory after the default (packages/opencode/src/
+// config/paths.ts) and loads its plugins and opencode.json as well, so the same directory works
+// for both.
+//
+// Otherwise OpenCode roots it at `$XDG_CONFIG_HOME/opencode` and falls back to `~/.config/opencode`
 // (packages/util/src/global-roots.ts: `process.env.XDG_CONFIG_HOME || path.join(home, ".config")`).
-// An empty value falls back and nothing is trimmed; a relative value is resolved against the
-// working directory, so it is made absolute here. The home directory is only needed for the
-// default, so an XDG_CONFIG_HOME override resolves without one.
+// For both variables an empty value falls back and nothing is trimmed; a relative value is resolved
+// against the working directory, so it is made absolute here. The home directory is only needed
+// for the default, so either override resolves without one.
 //
 // Exported because discovery and the inventory scan report on the same plugin the installer
 // writes and must not rebuild the path themselves.
 func OpenCodeConfigDir(home string) (string, error) {
+	if dir := os.Getenv("OPENCODE_CONFIG_DIR"); dir != "" {
+		return filepath.Abs(dir)
+	}
 	if base := os.Getenv("XDG_CONFIG_HOME"); base != "" {
 		abs, err := filepath.Abs(base)
 		if err != nil {
@@ -164,10 +300,8 @@ func OpenCodeConfigDir(home string) (string, error) {
 func opencodePluginDir(level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
-		home, err := os.UserHomeDir()
-		if err != nil && os.Getenv("XDG_CONFIG_HOME") == "" {
-			return "", err
-		}
+		// OpenCodeConfigDir reports a missing home directory only when no override needs one.
+		home, _ := os.UserHomeDir()
 		dir, err := OpenCodeConfigDir(home)
 		if err != nil {
 			return "", err
