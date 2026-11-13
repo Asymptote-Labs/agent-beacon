@@ -98,6 +98,42 @@ func RuntimeLogIsPrivate(path string) bool {
 	return processOwnsHome(home)
 }
 
+// RuntimeLogDirCreatable reports whether a writer may create the directory the runtime log at path
+// lives in. Every writer may, except in places a sandbox gets wrong:
+//
+//   - Only a privileged writer creates the Unix system log's directory: install makes it,
+//     root-owned, before any hook runs.
+//   - Nobody creates a missing home directory to hold a log below it: an account's home exists
+//     wherever the account really runs.
+//   - Nobody creates it on the root filesystem of a sandbox the account assembled (OnSandboxRoot),
+//     where a launcher that bind-mounts a project under the home has made the home exist as an
+//     empty mount point.
+//
+// A writer that finds any of these is somewhere install and the home never were, and a log it
+// created there would take every event and vanish with the sandbox, with nothing reported.
+// Refusing leaves the write to fail, and the writer's fallbacks to handle it.
+func RuntimeLogDirCreatable(path string) bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return true
+	}
+	if os.Geteuid() != 0 && pathWithin(abs, unixSystemLogDir) {
+		return false
+	}
+	if OnSandboxRoot(filepath.Dir(abs)) {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" || isFilesystemRoot(home) || !pathWithin(abs, home) {
+		return true
+	}
+	info, err := os.Stat(home)
+	return err == nil && info.IsDir()
+}
+
 // PrivateACLRuntimeLogFileMode is the mode a newly created private log takes when the directory
 // it was created in hands it a POSIX ACL (a default ACL, `setfacl -d`). On Linux an ACL's mask is
 // the file's group bits, so creating the file 0600 would set the mask to nothing and cancel the

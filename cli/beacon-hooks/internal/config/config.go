@@ -142,7 +142,7 @@ func GetSessionLogFile(platform, sessionID string) string {
 
 // EnsureSessionLogDir creates the session logs directory if it doesn't exist
 func EnsureSessionLogDir(platform string) error {
-	return os.MkdirAll(GetSessionLogDir(platform), 0755)
+	return mkdirInHome(GetSessionLogDir(platform))
 }
 
 // RotateLogIfNeededForPlatform rotates the platform-specific log file if it exceeds LogMaxSizeBytes.
@@ -203,5 +203,19 @@ func removeOverflowArchives(path string, archives int) error {
 
 // EnsureStateDir ensures the state directory for the given platform exists
 func EnsureStateDir(platform string) error {
-	return os.MkdirAll(GetStateDir(platform), 0755)
+	return mkdirInHome(GetStateDir(platform))
+}
+
+// mkdirInHome creates dir, which lies under ~/.beacon, but never the home directory itself. A
+// sandbox that assembles its own root filesystem, which the account may write, often leaves the
+// home out; a home a hook created there would vanish with the sandbox, taking whatever was written
+// into it, and would make the account's event spool look available when it is not. State in a
+// home that does exist there -- the mount point of a project bound beneath it -- is kept: it is
+// per-session dedupe state, and refusing it would record the session's prompt again on every
+// tool call. The account spool and the log check OnSandboxRoot themselves.
+func mkdirInHome(dir string) error {
+	if _, err := os.Stat(filepath.Dir(BeaconDir)); err != nil {
+		return err
+	}
+	return os.MkdirAll(dir, 0755)
 }

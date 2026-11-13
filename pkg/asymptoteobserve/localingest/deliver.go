@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -21,12 +22,25 @@ const spoolDirInHome = ".beacon/endpoint/spool"
 // DefaultSpoolDir is the current account's spool directory, or "" when it has no home. The home
 // comes from the account, not the environment: a process started under other credentials can
 // inherit its parent's HOME or USERPROFILE, which would point the spool at a home it cannot write.
+//
+// A home that does not exist counts as none, and so does a spool that would lie on the root
+// filesystem of a sandbox the account assembled (asymptoteobserve.OnSandboxRoot): a launcher that
+// bind-mounts only a project under the home makes the home exist there as an empty mount point.
+// A spool created in either would hold events that vanish with the sandbox, reported as spooled.
+// A spool directory the sandbox bind-mounts is real and is used.
 func DefaultSpoolDir() string {
 	home, err := accounthome.Dir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, spoolDirInHome)
+	if info, err := os.Stat(home); err != nil || !info.IsDir() {
+		return ""
+	}
+	dir := filepath.Join(home, spoolDirInHome)
+	if asymptoteobserve.OnSandboxRoot(dir) {
+		return ""
+	}
+	return dir
 }
 
 // defaultFailureBackoff is how long an account skips the socket after a failed send.
@@ -92,9 +106,10 @@ const (
 //     writes logPath, and it takes the line. A rejected line is reported, never retried.
 //   - If there is no socket, or the send fails -- a socket a crashed collector left behind, a
 //     collector that is hung -- the line is appended directly. On a shared log that simply works.
-//   - Only when the direct append is refused for permission, as a restricted log refuses it while
-//     its collector is down, is the line spooled. A collector that answered for some other log
-//     will never take it, so then the refusal is returned instead.
+//   - Only when the direct append is refused or cannot reach the log -- a restricted log refusing
+//     it while its collector is down, or a sandbox where the log's directory is missing or
+//     read-only -- is the line spooled. A collector that answered for some other log will never
+//     take it, so then the refusal is returned instead.
 //
 // Every line that gets through takes up to a batch of this account's spool for logPath with it, by
 // the same route. After a failed send the account skips the socket for FailureBackoff, in this
@@ -145,13 +160,20 @@ func (d Deliverer) WriteOutcome(logPath string, line []byte, appendLine func([]b
 		})
 		return Appended, nil
 	}
-	if !errors.Is(err, fs.ErrPermission) || collectorElsewhere {
+	if !logUnreachable(err) || collectorElsewhere {
 		return Appended, err
 	}
 	if spoolErr := d.spoolLine(logPath, line); spoolErr != nil {
 		return Spooled, fmt.Errorf("%w; spool: %v", err, spoolErr)
 	}
 	return Spooled, nil
+}
+
+// logUnreachable reports whether a failed direct append means the log is out of this writer's
+// reach rather than broken: refused for permission, its directory missing, or a read-only mount.
+// Those are the states a spooled line outlasts.
+func logUnreachable(err error) bool {
+	return errors.Is(err, fs.ErrPermission) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.EROFS)
 }
 
 // sendFailureMarker, in the account's spool directory, is touched when a send fails. Hooks run as
@@ -238,7 +260,7 @@ func (d Deliverer) spoolFor(logPath string) Spool {
 func (d Deliverer) spoolLine(logPath string, line []byte) error {
 	s := d.spoolFor(logPath)
 	if s.Dir == "" {
-		return errors.New("no home directory to spool in")
+		return errors.New("no account spool to write: no home, or only the sandbox's own")
 	}
 	dropped, err := s.Append([][]byte{line})
 	if err != nil {

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -60,5 +61,33 @@ func TestRotateLogIfNeededForPlatformArchivesExistingLog(t *testing.T) {
 	}
 	if data, err := os.ReadFile(logFile + ".2"); err != nil || string(data) != "older log" {
 		t.Fatalf(".2 archive = %q err=%v, want older log", string(data), err)
+	}
+}
+
+// A sandbox that assembles its own root filesystem often leaves the home out. The hook's state
+// directories must not conjure one there: it would vanish with the sandbox, and make the account's
+// event spool beneath it look available when it is not.
+func TestStateDirsNeverCreateAMissingHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "missing-home")
+	oldBeaconDir, oldCursorDir := BeaconDir, CursorDir
+	BeaconDir = filepath.Join(home, ".beacon")
+	CursorDir = filepath.Join(BeaconDir, "cursor")
+	t.Cleanup(func() { BeaconDir, CursorDir = oldBeaconDir, oldCursorDir })
+
+	if err := EnsureStateDir("cursor"); err == nil {
+		t.Fatal("EnsureStateDir succeeded under a home that does not exist")
+	}
+	if err := EnsureSessionLogDir("cursor"); err == nil {
+		t.Fatal("EnsureSessionLogDir succeeded under a home that does not exist")
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("the home was created: %v", err)
+	}
+
+	if err := os.Mkdir(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureSessionLogDir("cursor"); err != nil {
+		t.Fatalf("EnsureSessionLogDir under an existing home = %v", err)
 	}
 }

@@ -11,8 +11,11 @@ import (
 	"os/user"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/accounthome"
 )
 
 // testLog is the log the deliverer tests write; their servers accept any.
@@ -186,6 +189,32 @@ func TestWriteSpoolsWhenARestrictedLogRefusesAndDrainsAfter(t *testing.T) {
 		if !got[want] {
 			t.Fatalf("event %s never reached the collector: %v", want, got)
 		}
+	}
+}
+
+// In a sandbox the log can be out of reach without a permission error: its directory was never
+// mounted, or it is mounted read-only. The line is spooled in those cases too, and a log that is
+// merely broken in some other way still returns its error.
+func TestWriteSpoolsWhenASandboxCannotReachTheLog(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err     error
+		spooled bool
+	}{
+		"directory missing": {&fs.PathError{Op: "open", Path: testLog, Err: syscall.ENOENT}, true},
+		"read-only mount":   {&fs.PathError{Op: "open", Path: testLog, Err: syscall.EROFS}, true},
+		"disk full":         {&fs.PathError{Op: "write", Path: testLog, Err: syscall.ENOSPC}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := deliverer(t, filepath.Join(shortTempDir(t), "none.sock"))
+			err := d.Write(testLog, lines(t, 1)[0], (&directLog{failErr: tc.err}).append)
+			n, _ := d.Pending(testLog)
+			if tc.spooled && (err != nil || n != 1) {
+				t.Fatalf("Write = %v with %d pending, want the line spooled", err, n)
+			}
+			if !tc.spooled && (!errors.Is(err, tc.err) || n != 0) {
+				t.Fatalf("Write = %v with %d pending, want the error and nothing spooled", err, n)
+			}
+		})
 	}
 }
 
@@ -475,5 +504,16 @@ func TestTheSpoolIsInTheAccountsHomeNotHOME(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if got, want := DefaultSpoolDir(), filepath.Join(u.HomeDir, ".beacon", "endpoint", "spool"); got != want {
 		t.Fatalf("DefaultSpoolDir = %q, want %q under the account's home", got, want)
+	}
+}
+
+// A sandbox that assembles its own root filesystem often leaves the home out. A spool created in
+// its place would sit in the sandbox's own filesystem and vanish with it, reported as spooled.
+func TestNoSpoolInAHomeThatDoesNotExist(t *testing.T) {
+	prev := accounthome.Dir
+	t.Cleanup(func() { accounthome.Dir = prev })
+	accounthome.Dir = func() (string, error) { return filepath.Join(t.TempDir(), "missing-home"), nil }
+	if got := DefaultSpoolDir(); got != "" {
+		t.Fatalf("DefaultSpoolDir = %q, want none for a home that does not exist", got)
 	}
 }

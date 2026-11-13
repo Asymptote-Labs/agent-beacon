@@ -58,6 +58,43 @@ func TestSystemLogIsNeverPrivate(t *testing.T) {
 	}
 }
 
+// An ordinary account never creates the system log's directory, which install makes before any hook
+// runs: one that is missing means a sandbox with a root filesystem of its own, where a log the hook
+// created would take every event and vanish with the sandbox. Any other log's directory is created
+// as before.
+func TestOnlyRootCreatesTheSystemLogDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the Unix system log directory does not exist on Windows")
+	}
+	system := filepath.Join(unixSystemLogDir, "runtime.jsonl")
+	if got, want := RuntimeLogDirCreatable(system), os.Geteuid() == 0; got != want {
+		t.Fatalf("RuntimeLogDirCreatable(%s) = %v, want %v for euid %d", system, got, want, os.Geteuid())
+	}
+	if other := filepath.Join(t.TempDir(), "logs", "runtime.jsonl"); !RuntimeLogDirCreatable(other) {
+		t.Fatalf("RuntimeLogDirCreatable(%s) = false, want any other log's directory creatable", other)
+	}
+}
+
+// A per-user log lives under the home, and a sandbox often leaves the home out: no writer creates a
+// missing home to hold the log, or the events go into the sandbox's own filesystem and vanish.
+func TestNoWriterCreatesAMissingHomeForItsLog(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows profiles are not the sandbox case")
+	}
+	home := filepath.Join(t.TempDir(), "missing-home")
+	setTestHome(t, home)
+	userLog := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
+	if RuntimeLogDirCreatable(userLog) {
+		t.Fatal("RuntimeLogDirCreatable = true under a home that does not exist")
+	}
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if !RuntimeLogDirCreatable(userLog) {
+		t.Fatal("RuntimeLogDirCreatable = false under an existing home")
+	}
+}
+
 func TestSettleRuntimeLogArchives(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits do not exist on Windows")

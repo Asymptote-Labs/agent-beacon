@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -29,7 +30,10 @@ const SocketDirMode os.FileMode = 0o755
 const SocketMode os.FileMode = 0o666
 
 // connect dials the socket at the client's path once checkSocket has accepted it, by its resolved
-// path.
+// path, and keeps the connection only if the kernel says the process serving it is the trusted
+// owner. That last check is what makes the path checks safe to relax for a sandbox (see
+// checkSocketDirs): whatever happened to the path between the check and the dial, the client
+// sends nothing until it knows who is listening.
 func (c Client) connect(timeout time.Duration) (net.Conn, error) {
 	socket, err := checkSocket(c.path(), c.TrustedOwner)
 	if err != nil {
@@ -39,13 +43,35 @@ func (c Client) connect(timeout time.Duration) (net.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", c.path(), err)
 	}
+	if err := checkServer(conn, c.TrustedOwner); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("%w: %s: %v", ErrUntrustedSocket, c.path(), err)
+	}
 	return conn, nil
 }
 
+// checkServer asks the kernel which account is serving the other end of conn. For a client,
+// SO_PEERCRED and LOCAL_PEERCRED report the credentials the server listened with, which no
+// process can change afterwards.
+func checkServer(conn net.Conn, owner int) error {
+	unixConn, ok := conn.(*net.UnixConn)
+	if !ok {
+		return fmt.Errorf("not a Unix socket connection")
+	}
+	peer, err := peerCredentials(unixConn)
+	if err != nil {
+		return err
+	}
+	if peer.UID != strconv.Itoa(owner) {
+		return fmt.Errorf("served by uid %s, not uid %d", peer.UID, owner)
+	}
+	return nil
+}
+
 // checkSocket decides whether a writer may send to path. The socket must be owned by owner, and so
-// must its directory, which nobody else may write; every directory above it must belong to root or
-// owner and be writable by nobody else unless it is sticky (as /tmp is), so the directory holding
-// the socket cannot be swapped for another.
+// must its directory, which nobody else may write; every directory above it must belong to root,
+// owner or the sending account, and be writable by nobody else unless it is sticky (as /tmp is),
+// so the directory holding the socket cannot be swapped by another account.
 //
 // It returns the socket's path with every link in its directories resolved, and the caller dials
 // that path, never the one it was given: a link anywhere in the given path could otherwise be
@@ -79,8 +105,20 @@ func checkSocket(path string, owner int) (string, error) {
 	return resolved, nil
 }
 
+// senderUID is the account sending; tests stand in another.
+var senderUID = os.Geteuid
+
 // checkSocketDirs checks dir, which holds the socket, and every directory above it.
+//
+// An ancestor may belong to the sending account as well as to root. A sandbox without its own user
+// namespace -- bubblewrap as a sandboxing launcher runs it -- assembles its root filesystem on a
+// tmpfs the launching account owns, so with the collector's socket directory bind-mounted in, `/`,
+// `/var` and `/var/run` belong to the account whose hooks run there. Only that account and root can
+// rename such a directory, and no other account can, which is what the walk guards against. That
+// account could still swap one in its own sandbox, but then checkServer refuses whatever it points
+// at unless root serves it.
 func checkSocketDirs(dir string, owner int) error {
+	sender := senderUID()
 	for first := true; ; first = false {
 		info, err := os.Lstat(dir)
 		if err != nil {
@@ -98,7 +136,7 @@ func checkSocketDirs(dir string, owner int) error {
 			if uid != owner || writableByOthers {
 				return fmt.Errorf("%w: %s must be owned by uid %d and writable by nobody else", ErrUntrustedSocket, dir, owner)
 			}
-		} else if (uid != 0 && uid != owner) || !ancestorWriteSafe(info) {
+		} else if (uid != 0 && uid != owner && uid != sender) || !ancestorWriteSafe(info) {
 			return fmt.Errorf("%w: %s is writable by other accounts", ErrUntrustedSocket, dir)
 		}
 		parent := filepath.Dir(dir)
