@@ -81,10 +81,12 @@ definitions:
     description: >
       The path is a file a shell runs when it starts or at login: a user's .bashrc,
       .bash_profile, .bash_login, .profile, .zshrc, .zprofile, .zshenv, .zlogin, .kshrc,
-      .login, .cshrc or .tcshrc, fish's config.fish, or the system's /etc/profile and the
-      files under a profile.d directory.
+      .login, .cshrc or .tcshrc, fish's config.fish, the system's /etc/profile,
+      /etc/bash.bashrc, /etc/zshrc, /etc/zshenv and /etc/zprofile, and the files of
+      /etc/zsh and of a profile.d directory. Every rule that asks "is this a startup
+      file" asks it here, so a file added to the list is added for all of them.
     body: >
-      path.matches("(?i)(^|/)(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|profile\\.d/[^/]+)$")
+      path.matches("(?i)(^|/)(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|etc/bash\\.bashrc|etc/zshrc|etc/zshenv|etc/zprofile|etc/zsh/[^/]+|profile\\.d/[^/]+)$")
     tests:
       - name: a_line_appended_under_a_variable
         match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, shell_startup_file(f.path)))
@@ -104,6 +106,30 @@ definitions:
         events:
           - event: { action: file.created }
             file: { path: "/home/dev/.bashrc.bak" }
+      - name: the_system_bashrc_appended_by_a_command
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, shell_startup_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo 'source /opt/x.sh' | sudo tee -a /etc/bash.bashrc" }
+      - name: a_file_of_the_system_zsh_directory
+        match: shell_startup_file(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "/etc/zsh/zshenv" }
+      - name: the_system_zshrc_in_other_case
+        match: shell_startup_file(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "/private/etc/ZSHRC" }
+      - name: a_file_deeper_under_the_system_zsh_directory
+        match: shell_startup_file(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.created }
+            file: { path: "/etc/zsh/completions/_tool" }
 
   - name: shell_startup_file_redirect
     params: [text]
@@ -113,7 +139,7 @@ definitions:
       for text a rule cannot parse (what reaches a command the parser cannot see into); keep
       the two in step.
     body: >
-      text.matches("(?i)(>>?|\\btee\\b)\\s*([^|;&]*[\\s/])?(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|profile\\.d/[^\\s;&|\"']+)([\"'\\s]|$)")
+      text.matches("(?i)(>>?|\\btee\\b)\\s*([^|;&]*[\\s/])?(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|etc/bash\\.bashrc|etc/zshrc|etc/zshenv|etc/zprofile|etc/zsh/[^\\s;&|\"']+|profile\\.d/[^\\s;&|\"']+)([\"'\\s]|$)")
     tests:
       - name: an_append_inside_text
         match: shell_startup_file_redirect(e.command.command)
@@ -133,6 +159,12 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "grep -n PATH ~/.bashrc > /tmp/paths.txt" }
+      - name: a_tee_onto_the_system_zshrc
+        match: shell_startup_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "python3 -c \"import os; os.system('echo x | sudo tee -a /etc/zshrc')\"" }
 
   - name: git_hook_file
     params: [path]

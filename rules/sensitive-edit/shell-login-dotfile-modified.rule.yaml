@@ -1,14 +1,15 @@
 id: shell-login-dotfile-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 4
+version: 5
 title: Shell rc / login dotfile modified
 description: >
   The agent modified a shell startup or login file: a user's dotfile (.bashrc,
   .bash_profile, .bash_login, .profile, .zshrc, .zprofile, .zshenv, .zlogin, .kshrc,
-  .login, .cshrc, .tcshrc, or fish config.fish) or the system's /etc/profile or a file
-  under profile.d. These run on every new shell or login session, outside any agent
-  sandbox, so an edit here is durable persistence (e.g. an injected command, alias, or
-  PATH change).
+  .login, .cshrc, .tcshrc, or fish config.fish), the system's /etc/profile,
+  /etc/bash.bashrc, /etc/zshrc, /etc/zshenv or /etc/zprofile, or a file of /etc/zsh or
+  of a profile.d directory. These run on every new shell or login session, outside any
+  agent sandbox, so an edit here is durable persistence (e.g. an injected command,
+  alias, or PATH change), and a system-wide one reaches every user of the machine.
 severity: high
 status: stable
 posture: detect
@@ -41,6 +42,30 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'export PATH=/opt/tools:$PATH' | sudo tee /etc/profile.d/tools.sh" }
+        session: { id: s1 }
+  - name: system_zshrc_appended_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'source /opt/x.sh' | sudo tee -a /etc/zshrc" }
+        session: { id: s1 }
+  - name: system_bashrc_edited
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/etc/bash.bashrc" }
+        session: { id: s1 }
+  - name: file_of_the_system_zsh_directory_written_inside_a_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sh -c 'echo alias ls=evil >> /etc/zsh/zshenv'" }
+        session: { id: s1 }
+  - name: system_zshrc_only_read
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat /etc/zshrc /etc/bash.bashrc | grep -n PATH" }
         session: { id: s1 }
   - name: system_profile_edited
     verdict: match

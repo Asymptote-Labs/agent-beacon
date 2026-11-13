@@ -1,6 +1,6 @@
 id: telemetry-or-history-tampering
 spec: threat-rules/v1.3  # needed for args, file_writes and predicates
-version: 4
+version: 5
 title: Beacon telemetry or shell history disabled or removed
 description: >
   An agent deletes or truncates Beacon data, removes its managed plugin files,
@@ -42,8 +42,9 @@ taxonomy:
 #      (c.env). An assignment whose value the parse leaves unknown (HISTFILE="$x") has an
 #      empty value in c.env too, so the empty HISTFILE is confirmed on the text.
 #   5. Content, not a command: a line that disables history, in the text of a command that
-#      writes a shell startup file. It is not asked through unread_text, since a
-#      here-document body is nothing the line runs.
+#      writes a shell startup file (shell_startup_file, the pack's one list of them,
+#      rules/concepts/sensitive-files.predicates.yaml). It is not asked through
+#      unread_text, since a here-document body is nothing the line runs.
 # The text half is the text patterns of version 1 as one pattern: a command prefix, then
 # what the command is, one alternative for each of the fourteen things above that a command
 # can be. They were fourteen patterns that each began with the same prefix; a pattern is
@@ -82,8 +83,7 @@ match: >
       c.env.exists(k, k.matches("^(HISTSIZE|HISTFILESIZE)$") && c.env[k] == "0") ||
       "HISTFILE" in c.env && (c.env["HISTFILE"] == "/dev/null" ||
         c.env["HISTFILE"] == "" && e.command.command.matches("(^|[\\s;&|({])HISTFILE=([\"\\x27][\"\\x27])?([\\s;&|<>#)}]|$)")) ||
-      c.file_writes.exists(f, f.op in ["write", "append"] &&
-        f.path.matches("(^|/)\\.(bashrc|bash_profile|bash_login|profile|zshrc|zprofile|zshenv|zlogin|kshrc)$|(^|/)etc/(profile|bash\\.bashrc|zshrc|zshenv|zprofile)$|(^|/)etc/(profile\\.d|zsh)/[^/]+$")) &&
+      c.file_writes.exists(f, f.op in ["write", "append"] && shell_startup_file(f.path)) &&
         e.command.command.matches("(^|[;&|\\n\"\\x27])[ \\t]*(unset[ \\t]+HISTFILE|(export[ \\t]+)?(HISTFILE=(/dev/null|\"\"|\\x27\\x27)?|(HISTSIZE|HISTFILESIZE)=0)|set[ \\t]+\\+o[ \\t]+history)([ \\t]|$|[;&|\\n<>#\\\\]|[\"\\x27]([ \\t]|$|[;&|\\n<>#)]))")
     ) ||
     unread_text(e, t,
@@ -723,6 +723,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'export HISTSIZE=0' | sudo tee -a /etc/profile.d/quiet.sh" }
+        session: { id: s1 }
+  - name: history_disabled_in_a_startup_file_named_in_other_case
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'unset HISTFILE' >> ~/.BashRC" }
+        session: { id: s1 }
+  - name: history_size_zeroed_in_the_system_zsh_directory
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'HISTSIZE=0' | sudo tee -a /etc/zsh/zshrc" }
         session: { id: s1 }
   - name: tampering_through_a_wrapper_the_parser_does_not_look_through
     verdict: match
