@@ -2,9 +2,16 @@
 // Beacon endpoint telemetry plugin for opencode.
 // Managed by beacon endpoint hooks install --harness opencode.
 
+import { appendFile, mkdir } from "node:fs/promises"
+import { homedir } from "node:os"
+import { dirname, join } from "node:path"
+
 const beaconCommand = "__BEACON_COMMAND__"
 const pluginID = "beacon.endpoint"
 const debugEnabled = process.env.BEACON_OPENCODE_DEBUG === "1"
+// OpenCode 2.x gives plugins no logger and discards the server's stderr unless it runs
+// standalone with --print-logs, so debug lines without client.app.log go to this file.
+const debugFile = join(homedir(), ".beacon", "endpoint", "logs", "opencode-plugin-debug.log")
 const sendTimeoutMs = 2000
 const directHookTypes = new Set([
   "chat.message",
@@ -33,13 +40,20 @@ const forwardedEvents = new Set([
 async function debugLog(client, message, extra) {
   if (!debugEnabled) return
   try {
-    await client?.app?.log?.({
-      body: {
-        service: "beacon-opencode-plugin",
-        level: "debug",
-        message,
-        extra,
-      },
+    if (typeof client?.app?.log === "function") {
+      await client.app.log({
+        body: {
+          service: "beacon-opencode-plugin",
+          level: "debug",
+          message,
+          extra,
+        },
+      })
+      return
+    }
+    await mkdir(dirname(debugFile), { recursive: true, mode: 0o700 })
+    await appendFile(debugFile, JSON.stringify({ time: new Date().toISOString(), message, extra }) + "\n", {
+      mode: 0o600,
     })
   } catch {
     // Debug logging must stay best-effort.
@@ -459,7 +473,10 @@ function v2Events(event, models) {
   const created = typeof event?.created === "number" ? event.created : Date.now()
   switch (event?.type) {
     case "session.created":
-    case "session.model.selected": {
+    case "session.model.selected":
+    // The step is the one event that always names the model: OpenCode often creates a session
+    // before the plugin's event stream is subscribed, and a default model is never "selected".
+    case "session.step.started": {
       const model = v2Model(data.model)
       if (sid && model) models.set(sid, model)
       if (event.type !== "session.created") return []
@@ -551,16 +568,24 @@ export default {
     })
     const models = new Map()
     const registrations = []
+    const registered = []
     const register = async (domain, name, callback) => {
+      if (typeof domain?.hook !== "function") {
+        await debugLog(ctx, "Beacon V2 hook API unavailable", { name })
+        return
+      }
       try {
-        const registration = await domain?.hook?.(name, async (input) => {
+        const registration = await domain.hook(name, async (input) => {
           try {
             await callback(input)
           } catch (err) {
             await debugLog(ctx, "Beacon V2 hook failed", { name, error: String(err) })
           }
         })
-        if (registration) registrations.push(registration)
+        if (registration) {
+          registrations.push(registration)
+          registered.push(name)
+        }
       } catch (err) {
         await debugLog(ctx, "Beacon V2 hook registration failed", { name, error: String(err) })
       }
@@ -609,6 +634,11 @@ export default {
           },
         },
       })
+    })
+    await debugLog(ctx, "Beacon V2 setup complete", {
+      opencode: ctx?.app?.version,
+      hooks: registered,
+      events: typeof ctx?.event?.subscribe === "function",
     })
 
     const controller = new AbortController()

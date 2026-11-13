@@ -176,7 +176,7 @@ func TestEverySessionSyncIsAQuietNoOpWithoutItsRuntime(t *testing.T) {
 	testenv.SetHome(t, home)
 	// Each runtime's own directory override would otherwise point outside the empty home.
 	for _, key := range []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CURSOR_CONFIG_DIR", "CLINE_DIR", "DSH_HOME",
-		"HERMES_HOME", "HERMES_DATA_DIR_SUFFIX", "OPENCLAW_STATE_DIR", "OPENCODE_DB", "PI_CODING_AGENT_DIR",
+		"HERMES_HOME", "HERMES_DATA_DIR_SUFFIX", "OPENCLAW_STATE_DIR", "OPENCODE_CONFIG_DIR", "OPENCODE_DB", "PI_CODING_AGENT_DIR",
 		"PRIME_AGENT_CODING_AGENT_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME"} {
 		t.Setenv(key, "")
 	}

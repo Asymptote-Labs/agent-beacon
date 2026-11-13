@@ -22,7 +22,7 @@ Before enabling OpenCode telemetry, make sure:
 
 ## Collection path
 
-Beacon installs an owned OpenCode plugin at `$XDG_CONFIG_HOME/opencode/plugins/beacon.ts` (default `~/.config/opencode/plugins/beacon.ts`) for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin forwards supported OpenCode hook payloads to Beacon's hook adapter.
+Beacon installs an owned OpenCode plugin at `plugins/beacon.ts` in OpenCode's global config directory for user-level hooks, or at `./.opencode/plugins/beacon.ts` for project-level hooks. The global config directory is `$OPENCODE_CONFIG_DIR` when that is set, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. OpenCode 2.x reads only `$OPENCODE_CONFIG_DIR` when it is set, so set it in the shell that runs the install, the same way you set it for OpenCode. If Beacon's plugin is also in the default directory, from an earlier Beacon or an install run without the variable, a user-level install with the variable set leaves that copy in place and names it, because sessions started without the variable still use it. OpenCode 1.x sessions started with the variable load both copies and record each event twice, so remove the default copy if every session sets the variable. A user-level uninstall with the variable set removes both. The plugin forwards supported OpenCode hook payloads to Beacon's hook adapter.
 
 The one plugin file loads in both OpenCode 1.x and OpenCode 2.x. Its default export carries the plugin `id`, the 1.x `server` entry, and the 2.x `setup` entry. On 2.x, `setup` registers the session `prompt` hook and the tool `execute.before`/`execute.after` hooks, and it subscribes to the event stream. It translates those into the same payloads the 1.x hooks produce, so events from either version look the same in the runtime log. After upgrading OpenCode from 1.x to 2.x, run `beacon endpoint hooks install --harness opencode` again, because a plugin written by an older Beacon exports only the 1.x factory, and OpenCode 2.x refuses to load it ("Plugin must export a default definition with an id and an effect or setup function").
 
@@ -32,7 +32,7 @@ For backfill, `beacon endpoint opencode sync` reads OpenCode's local `opencode.d
 
 ## Discovery and status
 
-Beacon detects OpenCode through the `opencode` executable or `$XDG_CONFIG_HOME/opencode` (default `~/.config/opencode`), then checks for Beacon plugin configuration.
+Beacon detects OpenCode through the `opencode` executable or its global config directory (`$OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`), then checks for Beacon plugin configuration.
 
 Use `beacon endpoint hooks status --harness opencode` to inspect OpenCode plugin status.
 Use `beacon endpoint opencode status` to inspect persisted session-store collection progress.
@@ -75,7 +75,9 @@ The plugin uses OpenCode session, message, part, permission request, and tool ca
 
 Restart OpenCode after installing or removing hooks so new sessions pick up the updated plugin configuration.
 
-For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches OpenCode to emit best-effort plugin debug logs. The adapter has a bounded local subprocess timeout and remains fail-open, so telemetry failures do not interrupt OpenCode execution.
+Every copy of Beacon's plugin uses the plugin ID `beacon.endpoint`, and OpenCode 2.x runs only the first one it loads. It drops the others without logging anything. OpenCode loads plugins from the user config directory first, then from each `.opencode` directory between the filesystem root and the working directory (outermost first), then from the system config directory (`/etc/opencode` on Linux, `/Library/Application Support/opencode` on macOS). Inside each directory, files in `plugin/` load before files in `plugins/`. So a user-level install hides a project-level one, and a stale copy in `plugin/` hides the one Beacon writes to `plugins/`. `beacon endpoint hooks status` lists the copies OpenCode never runs in `ignored_plugin_paths`, and reports a copy as not installed when another copy hides it.
+
+For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment of the OpenCode server process to emit best-effort plugin debug logs. OpenCode 1.x writes them to its own log. OpenCode 2.x gives plugins no logger, so the plugin appends them to `~/.beacon/endpoint/logs/opencode-plugin-debug.log`, beginning with one `Beacon V2 setup complete` line that lists the hooks it registered. The OpenCode 2.x background service keeps the environment it started with: run `opencode service set env BEACON_OPENCODE_DEBUG 1`, then `opencode service restart`. The adapter has a bounded local subprocess timeout and remains fail-open, so telemetry failures do not interrupt OpenCode execution.
 
 For historical collection or deployments where OpenCode did not load the plugin, run `beacon endpoint opencode sync --print` to preview mapped events, then `beacon endpoint opencode sync` to append them to the runtime log. Use `--watch` or a scheduler if you want the poll path to stay current.
 

@@ -74,7 +74,7 @@ func newMCPFixture(t *testing.T, detected ...string) *mcpFixture {
 	t.Helper()
 	fx := &mcpFixture{home: t.TempDir(), requests: &requestLog{}, strays: &requestLog{}, auth: &requestLog{}}
 	testenv.SetHome(t, fx.home)
-	for _, key := range []string{"XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "JENKINS_URL", "TEAMCITY_VERSION"} {
+	for _, key := range []string{"XDG_CONFIG_HOME", "OPENCODE_CONFIG_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "JENKINS_URL", "TEAMCITY_VERSION"} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
 	}

@@ -149,6 +149,7 @@ func mustOpenCodePluginPath(t *testing.T, level Level) string {
 func TestOpenCodePluginPathHonorsXDGConfigHome(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
 	project := t.TempDir()
 	t.Chdir(project)
 	cwd, err := os.Getwd()
@@ -189,5 +190,183 @@ func TestOpenCodePluginPathHonorsXDGConfigHome(t *testing.T) {
 	}
 	if !IsOpenCodeInstalled(opts) {
 		t.Fatalf("IsOpenCodeInstalled = false for a managed plugin at %q", want)
+	}
+}
+
+// OPENCODE_CONFIG_DIR replaces OpenCode 2.x's global config directory outright, so a plugin
+// written under XDG_CONFIG_HOME or ~/.config never loads while it is set.
+func TestOpenCodePluginPathHonorsOpenCodeConfigDir(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	t.Chdir(t.TempDir())
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	xdg := filepath.Join(t.TempDir(), "xdg")
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	custom := filepath.Join(t.TempDir(), "opencode-config")
+	for name, tc := range map[string]struct{ value, want string }{
+		"absolute": {custom, filepath.Join(custom, "plugins", "beacon.ts")},
+		"relative": {"rel-config", filepath.Join(cwd, "rel-config", "plugins", "beacon.ts")},
+		"empty":    {"", filepath.Join(xdg, "opencode", "plugins", "beacon.ts")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("OPENCODE_CONFIG_DIR", tc.value)
+			if got := mustOpenCodePluginPath(t, LevelUser); got != tc.want {
+				t.Fatalf("user plugin path = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// OpenCode 2.x runs only the first plugin with a given ID and drops the rest without a log line, so
+// a second Beacon copy (a project install under a user install, or a stale one in plugin/) never
+// receives telemetry while its file looks installed.
+func TestOpenCodeStatusReportsCopiesOpenCodeNeverRuns(t *testing.T) {
+	// The backslash and the apostrophe put the hook binary on a path the plugin's shell quoting
+	// and string literal both escape, as every Windows path and a profile like O'Brien are.
+	home := filepath.Join(t.TempDir(), `o'brien\slash`)
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	testenv.SetHome(t, home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
+	system := t.TempDir()
+	defaultSystemDir := opencodeSystemDir
+	opencodeSystemDir = func() string { return system }
+	t.Cleanup(func() { opencodeSystemDir = defaultSystemDir })
+	outer := t.TempDir()
+	inner := filepath.Join(outer, "repo")
+	if err := os.MkdirAll(inner, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(inner)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer = filepath.Dir(cwd)
+
+	binary, err := endpointHookBinaryPath(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(binary), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binary, []byte("hooks"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(home, ".config", "opencode")
+	write := func(path string) string {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := installOpenCodePlugin(path, binary, "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	user := filepath.Join(global, "plugins", "beacon.ts")
+	project := write(filepath.Join(cwd, ".opencode", "plugins", "beacon.ts"))
+	outerProject := write(filepath.Join(outer, ".opencode", "plugins", "beacon.ts"))
+	systemCopy := write(filepath.Join(system, "plugins", "beacon.ts"))
+
+	// Without a user copy, the outermost project directory loads first.
+	status := OpenCodeHookStatus(OpenCodeOptions{Level: LevelProject, UserMode: true})
+	if status.Installed || !strings.Contains(status.Message, outerProject) {
+		t.Fatalf("shadowed project copy reported as %+v", status)
+	}
+
+	write(user)
+	if got, want := opencodeLoadedPlugins(home, cwd), []string{user, outerProject, project, systemCopy}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("load order = %q, want %q", got, want)
+	}
+	status = OpenCodeHookStatus(OpenCodeOptions{Level: LevelUser, UserMode: true})
+	if !status.Installed || strings.Join(status.IgnoredPluginPaths, "\n") != strings.Join([]string{outerProject, project, systemCopy}, "\n") {
+		t.Fatalf("running user copy reported as %+v", status)
+	}
+
+	// plugin/ sorts before plugins/, so a stale copy there shadows the one Beacon writes.
+	stale := filepath.Join(global, "plugin", "beacon.ts")
+	if err := os.MkdirAll(filepath.Dir(stale), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installOpenCodePlugin(stale, "/old/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatal(err)
+	}
+	status = OpenCodeHookStatus(OpenCodeOptions{Level: LevelUser, UserMode: true})
+	if status.Installed || !strings.Contains(status.Message, stale) {
+		t.Fatalf("user copy shadowed by %s reported as %+v", stale, status)
+	}
+}
+
+// With OPENCODE_CONFIG_DIR set, Beacon manages the plugin under it, but a copy an earlier Beacon (or
+// an install run without the variable) wrote to the default directory is still what sessions
+// started without the variable load. Install keeps and reports it; uninstall removes it too.
+func TestOpenCodeKeepsDefaultDirCopyOnInstallAndRemovesItOnUninstall(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Chdir(t.TempDir())
+	defaultCopy := filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts")
+	if err := os.MkdirAll(filepath.Dir(defaultCopy), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installOpenCodePlugin(defaultCopy, "/old/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatal(err)
+	}
+	custom := filepath.Join(t.TempDir(), "custom")
+	t.Setenv("OPENCODE_CONFIG_DIR", custom)
+	opts := OpenCodeOptions{Level: LevelUser, LogPath: filepath.Join(home, "runtime.jsonl"), UserMode: true}
+
+	status, err := InstallOpenCode(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(custom, "plugins", "beacon.ts"); !status.Installed || status.PluginPath != want || status.DefaultPluginPath != defaultCopy {
+		t.Fatalf("install = %+v, want installed at %s and %s reported", status, want, defaultCopy)
+	}
+	if !isOpenCodeInstalledAt(defaultCopy) {
+		t.Fatalf("install removed %s, which sessions without OPENCODE_CONFIG_DIR still load", defaultCopy)
+	}
+
+	if status, err = UninstallOpenCode(opts); err != nil {
+		t.Fatal(err)
+	}
+	if status.DefaultPluginPath != defaultCopy || !strings.Contains(status.Message, defaultCopy) {
+		t.Fatalf("uninstall = %+v, want %s removed", status, defaultCopy)
+	}
+	for _, path := range []string{defaultCopy, status.PluginPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("uninstall left %s: %v", path, err)
+		}
+	}
+}
+
+// OPENCODE_CONFIG_DIR may name the default directory under another spelling. The plugin Beacon
+// manages there is then the same file, and uninstall must not treat it as a second copy.
+func TestOpenCodeDefaultDirAliasIsNotASecondCopy(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Chdir(t.TempDir())
+	defaultDir := filepath.Join(home, ".config", "opencode")
+	if err := os.MkdirAll(defaultDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(defaultDir, alias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	t.Setenv("OPENCODE_CONFIG_DIR", alias)
+	status, err := InstallOpenCode(OpenCodeOptions{Level: LevelUser, LogPath: filepath.Join(home, "runtime.jsonl"), UserMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Installed || status.DefaultPluginPath != "" {
+		t.Fatalf("install through an alias of the default directory = %+v", status)
 	}
 }

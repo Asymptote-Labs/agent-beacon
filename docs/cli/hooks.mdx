@@ -452,9 +452,11 @@ If Codex session context is missing, check the selected level, confirm the hook 
 
 ## OpenCode troubleshooting
 
-Beacon installs an owned OpenCode plugin at `~/.config/opencode/plugins/beacon.ts` for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin is a thin local adapter: it forwards supported OpenCode hook payloads to Beacon's Go hook binary, and Beacon handles normalization, redaction, retention, and JSONL output.
+Beacon installs an owned OpenCode plugin at `plugins/beacon.ts` in OpenCode's global config directory (`$OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`) for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin is a thin local adapter: it forwards supported OpenCode hook payloads to Beacon's Go hook binary, and Beacon handles normalization, redaction, retention, and JSONL output.
 
-For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches OpenCode to emit best-effort plugin debug logs. Beacon telemetry should not interrupt OpenCode execution if the hook command fails.
+For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment of the OpenCode server process to emit best-effort plugin debug logs: OpenCode 1.x writes them to its own log, and on OpenCode 2.x they go to `~/.beacon/endpoint/logs/opencode-plugin-debug.log`. For the OpenCode 2.x background service, run `opencode service set env BEACON_OPENCODE_DEBUG 1` and then `opencode service restart`. Beacon telemetry should not interrupt OpenCode execution if the hook command fails.
+
+OpenCode 2.x runs only the first Beacon plugin copy it loads, so a second copy (for example, a project-level install under a user-level one) never receives telemetry. `beacon endpoint hooks status --harness opencode` lists those copies in `ignored_plugin_paths`.
 
 ## Devin troubleshooting
 

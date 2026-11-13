@@ -16,6 +16,7 @@ func TestDiscoverOpenCodeHonorsXDGConfigHome(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
 	pluginPath := filepath.Join(xdg, "opencode", "plugins", "beacon.ts")
 	if err := os.MkdirAll(filepath.Dir(pluginPath), 0755); err != nil {
 		t.Fatal(err)

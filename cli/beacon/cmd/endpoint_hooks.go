@@ -151,6 +151,12 @@ func installEndpointHookTargetTo(report, notes io.Writer, name string, cfg endpo
 			return err
 		}
 		fmt.Fprintf(report, "opencode plugin installed: %s\n", status.PluginPath)
+		if len(status.IgnoredPluginPaths) > 0 {
+			fmt.Fprintln(notes, status.Message)
+		}
+		if status.DefaultPluginPath != "" {
+			fmt.Fprintf(notes, "Beacon's opencode plugin is also at %s, which OpenCode sessions started without OPENCODE_CONFIG_DIR use. OpenCode 1.x sessions started with it load both copies and record each event twice. If every OpenCode session sets OPENCODE_CONFIG_DIR, remove that file.\n", status.DefaultPluginPath)
+		}
 	case "cline":
 		status, err := endpointhooks.InstallCline(endpointhooks.ClineOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),

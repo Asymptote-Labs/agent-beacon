@@ -438,6 +438,7 @@ func isolate(t *testing.T) string {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("GEMINI_CLI_HOME", "")
@@ -838,6 +839,10 @@ func TestOpenCodePrefersAnExistingConfigFile(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 	if got := targetPath(t, target, home); got != filepath.Join(home, "xdg", "opencode", "opencode.jsonc") {
 		t.Fatalf("XDG_CONFIG_HOME was not honored: %s", got)
+	}
+	t.Setenv("OPENCODE_CONFIG_DIR", filepath.Join(home, "custom"))
+	if got := targetPath(t, target, home); got != filepath.Join(home, "custom", "opencode.jsonc") {
+		t.Fatalf("OPENCODE_CONFIG_DIR was not honored: %s", got)
 	}
 }
 
