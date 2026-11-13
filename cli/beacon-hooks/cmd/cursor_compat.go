@@ -80,7 +80,10 @@ func cursorRecordsThisHook(command string, input map[string]interface{}) bool {
 // subagent summaries attributed to this machine, with nothing to say the agent never ran on it.
 //
 // Such a payload names the cloud agent ("bc-<uuid>") or one of its subagents ("task-call-<id>")
-// and no workspace. A cloud agent on a self-hosted worker has the same kind of id but runs in a
+// and no workspace. A cloud subagent's reasoning carries no parent id to tie it to its agent, so
+// the prefix alone has to say it: local agents and their subagents get plain UUIDs (every local
+// subagent transcript Cursor 3.30 had written was named by one). A cloud agent on a self-hosted
+// worker has the same kind of id but runs in a
 // checkout, so a hook there keeps recording, as does every hook in a cloud sandbox
 // (BEACON_ORIGIN=cloud), where the project hooks from `beacon cloud cursor print-hooks` record
 // the agent itself.

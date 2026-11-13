@@ -404,6 +404,20 @@ func TestCursorCloudAgentsStillRecordWhereTheyRun(t *testing.T) {
 			t.Fatalf("wrote %d events, want the reasoning recorded", n)
 		}
 	})
+	t.Run("a local subagent with no workspace open", func(t *testing.T) {
+		// A local subagent has a plain UUID of its own, never a task-call- id.
+		logPath := setupCursorCompatRun(t, "cursor", "agent-thought")
+		runHookWithInput(t, runAgentThought, relayedCloudThought("51762848-3459-4f0b-bdd8-f896f78f9acf"))
+		stop := relayedCloudSubagentStop()
+		stop["conversation_id"] = "8b01d14e-50f0-41f8-aa3f-6781f51243d4"
+		stop["parent_conversation_id"] = "8b01d14e-50f0-41f8-aa3f-6781f51243d4"
+		setupCursorCompatRun(t, "cursor", "subagent-stop")
+		t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+		runHookWithInput(t, subagentStopCmd.Run, stop)
+		if n := countEndpointEvents(t, logPath); n != 2 {
+			t.Fatalf("wrote %d events, want the subagent's reasoning and its stop recorded", n)
+		}
+	})
 }
 
 func TestCursorDesktopRelayReplyIsUnchanged(t *testing.T) {
