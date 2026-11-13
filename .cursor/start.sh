@@ -27,6 +27,13 @@ BEACON_CLOUD_UPLOAD_NORMALIZED="$(printf '%s' "${BEACON_CLOUD_UPLOAD:-gcs}" | tr
 BEACON_CLOUD_S3_REGION_EFFECTIVE="${BEACON_CLOUD_S3_REGION:-${AWS_REGION:-${AWS_DEFAULT_REGION:-}}}"
 
 case "$BEACON_CLOUD_UPLOAD_NORMALIZED" in
+  asymptote)
+    if [ -n "${BEACON_CLOUD_INGEST_URL:-}" ] && [ -n "${BEACON_CLOUD_DEVICE_KEY:-}" ]; then
+      echo "Beacon Cloud forwarding to Asymptote Managed is configured for: $BEACON_CLOUD_INGEST_URL"
+    else
+      echo "Asymptote Managed forwarding is not active; set BEACON_CLOUD_INGEST_URL and BEACON_CLOUD_DEVICE_KEY to enable uploads."
+    fi
+    ;;
   s3)
     if [ -n "${BEACON_CLOUD_S3_BUCKET:-}" ] &&
       [ -n "$BEACON_CLOUD_S3_REGION_EFFECTIVE" ] &&
