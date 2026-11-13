@@ -87,10 +87,11 @@ For Cursor Cloud Agents, keep the repository-owned setup in `.cursor/`:
 ```
 
 The install script builds the current branch by default, or downloads a release
-when `BEACON_VERSION` is set. Generate `.cursor/hooks.json` with
-`beacon cloud cursor print-hooks`, then commit it before starting a cloud agent;
-the environment update script must not create hooks after Cursor has already
-loaded the project configuration.
+when `BEACON_VERSION` is set. This repository commits its `.cursor/hooks.json`
+(generated with `beacon cloud cursor print-hooks`) so cloud agents on any branch
+test that branch's hooks. Other repositories don't need to commit anything: the
+install script from `beacon cloud cursor print-setup` writes the hooks at Build
+time and excludes them from git.
 
 For Claude Code on the web, generate the setup script for a Beacon release and
 paste it into the provider's cloud setup field:
