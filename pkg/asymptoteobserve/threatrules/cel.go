@@ -140,10 +140,26 @@ func compileMatch(expr string) (cel.Program, *cel.Ast, error) {
 
 // compileMatch compiles expr against the library's environment: the engine's, with the
 // library's predicates expanded where expr calls them.
+//
+// The result is kept (matchCache). Loading a rule validates its expressions, compiling a rule
+// validates it again and then compiles them, and each of those parsed, type-checked and
+// planned the same text: three times over for every expression of a pack, which was most of
+// what starting a scan cost before its first event.
 func (l *Library) compileMatch(expr string) (cel.Program, *cel.Ast, error) {
 	if strings.TrimSpace(expr) == "" {
 		return nil, nil, fmt.Errorf("empty match expression")
 	}
+	cache, key := l.matchCache(), matchKey{expr: expr, limit: evalCostLimit}
+	if m, ok := cache.get(key); ok {
+		return m.prog, m.ast, m.err
+	}
+	m := &compiledMatch{}
+	m.prog, m.ast, m.err = l.compileMatchUncached(expr)
+	cache.put(key, m)
+	return m.prog, m.ast, m.err
+}
+
+func (l *Library) compileMatchUncached(expr string) (cel.Program, *cel.Ast, error) {
 	env, err := l.environment()
 	if err != nil {
 		return nil, nil, fmt.Errorf("build CEL env: %w", err)
@@ -160,6 +176,55 @@ func (l *Library) compileMatch(expr string) (cel.Program, *cel.Ast, error) {
 		return nil, nil, fmt.Errorf("build CEL program: %w", err)
 	}
 	return prog, ast, nil
+}
+
+// matchCache holds what compiling an expression gave, for one set of definitions: the program,
+// the checked expression, or the error. An expression means the same every time it is
+// compiled with the same definitions and the same cost limit, and a program is safe to share.
+type matchCache struct {
+	mu      sync.Mutex
+	matches map[matchKey]*compiledMatch
+}
+
+type matchKey struct {
+	expr  string
+	limit uint64
+}
+
+type compiledMatch struct {
+	prog cel.Program
+	ast  *cel.Ast
+	err  error
+}
+
+// maxCachedMatches bounds a cache. A pack has a hundred expressions or so; a process that
+// compiles arbitrary ones (a linter run over many packs, a fuzzer) starts again when full.
+const maxCachedMatches = 4096
+
+// plainMatches is the cache of expressions compiled with no definitions.
+var plainMatches matchCache
+
+func (l *Library) matchCache() *matchCache {
+	if l == nil {
+		return &plainMatches
+	}
+	return &l.matches
+}
+
+func (c *matchCache) get(key matchKey) (*compiledMatch, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	m, ok := c.matches[key]
+	return m, ok
+}
+
+func (c *matchCache) put(key matchKey, m *compiledMatch) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.matches == nil || len(c.matches) >= maxCachedMatches {
+		c.matches = map[matchKey]*compiledMatch{}
+	}
+	c.matches[key] = m
 }
 
 // selectsField reports whether the checked expression selects a field named name anywhere,

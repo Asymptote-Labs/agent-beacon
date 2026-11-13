@@ -106,7 +106,8 @@ type Predicate struct {
 
 // Library is the predicates of one rule pack's definitions, and the CEL environment its rules
 // compile against. A nil Library has no predicates: it is the engine's environment alone, which
-// is what a pack without definitions gets. A Library is immutable and safe for concurrent use.
+// is what a pack without definitions gets. A Library's definitions never change, and it is safe
+// for concurrent use; it remembers the expressions it has compiled (matches).
 type Library struct {
 	predicates map[string]*predicate
 	// order lists the predicate names, sorted.
@@ -116,6 +117,7 @@ type Library struct {
 	info  []Predicate
 	// catalogs are the pack's catalogs, in the order of their files' names.
 	catalogs []*concepts.Catalog
+	matches  matchCache
 }
 
 // predicateTest is one fixture Check runs: a definition's, or a catalog's examples, which stand
