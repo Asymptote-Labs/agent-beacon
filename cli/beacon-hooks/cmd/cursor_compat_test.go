@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
@@ -318,5 +320,98 @@ func TestCursorRecordsThisHookToleratesBadFiles(t *testing.T) {
 	}
 	if cursorRecordsThisHook("", nil) {
 		t.Fatal("an unknown command matched")
+	}
+}
+
+// relayedCloudThought is an afterAgentThought payload as the Cursor desktop app sends it to the
+// user-level hooks while its Agents Window shows a cloud agent (captured on Cursor 3.30.8): the
+// cloud agent's id, no workspace and no transcript.
+func relayedCloudThought(conversationID string) map[string]interface{} {
+	return map[string]interface{}{
+		"conversation_id": conversationID,
+		"generation_id":   "",
+		"hook_event_name": "afterAgentThought",
+		"text":            "Exploring the repository layout first.",
+		"duration_ms":     float64(1200),
+		"transcript_path": nil,
+		"workspace_roots": []interface{}{},
+	}
+}
+
+func relayedCloudSubagentStop() map[string]interface{} {
+	return map[string]interface{}{
+		"conversation_id":        "bc-9af6e247-b89f-4ae9-9743-d5d5de5b8f81",
+		"parent_conversation_id": "bc-9af6e247-b89f-4ae9-9743-d5d5de5b8f81",
+		"generation_id":          "",
+		"hook_event_name":        "subagentStop",
+		"subagent_type":          "explore",
+		"status":                 "completed",
+		"summary":                "The repository is a Go module.",
+		"transcript_path":        nil,
+		"workspace_roots":        []interface{}{},
+	}
+}
+
+func TestCursorDesktopRelayOfACloudAgentRecordsNothing(t *testing.T) {
+	cases := []struct {
+		name     string
+		declared string
+		command  string
+		run      func(cmd *cobra.Command, args []string)
+		payload  map[string]interface{}
+	}{
+		{"the agent's reasoning", "cursor", "agent-thought", runAgentThought, relayedCloudThought("bc-9af6e247-b89f-4ae9-9743-d5d5de5b8f81")},
+		// A subagent's reasoning carries the subagent's own id, newline included, and no parent.
+		{"a subagent's reasoning", "cursor", "agent-thought", runAgentThought, relayedCloudThought("task-call-e65dd302-df4c-454d-b435-a575a7e1cef5-2\nfc_7ab70849-9c8e-9581-bea6-1a9338d8ee33_0")},
+		// Beacon's Cursor hooks run no subagent command, so this one arrives through the Claude Code
+		// hook Cursor also runs.
+		{"a subagent stopping, through the Claude Code hook", "claude", "subagent-stop", subagentStopCmd.Run, relayedCloudSubagentStop()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logPath := setupCursorCompatRun(t, tc.declared, tc.command)
+			runHookWithInput(t, tc.run, tc.payload)
+			if n := countEndpointEvents(t, logPath); n != 0 {
+				t.Fatalf("wrote %d events for a cloud agent that never ran here, want 0", n)
+			}
+		})
+	}
+}
+
+func TestCursorCloudAgentsStillRecordWhereTheyRun(t *testing.T) {
+	t.Run("in a cloud sandbox", func(t *testing.T) {
+		t.Setenv("BEACON_ORIGIN", "cloud")
+		logPath := setupCursorCompatRun(t, "cursor", "agent-thought")
+		runHookWithInput(t, runAgentThought, relayedCloudThought("bc-9af6e247-b89f-4ae9-9743-d5d5de5b8f81"))
+		if n := countEndpointEvents(t, logPath); n != 1 {
+			t.Fatalf("wrote %d events, want the reasoning recorded", n)
+		}
+	})
+	t.Run("on a self-hosted worker, in a checkout", func(t *testing.T) {
+		payload := relayedCloudThought("bc-9af6e247-b89f-4ae9-9743-d5d5de5b8f81")
+		payload["workspace_roots"] = []interface{}{"/home/worker/repo"}
+		logPath := setupCursorCompatRun(t, "cursor", "agent-thought")
+		runHookWithInput(t, runAgentThought, payload)
+		if n := countEndpointEvents(t, logPath); n != 1 {
+			t.Fatalf("wrote %d events, want the reasoning recorded", n)
+		}
+	})
+	t.Run("a local conversation with no workspace open", func(t *testing.T) {
+		// The Agents Window runs local agents too, and without a folder they have no roots either.
+		logPath := setupCursorCompatRun(t, "cursor", "agent-thought")
+		runHookWithInput(t, runAgentThought, relayedCloudThought("8b01d14e-50f0-41f8-aa3f-6781f51243d4"))
+		if n := countEndpointEvents(t, logPath); n != 1 {
+			t.Fatalf("wrote %d events, want the reasoning recorded", n)
+		}
+	})
+}
+
+func TestCursorDesktopRelayReplyIsUnchanged(t *testing.T) {
+	setupCursorCompatRun(t, "cursor", "agent-thought")
+	relayed := runHookWithInput(t, runAgentThought, relayedCloudThought("bc-9af6e247-b89f-4ae9-9743-d5d5de5b8f81"))
+	setupCursorCompatRun(t, "cursor", "agent-thought")
+	local := runHookWithInput(t, runAgentThought, relayedCloudThought("56b95d2b-bed7-4c60-9141-0b165f5dddbe"))
+	if !reflect.DeepEqual(relayed, local) {
+		t.Fatalf("relayed run replied %#v, want the local reply %#v", relayed, local)
 	}
 }

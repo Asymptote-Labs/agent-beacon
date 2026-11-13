@@ -9,6 +9,15 @@ Beacon supports Cursor through native hook payloads sent to `beacon-hooks`, with
 For provider-managed Cursor cloud sessions, see
 [Cursor Cloud Agents](/runtimes/cursor-cloud-agents).
 
+While the Cursor desktop app shows a cloud agent, it also runs the hooks
+installed on your machine for that agent's reasoning and subagent events, but
+not for its prompts, tool calls, replies or turn ends, which happen in Cursor's
+VM. Beacon does not record those calls on the endpoint, so a cloud agent never
+appears as a partial local session. To record cloud agents, set up
+[Cursor Cloud Agents](/runtimes/cursor-cloud-agents). Beacon v1.3.60 and earlier
+recorded them as `agent.reasoning` and `subagent.stopped` events from your
+machine, under session ids that start with `bc-` or `task-call-`.
+
 ## Prerequisites
 
 Before enabling Cursor hooks, make sure:

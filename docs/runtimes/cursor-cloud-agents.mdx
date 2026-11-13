@@ -60,6 +60,21 @@ Beacon uses Cursor's `conversation_id` hook field as the default `run_id` for
 Cursor Cloud telemetry. If you set `BEACON_RUN_ID` yourself, Beacon preserves
 that value instead.
 
+### Cloud agents started from Cursor desktop
+
+A cloud agent runs in Cursor's VM whether you start it from the web, Slack, the
+API, or the Cursor desktop app with **Cloud** selected. Only this setup records
+what it does.
+
+If your machine also runs a local Beacon endpoint, the desktop app runs the
+hooks installed there for a cloud agent it shows, but only for the agent's
+reasoning and subagent events. Beacon does not record those calls on the
+endpoint, so a cloud agent does not show up as a partial local session. Beacon
+`v1.3.60` and earlier recorded them as `agent.reasoning` and `subagent.stopped`
+events from your machine, under session ids that start with `bc-` (the cloud
+agent) or `task-call-` (one of its subagents). Exclude those session ids when
+you read older endpoint data.
+
 ## Prerequisites
 
 - Beacon CLI `v1.0.3` or later for direct S3 upload. Cursor Cloud prompt capture

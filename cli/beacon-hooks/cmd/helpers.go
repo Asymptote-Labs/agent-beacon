@@ -25,13 +25,15 @@ var duplicateCursorRun bool
 func readStdinJSON() (map[string]interface{}, error) {
 	declaredPlatform = platformFlag
 	duplicateCursorRun = false
+	relayedCloudRun := false
 	var input map[string]interface{}
 	err := json.NewDecoder(os.Stdin).Decode(&input)
 	if err == nil {
 		applyPayloadPlatformOverride(input)
 		duplicateCursorRun = declaredPlatform == "claude" && platformFlag == "cursor" && cursorRecordsThisHook(hookCommand, input)
+		relayedCloudRun = platformFlag == "cursor" && cursorRelaysCloudAgent(input)
 	}
-	logging.SuppressEndpointEvents(duplicateCursorRun)
+	logging.SuppressEndpointEvents(duplicateCursorRun || relayedCloudRun)
 	return input, err
 }
 
