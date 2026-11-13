@@ -95,6 +95,9 @@ func TestRenderCursorCloudSetupWritesExcludedHooks(t *testing.T) {
 		`"afterAgentThought"`,
 		`BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=cursor_cloud`,
 		`grep -qxF '.cursor/hooks.json' "$EXCLUDE" 2>/dev/null || echo '.cursor/hooks.json' >> "$EXCLUDE"`,
+		// The common directory's exclude file, which git reads in a linked worktree too, and no
+		// failure (under set -e) outside a git checkout.
+		`EXCLUDE="$(git -C "$REPO_ROOT" rev-parse --git-path info/exclude 2>/dev/null || true)"`,
 		// A repository's own committed hooks are never overwritten.
 		`git -C "$REPO_ROOT" ls-files --error-unmatch .cursor/hooks.json`,
 	} {
@@ -110,6 +113,9 @@ func TestRenderCursorCloudSetupWritesExcludedHooks(t *testing.T) {
 	safe, err := renderCursorCloudSetup("v1.3.60", true)
 	if err != nil {
 		t.Fatalf("render safe cursor cloud setup: %v", err)
+	}
+	if strings.Contains(got, "--absolute-git-dir") {
+		t.Fatalf("setup must not find info/exclude through the worktree's own git dir:\n%s", got)
 	}
 	if strings.Contains(safe, `"beforeShellExecution"`) {
 		t.Fatalf("--safe-hooks setup should leave out the shell hooks:\n%s", safe)

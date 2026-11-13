@@ -328,10 +328,17 @@ fi
 mkdir -p "$REPO_ROOT/.cursor"
 cat > "$REPO_ROOT/.cursor/hooks.json" <<'BEACON_HOOKS'
 %sBEACON_HOOKS
-# info/exclude is never committed, so the agent does not see the hooks file as a change.
-EXCLUDE="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)/info/exclude"
-mkdir -p "$(dirname "$EXCLUDE")"
-grep -qxF '.cursor/hooks.json' "$EXCLUDE" 2>/dev/null || echo '.cursor/hooks.json' >> "$EXCLUDE"
+# info/exclude is never committed, so the agent does not see the hooks file as a change. Git reads
+# it from the common directory, which --git-path names in a linked worktree too.
+EXCLUDE="$(git -C "$REPO_ROOT" rev-parse --git-path info/exclude 2>/dev/null || true)"
+case "$EXCLUDE" in
+  "" | /*) ;;
+  *) EXCLUDE="$REPO_ROOT/$EXCLUDE" ;;
+esac
+if [ -n "$EXCLUDE" ]; then
+  mkdir -p "$(dirname "$EXCLUDE")"
+  grep -qxF '.cursor/hooks.json' "$EXCLUDE" 2>/dev/null || echo '.cursor/hooks.json' >> "$EXCLUDE"
+fi
 echo "Beacon wrote $REPO_ROOT/.cursor/hooks.json"
 `, version, hooks), nil
 }
