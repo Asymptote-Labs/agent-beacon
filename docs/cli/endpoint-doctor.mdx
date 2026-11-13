@@ -124,6 +124,22 @@ git_hook_budget: warn target=/work/my-repo (2 hook run(s) ran out of time in the
 
 It warns when a run was cut short, because a commit may have been left unlinked; runs that only finished late are reported as ok. The budgets are fixed, so `--fix` lists the check as a manual skip.
 
+### `workspace_spool`
+
+This check appears only when a [workspace spool](/cli/endpoint-spool) holds hook events: a sandboxed hook could not reach the socket or the runtime log, staged its events in the session workspace, and nothing has drained them yet. Capture is working; only the drain is missing.
+
+```
+workspace_spool: warn target=workspace_spool (2 session(s) have hook events staged in their workspace
+  spool; capture is working, but the events are not in ~/.beacon/endpoint/logs/runtime.jsonl yet)
+  action="run `beacon endpoint spool drain` as the user who owns the workspace"
+```
+
+| Evidence | Status | Meaning |
+|----------|--------|---------|
+| `workspace_spool_pending_drain` | warn (low) | Sessions Beacon has recorded, or sessions under `workspace_spool_roots`, have staged events waiting for a drain |
+
+DeepSeek Harness sessions are left out: [`dsh_spool_pending_drain`](#dsh_hook_capture) already reports them.
+
 ## Fix mode
 
 `beacon endpoint doctor --fix` plans and applies safe remediations for supported findings. It can create a missing runtime log, and recreate managed collector configuration and the service definition (a launchd plist or a systemd unit) when the endpoint configuration is valid. On a Windows system install it also resets the log directory ACL, from an elevated shell, when interactive users cannot append to the runtime log or when they hold more than append (an older install's Modify grant): the same ACL a fresh install applies, described in [Windows](/platforms/windows#what-the-install-does).

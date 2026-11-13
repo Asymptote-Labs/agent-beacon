@@ -55,6 +55,8 @@ To also hold events while the collector restarts, mount the account's spool too:
 
 A hook that can reach neither the socket nor a spool does not record the event. It prints `beacon-hooks: this event was NOT recorded` and the reason to the hook's stderr, and the agent carries on. On Linux, inside a sandbox whose root filesystem is a tmpfs owned by the account (bubblewrap's), a hook never puts the log or the spool on that filesystem; only directories the sandbox mounts take them. That holds even when a project bound under the home makes the home exist inside the sandbox, so events never go to files that disappear with the sandbox.
 
+Runtimes that build their own sandbox, such as DeepSeek Harness or Gemini CLI and Qwen Code in a container, usually leave only the session workspace writable, and you cannot add mounts. There the hook stages the event in the session workspace instead, and Beacon drains it later; see [`beacon endpoint spool`](/cli/endpoint-spool).
+
 ## Turn it on
 
 <Note>

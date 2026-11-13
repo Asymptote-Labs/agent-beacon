@@ -127,6 +127,11 @@ type Config struct {
 	// the default) or "disabled". Only the system config's value counts, and it applies to every
 	// account on the machine; read it through SystemDashboardDisabled.
 	Dashboard string `json:"dashboard,omitempty"`
+	// WorkspaceSpoolRoots are absolute paths, or globs of them, naming workspace directories whose
+	// staged hook spools (<workspace>/.beacon/spool) a sweep drains even for sessions Beacon has
+	// not recorded: the operator configuring a root vouches for what is staged under it. Load drops
+	// any entry that is not absolute or not a valid glob.
+	WorkspaceSpoolRoots []string `json:"workspace_spool_roots,omitempty"`
 }
 
 const (
@@ -626,10 +631,29 @@ func Load(userMode bool) (Config, error) {
 	}
 	loadOTLPForwardSecrets(&cfg)
 	NormalizeDestinations(&cfg)
+	cfg.WorkspaceSpoolRoots = validWorkspaceSpoolRoots(cfg.WorkspaceSpoolRoots)
 	if err := ValidateDestinations(cfg.Destinations); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// validWorkspaceSpoolRoots keeps the roots that are absolute paths or well-formed globs of them.
+// A relative root would resolve against whatever directory a sweep happens to run in, so it names
+// nothing; like an unknown harness, an invalid entry is dropped rather than failing the load.
+func validWorkspaceSpoolRoots(roots []string) []string {
+	var out []string
+	for _, root := range roots {
+		root = strings.TrimSpace(root)
+		if root == "" || !filepath.IsAbs(root) {
+			continue
+		}
+		if _, err := filepath.Match(root, ""); err != nil {
+			continue
+		}
+		out = append(out, root)
+	}
+	return out
 }
 
 func Save(cfg Config) (string, error) {

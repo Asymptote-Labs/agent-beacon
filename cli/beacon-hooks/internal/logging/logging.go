@@ -153,22 +153,23 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 	normalizeEventModel(event)
 	attachDerivedTrace(event)
 	if err := writeEndpointJSON(path, event); err != nil {
-		// DeepSeek Harness runs hook commands inside the session sandbox, which cannot reach
-		// ~/.beacon but CAN write the session workspace in workspace-write mode (#605).
-		// Staging the event there keeps capture live; `beacon endpoint dsh sync` drains the
-		// spool from outside the sandbox. A staged event is deliberately silent: one process
-		// per event would print a note on every event into the runtime's hook stderr stream,
-		// so the staged state surfaces through `dsh status`, `dsh sync` and `doctor` instead.
-		// When staging fails too -- read-only mode, no workspace, unsafe ids, a full spool --
-		// the NOT-recorded explanation below fires unchanged, which is the honest report for
-		// an event nothing captured.
-		if l.stageInDSHSpool(event) {
+		// A hook inside a sandbox that confines writes to the session workspace cannot reach the
+		// runtime log (DeepSeek Harness first, #605; container and operator sandboxes since, #1284)
+		// but can write the workspace. Staging the event there keeps capture live; a sweep, `beacon
+		// endpoint spool drain`, or this session's next hook that can reach the log drains it. A
+		// staged event is not reported as lost; the first one a session stages prints one note
+		// saying where it waits (stageInWorkspaceSpool). When staging fails too -- read-only mode,
+		// no workspace, unsafe ids, a full spool, a Beacon-only action -- the NOT-recorded
+		// explanation below fires unchanged, which is the honest report for an event nothing
+		// captured.
+		if l.stageInWorkspaceSpool(event, path) {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "logging: failed to write endpoint event to %s: %v\n", path, err)
 		reportEndpointWriteFailure(os.Stderr, l.platform, path, err)
 		return err
 	}
+	l.drainOwnWorkspaceSpool(path, event)
 	recordActiveSession(event)
 	l.requestShareOnce(event)
 	return nil
@@ -253,25 +254,96 @@ func recordActiveSession(event map[string]interface{}) {
 	_ = activesession.Record(activesession.DefaultPath(), name, id, dir, time.Now())
 }
 
-// stageInDSHSpool stages one event a sandboxed DeepSeek Harness hook could not write to the
-// runtime log in the session workspace's spool, and reports whether it did.
+// stageInWorkspaceSpool stages one event this hook could not write to the runtime log at logPath
+// in its session's workspace spool (asymptoteobserve.WorkspaceSpoolDir), and reports whether it
+// did.
 //
-// Staging is dsh-only: its sandbox is the reason the log write fails (#605), and staging another
-// runtime's events into a project checkout would be new pollution with no drain path. The session
-// id must be a safe directory name on BOTH the writing and the draining side
-// (ValidDSHSessionIDForSpool is what they share), and the workspace comes from the event's own
-// session.working_directory -- the envelope value the bridge stamped from session.header.cwd, the
-// same directory the sandbox confines writes to -- with the process cwd as the fallback for callers
-// that did not carry the field.
+// Every harness stages, because every harness's spool has a drain: the sweep, `beacon endpoint
+// spool drain`, and the session's own next hook that reaches the log. It began as DeepSeek
+// Harness's alone (#605) and became general once other sandboxes showed the same shape (#1284).
+// The session id and harness name must be safe directory names on BOTH the writing and the
+// draining side (ValidSpoolName is what they share), so a hook without a session id stages
+// nothing. The workspace comes from the event's own session.working_directory -- the directory a
+// sandbox confines writes to -- with the process cwd as the fallback for callers that did not
+// carry the field.
+//
+// An action only Beacon writes (IsBeaconOnlyAction) is never staged: every drain refuses it, as it
+// must refuse one a repository planted, so staging would only turn a write the caller can retry
+// (requestShareOnce takes its mark back) into one silently lost.
 //
 // The spool is a localingest.Spool, the store a restricted-mode hook already falls back to, not the
 // runtime log's writer: it is private to this account wherever the workspace lives, bounded, and
-// waits at most its short lock timeout for a sweep draining it, so a hook never holds the agent up
-// behind `beacon endpoint dsh sync`.
-func (l *Logger) stageInDSHSpool(event map[string]interface{}) bool {
-	if l == nil || asymptoteobserve.NormalizeHarnessName(l.platform) != dshHarnessName {
+// waits at most its short lock timeout for a drain under way, so a hook never holds the agent up
+// behind one. A hook running as root never stages in a workspace another account owns
+// (rootInAnotherAccountsWorkspace): that account could never drain the root-owned files.
+func (l *Logger) stageInWorkspaceSpool(event map[string]interface{}, logPath string) bool {
+	if l == nil || l.sessionID == "" {
 		return false
 	}
+	if info, _ := event["event"].(map[string]interface{}); info != nil {
+		if action, _ := info["action"].(string); asymptoteobserve.IsBeaconOnlyAction(action) {
+			return false
+		}
+	}
+	harness := asymptoteobserve.NormalizeHarnessName(l.platform)
+	workspace := spoolWorkspace(event)
+	dir, ok := asymptoteobserve.WorkspaceSpoolDir(workspace, harness, l.sessionID)
+	// A workspace on the sandbox's own root filesystem (a cwd the sandbox never mounted) would
+	// hold the spool only as long as the sandbox lives.
+	if !ok || rootInAnotherAccountsWorkspace(workspace) || asymptoteobserve.OnSandboxRoot(dir) || !spoolPathIsReal(dir, true) {
+		return false
+	}
+	line, err := encodeEndpointLine(event)
+	if err != nil {
+		return false
+	}
+	// <ws>/.beacon/spool, two levels above <harness>/<session>. Nothing is staged unless its
+	// .gitignore keeps the spool out of git (ensureSpoolGitignore).
+	spoolRoot := filepath.Dir(filepath.Dir(dir))
+	if !ensureSpoolGitignore(spoolRoot) {
+		return false
+	}
+	spool := localingest.Spool{Dir: dir}
+	pending, _, err := spool.Pending()
+	first := err != nil || pending == 0
+	if dropped, err := spool.Append([][]byte{line}); err != nil || dropped > 0 {
+		return false
+	}
+	ensureSpoolGitExclude(spoolRoot)
+	if first {
+		reportStagedSession(os.Stderr, harness, l.sessionID, logPath, dir, workspace)
+	}
+	return true
+}
+
+// reportStagedSession prints, once for each session's spool (when it starts holding events), where
+// this session's events now wait and what delivers them. Not on every event: a hook runs as one
+// process per event, and every note lands in the runtime's hook stderr stream. Nothing tells the
+// hook whether a drain will find the session -- that needs Beacon to have recorded it outside the
+// sandbox, or the workspace under workspace_spool_roots -- so the note names the drain the person
+// can always run. That command names this session alone and the log this hook writes, shell-quoted
+// to paste as it is: pasted, it vouches for one session, never for every spool a cloned repository
+// planted beside it, and delivers to the log the hook meant, whatever mode the command runs in.
+// DeepSeek Harness is the exception: `beacon endpoint dsh sync` finds its sessions through its own
+// store, so its staging stays silent as it always was.
+func reportStagedSession(w io.Writer, harness, sessionID, logPath, dir, workspace string) {
+	if harness == dshHarnessName {
+		return
+	}
+	fmt.Fprintf(w, "beacon-hooks: cannot write the Beacon runtime log %s here; this session's events are held in %s until Beacon drains them.\n", logPath, dir)
+	fmt.Fprintf(w, "beacon-hooks: they are delivered by this session's next hook that reaches the log, or by running this outside the sandbox: beacon endpoint spool drain --log-path %s --workspace %s --harness %s --session %s\n",
+		shellQuote(logPath), shellQuote(workspace), shellQuote(harness), shellQuote(sessionID))
+}
+
+// shellQuote quotes s for a POSIX shell, so a path with spaces, quotes or `$(...)` pastes as one
+// literal argument.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// spoolWorkspace is the workspace an event's session runs in: its session.working_directory, or
+// the process cwd when the caller did not carry one.
+func spoolWorkspace(event map[string]interface{}) string {
 	cwd := ""
 	if session, ok := event["session"].(map[string]interface{}); ok {
 		cwd, _ = session["working_directory"].(string)
@@ -279,19 +351,95 @@ func (l *Logger) stageInDSHSpool(event map[string]interface{}) bool {
 	if strings.TrimSpace(cwd) == "" {
 		cwd, _ = os.Getwd()
 	}
-	dir, ok := asymptoteobserve.DSHSpoolDir(cwd, l.sessionID)
-	if !ok {
-		return false
+	return cwd
+}
+
+// spoolPathIsReal reports whether the components WorkspaceSpoolDir adds below the workspace --
+// .beacon, spool, <harness> and <session> -- are real directories and the spool file, if present,
+// a regular file no larger than a spool can grow. allowMissing lets components that do not exist
+// yet pass, for a writer that creates them.
+//
+// The sandboxed agent can write the workspace and knows its own session id, so it can plant the
+// session directory as a link to the account's own spool; the hook's drain, running outside the
+// sandbox, would then remove the lines it refuses from that spool. Spool.Append never lets the
+// file outgrow DefaultSpoolMaxBytes, so a larger one was written by hand and is not read. Lstat
+// checks the components themselves, from the session directory up, so a missing spool costs a
+// drain one stat.
+func spoolPathIsReal(dir string, allowMissing bool) bool {
+	file := localingest.Spool{Dir: dir}.FilePath()
+	for i := 0; i < 4; i, dir = i+1, filepath.Dir(dir) {
+		info, err := os.Lstat(dir)
+		switch {
+		case err == nil:
+			if !info.IsDir() {
+				return false
+			}
+		case allowMissing && os.IsNotExist(err):
+		default:
+			return false
+		}
 	}
-	line, err := encodeEndpointLine(event)
-	if err != nil {
-		return false
+	info, err := os.Lstat(file)
+	return err != nil || (info.Mode().IsRegular() && info.Size() <= localingest.DefaultSpoolMaxBytes)
+}
+
+// ownSpoolDrainBatch bounds how many staged lines one hook delivers, so a long-sandboxed session's
+// backlog never makes a single hook slow; what is left waits for a sweep or a later process.
+const ownSpoolDrainBatch = 256
+
+// drainedOwnSpools remembers the spool directories this process has already drained, so a hook
+// that emits several events drains once rather than once per event.
+var drainedOwnSpools sync.Map
+
+// drainOwnWorkspaceSpool delivers, after this hook reached the runtime log at path, one batch of
+// what earlier hooks of the same session staged when they could not -- a session that leaves its
+// sandbox, or whose log comes back, catches up without waiting for a sweep.
+//
+// Only this hook's own session spool is drained: the hook knows its own session id is genuine, and
+// cannot know that of any other directory under the workspace, which anything able to write the
+// workspace (a cloned repository included) may have planted. Lines are untrusted all the same, so
+// each passes AdmitStagedLine first; a refused one counts as processed, discarded rather than
+// retried forever. A delivery error leaves it and the rest staged for the next drain.
+//
+// Everything here is best-effort and quiet: it never stages, never goes back through
+// EndpointEventWithFidelity, never writes stderr and never fails the hook. It drains only through
+// real directories (spoolPathIsReal), and Spool.Drain skips without waiting when another drainer
+// holds the spool. Each admitted line is decoded and written again through encodeEndpointLine, as
+// every line this hook writes is -- redacted, size-capped and stamped -- never appended byte for
+// byte. Like staging, a hook running as root never drains in a workspace another account owns:
+// the rewrite would leave that account's pending.jsonl root's.
+func (l *Logger) drainOwnWorkspaceSpool(path string, event map[string]interface{}) {
+	if l == nil || l.sessionID == "" {
+		return
 	}
-	if dropped, err := (localingest.Spool{Dir: dir}).Append([][]byte{line}); err != nil || dropped > 0 {
-		return false
+	harness := asymptoteobserve.NormalizeHarnessName(l.platform)
+	workspace := spoolWorkspace(event)
+	dir, ok := asymptoteobserve.WorkspaceSpoolDir(workspace, harness, l.sessionID)
+	if !ok || rootInAnotherAccountsWorkspace(workspace) {
+		return
 	}
-	ensureSpoolGitExclude(filepath.Dir(dir))
-	return true
+	if _, done := drainedOwnSpools.LoadOrStore(dir, true); done || !spoolPathIsReal(dir, false) {
+		return
+	}
+	_, _ = localingest.Spool{Dir: dir}.Drain(ownSpoolDrainBatch, func(lines [][]byte) (int, error) {
+		for i, line := range lines {
+			if !asymptoteobserve.AdmitStagedLine(line, harness, l.sessionID) {
+				continue
+			}
+			var staged map[string]interface{}
+			if err := json.Unmarshal(line, &staged); err != nil {
+				continue
+			}
+			encoded, err := encodeEndpointLine(staged)
+			if err != nil {
+				continue
+			}
+			if err := deliverEndpointLine(path, encoded); err != nil {
+				return i, err
+			}
+		}
+		return len(lines), nil
+	})
 }
 
 // reportedWriteFailures remembers which runtime log paths this process has already explained a

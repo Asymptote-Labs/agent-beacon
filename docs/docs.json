@@ -352,6 +352,7 @@
                   "cli/endpoint-dsh",
                   "cli/endpoint-fx",
                   "cli/endpoint-harness2",
+                  "cli/endpoint-spool",
                   "cli/endpoint-traces",
                   "cli/dashboard",
                   "cli/wazuh",

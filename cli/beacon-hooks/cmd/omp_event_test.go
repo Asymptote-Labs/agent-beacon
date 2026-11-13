@@ -254,7 +254,8 @@ func TestOmpEventMCPToolRoutesAreWrittenAsListings(t *testing.T) {
 }
 
 // The extension decides whether to resend a skill listing from this reply, because the hook exits 0
-// whether or not it wrote anything. Every way an event is dropped must report nothing recorded.
+// whether or not it wrote anything. Every way an event is dropped must report nothing recorded; an
+// event staged in the workspace spool is recorded, since a drain delivers it later.
 func TestOmpEventReplyReportsWhatWasRecorded(t *testing.T) {
 	listing := map[string]interface{}{"type": "context", "sessionId": "sess-1", "skillListing": "- deploy: Deploy applications."}
 	noLog := func(t *testing.T) {
@@ -269,23 +270,41 @@ func TestOmpEventReplyReportsWhatWasRecorded(t *testing.T) {
 		}
 		t.Setenv("BEACON_ENDPOINT_LOG", dir)
 	}
+	// A workspace under a regular file cannot be created on any platform, so nothing stages.
+	unwritableWorkspace := func(t *testing.T) string {
+		blocker := filepath.Join(t.TempDir(), "not-a-directory")
+		if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return filepath.Join(blocker, "workspace")
+	}
+	writableWorkspace := func(t *testing.T) string { return t.TempDir() }
 	for _, tc := range []struct {
 		name    string
 		input   map[string]interface{}
 		setup   func(*testing.T)
+		cwd     func(*testing.T) string
 		written float64
 	}{
-		{"written", listing, nil, 1},
-		{"log not writable", listing, unwritable, 0},
-		{"no endpoint log configured", listing, noLog, 0},
-		{"type this build does not map", map[string]interface{}{"type": "message_update", "sessionId": "sess-1"}, nil, 0},
+		{"written", listing, nil, nil, 1},
+		{"log not writable", listing, unwritable, unwritableWorkspace, 0},
+		{"log not writable, staged in the workspace", listing, unwritable, writableWorkspace, 1},
+		{"no endpoint log configured", listing, noLog, nil, 0},
+		{"type this build does not map", map[string]interface{}{"type": "message_update", "sessionId": "sess-1"}, nil, nil, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ompTestLog(t)
 			if tc.setup != nil {
 				tc.setup(t)
 			}
-			if out := runHookWithInput(t, runOmpEvent, tc.input); out["recorded"] != tc.written {
+			input := make(map[string]interface{}, len(tc.input)+1)
+			for key, value := range tc.input {
+				input[key] = value
+			}
+			if tc.cwd != nil {
+				input["cwd"] = tc.cwd(t)
+			}
+			if out := runHookWithInput(t, runOmpEvent, input); out["recorded"] != tc.written {
 				t.Fatalf("reply = %v, want recorded = %v", out, tc.written)
 			}
 		})

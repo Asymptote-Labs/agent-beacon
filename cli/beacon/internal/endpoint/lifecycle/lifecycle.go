@@ -1323,6 +1323,9 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		if existing.SessionSync != nil {
 			cfg.SessionSync = existing.SessionSync
 		}
+		// Spool roots are an operator's vouching for where hooks may stage; a repair that dropped
+		// them would leave those sessions' events staged for good.
+		cfg.WorkspaceSpoolRoots = existing.WorkspaceSpoolRoots
 		// The OTLP forward replaces the export a runtime had to another backend before Beacon
 		// pointed it at the collector. An upgrade or repair that dropped it would silently cut that
 		// backend off, so it is kept until --no-otlp-forward removes it.

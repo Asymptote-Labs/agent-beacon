@@ -52,7 +52,7 @@ func jsonString(s string) string {
 // would, and returns the staged byte count.
 func plantSpool(t *testing.T, workspace, id string) int {
 	t.Helper()
-	dir, ok := asymptoteobserve.DSHSpoolDir(workspace, id)
+	dir, ok := asymptoteobserve.WorkspaceSpoolDir(workspace, "deepseek_harness", id)
 	if !ok {
 		t.Fatalf("unsafe test session id %q", id)
 	}
@@ -126,7 +126,7 @@ func TestDshHookCapturePendingDrainClearsOnceTheSpoolIsEmpty(t *testing.T) {
 
 	// Drain: the events land in the log as hook events and the spool file goes away.
 	f.event(t, "hook", f.installedAt.Add(2*time.Hour))
-	dir, _ := asymptoteobserve.DSHSpoolDir(workspace, "pending-1")
+	dir, _ := asymptoteobserve.WorkspaceSpoolDir(workspace, "deepseek_harness", "pending-1")
 	if err := os.Remove((localingest.Spool{Dir: dir}).FilePath()); err != nil {
 		t.Fatal(err)
 	}

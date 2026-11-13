@@ -7,20 +7,69 @@ import (
 	"strings"
 )
 
+// spoolGitignore, in <workspace>/.beacon/spool/, ignores everything there, itself included.
+const spoolGitignore = "# Beacon staged hook events here; never commit them.\n*\n"
+
+// ensureSpoolGitignore makes sure the workspace spool at spoolRoot (<workspace>/.beacon/spool)
+// holds a .gitignore that ignores everything in it, and reports whether it does. Staging depends
+// on it: the spool holds prompts, raw hook payloads and diffs, which an agent's `git add -A` must
+// never pick up, and this file works however git is laid out -- a linked worktree, a .git the
+// sandbox mounts read-only or not at all, a repository root above the mount -- every case
+// ensureSpoolGitExclude cannot reach. Being the deepest ignore file, it overrides any negation
+// higher up.
+//
+// It is created when missing. One already there is kept, never overwritten, but it counts only
+// when it is a regular file that ignores `*` and negates nothing: a cloned repository can commit
+// its own .beacon/spool/.gitignore to switch the protection off, and staging next to it would hand
+// the session's prompts to the next commit.
+func ensureSpoolGitignore(spoolRoot string) bool {
+	if err := os.MkdirAll(spoolRoot, 0o700); err != nil {
+		return false
+	}
+	path := filepath.Join(spoolRoot, ".gitignore")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err == nil {
+		_, werr := f.WriteString(spoolGitignore)
+		cerr := f.Close()
+		return werr == nil && cerr == nil
+	}
+	if !os.IsExist(err) {
+		return false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 4096 {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	ignoresAll := false
+	for _, line := range strings.Split(string(data), "\n") {
+		switch line = strings.TrimSpace(line); {
+		case strings.HasPrefix(line, "!"):
+			return false
+		case line == "*":
+			ignoresAll = true
+		}
+	}
+	return ignoresAll
+}
+
 // ensureSpoolGitExclude hides a freshly created spool directory from `git status` by adding
-// its workspace-relative path to the repository's .git/info/exclude.
+// its workspace-relative path to the repository's .git/info/exclude, alongside the spool's own
+// .gitignore (ensureSpoolGitignore), which also hides the .gitignore itself.
 //
 // The spool is telemetry that exists only while a sandboxed session is being captured, so an
-// untracked `.beacon/dsh-spool/` showing up in an operator's status output for the duration
-// is exactly the repository pollution the spool design has to avoid. .git/info/exclude (not
-// .gitignore) is the mechanism git reserves for local, unshared ignores, and it is the same
-// one Beacon's cloud setup script already uses for its repo-local files -- add-only, never
-// removed, because an entry naming a path that no longer exists is inert.
+// untracked `.beacon/spool/` showing up in an operator's status output for the duration
+// is exactly the repository pollution the spool design has to avoid. .git/info/exclude is the
+// mechanism git reserves for local, unshared ignores, and it is the same one Beacon's cloud setup
+// script already uses for its repo-local files -- add-only, never removed, because an entry naming
+// a path that no longer exists is inert.
 //
-// Everything here is best-effort: a missing or unwritable exclude file means the directory
-// stays visible in git status, which costs a line of noise and no correctness. A linked
-// worktree (.git is a file, not a directory) is skipped rather than resolved -- writing into
-// a worktree's shared git dir from a telemetry hook is a step too far for a hint.
+// Everything here is best-effort: a missing or unwritable exclude file leaves the .gitignore
+// alone to do the job. A linked worktree (.git is a file, not a directory) is skipped rather than
+// resolved -- writing into a worktree's shared git dir from a telemetry hook is a step too far.
 func ensureSpoolGitExclude(spoolDir string) {
 	root := gitRootAbove(spoolDir)
 	if root == "" {

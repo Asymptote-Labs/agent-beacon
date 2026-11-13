@@ -34,6 +34,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/workspacespool"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
@@ -606,8 +607,47 @@ func sweepEndpointBackfill(logPath string, userMode bool, sweep endpointSweep) e
 			result.Runtimes = append(result.Runtimes, runtime)
 		}
 	}
+	if userMode && !sessionfs.Active() {
+		if runtime, ok := drainWorkspaceSpools(logPath, total); ok {
+			result.Events += runtime.Events
+			result.Limited = result.Limited || runtime.Limited
+			result.Runtimes = append(result.Runtimes, runtime)
+		}
+	}
 	result.Bytes = total.Used()
 	return result
+}
+
+// drainWorkspaceSpools moves the events sandboxed hooks staged in session workspaces (#605, #1284)
+// into the runtime log, within the sweep's budget like every runtime. The sessions are the ones
+// Beacon has recorded plus those under the operator's workspace_spool_roots, so a spool planted in
+// a cloned repository for an invented session is never read. Only a user sweep drains: root must
+// not write or remove files in a user's workspace, and the user's own sweep reaches them. ok is
+// false when there is nothing to report.
+func drainWorkspaceSpools(logPath string, total *writer.Budget) (endpointBackfillRuntimeResult, bool) {
+	if logPath == "" {
+		// The sink's writer appends to the default path then; the recorded sessions are there.
+		logPath = writer.DefaultPath(true)
+	}
+	var roots []string
+	if cfg, err := endpointconfig.Load(true); err == nil {
+		roots = cfg.WorkspaceSpoolRoots
+	}
+	sessions, err := workspacespool.Discover(logPath, roots, nil)
+	share := total.Sub(endpointBackfillShareBytes)
+	sink := sessionsync.Sink{Write: true, Log: writer.Options{Path: logPath, UserMode: true, Budget: share}}
+	sink.GuardRetention()
+	var summary workspacespool.Summary
+	err = errors.Join(err, workspacespool.Drain(sessions, sink.Emit, &summary))
+	runtime := endpointBackfillRuntimeResult{Name: "Workspace spools", Sync: "beacon endpoint spool drain", Events: summary.Events}
+	if sessionsync.Stopped(err) || share.Refused() {
+		runtime.Limited = true
+	}
+	runtime.RetentionLimited = errors.Is(err, writer.ErrRetentionWindowFull)
+	if err != nil && !onlyStopped(err) {
+		runtime.Err = err
+	}
+	return runtime, runtime.Events > 0 || runtime.Limited || runtime.Err != nil
 }
 
 // onlyStopped reports whether err says nothing but that the sweep stopped early: the budget ran

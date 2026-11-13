@@ -1,0 +1,161 @@
+---
+title: "beacon endpoint spool"
+description: "Drain hook events that sandboxed agents staged in their session workspace"
+---
+
+## Command overview
+
+Some agents run their hooks in a sandbox that confines writes to the session
+workspace: DeepSeek Harness in `workspace-write`, Gemini CLI and Qwen Code in a
+container sandbox, or an operator's own sandbox that mounts nothing of Beacon's.
+A hook there cannot reach the ingest socket, the runtime log, or the account
+spool. Instead of dropping the event, it stages it in the **workspace spool**:
+
+```text
+<workspace>/.beacon/spool/<harness>/<session>/
+```
+
+Hooks stage only when every other route failed. The spool is readable only by
+your account and capped at 8 MiB per session, and a `.gitignore` inside
+`.beacon/spool/` keeps it out of `git add`, whatever the repository's layout.
+Beacon later drains it into the runtime log with the `harness.collection_method=hook`
+label the event was captured under. Hooks never stage:
+
+- actions only Beacon writes, such as an auto-share request, which are reported
+  as not recorded, as before;
+- as root in a workspace another account owns, such as a rootful container over
+  your checkout: you could neither drain nor delete root's files. Run the
+  container as your own uid, or mount the ingest socket. Root that owns the
+  workspace (a rootless container) stages as usual;
+- in a working directory that exists only on the sandbox's own root
+  filesystem, where the spool would disappear with the sandbox;
+- next to a `.beacon/spool/.gitignore` that does not ignore everything there.
+  A repository can commit its own to switch the protection off; Beacon leaves
+  it alone and stages nothing beside it.
+
+The first event a session stages prints one note to the hook's stderr, naming
+the spool and a drain command for that one session and the log the hook writes:
+
+```text
+beacon endpoint spool drain --log-path '/var/log/beacon-agent/runtime.jsonl' --workspace '/home/dev/src/app' --harness 'opencode' --session 'ses_123'
+```
+
+Later events of the session stage without a note, so the agent's hook output is
+not flooded. A hook cannot tell whether a sweep will find the session, so the
+note always names the command. The command names the session, so running it
+never drains a spool a cloned repository planted beside it, and it names the
+log, so the events go where the hook meant them, whichever mode it runs in.
+DeepSeek Harness stages silently, because
+[`beacon endpoint dsh sync`](/cli/endpoint-dsh) finds its sessions through its
+own session store.
+
+```bash title="Command syntax"
+beacon endpoint spool [command]
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `beacon endpoint spool drain` | Append staged hook events to the runtime log |
+| `beacon endpoint spool status` | List workspace spools holding staged hook events |
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--workspace <path>` | Also include every session spool in this workspace. Repeatable. The path is taken literally, never as a glob |
+| `--harness <name>` | Only spools of this harness, for example `opencode` |
+| `--session <id>` | Only spools of this session id |
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--json` | Print the result as JSON |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+
+## When staged events are drained
+
+Staged events reach the runtime log in one of three ways:
+
+1. **The user-mode sweep.** The scheduled [session sync](/cli/endpoint-install#scheduled-session-sync) and the install backfill drain every spool they find.
+2. **`beacon endpoint spool drain`**, run by hand or from your own scheduler.
+3. **The next hook of the same session that gets through**, for example once the session leaves the sandbox, delivers what that session staged first.
+
+```bash title="Drain spools"
+beacon endpoint spool drain
+beacon endpoint spool drain --workspace ~/src/my-repo
+```
+
+```text
+workspace spool drain: 2 sessions, 14 events, 0 rejected
+```
+
+In system mode, the root sweep never drains workspace spools, so use (2) or (3).
+`drain` refuses to run as root: run it as the account that owns the workspace.
+It appends through the ingest socket like a hook, so an ordinary account does
+not need write access to the system log. If that account cannot read the system
+log, Beacon cannot list the sessions it has recorded; `drain` prints a note and
+still drains configured roots and `--workspace`. If it cannot read the system
+`config.json` (root-only when it holds a destination secret), Beacon does not
+know which log to write: `drain` asks for `--log-path`, and `status` lists only
+`--workspace` spools.
+
+`status` lists each session with staged bytes: workspace, harness, session, and
+size. [`beacon endpoint doctor`](/cli/endpoint-doctor#workspace_spool) reports
+the same state as `workspace_spool_pending_drain`.
+
+## Security model
+
+Anything running in a workspace can write to it, so Beacon treats every staged
+line as untrusted:
+
+- **Lines are checked one by one.** A line is appended only if it is a valid
+  hook or plugin event from Beacon, for the harness and session whose spool
+  holds it. Actions only Beacon writes, such as `session.share_requested`, are
+  refused. Everything else is counted as rejected and removed. Each admitted
+  line is written again through Beacon's own encoder, so it is redacted and
+  size-capped like any other event.
+- **Only known sessions are drained.** Beacon drains a spool only for a session
+  it has already recorded in the runtime log, with that workspace as its working
+  directory. A cloned repository that carries a planted
+  `.beacon/spool/<harness>/<id>/` is never drained.
+- **Configured roots are vouched for by the operator.** Sessions under
+  `workspace_spool_roots` or a `--workspace` are drained even if Beacon has not
+  recorded them, because the operator named those directories. Add `--harness`
+  and `--session` to vouch for one session only.
+- **Links are never followed.** Every directory below the workspace must be a
+  real directory and `pending.jsonl` a regular file, so a sandboxed agent cannot
+  plant its session directory as a link to the account's own spool and have a
+  drain outside the sandbox empty it. A `pending.jsonl` larger than a spool can
+  grow (8 MiB) was written by hand and is left unread, so it cannot tie up a
+  sweep.
+- **Root never drains for a user.** Neither the system-mode sweep nor
+  `beacon endpoint spool drain` drains as root.
+
+Delivery is at least once: a drain killed between appending a batch and removing
+it from the spool appends that batch again.
+
+## Configuring roots
+
+For sandboxes whose sessions Beacon has not recorded yet, such as a container
+sandbox where no hook ever reached the log, list the workspaces in
+`workspace_spool_roots` in the endpoint `config.json`. Each entry is a glob of
+workspace directories:
+
+```json title="config.json"
+{
+  "workspace_spool_roots": [
+    "/home/dev/src/*",
+    "/srv/agents/workspaces/*"
+  ]
+}
+```
+
+Every `<workspace>/.beacon/spool/<harness>/<session>/` under a matching
+directory is drained.
+
+## DeepSeek Harness
+
+DeepSeek Harness hooks stage in `.beacon/spool/deepseek_harness/<session>/`.
+Spools an earlier hook left in `.beacon/dsh-spool/<session>/` are still drained.
+[`beacon endpoint dsh sync`](/cli/endpoint-dsh) drains them too, and doctor
+reports them as `dsh_spool_pending_drain`.
