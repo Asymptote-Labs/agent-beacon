@@ -229,13 +229,21 @@ func uploadObjectName(cfg Config) string {
 	return ObjectName(cfg)
 }
 
+// stateObjectMatchesConfig reports whether the state's object is this log's, so the upload rewrites
+// it rather than starting another.
+//
+// The state follows the log, not the run id. A sandbox runs one agent, and a new run in it starts at
+// a session start, which removes the log and the state (ResetFromEnv). Within a run the run id can
+// still change: Cursor gives each subagent a conversation id of its own, and BEACON_RUN_ID is seeded
+// from the conversation id of each hook. Matching the run id started a new object, holding the whole
+// log again, every time the agent and a subagent took turns.
 func stateObjectMatchesConfig(st state, cfg Config) bool {
 	objectName := strings.TrimSpace(st.LastObject)
 	if objectName == "" {
 		return false
 	}
 	if st.Provider != "" || st.RunID != "" {
-		return st.Provider == cfg.Provider && st.RunID == cfg.RunID
+		return st.Provider == cfg.Provider
 	}
 	provider := objectkey.CleanPart(defaultString(cfg.Provider, "unknown"))
 	runID := objectkey.CleanPart(defaultString(cfg.RunID, "unknown"))

@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -492,4 +493,51 @@ func pemKey(t *testing.T, key *rsa.PrivateKey) string {
 		t.Fatalf("marshal key: %v", err)
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: data}))
+}
+
+// A Cursor subagent reports a conversation id of its own, which becomes the run id of its hooks.
+// The agent and its subagent share one sandbox log, so they must keep rewriting one object.
+func TestUploadKeepsOneObjectWhenTheConversationChanges(t *testing.T) {
+	current := time.Date(2026, 11, 13, 21, 5, 36, 0, time.UTC)
+	restore := stubNowFunc(t, func() time.Time { return current })
+	defer restore()
+	var uploadedPaths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uploadedPaths = append(uploadedPaths, r.URL.EscapedPath())
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	cfg := Config{
+		Upload:        uploadS3,
+		LogPath:       logPath,
+		StatePath:     filepath.Join(dir, "state.json"),
+		Bucket:        "bucket",
+		Prefix:        "prefix",
+		Provider:      "cursor_cloud",
+		RunID:         "bc-89723c38-a074-4c36-98cc-95e9da5f8dd3",
+		S3Region:      "us-west-2",
+		S3AccessKeyID: "AKIATEST",
+		S3SecretKey:   "secret",
+		S3Endpoint:    server.URL,
+	}
+	for i, runID := range []string{cfg.RunID, "bc-80383700-254c-5f11-8bff-de4e1cd943c0", cfg.RunID} {
+		appendLines(t, logPath, fmt.Sprintf(`{"event":%d}`, i))
+		next := cfg
+		next.RunID = runID
+		current = current.Add(time.Minute)
+		if err := Upload(context.Background(), next, true); err != nil {
+			t.Fatalf("Upload %d returned error: %v", i, err)
+		}
+	}
+	if len(uploadedPaths) != 3 {
+		t.Fatalf("uploaded paths = %v, want 3 uploads", uploadedPaths)
+	}
+	for _, p := range uploadedPaths[1:] {
+		if p != uploadedPaths[0] {
+			t.Fatalf("a subagent's upload started another object: %v", uploadedPaths)
+		}
+	}
 }

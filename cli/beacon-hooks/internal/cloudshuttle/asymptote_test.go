@@ -245,3 +245,34 @@ func TestSessionStartShipsALogWhoseRunNeverUploaded(t *testing.T) {
 		t.Fatalf("no .previous-* copy should be left behind: %v", matches)
 	}
 }
+
+// The agent and its Cursor subagent take turns uploading one log under different run ids. Each
+// upload sends only the lines no upload has sent yet.
+func TestManagedUploadDoesNotResendWhenTheConversationChanges(t *testing.T) {
+	server, calls := startFakeIngest(t, 200)
+	cfg := asymptoteConfig(t, server)
+	cfg.Provider = "cursor_cloud"
+	cfg.RunID = "bc-89723c38-a074-4c36-98cc-95e9da5f8dd3"
+	subagent := cfg
+	subagent.RunID = "bc-80383700-254c-5f11-8bff-de4e1cd943c0"
+
+	appendLines(t, cfg.LogPath, `{"event":1}`, `{"event":2}`)
+	if err := Upload(context.Background(), cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	appendLines(t, cfg.LogPath, `{"event":3}`)
+	if err := Upload(context.Background(), subagent, true); err != nil {
+		t.Fatal(err)
+	}
+	appendLines(t, cfg.LogPath, `{"event":4}`)
+	if err := Upload(context.Background(), cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	var sent []string
+	for _, call := range *calls {
+		sent = append(sent, call.lines...)
+	}
+	if got := strings.Join(sent, "|"); got != `{"event":1}|{"event":2}|{"event":3}|{"event":4}` {
+		t.Fatalf("lines sent = %s, want each line once", got)
+	}
+}

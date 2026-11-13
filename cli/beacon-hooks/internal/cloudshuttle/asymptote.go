@@ -62,7 +62,9 @@ func asymptoteConfigured(cfg Config) bool {
 // shuttle state. `snapshot` is a consistent copy of the log; `size` its length.
 func uploadAsymptoteIncremental(ctx context.Context, cfg Config, snapshot string, size int64) error {
 	offset := int64(0)
-	if st, err := readState(cfg.StatePath); err == nil && st.Provider == cfg.Provider && st.RunID == cfg.RunID && st.LastSize > 0 && st.LastSize <= size {
+	// The position belongs to the log, not the run id, for the reason stateObjectMatchesConfig gives:
+	// keyed by run id, every switch between a Cursor agent and its subagent resent the whole log.
+	if st, err := readState(cfg.StatePath); err == nil && st.Provider == cfg.Provider && st.LastSize > 0 && st.LastSize <= size {
 		offset = st.LastSize
 	}
 	if offset >= size {
