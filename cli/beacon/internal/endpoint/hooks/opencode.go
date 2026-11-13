@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 
 	opencodeplugin "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/opencode"
@@ -33,9 +32,10 @@ type OpenCodeStatus struct {
 	// IgnoredPluginPaths are Beacon plugin copies OpenCode loads but never runs, because another
 	// copy with the same plugin ID loads before them. It includes PluginPath when that is one.
 	IgnoredPluginPaths []string `json:"ignored_plugin_paths,omitempty"`
-	// RemovedPluginPath is a Beacon plugin that install or uninstall removed from the default user
-	// config directory, because OPENCODE_CONFIG_DIR moves the one Beacon manages.
-	RemovedPluginPath string `json:"removed_plugin_path,omitempty"`
+	// DefaultPluginPath is Beacon's user-level plugin in OpenCode's default config directory while
+	// OPENCODE_CONFIG_DIR moves the one Beacon manages elsewhere. Sessions started without the
+	// variable still use it, so install leaves it in place; uninstall removes it.
+	DefaultPluginPath string `json:"default_plugin_path,omitempty"`
 }
 
 var opencodeRuntime = hookRuntime{
@@ -51,12 +51,8 @@ func InstallOpenCode(opts OpenCodeOptions) (OpenCodeStatus, error) {
 	if err != nil {
 		return OpenCodeStatus{}, err
 	}
-	removed, err := removeOverriddenOpenCodePlugin(opts.Level)
-	if err != nil {
-		return OpenCodeStatus{}, err
-	}
 	out := opencodeStatusFromRuntime(status)
-	out.RemovedPluginPath = removed
+	out.DefaultPluginPath = opencodeDefaultDirPlugin(opts.Level)
 	return out, nil
 }
 
@@ -65,41 +61,46 @@ func UninstallOpenCode(opts OpenCodeOptions) (OpenCodeStatus, error) {
 	if err != nil {
 		return OpenCodeStatus{}, err
 	}
-	removed, err := removeOverriddenOpenCodePlugin(opts.Level)
-	if err != nil {
-		return OpenCodeStatus{}, err
-	}
 	out := opencodeStatusFromRuntime(status)
-	if removed != "" {
-		out.RemovedPluginPath = removed
-		out.Message += fmt.Sprintf("; also removed the Beacon plugin at %s", removed)
+	if path := opencodeDefaultDirPlugin(opts.Level); path != "" {
+		if _, err := removeOpenCodePlugin(path); err != nil {
+			return OpenCodeStatus{}, err
+		}
+		out.DefaultPluginPath = path
+		out.Message += fmt.Sprintf("; also removed the Beacon plugin at %s", path)
 	}
 	return out, nil
 }
 
-// removeOverriddenOpenCodePlugin removes Beacon's user-level plugin from the default config
-// directory when OPENCODE_CONFIG_DIR is set, and returns its path if there was one. A Beacon from
-// before OPENCODE_CONFIG_DIR was honored wrote it there. Once Beacon manages the copy under the
-// override, nothing reports this one any more, yet OpenCode 1.x still runs it beside the new copy,
-// duplicating every event, and keeps spawning a hook binary that uninstall removed.
-func removeOverriddenOpenCodePlugin(level Level) (string, error) {
+// opencodeDefaultDirPlugin returns Beacon's user-level plugin in the default config directory when
+// OPENCODE_CONFIG_DIR moves the one Beacon manages elsewhere, or "" when there is none. An earlier
+// Beacon, or an install run without the variable, wrote it. Sessions started without the variable
+// load only that copy, OpenCode 1.x sessions started with it load both, and nothing else reports
+// it. The two directories are compared by identity, not by name, so a symlink or a case-folding
+// filesystem never makes the managed copy look like a second one.
+func opencodeDefaultDirPlugin(level Level) string {
 	if (level != "" && level != LevelUser) || os.Getenv("OPENCODE_CONFIG_DIR") == "" {
-		return "", nil
+		return ""
 	}
 	home, _ := os.UserHomeDir()
 	dir, err := opencodeDefaultConfigDir(home)
 	if err != nil {
-		return "", nil
+		return ""
 	}
 	path := filepath.Join(dir, "plugins", opencodePluginFileName)
-	if current, err := opencodePluginPath(level); err != nil || current == path {
-		return "", nil
+	current, err := opencodePluginPath(level)
+	if err != nil || current == path {
+		return ""
 	}
-	removed, err := removeOpenCodePlugin(path)
-	if err != nil || !removed {
-		return "", err
+	if a, err := os.Stat(filepath.Dir(current)); err == nil {
+		if b, err := os.Stat(filepath.Dir(path)); err == nil && os.SameFile(a, b) {
+			return ""
+		}
 	}
-	return path, nil
+	if !isOpenCodeInstalledAt(path) {
+		return ""
+	}
+	return path
 }
 
 func OpenCodeHookStatus(opts OpenCodeOptions) OpenCodeStatus {
@@ -124,9 +125,9 @@ func opencodeStatusFromRuntime(status runtimeStatus) OpenCodeStatus {
 			return out
 		}
 		data, err := os.ReadFile(out.PluginPath)
-		// The plugin holds the hook command as a string literal written with %q, so a Windows
-		// path's backslashes appear doubled there.
-		quoted := strconv.Quote(out.BinaryPath)
+		// Search for the binary as the renderer wrote it: shell-quoted, then a %q string literal,
+		// which doubles a Windows path's backslashes and escapes an apostrophe's quoting.
+		quoted := fmt.Sprintf("%q", hookCommandQuote(out.BinaryPath))
 		if err != nil || !strings.Contains(string(data), quoted[1:len(quoted)-1]) || strings.Contains(string(data), "__BEACON_") {
 			out.Installed = false
 			out.Message = fmt.Sprintf("opencode plugin at %s does not reference the active Beacon hook binary", out.PluginPath)
