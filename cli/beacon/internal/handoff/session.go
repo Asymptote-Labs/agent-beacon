@@ -1,9 +1,10 @@
 // Package handoff finds agent sessions on this machine so they can be picked up again, in the same
 // runtime or a different one.
 //
-// A handoff reads the runtime's own session store, never Beacon's runtime log alone: the store is
-// what the runtime itself resumes from, and it keeps content that the runtime log truncates. Every
-// read is local and read-only.
+// A handoff prefers the runtime's own session store, supplementing it with Beacon's runtime log
+// when a session is no longer in its store or its runtime has no store reader. The store is what
+// the runtime itself resumes from, and it keeps content that the log truncates. Every read is local
+// and read-only.
 package handoff
 
 import (
@@ -34,6 +35,8 @@ type Session struct {
 	// request, because resuming one resumes a fragment of the parent's task.
 	Subagent bool   `json:"subagent,omitempty"`
 	ParentID string `json:"parent_id,omitempty"`
+	// FromLog identifies a session absent from its runtime store, for log-backed readers.
+	FromLog bool `json:"-"`
 }
 
 // Source lists the sessions one runtime has stored locally.
@@ -73,7 +76,6 @@ func List(sources []Source, filter Filter) ([]Session, error) {
 func listSessions(sources []Source, filter Filter) ([]Session, []*SourceError) {
 	var sessions []Session
 	var errs []*SourceError
-	within := directoryMatcher(filter.Directory)
 	for _, source := range sources {
 		if filter.Harness != "" && source.Harness() != filter.Harness {
 			continue
@@ -82,18 +84,23 @@ func listSessions(sources []Source, filter Filter) ([]Session, []*SourceError) {
 		if err != nil {
 			errs = append(errs, &SourceError{Harness: source.Harness(), Err: err})
 		}
-		for _, session := range found {
-			if session.ID == "" {
-				continue
-			}
-			if session.Subagent && !filter.IncludeSubagents {
-				continue
-			}
-			if filter.Directory != "" && !within(session.Directory) {
-				continue
-			}
-			sessions = append(sessions, session)
+		sessions = append(sessions, found...)
+	}
+	return filterSessions(sessions, filter), errs
+}
+
+// filterSessions applies the shared listing contract after all sources are collected.
+func filterSessions(found []Session, filter Filter) []Session {
+	var sessions []Session
+	within := directoryMatcher(filter.Directory)
+	for _, session := range found {
+		if session.ID == "" || (filter.Harness != "" && session.Harness != filter.Harness) || (session.Subagent && !filter.IncludeSubagents) {
+			continue
 		}
+		if filter.Directory != "" && !within(session.Directory) {
+			continue
+		}
+		sessions = append(sessions, session)
 	}
 	sort.SliceStable(sessions, func(i, j int) bool {
 		if !sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
@@ -107,7 +114,7 @@ func listSessions(sources []Source, filter Filter) ([]Session, []*SourceError) {
 	if filter.Limit > 0 && len(sessions) > filter.Limit {
 		sessions = sessions[:filter.Limit]
 	}
-	return sessions, errs
+	return sessions
 }
 
 // MinPrefixLength is the shortest session id prefix Find accepts, so a stray short argument cannot
