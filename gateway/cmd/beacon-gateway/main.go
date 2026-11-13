@@ -22,8 +22,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/gateway/pipeline"
 )
 
-const version = "0.2.0-dev"
-
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "beacon-gateway:", err)
@@ -33,7 +31,12 @@ func main() {
 
 func run() error {
 	configPath := flag.String("config", "", "configuration file (default: built-in LiteLLM observe-only config)")
+	printVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *printVersion {
+		fmt.Println(versionLine())
+		return nil
+	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	cfg, err := loadConfig(*configPath)
