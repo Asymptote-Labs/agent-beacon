@@ -70,6 +70,40 @@ func cursorRecordsThisHook(command string, input map[string]interface{}) bool {
 	return false
 }
 
+// cursorRelaysCloudAgent reports whether this payload is the Cursor desktop app running a hook on
+// this machine for a cloud agent's event.
+//
+// A cloud agent runs in Cursor's VM, which loads only project, team and enterprise hooks. While the
+// desktop app's Agents Window shows one, it also runs the user-level hooks here, but only for
+// afterAgentThought, subagentStart and subagentStop (measured on Cursor 3.29 and 3.30): no session
+// start, prompt, tool call, response or stop. Recorded, those made a session of reasoning and
+// subagent summaries attributed to this machine, with nothing to say the agent never ran on it.
+//
+// Such a payload names the cloud agent ("bc-<uuid>") or one of its subagents ("task-call-<id>")
+// and no workspace. A cloud subagent's reasoning carries no parent id to tie it to its agent, so
+// the prefix alone has to say it: local agents and their subagents get plain UUIDs (every local
+// subagent transcript Cursor 3.30 had written was named by one). A cloud agent on a self-hosted
+// worker has the same kind of id but runs in a
+// checkout, so a hook there keeps recording, as does every hook in a cloud sandbox
+// (BEACON_ORIGIN=cloud), where the project hooks from `beacon cloud cursor print-hooks` record
+// the agent itself.
+func cursorRelaysCloudAgent(input map[string]interface{}) bool {
+	if strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) == "cloud" {
+		return false
+	}
+	id := getFirstStr(input, "conversation_id", "parent_conversation_id")
+	if !strings.HasPrefix(id, "bc-") && !strings.HasPrefix(id, "task-call-") {
+		return false
+	}
+	roots, _ := input["workspace_roots"].([]interface{})
+	for _, root := range roots {
+		if s, ok := root.(string); ok && strings.TrimSpace(s) != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // cursorMatcherSelects reports whether a Cursor hook entry's matcher selects tool. An entry with no
 // matcher runs for every call. Cursor reads a matcher as a pattern found anywhere in the tool's
 // name, which is how Beacon's "MCP" selects "MCP:slack_send_message". A matcher that isn't a valid
