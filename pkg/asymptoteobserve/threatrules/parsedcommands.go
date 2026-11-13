@@ -75,9 +75,45 @@ func ParsedCommands(command string) []asymptoteobserve.ParsedCommand {
 }
 
 // ParsedCommandLine returns ParsedCommands of command, and whether the command line was not read
-// to its end (e.command.parsed_incomplete): it does not parse, it ends early, or it is longer
-// than ParsedCommandsLimit. A rule can then conclude nothing from what the list lacks.
+// to its end (e.command.parsed_incomplete): it does not parse, it ends early, it is longer
+// than ParsedCommandsLimit, or it has more commands than maxParsedCommands or more words
+// than maxParsedWords. A rule can then conclude nothing from what the list lacks.
+//
+// A command line is whatever an agent ran or was made to run, and every scan, the dashboard
+// and the gateway read each one. Should the reading panic, the line counts as one that was
+// not read: it has no parsed commands and is incomplete, so the rules that match a line's text
+// still see it and nothing else stops. FuzzParsedCommandLine calls the reading itself, where a
+// panic is a failure.
 func ParsedCommandLine(command string) (parsed []asymptoteobserve.ParsedCommand, incomplete bool) {
+	defer func() {
+		if recover() != nil {
+			parsed, incomplete = nil, true
+		}
+	}()
+	return readCommandLine(command)
+}
+
+// readCommandLine is the reading ParsedCommandLine guards; a test replaces it with one that
+// panics.
+var readCommandLine = parsedCommandLine
+
+// maxParsedCommands and maxParsedWords bound the commands of one command line, those of the
+// scripts it runs included, and their words. Past either the line is not read, like one whose
+// braces produce too many words (shellcmd.ErrTooManyWords).
+//
+// What a rule does with the commands grows faster than their number: a rule that asks of each
+// command whether another one feeds it asks the square. The longest of 18,600 real command
+// lines has 73 commands and 200 words; a line of the limit's 4,096 bytes can be made to hold
+// 2,048 commands, which cost every rule together over a second where 256 cost a fifth of
+// one, and 1,300 substitutions inside one another took one rule past the cost limit, which
+// fails a scan. A line of ParsedCommandsLimit bytes holds half as many words as bytes, and
+// each script inside it may add what its brace expansions produce.
+const (
+	maxParsedCommands = 256
+	maxParsedWords    = ParsedCommandsLimit
+)
+
+func parsedCommandLine(command string) (parsed []asymptoteobserve.ParsedCommand, incomplete bool) {
 	if command == "" {
 		return nil, false
 	}
@@ -87,7 +123,17 @@ func ParsedCommandLine(command string) (parsed []asymptoteobserve.ParsedCommand,
 	if len(cmds) == 0 {
 		return nil, incomplete
 	}
+	if len(cmds) > maxParsedCommands {
+		return nil, true
+	}
 	cmds = shellcmd.WithScripts(cmds, maxShellDepth)
+	words := 0
+	for _, c := range cmds {
+		words += len(c.Argv)
+	}
+	if words > maxParsedWords || len(cmds) > maxParsedCommands {
+		return nil, true
+	}
 	reads := shellcmd.FileReads(cmds)
 	sockets := shellcmd.SocketRedirects(cmds)
 	out := make([]asymptoteobserve.ParsedCommand, len(cmds))

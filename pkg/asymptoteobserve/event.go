@@ -195,9 +195,10 @@ type CommandInfo struct {
 	ParsedCommands []ParsedCommand `json:"-" cel:"parsed_commands"`
 	// ParsedIncomplete is set when Command was not read to its end: it does not parse, it ends
 	// inside a quote, a here-document, a substitution or a compound command (as a cut capture
-	// does), or it is longer than the engine reads. ParsedCommands then lists the commands
-	// before that point only, so nothing can be concluded from a command's absence. Derived
-	// like ParsedCommands, never written or read.
+	// does), it is longer than the engine reads, or it names more than the engine reads
+	// (hundreds of commands, a brace expansion of thousands of words). ParsedCommands then
+	// lists the commands before that point only, and none in the last case, so nothing can be
+	// concluded from a command's absence. Derived like ParsedCommands, never written or read.
 	ParsedIncomplete bool `json:"-" cel:"parsed_incomplete"`
 }
 

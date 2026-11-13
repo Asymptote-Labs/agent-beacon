@@ -147,6 +147,25 @@ const (
 	refDeclared
 )
 
+// ErrTooManyWords is Parse's error for a command line whose brace expansions produce more than
+// maxBraceWords words.
+var ErrTooManyWords = errors.New("shellcmd: brace expansions produce too many words to read")
+
+// maxBraceWords bounds the words the brace expansions of one command line may produce. A few
+// bytes of braces name any number of words (`{a,b}{a,b}{a,b}..` doubles with every pair, and
+// `{1..999999999}` is sixteen bytes), and each is a word some rule then looks at. A thousand is
+// more than a line that lists files or counts a loop comes to; a line past it is not read at
+// all, which leaves it to a caller's reading of its text, rather than read without some of its
+// words.
+const maxBraceWords = 1024
+
+// maxCutRetries bounds how many times Parse looks for the part of a cut command line that
+// stands on its own. Each try drops the innermost construct left open, so a line needs as many
+// as it has constructs open where it was cut: a quote inside a substitution inside a quote is
+// three, and an `if` inside a loop is four. A line of nothing but opening parentheses would
+// otherwise be parsed once for each.
+const maxCutRetries = 32
+
 // Parse parses command as bash and returns its statements in walk order: each statement, then the
 // statements inside it (an if's body, a command substitution in its words). A statement that
 // carries nothing -- no simple command and no redirection, such as the `a && b` around its two
@@ -156,36 +175,51 @@ const (
 // quote, here-document, substitution or compound command: a capture cut short), Parse also
 // returns the commands of the part before the point where it became incomplete, parsed on its
 // own; the last of them may be missing words that the cut removed. Any other parse error returns
-// no commands. A caller that must not act on a partial command line ignores the commands
-// whenever the error is not nil.
+// no commands, and so do a line cut inside more than maxCutRetries constructs and one whose
+// brace expansions produce too many words (ErrTooManyWords). A caller that must not act on a
+// partial command line ignores the commands whenever the error is not nil.
 func Parse(command string) ([]Command, error) {
+	return parse(command, new(int))
+}
+
+// parse is Parse with the count of the words brace expansions have produced so far, which the
+// scripts of one command line share (WithScripts).
+func parse(command string, braceWords *int) ([]Command, error) {
 	file, err := parseBash(command)
 	if err == nil {
-		return walk(command, file), nil
+		return walk(command, file, braceWords)
 	}
 	// The prefix can itself end inside an earlier construct (`a "$(b` cut again at `$(`); each
-	// retry is strictly shorter, so this ends.
+	// retry is strictly shorter.
 	prefix, perr := command, err
-	for {
+	for range maxCutRetries {
 		var incomplete syntax.ParseError
 		if !errors.As(perr, &incomplete) || !incomplete.Incomplete || int(incomplete.Pos.Offset()) >= len(prefix) {
 			return nil, err
 		}
 		prefix = prefix[:incomplete.Pos.Offset()]
 		if file, perr = parseBash(prefix); perr == nil {
-			return walk(prefix, file), err
+			commands, tooMany := walk(prefix, file, braceWords)
+			if tooMany != nil {
+				return nil, tooMany
+			}
+			return commands, err
 		}
 	}
+	return nil, err
 }
 
 func parseBash(command string) (*syntax.File, error) {
 	return syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(command), "")
 }
 
-func walk(source string, file *syntax.File) []Command {
-	p := parser{source: source, stages: map[*syntax.Stmt]stage{}, containers: map[*syntax.Stmt]bool{}}
+func walk(source string, file *syntax.File, braceWords *int) ([]Command, error) {
+	p := parser{source: source, stages: map[*syntax.Stmt]stage{}, containers: map[*syntax.Stmt]bool{}, braceWords: braceWords}
 	syntax.Walk(file, p.visit)
-	return p.commands
+	if p.tooManyWords {
+		return nil, ErrTooManyWords
+	}
+	return p.commands, nil
 }
 
 type stage struct{ pipeline, index int }
@@ -225,6 +259,10 @@ type parser struct {
 	// scopes are the byte ranges of the loops, and the whole source once per function
 	// declaration: a command inside one may run after anything in that range.
 	scopes []substitution
+	// braceWords counts the words brace expansions have produced, and tooManyWords is set
+	// once that passes maxBraceWords: the command line is then not read (ErrTooManyWords).
+	braceWords   *int
+	tooManyWords bool
 }
 
 // declaration is an assignment by export, declare, local, readonly or typeset, and where its
@@ -541,13 +579,18 @@ func (p *parser) callArgs(call *syntax.CallExpr, refs []wordRef) ([]Word, []word
 	for _, word := range call.Args {
 		// SplitBraces rewrites the word's parts, so it works on a copy: the tree is still being walked.
 		split := &syntax.Word{Parts: slices.Clone(word.Parts)}
-		if !syntax.SplitBraces(split) {
+		if p.tooManyWords || !syntax.SplitBraces(split) {
 			refs = p.refs(refs, word.Parts, refArg, len(words))
 			words = append(words, p.word(word, word))
 			continue
 		}
-		// Every word a brace expansion produces may hold what the unexpanded word does.
-		for _, expanded := range expand.Braces(split) {
+		// Every word a brace expansion produces may hold what the unexpanded word does. The
+		// words are taken one at a time, so an expansion past the bound is never built.
+		for expanded, err := range expand.BracesSeq(nil, split) {
+			if *p.braceWords++; err != nil || *p.braceWords > maxBraceWords {
+				p.tooManyWords = true
+				break
+			}
 			refs = p.refs(refs, word.Parts, refArg, len(words))
 			words = append(words, p.word(expanded, word))
 		}

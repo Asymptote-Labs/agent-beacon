@@ -197,7 +197,8 @@ var printfEscapes = strings.NewReplacer(`\n`, "\n", `\t`, "\t", `\\`, `\`, `\"`,
 
 // printfOutput returns what printf prints for a format whose only directives are %s, %b and
 // %%: the format once when it has none, and otherwise once for each group of arguments, as
-// printf reuses its format. ok is false for any other directive.
+// printf reuses its format. ok is false for any other directive, and for output that the
+// reuse makes longer than maxScriptBytes.
 func printfOutput(format string, args []Word) (string, bool) {
 	var literals []string // the text before each directive, and after the last
 	var b strings.Builder
@@ -236,6 +237,9 @@ func printfOutput(format string, args []Word) (string, bool) {
 		out.WriteString(tail)
 		if next >= len(args) {
 			return out.String(), true
+		}
+		if out.Len() > maxScriptBytes {
+			return "", false // more than is read as a script: see maxScriptBytes
 		}
 	}
 }
@@ -326,7 +330,7 @@ func WithScripts(commands []Command, depth int) []Command {
 	if depth <= 0 || !slices.ContainsFunc(commands, hasRunnerWord) {
 		return commands
 	}
-	x := expander{out: make([]Command, 0, len(commands)+4)}
+	x := expander{out: make([]Command, 0, len(commands)+4), scriptBytes: maxScriptBytes}
 	x.add(commands, 0, depth)
 	return x.out
 }
@@ -341,12 +345,23 @@ func isPowerShell(word string) bool {
 	return name == "powershell" || name == "pwsh"
 }
 
+// maxScriptBytes bounds the script text WithScripts reads for one command line. A script is
+// part of the line that holds it, so a line's scripts come to a few times the line at most,
+// one for each level; a printf that reuses its format for a thousand arguments is the
+// exception, and prints megabytes from a line of four kilobytes. Past the bound a script is
+// not read, which leaves the command that runs it one this package cannot see into.
+const maxScriptBytes = 16 << 10
+
 type expander struct {
 	out []Command
 	// pipelines and substs are the highest of each number given out so far: a script is parsed
 	// on its own and its numbers start again, so they are moved past these.
 	pipelines int
 	substs    int32
+	// scriptBytes is what is left of maxScriptBytes, and braceWords the words the scripts'
+	// brace expansions have produced, bounded for all of them together as a line's own are.
+	scriptBytes int
+	braceWords  int
 }
 
 // add appends commands, the commands of one parse, as the script of the shell at index
@@ -411,10 +426,11 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 				_, onStdin = c.HereInput()
 			}
 		}
-		if !ok {
+		if !ok || len(script) > x.scriptBytes {
 			continue
 		}
-		if sub, err := Parse(script); len(sub) > 0 {
+		x.scriptBytes -= len(script)
+		if sub, err := parse(script, &x.braceWords); len(sub) > 0 {
 			at := len(x.out)
 			x.out[at-1].scripted, x.out[at-1].ranCommands, x.out[at-1].scriptOnStdin = !interpreter, interpreter, onStdin
 			x.out[at-1].scriptZero = int32(zero + 1)

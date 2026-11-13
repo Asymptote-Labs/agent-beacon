@@ -280,12 +280,27 @@ the steps in both orders still fires once. A single event never satisfies two st
   `spec: threat-rules/v1.3` or later) is derived with `e.command.parsed_commands` and says
   whether the command line was read to its end. It is `true` when `command.command` does not
   parse, when it ends early (an unclosed quote, here-document, substitution or compound
-  command, which is what a capture cut by a writer or a runtime looks like), or when it is
-  longer than the 4096 bytes that are read; `false` otherwise, and for an event without a
-  command. `parsed_commands` of such a line lists the commands before that point only: in
+  command, which is what a capture cut by a writer or a runtime looks like), when it is
+  longer than the 4096 bytes that are read, or when it names more than is read (below);
+  `false` otherwise, and for an event without a command. `parsed_commands` of such a line
+  lists the commands before that point only: in
   `cd repo && for d in a b; do rm -rf "$d"` cut after `do`, it is `cd` alone. A rule that
   concludes something from what the list lacks ("no command of this line is X", "every
   command of this line is known") MUST treat an incomplete line as one it has not read.
+
+  A command line is text an agent ran or was made to run, and a few bytes of it can name a
+  great deal: `{a,b}{a,b}{a,b}..` doubles its words with every pair, `{1..999999999}` is
+  sixteen bytes, a `printf` whose format is reused for each argument prints megabytes into
+  a shell, and 4096 bytes hold two thousand one-letter commands, which a rule that compares
+  each command with every other reads four million times. The reference derivation
+  therefore reads a line only within these bounds, and a line past one has no
+  `parsed_commands` and is incomplete, which leaves it to a rule's reading of its text: the
+  brace expansions of the line produce at most 1,024 words, and those of its scripts
+  together as many again; the commands of the line and of the scripts it runs number at
+  most 256 and come to at most 4,096 words. A line cut inside more than 32 open constructs
+  is incomplete with no commands as well. A script is read, and its commands listed, while
+  the scripts of the line come to at most 16 KiB; a script past that is left unread like
+  the code of an interpreter, so the command that runs it has `runs_read` false.
 - `file_writes` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) is a field of each `parsed_commands` entry: the files the command evidently writes,
   a list of `{path, op}` with the `op` values of `file_effects` (`write`, `append`, `touch`,

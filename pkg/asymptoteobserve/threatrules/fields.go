@@ -176,7 +176,9 @@ var derivedFieldDocs = map[string]string{
 		"  one that does not parse yields an empty list.",
 	ParsedIncompletePath: "true when `command.command` was not read to its end (spec v1.3):\n" +
 		"  it does not parse, it ends inside a quote, a here-document, a substitution or a compound\n" +
-		"  command (as a cut capture does), or it is longer than the engine reads.\n" +
+		"  command (as a cut capture does), it is longer than the engine reads, or it names more\n" +
+		"  than the engine reads (more than 256 commands, or a brace expansion of thousands of\n" +
+		"  words; SPEC gives the bounds).\n" +
 		"  `e.command.parsed_commands` then lists the commands before that point only, so a rule\n" +
 		"  that concludes something from a command's absence asks this first.",
 	ToolResultTextPath: "`gen_ai.tool.call.result` as text, only on read-type tool\n" +

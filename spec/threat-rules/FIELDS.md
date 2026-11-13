@@ -223,7 +223,9 @@ never written to or read from the log, so a fixture sets the source field, not t
   one that does not parse yields an empty list.
 - `e.command.parsed_incomplete`: true when `command.command` was not read to its end (spec v1.3):
   it does not parse, it ends inside a quote, a here-document, a substitution or a compound
-  command (as a cut capture does), or it is longer than the engine reads.
+  command (as a cut capture does), it is longer than the engine reads, or it names more
+  than the engine reads (more than 256 commands, or a brace expansion of thousands of
+  words; SPEC gives the bounds).
   `e.command.parsed_commands` then lists the commands before that point only, so a rule
   that concludes something from a command's absence asks this first.
 - `e.gen_ai.system_instructions_text`: `gen_ai.system_instructions` as text: the `content` of each

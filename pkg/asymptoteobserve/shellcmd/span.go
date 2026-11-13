@@ -2,6 +2,7 @@ package shellcmd
 
 import (
 	"slices"
+	"sort"
 	"strings"
 )
 
@@ -56,39 +57,71 @@ func Spans(commands []Command, writes []bool) []string {
 			wrote[top] = true
 		}
 	}
+	// A line of a thousand short commands is four kilobytes, and every command is asked about
+	// every writer before it, so what is asked of a command is worked out once: its own piece,
+	// whether it takes a variable's value, and which commands write or carry a here-document.
+	own := ownPieces(commands)
+	takes := make([]int8, len(commands)) // 0 not asked yet, 1 yes, -1 no
+	takesVar := func(i int) bool {
+		if takes[i] == 0 {
+			takes[i] = -1
+			if takesVariable(commands, i) {
+				takes[i] = 1
+			}
+		}
+		return takes[i] > 0
+	}
+	var writers, hdocs []int
+	for j := range commands {
+		if commands[j].shell != 0 {
+			continue
+		}
+		if wrote[j] {
+			writers = append(writers, j)
+		}
+		if len(commands[j].hdocs) > 0 {
+			hdocs = append(hdocs, j)
+		}
+	}
+	slices.SortStableFunc(writers, func(a, b int) int { return own[a].start - own[b].start })
+	// add joins a piece to the ones before it, which start no later: pieces that overlap or
+	// touch are one.
 	var pieces []piece
+	add := func(p piece) {
+		if n := len(pieces); n > 0 && p.start <= pieces[n-1].end {
+			pieces[n-1].end = max(pieces[n-1].end, p.end)
+		} else {
+			pieces = append(pieces, p)
+		}
+	}
 	for i := range commands {
 		c := &commands[i]
 		if c.shell != 0 {
 			out[i] = out[c.shell-1]
 			continue
 		}
-		pieces = append(pieces[:0], ownPiece(commands, i))
-		fromStart := takesVariable(commands, i)
-		for j := range commands {
-			if d := &commands[j]; d.shell == 0 && d.Offset < c.Offset && wrote[j] {
-				pieces = append(pieces, ownPiece(commands, j))
-				fromStart = fromStart || takesVariable(commands, j)
+		fromStart := takesVar(i)
+		pieces = pieces[:0]
+		placed := false
+		for _, j := range writers {
+			if commands[j].Offset >= c.Offset {
+				continue
 			}
+			if !placed && own[i].start <= own[j].start {
+				add(own[i])
+				placed = true
+			}
+			add(own[j])
+			fromStart = fromStart || takesVar(j)
 		}
-		slices.SortFunc(pieces, func(a, b piece) int { return a.start - b.start })
+		if !placed {
+			add(own[i])
+		}
 		if fromStart {
-			last := pieces[0].end
-			for _, p := range pieces {
-				last = max(last, p.end)
-			}
-			pieces = append(pieces[:0], piece{0, last})
+			// The pieces are in order and apart, so the last one ends last.
+			pieces = append(pieces[:0], piece{0, pieces[len(pieces)-1].end})
 		}
-		// Pieces that overlap or touch are one.
-		merged := pieces[:1]
-		for _, p := range pieces[1:] {
-			if last := &merged[len(merged)-1]; p.start <= last.end {
-				last.end = max(last.end, p.end)
-			} else {
-				merged = append(merged, p)
-			}
-		}
-		out[i] = spanText(commands, c.source, merged)
+		out[i] = spanText(commands, hdocs, c.source, pieces)
 	}
 	return out
 }
@@ -96,61 +129,104 @@ func Spans(commands []Command, writes []bool) []string {
 // piece is a byte range of a command line.
 type piece struct{ start, end int }
 
-// ownPiece is the range of the line that command i, a command of the line itself, covers by
+// ownPieces returns, for each command of the line itself, the range of the line it covers by
 // itself: see Spans.
-func ownPiece(commands []Command, i int) piece {
-	c := &commands[i]
-	p := piece{c.Offset, max(c.end, c.Offset)}
-	if c.scopeEnd > 0 {
-		p.start, p.end = min(p.start, c.scopeStart), max(p.end, c.scopeEnd)
-	}
+func ownPieces(commands []Command) []piece {
+	// The stages of each pipeline in order, each with the earliest offset of a command at that
+	// stage or before it: a command's piece starts at the earliest of the stages before its own.
+	type stageStart struct{ stage, offset int }
+	pipelines := map[int][]stageStart{}
 	for j := range commands {
-		if d := &commands[j]; d.shell == 0 && d.Offset < c.Offset && d.Pipeline == c.Pipeline && d.Stage < c.Stage {
-			p.start = min(p.start, d.Offset)
+		if d := &commands[j]; d.shell == 0 {
+			pipelines[d.Pipeline] = append(pipelines[d.Pipeline], stageStart{d.Stage, d.Offset})
 		}
 	}
-	p.end = min(p.end, len(c.source))
-	p.start = min(p.start, p.end)
-	return p
+	for _, stages := range pipelines {
+		slices.SortStableFunc(stages, func(a, b stageStart) int { return a.stage - b.stage })
+		for k := 1; k < len(stages); k++ {
+			stages[k].offset = min(stages[k].offset, stages[k-1].offset)
+		}
+	}
+	own := make([]piece, len(commands))
+	for i := range commands {
+		c := &commands[i]
+		if c.shell != 0 {
+			continue
+		}
+		p := piece{c.Offset, max(c.end, c.Offset)}
+		if c.scopeEnd > 0 {
+			p.start, p.end = min(p.start, c.scopeStart), max(p.end, c.scopeEnd)
+		}
+		stages := pipelines[c.Pipeline]
+		if k := sort.Search(len(stages), func(k int) bool { return stages[k].stage >= c.Stage }); k > 0 {
+			// Only a command that comes before this one counts; the earliest of the stages
+			// before it is one whenever any is.
+			if first := stages[k-1].offset; first < c.Offset {
+				p.start = min(p.start, first)
+			}
+		}
+		p.end = min(p.end, len(c.source))
+		p.start = min(p.start, p.end)
+		own[i] = p
+	}
+	return own
 }
 
-// spanText writes pieces, which are sorted and do not touch, as one text: each followed by
-// the here-document bodies of its commands that no piece already holds.
-func spanText(commands []Command, source string, pieces []piece) string {
-	inside := func(offset int) bool {
-		return slices.ContainsFunc(pieces, func(p piece) bool { return offset >= p.start && offset < p.end })
+// spanText writes pieces, which are in order and do not touch, as one text: each followed by
+// the here-document bodies of its commands that no piece already holds. hdocs are the commands
+// of the line itself that have a here-document.
+func spanText(commands []Command, hdocs []int, source string, pieces []piece) string {
+	if len(pieces) == 1 && len(hdocs) == 0 {
+		return source[pieces[0].start:pieces[0].end]
 	}
-	var b *strings.Builder
-	for k, p := range pieces {
-		text := source[p.start:p.end]
-		if k > 0 {
-			b.WriteByte('\n')
-			b.WriteString(text)
+	// holding is the piece that holds an offset, or -1.
+	holding := func(offset int) int {
+		k := sort.Search(len(pieces), func(k int) bool { return pieces[k].end > offset })
+		if k < len(pieces) && pieces[k].start <= offset {
+			return k
 		}
-		for j := range commands {
-			d := &commands[j]
-			if d.shell != 0 || d.Offset < p.start || d.Offset >= p.end {
+		return -1
+	}
+	// The bodies that follow each piece, in the order of their commands.
+	type body struct {
+		piece int
+		text  string
+	}
+	var bodies []body
+	size := 0
+	for _, j := range hdocs {
+		d := &commands[j]
+		k := holding(d.Offset)
+		if k < 0 {
+			continue
+		}
+		for _, h := range d.hdocs {
+			if holding(h[0]) >= 0 || h[1] >= len(d.Redirects) {
 				continue
 			}
-			for _, h := range d.hdocs {
-				if inside(h[0]) || h[1] >= len(d.Redirects) {
-					continue
-				}
-				if b == nil {
-					b = &strings.Builder{}
-					b.WriteString(text)
-				}
-				b.WriteByte('\n')
-				b.WriteString(d.Redirects[h[1]].Body)
-			}
-		}
-		if b == nil && len(pieces) > 1 {
-			b = &strings.Builder{}
-			b.WriteString(text)
+			bodies = append(bodies, body{k, d.Redirects[h[1]].Body})
+			size += 1 + len(d.Redirects[h[1]].Body)
 		}
 	}
-	if b == nil {
+	if len(pieces) == 1 && len(bodies) == 0 {
 		return source[pieces[0].start:pieces[0].end]
+	}
+	slices.SortStableFunc(bodies, func(a, b body) int { return a.piece - b.piece })
+	for _, p := range pieces {
+		size += 1 + p.end - p.start
+	}
+	var b strings.Builder
+	b.Grow(size)
+	next := 0
+	for k, p := range pieces {
+		if k > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(source[p.start:p.end])
+		for ; next < len(bodies) && bodies[next].piece == k; next++ {
+			b.WriteByte('\n')
+			b.WriteString(bodies[next].text)
+		}
 	}
 	return b.String()
 }
