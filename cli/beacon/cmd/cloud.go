@@ -104,13 +104,17 @@ var cloudCursorPrintHooksCmd = &cobra.Command{
 
 var cloudCursorPrintSetupCmd = &cobra.Command{
 	Use:          "print-setup",
-	Short:        "Print a Cursor cloud agent binary setup script",
+	Short:        "Print a Cursor cloud environment install script that installs Beacon and its hooks",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(cloudOpts.version) == "" {
 			return fmt.Errorf("--version is required")
 		}
-		fmt.Print(renderCursorCloudSetup(cloudOpts.version))
+		rendered, err := renderCursorCloudSetup(cloudOpts.version, cloudOpts.safeHooks)
+		if err != nil {
+			return err
+		}
+		fmt.Print(rendered)
 		return nil
 	},
 }
@@ -159,6 +163,7 @@ func init() {
 	cloudCursorPrintHooksCmd.Flags().StringVar(&cloudOpts.logPath, "log-path", "/tmp/beacon/runtime.jsonl", "Cloud sandbox runtime JSONL path")
 	cloudCursorPrintHooksCmd.Flags().BoolVar(&cloudOpts.safeHooks, "safe-hooks", false, "Skip Cursor cloud shell/edit-specific hooks while testing telemetry forwarding")
 	cloudCursorPrintSetupCmd.Flags().StringVar(&cloudOpts.version, "version", "", "Beacon release tag to download, such as v0.0.50")
+	cloudCursorPrintSetupCmd.Flags().BoolVar(&cloudOpts.safeHooks, "safe-hooks", false, "Skip Cursor cloud shell/edit-specific hooks while testing telemetry forwarding")
 
 	cloudGCSSetupCmd.Flags().StringVar(&cloudOpts.project, "project", "", "Google Cloud project ID")
 	cloudGCSSetupCmd.Flags().StringVar(&cloudOpts.bucket, "bucket", "", "GCS bucket for cloud agent telemetry")
@@ -276,9 +281,27 @@ echo "Beacon hooks installed at $REPO_ROOT/.claude/settings.local.json"
 `, version)
 }
 
-func renderCursorCloudSetup(version string) string {
-	return fmt.Sprintf(`set -euo pipefail
-mkdir -p /tmp/beacon/bin /tmp/beacon/logs
+// renderCursorCloudSetup is the install script for a Cursor cloud environment. Cursor runs it when it
+// creates a Build, before any agent starts, and the Build keeps what it wrote. It installs
+// beacon-hooks and writes the project hooks into the checkout, listed in .git/info/exclude so the
+// agent never sees them as a change to commit: nothing is committed, and the hooks never run in
+// anyone's local Cursor. A repository that commits its own .cursor/hooks.json is left alone.
+//
+// Writing the hooks here was tried once before and dropped, when Cursor ran the setup script after
+// an agent had already loaded its hooks. Builds changed that order.
+func renderCursorCloudSetup(version string, safeHooks bool) (string, error) {
+	hooks, err := endpointhooks.RenderCursorCloudHooks(endpointhooks.CursorCloudOptions{
+		BinaryPath: "/tmp/beacon/bin/beacon-hooks",
+		LogPath:    "/tmp/beacon/runtime.jsonl",
+		SafeHooks:  safeHooks,
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(`#!/usr/bin/env bash
+# Beacon for Cursor cloud agents. Paste into the environment's Install script.
+set -euo pipefail
+mkdir -p /tmp/beacon/bin
 
 BEACON_VERSION=%q
 OS="linux"
@@ -291,13 +314,26 @@ esac
 ARCHIVE="beacon_${BEACON_VERSION#v}_${OS}_${ARCH}.tar.gz"
 BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/${BEACON_VERSION}"
 curl -fsSL "${BASE}/${ARCHIVE}" -o "/tmp/beacon/${ARCHIVE}"
-tar -xzf "/tmp/beacon/${ARCHIVE}" -C /tmp/beacon/bin
-chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks 2>/dev/null || true
+tar -xzf "/tmp/beacon/${ARCHIVE}" -C /tmp/beacon/bin beacon-hooks
+rm -f "/tmp/beacon/${ARCHIVE}"
+chmod +x /tmp/beacon/bin/beacon-hooks
+echo "Beacon installed /tmp/beacon/bin/beacon-hooks"
 
-echo "Beacon binaries installed in /tmp/beacon/bin"
-echo "Commit a project-level .cursor/hooks.json before starting Cursor Cloud Agents:"
-echo "  beacon cloud cursor print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .cursor/hooks.json"
-`, version)
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if git -C "$REPO_ROOT" ls-files --error-unmatch .cursor/hooks.json >/dev/null 2>&1; then
+  echo "This repository commits its own .cursor/hooks.json, so Beacon left it alone."
+  echo "Add Beacon's hooks to it: beacon cloud cursor print-hooks --binary-path /tmp/beacon/bin/beacon-hooks"
+  exit 0
+fi
+mkdir -p "$REPO_ROOT/.cursor"
+cat > "$REPO_ROOT/.cursor/hooks.json" <<'BEACON_HOOKS'
+%sBEACON_HOOKS
+# info/exclude is never committed, so the agent does not see the hooks file as a change.
+EXCLUDE="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)/info/exclude"
+mkdir -p "$(dirname "$EXCLUDE")"
+grep -qxF '.cursor/hooks.json' "$EXCLUDE" 2>/dev/null || echo '.cursor/hooks.json' >> "$EXCLUDE"
+echo "Beacon wrote $REPO_ROOT/.cursor/hooks.json"
+`, version, hooks), nil
 }
 
 func runCloudGCSSetup(cmd *cobra.Command, args []string) error {
