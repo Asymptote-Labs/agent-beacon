@@ -464,7 +464,8 @@
             "root": "guides/use-cases",
             "pages": [
               "guides/agent-runtime-telemetry",
-              "guides/inventory"
+              "guides/inventory",
+              "guides/multi-user-system-hooks"
             ]
           },
           {
