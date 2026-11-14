@@ -1,0 +1,80 @@
+---
+title: "System Hooks for Multiple OS Users"
+description: "Install Beacon endpoint hooks for several OS accounts on one host without stamping them into the wrong home"
+---
+
+## Overview
+
+On shared or multi-compartment hosts, `beacon endpoint hooks install --system` resolves the runtime user's home directory from the *invoking* environment. Run it as root without care and the managed plugin lands in root's home — the target user's runtime never loads it, and no error tells you why.
+
+Use this guide when several OS accounts on one machine each need hook-based telemetry (for example per-user sandboxes, shared build hosts, or lab machines), and you want system paths with per-user runtime ownership.
+
+## The pitfall
+
+```bash title="What goes wrong"
+sudo beacon endpoint hooks install --harness opencode --system
+# plugin is stamped under /root/.config/opencode/... — not the runtime user's
+```
+
+`--system` selects system *paths* for the hook binary and log, but the plugin destination is still derived from `$HOME`. Invoked as root, `$HOME` is `/root`.
+
+## The working pattern
+
+Install with the target user's home, then hand ownership to that user:
+
+```bash title="Install for a specific OS user"
+env HOME=/home/alice beacon endpoint hooks install --harness opencode --system
+chown -R alice:alice /home/alice/.config/opencode/plugins /home/alice/.beacon
+```
+
+Repeat per account. Each user gets the managed plugin under their own config root, stamped with the system hook binary and system runtime log.
+
+## Verify with a real event, not the status verb
+
+`beacon endpoint hooks status` resolves its expected paths from the invoking user's worldview, so it can report `installed=false` even when the runtime path is complete and working. Trust two things instead:
+
+1. The stamped command in the hook config (for example the `beacon-hooks ... <harness>-event` invocation inside the managed plugin).
+2. A real event in the system runtime log after activity.
+
+```bash title="Synthetic verification event"
+echo '{"type":"chat.message","session_id":"t","prompt":"x"}' \
+  | /etc/beacon/endpoint/hooks/beacon-hooks --platform opencode \
+      --log /var/log/beacon-agent/runtime.jsonl \
+      --config /etc/beacon/endpoint/config.json opencode-event
+# expect a prompt.submitted line in /var/log/beacon-agent/runtime.jsonl
+```
+
+A wrong or unknown `type` returns `{}` and writes nothing, so match the event name to the harness contract.
+
+## Socket directory ownership
+
+The ingest socket is only used when both the socket and its directory are root-owned. If the collector was ever started as a non-root user, fix the directory before restart:
+
+```bash title="Restore socket directory trust"
+mkdir -p /var/run/beacon-agent && chown root:root /var/run/beacon-agent
+```
+
+Otherwise hooks fall back to direct log append and the socket sits unused.
+
+## Hooks inside containers and sandboxes
+
+Hook commands that execute inside bubblewrap-style sandboxes cannot pass the ingest socket's trust walk, because the container's filesystem root is owned by the launching user. Since v1.3.61, a hook that cannot reach the ingest socket, the runtime log, or an account spool — for example inside a sandbox that confines writes to the session workspace — stages its event under `<workspace>/.beacon/spool/<harness>/<session>/`. Beacon drains those spools for sessions it has already recorded and for every session under the configured `workspace_spool_roots`:
+
+```bash title="Drain staged spool events"
+beacon endpoint spool
+```
+
+To cover workspaces outside the recorded sessions, add their roots to the endpoint config:
+
+```bash title="Cover additional workspace roots"
+beacon endpoint config set workspace_spool_roots /srv/sandboxes,/home
+```
+
+See the v1.3.61 spool release notes for the draining behavior.
+
+## Checklist
+
+- [ ] One install per OS user, each with `env HOME=<user home>`
+- [ ] `chown -R <user>:` on the plugin directory and `~<user>/.beacon`
+- [ ] `/var/run/beacon-agent` root-owned before collector restart
+- [ ] Verified with a real event in `/var/log/beacon-agent/runtime.jsonl`
