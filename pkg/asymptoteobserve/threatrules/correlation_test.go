@@ -76,6 +76,22 @@ func TestCorrelationCrossSession(t *testing.T) {
 	}
 }
 
+func TestCorrelationSessionlessEventsDoNotMatch(t *testing.T) {
+	c := readThenEgressRule(t)
+	// Two events that satisfy the step matches but have no session ID must not be
+	// falsely correlated into a session.
+	v, err := c.Evaluate([]asymptoteobserve.Event{
+		corrEvent("2026-06-13T10:00:00Z", "file.read", "", withEnv),
+		corrEvent("2026-06-13T10:00:30Z", "command.executed", "", withCurl),
+	})
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if v != VerdictNoMatch {
+		t.Fatalf("sessionless events want no_match, got %s", v)
+	}
+}
+
 func TestCorrelationUnrelatedEventBetweenSteps(t *testing.T) {
 	c := readThenEgressRule(t)
 	v, err := c.Evaluate([]asymptoteobserve.Event{
