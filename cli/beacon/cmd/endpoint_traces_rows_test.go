@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"strings"
@@ -161,5 +162,31 @@ func TestTraceShowCommandMetadataKeepsIndentedCommand(t *testing.T) {
 	assertTraceMetadataRow(t, rows[1], 3, strings.Join(strings.Fields(command), " "))
 	if !strings.HasSuffix(output, indentTraceText(command)+"\n") {
 		t.Fatalf("raw command detail changed: %q", output)
+	}
+}
+
+func TestTracesCommandsRespectCommandOut(t *testing.T) {
+	logPath, _, _ := traceHistoryFixture(t, false, "")
+	data, _ := json.Marshal(map[string]interface{}{
+		"timestamp": "2026-10-12T10:00:00Z",
+		"event":     map[string]interface{}{"id": "e1", "action": "prompt.submitted", "category": "prompt"},
+		"harness":   map[string]interface{}{"name": "cursor"},
+		"session":   map[string]interface{}{"id": "s1"},
+		"prompt":    map[string]interface{}{"text": "test prompt redirection"},
+	})
+	_ = os.WriteFile(logPath, append(data, '\n'), 0600)
+
+	previous := endpointTraceOpts
+	t.Cleanup(func() { endpointTraceOpts = previous })
+
+	var buf bytes.Buffer
+	endpointTracesSearchCmd.SetOut(&buf)
+	endpointTraceOpts.resultLevel = "trace"
+	endpointOpts.jsonOutput = false
+	if err := endpointTracesSearchCmd.RunE(endpointTracesSearchCmd, []string{"redirection"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "cursor") {
+		t.Fatalf("expected output in buffer, got: %q", buf.String())
 	}
 }
