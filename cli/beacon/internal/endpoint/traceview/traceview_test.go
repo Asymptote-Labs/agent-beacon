@@ -348,3 +348,16 @@ func TestSharingLabelsAndRefreshHint(t *testing.T) {
 		t.Fatalf("lines = %q", lines)
 	}
 }
+
+func TestPageDownWithEmptyTracesDoesNotPanic(t *testing.T) {
+	model := NewModel(nil)
+	model.loading = false
+	model.traces = nil
+	model.width, model.height = 100, 30
+	next, _ := model.Update(key("pgdown"))
+	m := next.(Model)
+	if m.selected < 0 {
+		t.Fatalf("selected was negative: %d", m.selected)
+	}
+	_ = m.View()
+}

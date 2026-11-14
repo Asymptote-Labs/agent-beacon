@@ -169,7 +169,7 @@ func (m Model) loadList() tea.Cmd {
 }
 
 func (m Model) loadDetail() tea.Cmd {
-	if len(m.traces) == 0 {
+	if len(m.traces) == 0 || m.selected < 0 || m.selected >= len(m.traces) {
 		return nil
 	}
 	id := m.traces[m.selected].ID
@@ -289,7 +289,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "pgdown":
 		m.selected += m.visibleTraceCount()
 		if m.selected >= len(m.traces) {
-			m.selected = len(m.traces) - 1
+			m.selected = max(0, len(m.traces)-1)
 		}
 		m.ensureVisible()
 	case "enter":
@@ -483,7 +483,7 @@ func (m Model) detailView() string {
 	var b strings.Builder
 	trace := m.detail.Trace
 	title := trace.Title
-	if title == "" && len(m.traces) > 0 {
+	if title == "" && len(m.traces) > 0 && m.selected >= 0 && m.selected < len(m.traces) {
 		title = m.traces[m.selected].Title
 	}
 	b.WriteString("  " + accentStyle.Render(truncate(title, max(20, m.width-4))) + "\n")
