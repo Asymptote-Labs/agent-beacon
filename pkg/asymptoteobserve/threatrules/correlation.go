@@ -237,6 +237,7 @@ func (c *CompiledRule) assignFrom(events []asymptoteobserve.Event, hits [][]int,
 
 // groupBySession partitions events by session.id, preserving per-group input order and
 // recording the order in which sessions first appear for deterministic evaluation.
+// Events without a session id are excluded from session-scoped correlation.
 func groupBySession(events []asymptoteobserve.Event) (map[string][]asymptoteobserve.Event, []string) {
 	groups := make(map[string][]asymptoteobserve.Event)
 	var order []string
@@ -244,6 +245,9 @@ func groupBySession(events []asymptoteobserve.Event) (map[string][]asymptoteobse
 		sid := ""
 		if events[i].Session != nil {
 			sid = events[i].Session.ID
+		}
+		if sid == "" {
+			continue
 		}
 		if _, seen := groups[sid]; !seen {
 			order = append(order, sid)
