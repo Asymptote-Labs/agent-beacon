@@ -812,3 +812,47 @@ func marshalEvents(t *testing.T, events ...schema.Event) [][]byte {
 	}
 	return lines
 }
+
+func TestInsertEventRecord(t *testing.T) {
+	t0, _ := time.Parse(time.RFC3339, "2026-05-13T01:00:00Z")
+	t1 := t0.Add(1 * time.Minute)
+	t2 := t0.Add(2 * time.Minute)
+	t3 := t0.Add(3 * time.Minute)
+
+	r0 := EventRecord{ID: "line-1", Parsed: t0}
+	r1 := EventRecord{ID: "line-2", Parsed: t1}
+	r2 := EventRecord{ID: "line-3", Parsed: t2}
+	r3 := EventRecord{ID: "line-4", Parsed: t3}
+
+	// Insert into empty list with limit 2
+	var events []EventRecord
+	events = insertEventRecord(events, r1, 2)
+	if len(events) != 1 || events[0].ID != "line-2" {
+		t.Fatalf("unexpected events after first insert: %+v", events)
+	}
+
+	// Insert older event (should go to end)
+	events = insertEventRecord(events, r0, 2)
+	if len(events) != 2 || events[0].ID != "line-2" || events[1].ID != "line-1" {
+		t.Fatalf("unexpected events after second insert: %+v", events)
+	}
+
+	// Insert event older than the oldest (r0) with limit 2 (should be rejected in O(1))
+	old := EventRecord{ID: "line-0", Parsed: t0.Add(-1 * time.Minute)}
+	events = insertEventRecord(events, old, 2)
+	if len(events) != 2 || events[0].ID != "line-2" || events[1].ID != "line-1" {
+		t.Fatalf("unexpected events after older insert: %+v", events)
+	}
+
+	// Insert newer event (r2) - should displace r0 and be at the front
+	events = insertEventRecord(events, r2, 2)
+	if len(events) != 2 || events[0].ID != "line-3" || events[1].ID != "line-2" {
+		t.Fatalf("unexpected events after newer insert: %+v", events)
+	}
+
+	// Insert newest event (r3) - should displace r1
+	events = insertEventRecord(events, r3, 2)
+	if len(events) != 2 || events[0].ID != "line-4" || events[1].ID != "line-3" {
+		t.Fatalf("unexpected events after newest insert: %+v", events)
+	}
+}

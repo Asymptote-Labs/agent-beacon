@@ -638,20 +638,40 @@ func readEventsFromSource(source eventSource, query EventQuery, result *EventRes
 			continue
 		}
 		result.TotalMatched++
-		result.Events = append(result.Events, record)
-		if !query.NoLimit {
-			sort.SliceStable(result.Events, func(i, j int) bool {
-				return recordBefore(result.Events[j], result.Events[i])
-			})
-			if len(result.Events) > limit {
-				result.Events = result.Events[:limit]
-			}
+		if query.NoLimit {
+			result.Events = append(result.Events, record)
+		} else {
+			result.Events = insertEventRecord(result.Events, record, limit)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return err
 	}
 	return nil
+}
+
+// insertEventRecord inserts record into events (which is maintained newest-first) up to limit items.
+// When events already holds limit records and record is older than or equal to the oldest record,
+// it is discarded in O(1) time without re-sorting or memory allocations.
+func insertEventRecord(events []EventRecord, record EventRecord, limit int) []EventRecord {
+	if len(events) == 0 {
+		return append(events, record)
+	}
+	if len(events) >= limit && !recordBefore(events[len(events)-1], record) {
+		return events
+	}
+	idx := sort.Search(len(events), func(i int) bool {
+		return recordBefore(events[i], record)
+	})
+	if len(events) < limit {
+		events = append(events, EventRecord{})
+	}
+	copy(events[idx+1:], events[idx:])
+	events[idx] = record
+	if len(events) > limit {
+		events = events[:limit]
+	}
+	return events
 }
 
 func FindEvent(path, id string) (EventRecord, bool, error) {
