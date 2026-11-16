@@ -187,11 +187,14 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		PresetDestination: preset,
 		PresetPrivacyMode: profile.Onboarding.PrivacyMode,
 		OfferAgentTools:   true,
-		BackfillDays:      endpointBackfillDays(),
-		NoBrowser:         endpointOpts.noBrowser,
-		NoDisplay:         onboardingDisplayCheck(),
-		Now:               onboardingClock,
-		SignInTimeout:     account.LoginWait,
+		// Only for a person who finishes without an account, and not when this install was
+		// already given an email (--email, BEACON_EMAIL, recorded in the profile).
+		AskEmail:      profile.Onboarding.Email == "",
+		BackfillDays:  endpointBackfillDays(),
+		NoBrowser:     endpointOpts.noBrowser,
+		NoDisplay:     onboardingDisplayCheck(),
+		Now:           onboardingClock,
+		SignInTimeout: account.LoginWait,
 		// Signing in happens inside the wizard so the full-screen UI is never torn
 		// down around it. The wizard itself stays free of network code: this is the
 		// only place onboarding reaches beacon.sh, and it hands back an email, never
@@ -259,6 +262,10 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		// user -- and recording it would name someone who did not authorize this
 		// run, under an outcome that says they did.
 		status = account.Status{}
+		recordWizardEmail(result)
+		if result.Email != "" {
+			profile.Onboarding.Email = result.Email
+		}
 	}
 
 	privacyMode := ""

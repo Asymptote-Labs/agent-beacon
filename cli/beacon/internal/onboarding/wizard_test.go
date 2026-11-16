@@ -665,3 +665,74 @@ func TestConfirmScreenNamesTheSessionBackfill(t *testing.T) {
 		}
 	}
 }
+
+// recoverWithoutAccount fails a sign-in and chooses to finish without an account.
+func recoverWithoutAccount(t *testing.T, askEmail bool) wizardModel {
+	t.Helper()
+	model := signInWizard(t, neverReturns)
+	model.options.AskEmail = askEmail
+	model.screen = signInScreen
+	model, _ = advanceWizard(t, model, "enter")
+	next, _ := model.Update(signInDoneMsg{attempt: 1, err: errors.New("connection refused")})
+	model = next.(wizardModel)
+	for i, choice := range model.recoveryChoices() {
+		if choice.id == "local" {
+			model.selected = i
+		}
+	}
+	model, _ = advanceWizard(t, model, "enter")
+	return model
+}
+
+func TestWizardAsksForAnOptionalEmailWithoutAnAccount(t *testing.T) {
+	model := recoverWithoutAccount(t, true)
+	if model.screen != emailScreen {
+		t.Fatalf("screen = %v, want the email question", model.screen)
+	}
+	// Letters type, including the ones that move a picker's cursor.
+	for _, key := range []string{"j", "k", "@acme", ".io"} {
+		model, _ = advanceWizard(t, model, key)
+	}
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	model = next.(wizardModel)
+	model, _ = advanceWizard(t, model, "o")
+	if model.emailInput != "jk@acme.io" {
+		t.Fatalf("input = %q", model.emailInput)
+	}
+	model, _ = advanceWizard(t, model, "enter")
+	if model.screen != confirmScreen || !model.result.EmailAsked || model.result.Email != "jk@acme.io" {
+		t.Fatalf("screen %v result %#v", model.screen, model.result)
+	}
+	if flat := strings.Join(strings.Fields(model.View()), " "); !strings.Contains(flat, "Email: jk@acme.io") {
+		t.Fatalf("the confirm screen does not show the email:\n%s", flat)
+	}
+}
+
+func TestWizardEmailQuestionRejectsAnInvalidAddressAndCanBeSkipped(t *testing.T) {
+	model := recoverWithoutAccount(t, true)
+	model, _ = advanceWizard(t, model, "not an email")
+	model, _ = advanceWizard(t, model, "enter")
+	if model.screen != emailScreen || model.emailErr == "" || model.result.EmailAsked {
+		t.Fatalf("an invalid address was accepted: screen %v err %q", model.screen, model.emailErr)
+	}
+	model.emailInput = ""
+	model, _ = advanceWizard(t, model, "enter")
+	if model.screen != confirmScreen || !model.result.EmailAsked || model.result.Email != "" {
+		t.Fatalf("a blank answer did not skip: screen %v result %#v", model.screen, model.result)
+	}
+}
+
+func TestWizardEmailQuestionEscCancels(t *testing.T) {
+	model := recoverWithoutAccount(t, true)
+	model, command := advanceWizard(t, model, "esc")
+	if command == nil || model.result.Completed {
+		t.Fatalf("esc did not cancel: %#v", model.result)
+	}
+}
+
+func TestWizardSkipsTheEmailQuestionWhenNotAsked(t *testing.T) {
+	model := recoverWithoutAccount(t, false)
+	if model.screen != confirmScreen || model.result.EmailAsked {
+		t.Fatalf("screen %v result %#v", model.screen, model.result)
+	}
+}
