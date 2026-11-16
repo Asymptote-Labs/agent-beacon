@@ -210,6 +210,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (_ *ConnectResult, err er
 	if enrollOpts.Device.InstallMode == "" {
 		enrollOpts.Device.InstallMode = installMode(opts.UserMode)
 	}
+	enrollOpts.Device.PrivacyMode = privacyMode
 	if enrollOpts.Out == nil {
 		enrollOpts.Out = out
 	}
@@ -361,6 +362,12 @@ func Connect(ctx context.Context, opts ConnectOptions) (_ *ConnectResult, err er
 	if err := clearConnectPending(opts.UserMode); err != nil {
 		return nil, fmt.Errorf("could not record that connect finished: %w", err)
 	}
+	// Once per connect, a backfill of nothing included, and never a reason to fail it.
+	report := BackfillReport{}
+	if backfill != nil {
+		report.SessionCount, report.EventCount = backfill.Sessions, backfill.Events
+	}
+	sendBackfillReport(ctx, opts.UserMode, result.IngestURL, report)
 	return &ConnectResult{
 		Enrollment:     enrollment,
 		VectorConfig:   configPath,

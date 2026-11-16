@@ -86,6 +86,9 @@ type fakeVectorSpec struct {
 }
 
 func TestMain(m *testing.M) {
+	// Connect reports its backfill to the ingest host the fake enrollment names; tests that check
+	// the report record it themselves.
+	sendBackfillReport = func(context.Context, bool, string, BackfillReport) {}
 	run := runCommandOutput
 	runCommandOutput = func(bin string, args ...string) ([]byte, error) {
 		if spec, ok := readFakeVector(bin); ok {
