@@ -13,8 +13,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 )
 
 // ProfilePath is the profile location relative to the user's home directory.
@@ -167,7 +165,7 @@ func Save(p Profile) error {
 	}
 	// Replaced atomically: other beacon processes read the profile at any time (telemetry reads it
 	// on every command), and a half-written file reads as an empty profile.
-	return atomicfile.Write(path, append(data, '\n'), 0o600)
+	return writeProfile(path, append(data, '\n'), os.Rename)
 }
 
 // ErrUnreadableProfile is returned by StoredInstallID when profile.json exists but cannot be
@@ -221,6 +219,15 @@ func createOnly(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	return writeProfile(path, data, os.Link)
+}
+
+// writeProfile writes data to a 0600 temp file beside path and moves it into place with place
+// (os.Rename to replace, os.Link to create only). The temp file takes the owner of the profile it
+// replaces: root running with a person's HOME (sudo on macOS keeps it) would otherwise leave a
+// root-owned profile that person can no longer read, re-running onboarding and turning telemetry
+// off for them.
+func writeProfile(path string, data []byte, place func(oldpath, newpath string) error) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
 	if err != nil {
 		return err
@@ -231,6 +238,10 @@ func createOnly(path string, data []byte) error {
 		tmp.Close()
 		return err
 	}
+	if err := keepOwner(tmp, path); err != nil {
+		tmp.Close()
+		return err
+	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err
@@ -238,7 +249,7 @@ func createOnly(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Link(tmpName, path)
+	return place(tmpName, path)
 }
 
 // NewInstallID returns a random 128-bit hex identifier.
