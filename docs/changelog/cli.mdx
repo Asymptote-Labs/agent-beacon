@@ -13,6 +13,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 Changes on `main` since v1.3.61. They ship in the next release.
 
+- **A hook with a fractional timeout no longer breaks install** · Claude Code's settings allow a hook's `timeout` to be any number of seconds, such as `2.5`, but Beacon read it as a whole number. One such hook of your own in `~/.claude/settings.json`, or in the Codex, Factory Droid or Qwen Code settings Beacon writes to, made `beacon endpoint install` and `repair` fail with `cannot unmarshal number 2.5`, made status report Beacon's hooks as missing, and stopped uninstall from removing them. All of these now work, and your hook is kept as you wrote it.
+
 ## November 2026
 
 ### v1.3.61 · November 13, 2026
