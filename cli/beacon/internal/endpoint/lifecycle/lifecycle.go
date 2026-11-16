@@ -25,6 +25,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -192,6 +193,13 @@ func inventoryJobEnv(userMode bool) map[string]string {
 		}
 	}
 	for _, name := range inventoryJobNameEnv {
+		if value, ok := os.LookupEnv(name); ok {
+			env[name] = value
+		}
+	}
+	// The CLI telemetry opt-out is read by every beacon command, the job's included, so one set in
+	// the install's shell holds for the job too.
+	for _, name := range telemetry.OptOutVariables {
 		if value, ok := os.LookupEnv(name); ok {
 			env[name] = value
 		}

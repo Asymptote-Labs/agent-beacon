@@ -54,7 +54,11 @@ type Options struct {
 	Environ func() []string
 	// Stderr receives the first-run notice.
 	Stderr io.Writer
-	Now    func() time.Time
+	// Interactive is true when Stderr is a terminal a person is reading. The notice is printed
+	// and recorded as shown only then, so a background job, an internal child process or a
+	// redirected run leaves it for the person's own first command.
+	Interactive bool
+	Now         func() time.Time
 }
 
 // recorder is the enabled state of one process.
@@ -77,7 +81,7 @@ var (
 
 // Init turns telemetry on for this process unless it is a development build or the environment
 // opts out. It makes sure the machine's install ID exists in profile.json, prints the first-run
-// notice once, and never touches the network: the PostHog client starts with the first event.
+// notice once to an interactive terminal, and never touches the network: the PostHog client starts with the first event.
 func Init(opts Options) {
 	r := newRecorder(opts)
 	mu.Lock()
@@ -115,24 +119,21 @@ func newRecorder(opts Options) *recorder {
 	}
 	persist := homeWritable(home)
 
-	profile := onboarding.Load()
-	if profile.InstallID == "" {
-		if _, err := onboarding.EnsureInstallID(&profile); err != nil {
-			return nil
-		}
-		// Onboarding mints the ID too, but saves it only when it records an answer, so an install
-		// that never ran the wizard would get a new anonymous ID on every run.
-		if persist {
-			_ = onboarding.Save(profile)
-		}
+	// Onboarding mints the ID too, but saves it only when it records an answer, so an install that
+	// never ran the wizard would get a new anonymous ID on every run. StoredInstallID only ever
+	// creates a missing profile: one it cannot read is left alone and this run sends nothing.
+	installID, err := onboarding.StoredInstallID(persist)
+	if err != nil {
+		return nil
 	}
 
 	st := loadState(home)
-	if st.NoticeShownAt == "" && opts.Stderr != nil {
-		fmt.Fprintln(opts.Stderr, Notice)
+	if st.NoticeShownAt == "" && opts.Stderr != nil && opts.Interactive && persist {
+		// Recorded before it is printed, so a notice that could not be recorded is not printed and
+		// is never shown again on every run.
 		st.NoticeShownAt = now().UTC().Format(time.RFC3339)
-		if persist {
-			_ = saveState(home, st)
+		if saveState(home, st) == nil {
+			fmt.Fprintln(opts.Stderr, Notice)
 		}
 	}
 
@@ -143,8 +144,8 @@ func newRecorder(opts Options) *recorder {
 	r := &recorder{
 		home:       home,
 		persist:    persist,
-		installID:  profile.InstallID,
-		distinctID: profile.InstallID,
+		installID:  installID,
+		distinctID: installID,
 		supers: posthog.Properties{
 			PropProduct:       ProductBeacon,
 			PropSurface:       SurfaceCLI,

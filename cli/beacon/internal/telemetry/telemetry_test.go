@@ -82,6 +82,7 @@ func options(env map[string]string, stderr io.Writer) Options {
 		Getenv:      func(key string) string { return env[key] },
 		Environ:     func() []string { return environ },
 		Stderr:      stderr,
+		Interactive: true,
 	}
 }
 
@@ -250,6 +251,97 @@ func TestInitSavesTheInstallIDAndPrintsTheNoticeOnce(t *testing.T) {
 	}
 	if again := onboarding.Load(); again.InstallID != profile.InstallID {
 		t.Fatalf("install ID changed from %s to %s", profile.InstallID, again.InstallID)
+	}
+}
+
+// A run nobody reads (a scheduled job, an internal child, redirected output) must not use up the
+// notice: it is neither printed nor recorded, and the person's first terminal run still shows it.
+func TestNonInteractiveRunLeavesTheNoticeForTheFirstInteractiveOne(t *testing.T) {
+	_, home := setup(t, nil)
+	var stderr bytes.Buffer
+	opts := options(nil, &stderr)
+	opts.Interactive = false
+	Init(opts)
+	if !Enabled() {
+		t.Fatal("telemetry is off in a non-interactive run")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("non-interactive run printed %q", stderr.String())
+	}
+	if st := loadState(home); st.NoticeShownAt != "" {
+		t.Fatalf("non-interactive run recorded the notice as shown at %s", st.NoticeShownAt)
+	}
+
+	Init(options(nil, &stderr))
+	if got := strings.Count(stderr.String(), Notice); got != 1 {
+		t.Fatalf("first interactive run printed the notice %d times: %q", got, stderr.String())
+	}
+}
+
+// The notice promises to be printed once, so one that cannot be recorded is not printed at all.
+func TestNoticeIsNotPrintedWhenItCannotBeRecorded(t *testing.T) {
+	_, home := setup(t, nil)
+	// A directory where the state file goes makes every save fail.
+	if err := os.MkdirAll(filepath.Join(home, StatePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	for i := 0; i < 2; i++ {
+		Init(options(nil, &stderr))
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("an unrecordable notice was printed: %q", stderr.String())
+	}
+}
+
+// Telemetry reads the install ID from an onboarded profile and never rewrites it.
+func TestInitKeepsAnExistingProfile(t *testing.T) {
+	setup(t, nil)
+	if err := onboarding.Save(onboarding.Profile{InstallID: "existing-id", Onboarding: onboarding.Onboarding{Email: "ada@example.com", CompletedAt: "2026-11-01T00:00:00Z"}}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(onboarding.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	Init(options(nil, io.Discard))
+	if !Enabled() {
+		t.Fatal("telemetry is off with an onboarded profile")
+	}
+	if got := active().installID; got != "existing-id" {
+		t.Fatalf("install ID = %q, want the profile's", got)
+	}
+	after, err := os.ReadFile(onboarding.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("profile rewritten:\n%s\nwas:\n%s", after, before)
+	}
+}
+
+// A profile that does not parse (a newer schema, a write in progress) is left as it is and the run
+// sends nothing, rather than replaced by one holding only a new install ID.
+func TestInitNeverOverwritesAProfileItCannotRead(t *testing.T) {
+	s, _ := setup(t, nil)
+	if err := os.MkdirAll(filepath.Dir(onboarding.Path()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := []byte(`{"email":"ada@example.com","onboarding":`)
+	if err := os.WriteFile(onboarding.Path(), corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	Init(options(nil, io.Discard))
+	if Enabled() {
+		t.Fatal("telemetry is on without a readable install ID")
+	}
+	Capture("cli_test", nil)
+	Close()
+	if len(s.all()) != 0 {
+		t.Fatalf("sent %d messages", len(s.all()))
+	}
+	if got, err := os.ReadFile(onboarding.Path()); err != nil || !bytes.Equal(got, corrupt) {
+		t.Fatalf("profile = %q, %v; want it untouched", got, err)
 	}
 }
 

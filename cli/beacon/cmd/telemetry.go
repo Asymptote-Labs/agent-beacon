@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"io"
 	"os"
 	"strings"
 
@@ -20,11 +21,27 @@ func startTelemetry(cmd *cobra.Command, _ []string) {
 	if !telemetryApplies(cmd) {
 		return
 	}
+	stderr := cmd.ErrOrStderr()
 	telemetryInit(telemetry.Options{
 		Version:     version.GetVersion(),
 		InstallMode: telemetryInstallMode(cmd),
-		Stderr:      cmd.ErrOrStderr(),
+		Stderr:      stderr,
+		Interactive: telemetryInteractive(cmd, stderr),
 	})
+}
+
+// telemetryInteractive reports whether a person is reading this command's stderr, which is when the
+// first-run notice may be shown. Hidden commands are internal children and scheduled jobs (the
+// inventory job, the console-user runs of the package scripts, `version refresh`), whose stderr
+// goes to a log or a buffer nobody reads even when it happens to be a terminal.
+var telemetryInteractive = func(cmd *cobra.Command, stderr io.Writer) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Hidden {
+			return false
+		}
+	}
+	file, ok := stderr.(*os.File)
+	return ok && isTerminal(file) && !strings.EqualFold(os.Getenv("TERM"), "dumb")
 }
 
 // telemetryApplies keeps telemetry out of the commands that are not a person running Beacon:

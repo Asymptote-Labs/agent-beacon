@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sentinel"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 )
 
 // TestMain puts stand-ins for the service managers first on PATH for the whole package.
@@ -22,10 +23,10 @@ import (
 //
 // It also clears CLAUDE_CONFIG_DIR, which a developer's shell may set: tests that write Claude Code
 // settings assume ~/.claude unless they set the variable themselves. It unsets the variables
-// inventoryJobEnv records whenever they are set, so the job-env tests see only what they set.
+// inventoryJobEnv records whenever they are set (the telemetry opt-out included), so the job-env tests see only what they set.
 func TestMain(m *testing.M) {
 	_ = os.Unsetenv("CLAUDE_CONFIG_DIR")
-	for _, name := range append(append([]string{}, inventoryJobPathEnv...), inventoryJobNameEnv...) {
+	for _, name := range append(append(append([]string{}, inventoryJobPathEnv...), inventoryJobNameEnv...), telemetry.OptOutVariables...) {
 		_ = os.Unsetenv(name)
 	}
 	// Tests that run a system install or uninstall must not reach a real Sentinel forwarder under

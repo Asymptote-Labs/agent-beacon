@@ -48,6 +48,7 @@ func TestMain(m *testing.M) {
 	// No command under test sends telemetry or writes its state, whatever version a test sets; a
 	// test of an event swaps the capture seam instead.
 	_ = os.Setenv(telemetry.EnvTelemetry, "0")
+	_ = os.Unsetenv(telemetry.EnvDoNotTrack)
 	shareAutoCloud = func() (bool, string) { return false, "" }
 	// The dashboard commands must not depend on the system config of the machine running the tests.
 	dashboardSystemDisabled = func() (bool, error) { return false, nil }

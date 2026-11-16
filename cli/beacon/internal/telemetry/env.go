@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"os"
 	"strings"
 )
 
@@ -113,4 +114,19 @@ func normalizeAgentName(raw string) string {
 		return ""
 	}
 	return name
+}
+
+// OptOutVariables are the variables OptedOut reads.
+var OptOutVariables = []string{EnvTelemetry, EnvDoNotTrack}
+
+// OptOutEnv returns NAME=value for each of OptOutVariables set in this process's environment, for a
+// beacon child process started with an environment of its own, so an opt-out reaches it.
+func OptOutEnv() []string {
+	var env []string
+	for _, name := range OptOutVariables {
+		if value, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+value)
+		}
+	}
+	return env
 }

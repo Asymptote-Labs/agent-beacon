@@ -16,6 +16,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/osuser"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -479,7 +480,10 @@ func consoleUserCommand(ctx context.Context, info consoleUserInfo, bin string, a
 		}
 	}
 	cmdArgs = append(cmdArgs, "env", "HOME="+info.HomeDir, "USER="+info.Username,
-		"LOGNAME="+info.Username, bin)
+		"LOGNAME="+info.Username)
+	// sudo and runuser reset the environment, so a CLI telemetry opt-out is passed on by hand.
+	cmdArgs = append(cmdArgs, telemetry.OptOutEnv()...)
+	cmdArgs = append(cmdArgs, bin)
 	cmdArgs = append(cmdArgs, args...)
 	return exec.CommandContext(ctx, launcher, cmdArgs...)
 }

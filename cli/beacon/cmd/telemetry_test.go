@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"os"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -77,5 +79,18 @@ func TestTelemetryStaysOutOfCompletionAndGitHooks(t *testing.T) {
 	}
 	if !telemetryApplies(endpointInstallCmd) {
 		t.Error("telemetry does not start for endpoint install")
+	}
+}
+
+// The first-run notice is only for a person reading a terminal: never a hidden command (scheduled
+// jobs and internal children) and never output that is not a terminal.
+func TestTelemetryNoticeOnlyForAPersonAtATerminal(t *testing.T) {
+	for _, hidden := range []*cobra.Command{endpointInventoryHeartbeatCmd, endpointInventoryResolvePackagesCmd, endpointUserConfigApplyNativeCmd} {
+		if telemetryInteractive(hidden, os.Stderr) {
+			t.Errorf("%s may show the notice", hidden.CommandPath())
+		}
+	}
+	if telemetryInteractive(endpointInstallCmd, &bytes.Buffer{}) {
+		t.Error("output that is not a terminal may show the notice")
 	}
 }
