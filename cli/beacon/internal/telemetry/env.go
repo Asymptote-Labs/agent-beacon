@@ -13,6 +13,10 @@ const (
 	// EnvDoNotTrack is the cross-tool convention (https://consoledonottrack.com); any value other
 	// than empty, 0 or false turns CLI telemetry off.
 	EnvDoNotTrack = "DO_NOT_TRACK"
+	// EnvInternalChild marks a beacon process another beacon process started for its own purposes
+	// (a repair run as the console user), whose stderr the parent captures. It never shows the
+	// first-run notice, which would be printed into a buffer and recorded as seen.
+	EnvInternalChild = "BEACON_INTERNAL_CHILD"
 )
 
 // OptedOut reports whether the environment turns telemetry off.
@@ -144,4 +148,9 @@ func OptOutEnv() []string {
 		}
 	}
 	return env
+}
+
+// InternalChildEnv is the NAME=value that marks a beacon child process as internal (EnvInternalChild).
+func InternalChildEnv() string {
+	return EnvInternalChild + "=1"
 }

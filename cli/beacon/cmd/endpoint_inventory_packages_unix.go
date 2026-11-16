@@ -38,7 +38,7 @@ func packagesAsUser(uid int, home string) (packageResolver, error) {
 		}}
 		// None of root's environment: the request carries everything the child reads, apart from a
 		// CLI telemetry opt-out set on the job, which must reach every beacon process it starts.
-		c.Env = append([]string{"HOME=" + home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}, telemetry.OptOutEnv()...)
+		c.Env = append([]string{"HOME=" + home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}, append(telemetry.OptOutEnv(), telemetry.InternalChildEnv())...)
 		c.Dir = "/"
 		return resolvePackagesWith(c, env, queries)
 	}, nil

@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"bytes"
-	"os"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -82,15 +80,37 @@ func TestTelemetryStaysOutOfCompletionAndGitHooks(t *testing.T) {
 	}
 }
 
-// The first-run notice is only for a person reading a terminal: never a hidden command (scheduled
-// jobs and internal children) and never output that is not a terminal.
-func TestTelemetryNoticeOnlyForAPersonAtATerminal(t *testing.T) {
+// The first-run notice is for whoever ran the command, a person or an agent, terminal or not; never
+// for a hidden command, a --scheduled job or an internal child, which run on their own.
+func TestTelemetryNoticeIsForWhoeverRanTheCommand(t *testing.T) {
+	t.Setenv(telemetry.EnvInternalChild, "")
+	if !telemetryShowsNotice(endpointInstallCmd) {
+		t.Error("an install, run by a person or an agent, may not show the notice")
+	}
 	for _, hidden := range []*cobra.Command{endpointInventoryHeartbeatCmd, endpointInventoryResolvePackagesCmd, endpointUserConfigApplyNativeCmd} {
-		if telemetryInteractive(hidden, os.Stderr) {
+		if telemetryShowsNotice(hidden) {
 			t.Errorf("%s may show the notice", hidden.CommandPath())
 		}
 	}
-	if telemetryInteractive(endpointInstallCmd, &bytes.Buffer{}) {
-		t.Error("output that is not a terminal may show the notice")
+
+	scheduled := endpointSessionsSyncCmd.Flags().Lookup("scheduled")
+	if scheduled == nil {
+		t.Fatal("sessions sync has no --scheduled flag")
+	}
+	if err := scheduled.Value.Set("true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = scheduled.Value.Set("false") })
+	if telemetryShowsNotice(endpointSessionsSyncCmd) {
+		t.Error("a --scheduled job may show the notice")
+	}
+	_ = scheduled.Value.Set("false")
+	if !telemetryShowsNotice(endpointSessionsSyncCmd) {
+		t.Error("a manual sessions sync may not show the notice")
+	}
+
+	t.Setenv(telemetry.EnvInternalChild, "1")
+	if telemetryShowsNotice(endpointInstallCmd) {
+		t.Error("an internal child may show the notice")
 	}
 }
