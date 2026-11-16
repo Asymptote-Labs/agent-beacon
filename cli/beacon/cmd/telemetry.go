@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/mcpserver"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
@@ -31,9 +32,16 @@ func startTelemetry(cmd *cobra.Command, _ []string) {
 // telemetryShowsNotice reports whether whoever ran this command reads its stderr, which is when the
 // first-run notice may be shown. That includes a coding agent or a script, which run most installs
 // without a terminal; the notice goes to stderr only, so stdout stays machine-readable. It excludes
-// what runs on its own: hidden commands (the inventory job, the console-user runs of the package
-// scripts, `version refresh`), a --scheduled run (the session sync and updater jobs), and a beacon
-// child another beacon process started with telemetry.EnvInternalChild, whose output it captures.
+// what runs on its own, whose stderr lands in a log nobody reads, because the notice is recorded as
+// shown and would never be printed again:
+//   - hidden commands (the inventory job, the console-user runs of the package scripts,
+//     `version refresh`) and a --scheduled run (the session sync and updater jobs);
+//   - a beacon child another beacon process started with telemetry.EnvInternalChild, whose output it
+//     captures, and the MDM scripts that set it when they run beacon as the console user;
+//   - a run without a terminal that sudo started as someone else (SUDO_USER is set), which is how
+//     MDM and fleet scripts we do not ship reach the console user; a person typing sudo -u at a
+//     terminal still sees it;
+//   - `beacon mcp serve` on stdio, which a coding agent's runtime starts and whose stderr it keeps.
 var telemetryShowsNotice = func(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		if c.Hidden {
@@ -43,8 +51,20 @@ var telemetryShowsNotice = func(cmd *cobra.Command) bool {
 	if flag := cmd.Flags().Lookup("scheduled"); flag != nil && flag.Value.String() == "true" {
 		return false
 	}
-	return os.Getenv(telemetry.EnvInternalChild) == ""
+	if os.Getenv(telemetry.EnvInternalChild) != "" {
+		return false
+	}
+	if os.Getenv("SUDO_USER") != "" && !telemetryStderrIsTerminal() {
+		return false
+	}
+	if cmd == mcpServeCmd && normalizedTransport() == mcpserver.TransportStdio {
+		return false
+	}
+	return true
 }
+
+// Swapped by tests.
+var telemetryStderrIsTerminal = func() bool { return isTerminal(os.Stderr) }
 
 // telemetryApplies keeps telemetry out of the commands that are not a person running Beacon:
 // shell completion, which runs on every Tab, and the entry points installed git hooks call on every

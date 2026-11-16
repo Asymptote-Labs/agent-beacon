@@ -16,8 +16,10 @@ forwarding destination, or Beacon Cloud if you chose it.
 
 The first time you, or a coding agent or script, run a `beacon` command with telemetry on,
 the CLI prints this line to stderr, once. It goes to stderr only, so a command's output stays
-machine-readable. Scheduled jobs and the `beacon` processes Beacon starts for itself never
-print it, and leave it for a run someone reads:
+machine-readable. Runs whose stderr nobody reads never print it, and leave it for a run
+someone does: scheduled jobs, the `beacon` processes Beacon starts for itself, MDM and fleet
+scripts that run `beacon` as the signed-in user through `sudo` without a terminal, and
+`beacon mcp serve` on stdio, which your coding agent starts:
 
 ```text
 Beacon sends CLI usage data (never prompts, code or file paths). Turn it off with BEACON_TELEMETRY=0. Learn more: https://docs.beacon.sh/cli/telemetry
