@@ -73,6 +73,9 @@ type recorder struct {
 	company    string
 	supers     posthog.Properties
 	client     posthog.Client
+	// sentSet is the person this run has already sent a $set for, so identifying them again in
+	// the same run sends nothing.
+	sentSet string
 }
 
 var (
@@ -223,12 +226,42 @@ func Identify(email, userID string) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.identify(email, userID)
+}
+
+// IdentifyIfAnonymous identifies the person with email, as Identify does, only when this machine
+// is not tied to anyone yet and that can be remembered. It is for a sign-in an earlier version of
+// the CLI recorded: it fills in who an anonymous machine belongs to, once, and never replaces a
+// person a sign-in or a given email already named.
+func IdentifyIfAnonymous(email, userID string) {
+	r := active()
+	if r == nil || !r.persist {
+		return
+	}
+	email = normalizeEmail(email)
+	if !strings.Contains(email, "@") {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.identified {
+		return
+	}
+	r.identify(email, userID)
+}
+
+// identify does the work of Identify for a normalized email. r.mu is held.
+func (r *recorder) identify(email, userID string) {
 	id := DistinctIDForEmail(email)
+	userID = strings.TrimSpace(userID)
+	if r.distinctID == id && r.sentSet == email+"\x00"+userID {
+		return
+	}
 	if r.distinctID != id {
 		r.enqueue(posthog.Alias{DistinctId: id, Alias: r.installID})
 	}
 	set := posthog.Properties{PersonEmail: email, PersonHasBeacon: true}
-	if userID = strings.TrimSpace(userID); userID != "" {
+	if userID != "" {
 		set[PersonBeaconUserID] = userID
 	}
 	r.distinctID = id
@@ -243,6 +276,7 @@ func Identify(email, userID string) {
 		},
 		Groups: r.groups(),
 	})
+	r.sentSet = email + "\x00" + userID
 	if r.persist {
 		st := loadState(r.home)
 		st.PHDistinctID = id

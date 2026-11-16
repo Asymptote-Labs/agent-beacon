@@ -74,6 +74,11 @@ it sends events under from then on is the SHA-256 of your lower-cased email. Eve
 work email are grouped under its domain; personal mailbox domains such as `gmail.com` are
 not. Signing out with `beacon logout` does not unlink the machine.
 
+If you are already signed in when the CLI does not know you yet, for example after signing in
+with a version that had no telemetry, the next command links the machine to that account the
+same way, once, whichever way Beacon is installed. It never replaces a person the CLI already
+knows, and with telemetry off it does not read the sign-in at all.
+
 The CLI keeps this state in `~/.beacon/telemetry.json` (mode `0600`): when the notice was
 shown, the identified ID, and when an install first succeeded. Deleting the file resets all
 three.
