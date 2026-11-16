@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRecordTracesSendsOneEventPerNewSession(t *testing.T) {
@@ -74,20 +75,18 @@ func TestRecordTracesIsOffWithTelemetry(t *testing.T) {
 	}
 }
 
-func TestLiveTraceOffsetIsKeptBetweenRuns(t *testing.T) {
+func TestLiveTraceIsKeptBetweenRuns(t *testing.T) {
 	setup(t, nil)
 	Init(options(nil, nil))
-	if _, ok := LiveTraceOffset(); ok {
-		t.Fatal("a fresh home has an offset")
+	if _, ok := LiveTrace(); ok {
+		t.Fatal("a fresh home has a position")
 	}
-	SetLiveTraceOffset(0)
-	if offset, ok := LiveTraceOffset(); !ok || offset != 0 {
-		t.Fatalf("offset = %d, %t; want 0, true", offset, ok)
-	}
-	SetLiveTraceOffset(4096)
+	saved := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	want := LiveTracePosition{Offset: 4096, LogID: "abc", SavedAt: saved}
+	SetLiveTrace(want)
 	Close()
 	Init(options(nil, nil))
-	if offset, ok := LiveTraceOffset(); !ok || offset != 4096 {
-		t.Fatalf("offset after a new run = %d, %t", offset, ok)
+	if got, ok := LiveTrace(); !ok || got != want {
+		t.Fatalf("position after a new run = %+v, %t; want %+v", got, ok, want)
 	}
 }

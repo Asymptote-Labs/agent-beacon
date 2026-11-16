@@ -104,27 +104,28 @@ func RecordTraces(source string, traces []Trace) {
 	}
 }
 
-// LiveTraceOffset is how far into the runtime log the scheduled scan for live sessions has read.
-// ok is false before the scan's first run, and when telemetry is off.
-func LiveTraceOffset() (offset int64, ok bool) {
+// LiveTrace is where the scheduled scan for live sessions stopped reading the runtime log. ok is
+// false before the scan's first run, and when telemetry is off.
+func LiveTrace() (pos LiveTracePosition, ok bool) {
 	r := active()
 	if r == nil {
-		return 0, false
+		return LiveTracePosition{}, false
 	}
 	st := loadState(r.home)
-	if st.LiveTraceOffset == nil {
-		return 0, false
+	if st.LiveTrace == nil {
+		return LiveTracePosition{}, false
 	}
-	return *st.LiveTraceOffset, true
+	return *st.LiveTrace, true
 }
 
-// SetLiveTraceOffset records how far into the runtime log the scan for live sessions has read.
-func SetLiveTraceOffset(offset int64) {
+// SetLiveTrace records where the scan for live sessions stopped reading the runtime log.
+func SetLiveTrace(pos LiveTracePosition) {
 	r := active()
 	if r == nil || !r.persist {
 		return
 	}
-	st := loadState(r.home)
-	st.LiveTraceOffset = &offset
-	_ = saveState(r.home, st)
+	updateState(r.home, func(st *state) bool {
+		st.LiveTrace = &pos
+		return true
+	})
 }
