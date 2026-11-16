@@ -222,6 +222,9 @@ type endpointBackfillResult struct {
 	// Floored is the earliest floor a skipped backfill left that limited a runtime in this sweep,
 	// or zero.
 	Floored time.Time
+	// Sessions are the sessions this sweep wrote records for, read back from the log only when
+	// telemetry is on (endpointSweepRecordsSessions); nil otherwise.
+	Sessions []sweptSession
 }
 
 // endpointBackfillEnabled reports whether this install or connect should backfill. Every real
@@ -294,7 +297,15 @@ func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration
 		sweep.Floors = readSessionSyncFloors(userMode)
 		floorRuntimesAddedSinceTheSkip(userMode, sweep.Floors)
 	}
-	return runEndpointBackfillUnlocked(logPath, userMode, sweep)
+	if !endpointSweepRecordsSessions() {
+		return runEndpointBackfillUnlocked(logPath, userMode, sweep)
+	}
+	// Under the lock, nothing else appends session-store records, so what follows offset is this
+	// sweep's.
+	offset := logSize(logPath)
+	result := runEndpointBackfillUnlocked(logPath, userMode, sweep)
+	result.Sessions = sessionsWrittenSince(logPath, offset)
+	return result
 }
 
 // endpointSweep is what a sweep reads beyond the window: for a runtime with a floor, no session
