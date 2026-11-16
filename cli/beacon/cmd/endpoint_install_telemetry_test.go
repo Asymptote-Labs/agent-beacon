@@ -30,11 +30,18 @@ func recordTelemetry(t *testing.T) *[]capturedEvent {
 	t.Helper()
 	events := &[]capturedEvent{}
 	oldCapture, oldRecords := telemetryCapture, endpointSweepRecordsSessions
+	oldBefore, oldRecord, oldManifest := telemetryInstalledBefore, telemetryRecordInstalled, installManifestExists
 	telemetryCapture = func(name string, props map[string]any) {
 		*events = append(*events, capturedEvent{name: name, props: props})
 	}
 	endpointSweepRecordsSessions = func() bool { return true }
-	t.Cleanup(func() { telemetryCapture, endpointSweepRecordsSessions = oldCapture, oldRecords })
+	telemetryInstalledBefore = func() bool { return false }
+	telemetryRecordInstalled = func(time.Time) {}
+	installManifestExists = func(bool) bool { return false }
+	t.Cleanup(func() {
+		telemetryCapture, endpointSweepRecordsSessions = oldCapture, oldRecords
+		telemetryInstalledBefore, telemetryRecordInstalled, installManifestExists = oldBefore, oldRecord, oldManifest
+	})
 	return events
 }
 
@@ -196,6 +203,66 @@ func TestEndpointInstallSendsStartedAndCompleted(t *testing.T) {
 	}
 	if !reflect.DeepEqual(completed[0].props, want) {
 		t.Errorf("completed = %+v, want %+v", completed[0].props, want)
+	}
+}
+
+func TestFirstInstallForDevice(t *testing.T) {
+	recordTelemetry(t)
+	fresh := onboarding.Profile{}
+	onboarded := onboarding.Profile{Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-07T00:00:00Z"}}
+	for _, tc := range []struct {
+		name      string
+		profile   onboarding.Profile
+		manifest  bool
+		installed bool
+		want      bool
+	}{
+		{"nothing installed", fresh, false, false, true},
+		{"wizard answered", onboarded, false, false, false},
+		// An agent, script or CI reinstall never runs the wizard, but the manifest is there.
+		{"reinstall without the wizard", fresh, true, false, false},
+		// Uninstall removes the manifest; telemetry remembers the install.
+		{"reinstall after uninstall", fresh, false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installManifestExists = func(bool) bool { return tc.manifest }
+			telemetryInstalledBefore = func() bool { return tc.installed }
+			if got := firstInstallForDevice(tc.profile); got != tc.want {
+				t.Fatalf("first = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCompletedInstallIsRememberedAndFailedOneIsNot(t *testing.T) {
+	recordEndpointLifecycle(t)
+	recordTelemetry(t)
+	var recorded int
+	telemetryRecordInstalled = func(time.Time) { recorded++ }
+	stubBackfill(t, 1<<20, 1<<19)
+	endpointOpts.harnesses = "codex"
+	cmd := &cobra.Command{}
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	endpointLifecycleInstall = func(lifecycle.InstallOptions) (lifecycle.InstallResult, error) {
+		return lifecycle.InstallResult{}, io.ErrUnexpectedEOF
+	}
+	if err := runEndpointInstall(cmd, nil); err == nil {
+		t.Fatal("a failed install returned no error")
+	}
+	if recorded != 0 {
+		t.Fatal("a failed install was remembered as installed")
+	}
+
+	endpointLifecycleInstall = func(lifecycle.InstallOptions) (lifecycle.InstallResult, error) {
+		return lifecycle.InstallResult{LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")}, nil
+	}
+	if _, err := captureStdout(t, func() error { return runEndpointInstall(cmd, nil) }); err != nil {
+		t.Fatal(err)
+	}
+	if recorded != 1 {
+		t.Fatalf("a completed install was remembered %d times, want 1", recorded)
 	}
 }
 

@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 )
@@ -17,8 +20,14 @@ const installSourceEnv = "BEACON_INSTALL_SOURCE"
 
 // Swapped by tests.
 var (
-	telemetryCapture    = telemetry.Capture
-	installTelemetryNow = time.Now
+	telemetryCapture         = telemetry.Capture
+	installTelemetryNow      = time.Now
+	telemetryInstalledBefore = telemetry.InstalledBefore
+	telemetryRecordInstalled = telemetry.RecordInstalled
+	installManifestExists    = func(userMode bool) bool {
+		_, err := lifecycle.ReadManifest(userMode)
+		return !errors.Is(err, fs.ErrNotExist)
+	}
 )
 
 // installTelemetry carries what cli_install_started measured to cli_install_completed.
@@ -31,13 +40,21 @@ type installTelemetry struct {
 // wizard, so the setup path is what the wizard gate will decide, not what the wizard did.
 func startInstallTelemetry(discovered []harness.Harness) installTelemetry {
 	profile := onboardingLoad()
-	t := installTelemetry{start: installTelemetryNow(), firstForDevice: !profile.Prompted()}
+	t := installTelemetry{start: installTelemetryNow(), firstForDevice: firstInstallForDevice(profile)}
 	telemetryCapture(telemetry.EventInstallStarted, map[string]any{
 		telemetry.PropSetupPath:         installSetupPath(profile),
 		telemetry.PropDetectedHarnesses: detectedHarnessNames(discovered),
 		telemetry.PropIsFirstForDevice:  t.firstForDevice,
 	})
 	return t
+}
+
+// firstInstallForDevice reports whether nothing says Beacon was installed here before: no wizard
+// answer (only the wizard records one), no install manifest (every install path writes it, and
+// uninstall removes it), and no install recorded by telemetry (which outlives uninstall). Reinstalls,
+// upgrades and repairs by an agent, a script or CI are therefore not first installs.
+func firstInstallForDevice(profile onboarding.Profile) bool {
+	return !profile.Prompted() && !installManifestExists(endpointUserMode()) && !telemetryInstalledBefore()
 }
 
 // completed sends cli_install_completed for an install that succeeded. backfill is nil when the
@@ -59,6 +76,7 @@ func (t installTelemetry) completed(selection endpointTargetSelection, backfill 
 		telemetry.PropDurationMS:           installTelemetryNow().Sub(t.start).Milliseconds(),
 		telemetry.PropIsFirstForDevice:     t.firstForDevice,
 	})
+	telemetryRecordInstalled(installTelemetryNow())
 }
 
 // installSetupPath names how this install is being driven. The checks run in order: a package
