@@ -30,6 +30,14 @@ Set either variable in the environment the CLI runs in:
 | `BEACON_TELEMETRY=0` | Turns CLI telemetry off. `false`, `no` and `off` work too. |
 | `DO_NOT_TRACK=1` | The [cross-tool convention](https://consoledonottrack.com). Any value other than `0` or `false` turns it off. |
 
+## System mode
+
+CLI telemetry is off by default for `--system` commands and for any command run as root
+(`sudo`, package scripts, MDM, and the system scheduled jobs), so fleet installs make no
+CLI telemetry requests and write no telemetry state unless an administrator opts in with
+`BEACON_TELEMETRY=1` (`true`, `yes` and `on` work too). `DO_NOT_TRACK` still turns it off.
+On Windows, where a process is never root, this covers `--system` commands.
+
 With telemetry off, the CLI sends nothing and writes no telemetry state. A variable set
 in the shell you run `beacon endpoint install` from is also recorded in the user-mode
 scheduled jobs (inventory and session sync), and the CLI passes it on to the `beacon`
@@ -49,7 +57,7 @@ CLI telemetry.
 | `surface` | `cli` |
 | `beacon_version` | The CLI version |
 | `os`, `arch` | Operating system and CPU architecture, such as `darwin` and `arm64` |
-| `install_mode` | `user`, or `system` for `--system` commands and commands run as root |
+| `install_mode` | `user`, or `system` for `--system` commands and commands run as root (only with `BEACON_TELEMETRY=1`, see [System mode](#system-mode)) |
 | `install_method` | `homebrew`, `package`, or `source` |
 | `is_ci` | Whether a CI marker such as `CI` or `GITHUB_ACTIONS` is set |
 | `invoking_agent` | The coding agent whose shell ran the command (`claude_code`, `cursor`, `codex`, `gemini_cli`, `opencode`, `cline`, a name from `AI_AGENT`), or `none` |

@@ -345,8 +345,61 @@ func TestInitNeverOverwritesAProfileItCannotRead(t *testing.T) {
 	}
 }
 
+// System mode (--system commands and runs as root: package, MDM and fleet installs) is off unless
+// BEACON_TELEMETRY opts in, and an opt-out still wins over that.
+func TestSystemModeIsOffUnlessOptedIn(t *testing.T) {
+	for _, env := range []map[string]string{nil, {EnvTelemetry: "yes-please"}, {EnvTelemetry: "1", EnvDoNotTrack: "1"}} {
+		s, home := setup(t, env)
+		var stderr bytes.Buffer
+		opts := options(env, &stderr)
+		opts.InstallMode = InstallModeSystem
+		Init(opts)
+		if Enabled() {
+			t.Fatalf("%v: telemetry is on in system mode", env)
+		}
+		Capture("cli_test", nil)
+		Close()
+		if len(s.all()) != 0 || stderr.Len() != 0 {
+			t.Fatalf("%v: sent %d messages, printed %q", env, len(s.all()), stderr.String())
+		}
+		if _, err := os.Stat(filepath.Join(home, ".beacon")); !os.IsNotExist(err) {
+			t.Fatalf("%v: wrote to ~/.beacon: %v", env, err)
+		}
+	}
+
+	env := map[string]string{EnvTelemetry: "1"}
+	setup(t, env)
+	opts := options(env, io.Discard)
+	opts.InstallMode = InstallModeSystem
+	Init(opts)
+	if !Enabled() {
+		t.Fatal("BEACON_TELEMETRY=1 did not turn telemetry on in system mode")
+	}
+}
+
+func TestOptedIn(t *testing.T) {
+	cases := []struct {
+		env  map[string]string
+		want bool
+	}{
+		{map[string]string{}, false},
+		{map[string]string{EnvTelemetry: "1"}, true},
+		{map[string]string{EnvTelemetry: " ON "}, true},
+		{map[string]string{EnvTelemetry: "true"}, true},
+		{map[string]string{EnvTelemetry: "yes"}, true},
+		{map[string]string{EnvTelemetry: "0"}, false},
+		{map[string]string{EnvTelemetry: "maybe"}, false},
+		{map[string]string{EnvTelemetry: "1", EnvDoNotTrack: "1"}, false},
+	}
+	for _, tc := range cases {
+		if got := OptedIn(func(k string) string { return tc.env[k] }); got != tc.want {
+			t.Errorf("OptedIn(%v) = %v, want %v", tc.env, got, tc.want)
+		}
+	}
+}
+
 func TestCaptureSendsSuperPropertiesAsTheInstall(t *testing.T) {
-	env := map[string]string{"CI": "true", "CLAUDECODE": "1"}
+	env := map[string]string{"CI": "true", "CLAUDECODE": "1", EnvTelemetry: "1"}
 	s, _ := setup(t, env)
 	opts := options(env, io.Discard)
 	opts.InstallMode = InstallModeSystem

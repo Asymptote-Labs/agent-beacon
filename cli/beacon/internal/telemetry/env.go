@@ -5,9 +5,10 @@ import (
 	"strings"
 )
 
-// Environment variables that turn telemetry off.
+// Environment variables that turn telemetry off, or on for system mode.
 const (
-	// EnvTelemetry set to 0, false, no or off turns CLI telemetry off.
+	// EnvTelemetry set to 0, false, no or off turns CLI telemetry off; set to 1, true, yes or on it
+	// turns it on for system mode, where it is off by default (OptedIn).
 	EnvTelemetry = "BEACON_TELEMETRY"
 	// EnvDoNotTrack is the cross-tool convention (https://consoledonottrack.com); any value other
 	// than empty, 0 or false turns CLI telemetry off.
@@ -26,6 +27,20 @@ func OptedOut(getenv func(string) string) bool {
 	default:
 		return true
 	}
+}
+
+// OptedIn reports whether the environment turns telemetry on for system mode (--system commands
+// and runs as root), which is off unless asked for: package, MDM and fleet installs run there,
+// and they stay off the network unless the administrator says otherwise. DO_NOT_TRACK still wins.
+func OptedIn(getenv func(string) string) bool {
+	if OptedOut(getenv) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(getenv(EnvTelemetry))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // agentMarker names the environment a coding agent sets in the shell it runs commands in. A marker
