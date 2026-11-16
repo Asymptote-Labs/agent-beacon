@@ -123,3 +123,19 @@ func TestRecordTracesSendsNothingWhileAnotherRunHoldsTheLock(t *testing.T) {
 		t.Fatalf("got %d events, want 1", got)
 	}
 }
+
+func TestLiveTraceIsKeptBetweenRuns(t *testing.T) {
+	setup(t, nil)
+	Init(options(nil, nil))
+	if _, ok := LiveTrace(); ok {
+		t.Fatal("a fresh home has a position")
+	}
+	saved := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	want := LiveTracePosition{Offset: 4096, LogID: "abc", SavedAt: saved}
+	SetLiveTrace(want)
+	Close()
+	Init(options(nil, nil))
+	if got, ok := LiveTrace(); !ok || got != want {
+		t.Fatalf("position after a new run = %+v, %t; want %+v", got, ok, want)
+	}
+}
