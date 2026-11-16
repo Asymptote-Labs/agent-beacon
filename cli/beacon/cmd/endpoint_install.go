@@ -320,6 +320,8 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		// After the connect, which decides whether these sessions stay local.
 		recordLocalTraces(telemetry.TraceSourceBackfill, endpointUserMode(), *backfill)
 	}
+	// The scheduled inventory job reports the sessions recorded from here on.
+	startLiveTraceCursor(result.LogPath)
 	installEvents.completed(selection, backfill)
 	return nil
 }

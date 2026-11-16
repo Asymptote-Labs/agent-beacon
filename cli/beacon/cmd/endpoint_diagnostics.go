@@ -519,6 +519,11 @@ func runEndpointInventoryHeartbeat(cmd *cobra.Command, args []string) error {
 		scope = systemHeartbeatScope()
 	}
 	result, err := writeInventoryHeartbeat(cfg, settings, endpointOpts.inventoryHeartbeatForce, trigger, scope)
+	if endpointOpts.inventoryScheduled {
+		// The always-on job is where a local-only endpoint's new sessions are reported from,
+		// whatever recorded them.
+		recordLiveTraces(cfg.LogPath, endpointUserMode())
+	}
 	if endpointOpts.jsonOutput {
 		_ = json.NewEncoder(os.Stdout).Encode(result)
 	}

@@ -87,7 +87,7 @@ three.
 | `cli_email_submitted` | `beacon endpoint install` is given an email with `--email` or `BEACON_EMAIL` and no valid sign-in, followed by `$create_alias` and `$set` | `email_source` (`flag` or `env`), `email_domain_kind` (`work` or `free`); never the address |
 | `cli_install_started` | `beacon endpoint install` begins (not on `--dry-run`) | `setup_path` (`wizard`, `agent`, `ci`, `package`, or `noninteractive`), `detected_harnesses` (the runtime names discovery found), `is_first_for_device` |
 | `cli_install_completed` | `beacon endpoint install` succeeds, after hooks, skills, the session backfill and any Beacon Cloud connect | `destination` (`local` or `cloud`), `harnesses_configured` (the install targets), `backfill_session_count`, `duration_ms`, `is_first_for_device` |
-| `cli_trace_recorded` | A local-only endpoint records an agent session for the first time, from the install's session backfill or the scheduled session sync. At most 50 a run; not sent when the endpoint forwards to Beacon Cloud | `harness` (the runtime's name, such as `claude_code`), `source` (`backfill` or `live`), `is_first_for_device` |
+| `cli_trace_recorded` | A local-only endpoint records an agent session for the first time, from the install's session backfill, the scheduled session sync, or the scheduled inventory job. At most 50 a run; not sent when the endpoint forwards to Beacon Cloud | `harness` (the runtime's name, such as `claude_code`), `source` (`backfill` or `live`), `is_first_for_device` |
 
 `backfill_session_count` is the number of sessions the install's [session backfill](/cli/endpoint-install#session-backfill)
 wrote records for, counted from the runtime log the backfill wrote; it is `0` when the
@@ -103,3 +103,14 @@ upgrade or repair, including one an agent or script runs, is `false`.
 To send each session once, the CLI keeps truncated SHA-256 hashes of the sessions it has reported in
 `~/.beacon/telemetry-sessions.json` (mode `0600`, at most 5,000). It never stores or sends session
 IDs. A system scheduled sync that runs without a home directory sends nothing.
+
+The scheduled inventory job, which every install runs, reports `source` `live` for the
+sessions that did something in the runtime log since its last run, however they were
+recorded (hooks, OpenTelemetry, plugins or a session-store sync). A session whose only
+records are its start and end is not counted. It reads only each line's action, runtime
+name and session ID, at most 32 MiB a run (the newest, when more was written), and keeps
+where it stopped in `~/.beacon/telemetry-log-cursor.json` (mode `0600`): hashes of the
+log's path and of its file's first line, and an offset, so log rotation loses nothing that
+is still kept. The install, the job's first run, and an endpoint connected to Beacon Cloud
+move that position to the end of the log without reading it, so earlier history is never
+reported as live.

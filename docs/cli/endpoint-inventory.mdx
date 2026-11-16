@@ -60,7 +60,7 @@ Content capture is opt-in and offline; `--contents` only reads files inventory a
 
 ## Inventory heartbeats
 
-A scheduled local job appends inventory telemetry to a separate `inventory_state.jsonl` file beside `runtime.jsonl`. It runs once when it is loaded (install, repair, reboot, package upgrade) and then every 6 hours, on every install in both modes: a LaunchAgent (`com.beacon.endpoint.inventory`) or LaunchDaemon on macOS, a `beacon-inventory.timer` under the user or system scope on Linux. Agent hooks no longer trigger inventory; an idle machine reports on the same schedule as a busy one.
+A scheduled local job appends inventory telemetry to a separate `inventory_state.jsonl` file beside `runtime.jsonl`. It runs once when it is loaded (install, repair, reboot, package upgrade) and then every 6 hours, on every install in both modes: a LaunchAgent (`com.beacon.endpoint.inventory`) or LaunchDaemon on macOS, a `beacon-inventory.timer` under the user or system scope on Linux. Agent hooks no longer trigger inventory; an idle machine reports on the same schedule as a busy one. With [CLI telemetry](/cli/telemetry) on, the job also sends `cli_trace_recorded` for the sessions a local-only endpoint recorded since its last run (counts and runtime names only).
 
 - `inventory.heartbeat` records that Beacon checked local agent configuration inventory, including counts and a snapshot digest. Every run writes one; it is the endpoint's liveness signal.
 - `inventory.snapshot` records the current metadata-only inventory. It is written only when the snapshot digest changed since the last run.

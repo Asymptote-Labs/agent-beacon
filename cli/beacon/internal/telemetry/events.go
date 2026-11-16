@@ -148,7 +148,8 @@ const (
 )
 
 // EventTraceRecorded is sent once per agent session a local-only endpoint records for the first
-// time, from the install's session backfill and the scheduled session sync. An endpoint that
+// time, from the install's session backfill, the scheduled session sync and the scheduled
+// inventory job. An endpoint that
 // forwards to Beacon Cloud does not send it: the cloud counts its own sessions.
 const EventTraceRecorded = "cli_trace_recorded"
 
@@ -164,6 +165,7 @@ const (
 const (
 	// TraceSourceBackfill is the install's read of recent session history.
 	TraceSourceBackfill = "backfill"
-	// TraceSourceLive is the scheduled session sync, reading sessions as they happen.
+	// TraceSourceLive is a scheduled job reporting sessions as they happen: the session sync, or
+	// the inventory job reading what the runtime log recorded since its last run.
 	TraceSourceLive = "live"
 )
