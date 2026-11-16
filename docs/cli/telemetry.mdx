@@ -75,7 +75,8 @@ work email are grouped under its domain; personal mailbox domains such as `gmail
 not. Signing out with `beacon logout` does not unlink the machine.
 
 The CLI keeps this state in `~/.beacon/telemetry.json` (mode `0600`): when the notice was
-shown and the identified ID. Deleting the file resets both.
+shown, the identified ID, and when an install first succeeded. Deleting the file resets all
+three.
 
 ## Events
 
@@ -92,6 +93,12 @@ shown and the identified ID. Deleting the file resets both.
 wrote records for, counted from the runtime log the backfill wrote; it is `0` when the
 backfill is off. The system packages' install scripts set `BEACON_INSTALL_SOURCE=package`,
 which is how `setup_path` tells a package install apart.
+
+`is_first_for_device` on the install events is `true` only when nothing says Beacon was
+installed for this account before: no answer from the install wizard, no install manifest
+(every install writes one), and no earlier successful install recorded in
+`~/.beacon/telemetry.json`, which `beacon endpoint uninstall` leaves in place. A reinstall,
+upgrade or repair, including one an agent or script runs, is `false`.
 
 To send each session once, the CLI keeps truncated SHA-256 hashes of the sessions it has reported in
 `~/.beacon/telemetry-sessions.json` (mode `0600`, at most 5,000). It never stores or sends session

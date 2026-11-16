@@ -25,6 +25,10 @@ type state struct {
 	PHDistinctID string `json:"ph_distinct_id,omitempty"`
 	// Company is the company group of the identified person, "" for a personal mailbox.
 	Company string `json:"company,omitempty"`
+	// InstalledAt is when `beacon endpoint install` first succeeded for this home. It outlives
+	// `beacon endpoint uninstall`, which removes the install manifest, so a reinstall is not
+	// counted as the device's first install.
+	InstalledAt string `json:"installed_at,omitempty"`
 	// LiveTraceOffset is how far into the runtime log the scheduled scan for live sessions has
 	// read, nil before its first run.
 	LiveTraceOffset *int64 `json:"live_trace_offset,omitempty"`
