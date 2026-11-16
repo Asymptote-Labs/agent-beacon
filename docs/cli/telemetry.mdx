@@ -105,9 +105,11 @@ installed for this account before: no answer from the install wizard, no install
 upgrade or repair, including one an agent or script runs, is `false`.
 
 To send each session once, the CLI keeps truncated SHA-256 hashes of the sessions it has reported in
-`~/.beacon/telemetry-sessions.json` (mode `0600`, at most 5,000). It never stores or sends session
-IDs. The scheduled inventory job also keeps how far into the runtime log it has read
-in `~/.beacon/telemetry.json`, with a hash of the log file's first line and when it read it. Its
+`~/.beacon/telemetry-sessions.json` (mode `0600`, at most 5,000), and updates it under a lock
+file beside it, `telemetry-sessions.lock`, so two runs that finish together do not report the
+same session twice. A run that cannot get the lock within a second sends nothing, and a later run
+reports those sessions. It never stores or sends session IDs. The scheduled inventory job also
+keeps how far into the runtime log it has read in `~/.beacon/telemetry.json`, with a hash of the log file's first line and when it read it. Its
 first run only records where the log ends, so earlier sessions are never reported as `live`, and so
 does a run more than three days after the last one (telemetry was off, or the machine was). When
 the log has rotated since the last run, the job finds the file it was reading among the archives
