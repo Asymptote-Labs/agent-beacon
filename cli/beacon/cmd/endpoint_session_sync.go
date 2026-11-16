@@ -7,6 +7,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 )
 
 // `beacon endpoint sessions` holds the scheduled session-store sync: the same sweep an install
@@ -102,6 +103,9 @@ func runEndpointSessionsSync(cmd *cobra.Command, args []string) error {
 		}
 	}
 	result := runSessionSweep(cfg.LogPath, userMode, endpointSessionsOpts.scheduled)
+	if endpointSessionsOpts.scheduled {
+		recordLocalTraces(telemetry.TraceSourceLive, userMode, result)
+	}
 	reportSessionSweep(cmd.OutOrStdout(), "Session sync", result)
 	// A runtime that failed is reported above and the rest still ran. The scheduled job exits
 	// cleanly so the scheduler keeps it on its interval; a manual run says it failed.
