@@ -25,6 +25,9 @@ type state struct {
 	PHDistinctID string `json:"ph_distinct_id,omitempty"`
 	// Company is the company group of the identified person, "" for a personal mailbox.
 	Company string `json:"company,omitempty"`
+	// LiveTraceOffset is how far into the runtime log the scheduled scan for live sessions has
+	// read, nil before its first run.
+	LiveTraceOffset *int64 `json:"live_trace_offset,omitempty"`
 }
 
 func statePath(home string) string {

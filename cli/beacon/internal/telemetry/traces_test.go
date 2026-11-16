@@ -73,3 +73,21 @@ func TestRecordTracesIsOffWithTelemetry(t *testing.T) {
 		t.Fatalf("a development build wrote the seen file: %v", err)
 	}
 }
+
+func TestLiveTraceOffsetIsKeptBetweenRuns(t *testing.T) {
+	setup(t, nil)
+	Init(options(nil, nil))
+	if _, ok := LiveTraceOffset(); ok {
+		t.Fatal("a fresh home has an offset")
+	}
+	SetLiveTraceOffset(0)
+	if offset, ok := LiveTraceOffset(); !ok || offset != 0 {
+		t.Fatalf("offset = %d, %t; want 0, true", offset, ok)
+	}
+	SetLiveTraceOffset(4096)
+	Close()
+	Init(options(nil, nil))
+	if offset, ok := LiveTraceOffset(); !ok || offset != 4096 {
+		t.Fatalf("offset after a new run = %d, %t", offset, ok)
+	}
+}
