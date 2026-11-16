@@ -3,6 +3,7 @@ package onboarding
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -172,5 +173,78 @@ func TestEnsureInstallIDMintsWhenMissing(t *testing.T) {
 	}
 	if got == "" || p.InstallID != got {
 		t.Fatalf("EnsureInstallID() = %q, profile = %q; want a minted ID stored on the profile", got, p.InstallID)
+	}
+}
+
+func TestStoredInstallIDCreatesAMissingProfileOnce(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+
+	if id, err := StoredInstallID(false); err != nil || id == "" {
+		t.Fatalf("StoredInstallID(false) = %q, %v", id, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ProfilePath)); !os.IsNotExist(err) {
+		t.Fatalf("StoredInstallID(false) wrote the profile: %v", err)
+	}
+
+	id, err := StoredInstallID(true)
+	if err != nil || id == "" {
+		t.Fatalf("StoredInstallID(true) = %q, %v", id, err)
+	}
+	if got := Load(); got.InstallID != id || got.SchemaVersion != SchemaVersion || got.Prompted() {
+		t.Fatalf("saved profile = %+v, want only install ID %s", got, id)
+	}
+	if again, err := StoredInstallID(true); err != nil || again != id {
+		t.Fatalf("second StoredInstallID = %q, %v; want %s", again, err, id)
+	}
+	if testenv.HasPOSIXFileModes() {
+		info, err := os.Stat(filepath.Join(home, ProfilePath))
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("profile mode = %v, %v; want 0600", info, err)
+		}
+	}
+}
+
+// Another process that creates the profile between the read and the write wins: its file is kept
+// and its ID returned.
+func TestStoredInstallIDNeverReplacesAProfileCreatedFirst(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	path := filepath.Join(home, ProfilePath)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"install_id":"first"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := createOnly(path, []byte(`{"install_id":"second"}`)); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("createOnly over an existing profile = %v, want ErrExist", err)
+	}
+	if id, err := StoredInstallID(true); err != nil || id != "first" {
+		t.Fatalf("StoredInstallID = %q, %v; want the existing ID", id, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("directory holds %v, %v; want only the profile, no temp file", entries, err)
+	}
+}
+
+func TestStoredInstallIDLeavesAnUnreadableProfileAlone(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	path := filepath.Join(home, ProfilePath)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, content := range []string{`{"onboarding":{"email":"ada@`, `{"schema_version":1}`} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if id, err := StoredInstallID(true); !errors.Is(err, ErrUnreadableProfile) {
+			t.Fatalf("%s: StoredInstallID = %q, %v; want ErrUnreadableProfile", content, id, err)
+		}
+		if got, _ := os.ReadFile(path); string(got) != content {
+			t.Fatalf("%s: profile rewritten to %s", content, got)
+		}
 	}
 }

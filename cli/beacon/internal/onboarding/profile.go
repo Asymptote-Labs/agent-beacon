@@ -9,6 +9,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -161,13 +163,93 @@ func Save(p Profile) error {
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Replaced atomically: other beacon processes read the profile at any time (telemetry reads it
+	// on every command), and a half-written file reads as an empty profile.
+	return writeProfile(path, append(data, '\n'), os.Rename)
+}
+
+// ErrUnreadableProfile is returned by StoredInstallID when profile.json exists but cannot be
+// read or parsed, or holds no install ID.
+var ErrUnreadableProfile = errors.New("profile.json is unreadable")
+
+// StoredInstallID returns the install ID saved in profile.json, for callers that need the ID but
+// own nothing else in the profile.
+//
+// It never rewrites an existing profile: a profile it cannot read or parse (a newer schema, or a
+// write it raced) is reported as ErrUnreadableProfile rather than replaced, because saving over it
+// would erase the onboarding record. Only when the file is missing does it mint an ID, and then it
+// creates the file only if create is true, without replacing one another process created first;
+// that process's ID is returned instead. With create false the minted ID is not saved.
+func StoredInstallID(create bool) (string, error) {
+	path := Path()
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		var p Profile
+		if json.Unmarshal(data, &p) != nil || p.InstallID == "" {
+			return "", ErrUnreadableProfile
+		}
+		return p.InstallID, nil
+	case !errors.Is(err, os.ErrNotExist):
+		return "", fmt.Errorf("%w: %v", ErrUnreadableProfile, err)
+	}
+	id, err := NewInstallID()
+	if err != nil {
+		return "", err
+	}
+	if !create {
+		return id, nil
+	}
+	data, err = json.MarshalIndent(Profile{SchemaVersion: SchemaVersion, InstallID: id}, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := createOnly(path, append(data, '\n')); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return StoredInstallID(false)
+		}
+		return "", err
+	}
+	return id, nil
+}
+
+// createOnly writes path from a complete temp file and links it into place, so a reader never sees
+// it half-written and an existing file, however it got there, is never replaced (os.ErrExist).
+func createOnly(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	// WriteFile only applies the mode when it creates the file, so an existing
-	// profile written before this code shipped would keep its old permissions.
-	return os.Chmod(path, 0o600)
+	return writeProfile(path, data, os.Link)
+}
+
+// writeProfile writes data to a 0600 temp file beside path and moves it into place with place
+// (os.Rename to replace, os.Link to create only). The temp file takes the owner of the profile it
+// replaces: root running with a person's HOME (sudo on macOS keeps it) would otherwise leave a
+// root-owned profile that person can no longer read, re-running onboarding and turning telemetry
+// off for them.
+func writeProfile(path string, data []byte, place func(oldpath, newpath string) error) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := keepOwner(tmp, path); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return place(tmpName, path)
 }
 
 // NewInstallID returns a random 128-bit hex identifier.
