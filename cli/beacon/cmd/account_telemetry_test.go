@@ -115,7 +115,8 @@ func TestInstallEmailSources(t *testing.T) {
 	}{
 		{name: "flag", flag: " Ada@Acme.io ", env: map[string]string{installEmailEnv: "env@acme.io"}, wantSource: telemetry.EmailSourceFlag, wantEmail: "ada@acme.io", wantKind: telemetry.EmailDomainWork},
 		{name: "env", env: map[string]string{installEmailEnv: "someone@gmail.com"}, wantSource: telemetry.EmailSourceEnv, wantEmail: "someone@gmail.com", wantKind: telemetry.EmailDomainFree},
-		{name: "legacy env", env: map[string]string{onboardingEnvEmail: "ops@acme.io"}, wantSource: telemetry.EmailSourceEnv, wantEmail: "ops@acme.io", wantKind: telemetry.EmailDomainWork},
+		// Fleets set the legacy variable to one administrator's address on every machine.
+		{name: "legacy env is not an identity", env: map[string]string{onboardingEnvEmail: "it@acme.io"}},
 		{name: "none"},
 	}
 	for _, tc := range cases {
@@ -154,17 +155,68 @@ func TestInstallEmailSources(t *testing.T) {
 	}
 }
 
-func TestInstallEmailIsNotRecordedOverASignedInAccount(t *testing.T) {
+// A valid sign-in already names the person: an install email is neither sent, identified nor
+// recorded, so the machine is not re-attributed to an address that never signed in.
+func TestInstallEmailIsIgnoredWithASignedInAccount(t *testing.T) {
 	h := newOnboardingHarness(t)
 	events := recordTelemetry(t)
-	recordIdentify(t)
+	ids := recordIdentify(t)
 	endpointOpts.email = "other@acme.io"
 	submitInstallEmail(h.stderr)
-	if len(eventsNamed(*events, telemetry.EventEmailSubmitted)) != 1 {
-		t.Fatalf("events = %+v", *events)
+	if len(*events) != 0 || len(*ids) != 0 || len(h.saved) != 0 {
+		t.Fatalf("events %+v, identified %+v, saved %+v", *events, *ids, h.saved)
 	}
+}
+
+// A completed onboarding record keeps its email after the session expires: replacing it would name
+// an unverified address as the one that signed in. The person is still identified.
+func TestInstallEmailNeverRewritesACompletedOnboarding(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.accountStatus = account.Status{SignedIn: true, Expired: true}
+	recordTelemetry(t)
+	ids := recordIdentify(t)
+	h.loaded = onboarding.Profile{Onboarding: onboarding.Onboarding{
+		CompletedAt: "2026-11-01T00:00:00Z", Outcome: onboarding.OutcomeAuthenticated, Email: "alice@acme.io",
+	}}
+	endpointOpts.email = "bob@acme.io"
+	submitInstallEmail(h.stderr)
 	if len(h.saved) != 0 {
-		t.Fatalf("recorded the email over the signed-in account: %+v", h.saved)
+		t.Fatalf("rewrote a completed onboarding: %+v", h.saved)
+	}
+	if len(*ids) != 1 || (*ids)[0].email != "bob@acme.io" {
+		t.Fatalf("identified %+v", *ids)
+	}
+}
+
+// root with another account's HOME (sudo on macOS) records nothing in that home, so it never
+// leaves a root-owned profile the person cannot read; root in its own home records as usual.
+func TestInstallEmailAsRootRecordsOnlyInRootsOwnHome(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		homeUID  int
+		wantSave bool
+	}{
+		{name: "another account's home", homeUID: 501},
+		{name: "root's own home", homeUID: 0, wantSave: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newOnboardingHarness(t)
+			h.accountStatus = account.Status{}
+			events := recordTelemetry(t)
+			recordIdentify(t)
+			onboardingIsRoot = func() bool { return true }
+			old := onboardingHomeOwnerUID
+			onboardingHomeOwnerUID = func() (int, error) { return tc.homeUID, nil }
+			t.Cleanup(func() { onboardingHomeOwnerUID = old })
+			endpointOpts.email = "ada@acme.io"
+			submitInstallEmail(h.stderr)
+			if len(eventsNamed(*events, telemetry.EventEmailSubmitted)) != 1 {
+				t.Fatalf("events = %+v", *events)
+			}
+			if got := len(h.saved) == 1; got != tc.wantSave {
+				t.Fatalf("saved %+v, want a save: %v", h.saved, tc.wantSave)
+			}
+		})
 	}
 }
 
