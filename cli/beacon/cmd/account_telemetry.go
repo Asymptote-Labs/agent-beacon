@@ -57,6 +57,17 @@ func installEmailInput() (raw, source, name string) {
 	return "", "", ""
 }
 
+// installEmailGiven reports whether this install was given a usable email (--email,
+// BEACON_EMAIL), which the wizard then does not ask for again.
+func installEmailGiven() bool {
+	raw, _, _ := installEmailInput()
+	if raw == "" {
+		return false
+	}
+	_, err := onboarding.NormalizeEmail(raw)
+	return err == nil
+}
+
 // validateInstallEmailFlag rejects a malformed --email before the install changes anything. The
 // environment forms are only warned about later: a typo in a fleet variable must not fail an install.
 func validateInstallEmailFlag() error {
@@ -128,6 +139,17 @@ func recordWizardEmail(result onboarding.WizardResult) {
 		recordEmailSubmitted(telemetry.EmailSourcePrompt, result.Email)
 	default:
 		telemetryCapture(telemetry.EventEmailPromptSkipped, nil)
+	}
+}
+
+// saveWizardEmail records the address typed at the wizard's email question as soon as it is sent.
+// A failed save is only reported: the install goes on, and Persist writes the profile again.
+func saveWizardEmail(stderr io.Writer, profile onboarding.Profile) {
+	if !onboardingProfileWritable() {
+		return
+	}
+	if err := onboardingSave(profile); err != nil {
+		fmt.Fprintf(stderr, "beacon: could not record the email: %v\n", err)
 	}
 }
 

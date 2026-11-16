@@ -189,7 +189,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		OfferAgentTools:   true,
 		// Only for a person who finishes without an account, and not when this install was
 		// already given an email (--email, BEACON_EMAIL, recorded in the profile).
-		AskEmail:      profile.Onboarding.Email == "",
+		AskEmail:      profile.Onboarding.Email == "" && !installEmailGiven(),
 		BackfillDays:  endpointBackfillDays(),
 		NoBrowser:     endpointOpts.noBrowser,
 		NoDisplay:     onboardingDisplayCheck(),
@@ -262,10 +262,14 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		// user -- and recording it would name someone who did not authorize this
 		// run, under an outcome that says they did.
 		status = account.Status{}
-		recordWizardEmail(result)
 		if result.Email != "" {
+			// Saved now, not by Persist after the install: the address is sent below, so a
+			// retry after a failed install must neither ask for it again nor send it twice.
+			// Only the email is written; the record stays open until Persist completes it.
 			profile.Onboarding.Email = result.Email
+			saveWizardEmail(cmd.ErrOrStderr(), *profile)
 		}
+		recordWizardEmail(result)
 	}
 
 	privacyMode := ""
