@@ -134,9 +134,16 @@ func newRecorder(opts Options) *recorder {
 	st := loadState(home)
 	if st.NoticeShownAt == "" && opts.Stderr != nil && opts.Interactive && persist {
 		// Recorded before it is printed, so a notice that could not be recorded is not printed and
-		// is never shown again on every run.
-		st.NoticeShownAt = now().UTC().Format(time.RFC3339)
-		if saveState(home, st) == nil {
+		// is never shown again on every run. Decided under the lock, so two runs starting together
+		// print it once.
+		shownAt := now().UTC().Format(time.RFC3339)
+		if updateState(home, func(st *state) bool {
+			if st.NoticeShownAt != "" {
+				return false
+			}
+			st.NoticeShownAt = shownAt
+			return true
+		}) {
 			fmt.Fprintln(opts.Stderr, Notice)
 		}
 	}
@@ -244,10 +251,12 @@ func Identify(email, userID string) {
 		Groups: r.groups(),
 	})
 	if r.persist {
-		st := loadState(r.home)
-		st.PHDistinctID = id
-		st.Company = r.company
-		_ = saveState(r.home, st)
+		company := r.company
+		updateState(r.home, func(st *state) bool {
+			st.PHDistinctID = id
+			st.Company = company
+			return true
+		})
 	}
 }
 

@@ -18,10 +18,11 @@ func RecordInstalled(now time.Time) {
 	if r == nil || !r.persist {
 		return
 	}
-	st := loadState(r.home)
-	if st.InstalledAt != "" {
-		return
-	}
-	st.InstalledAt = now.UTC().Format(time.RFC3339)
-	_ = saveState(r.home, st)
+	updateState(r.home, func(st *state) bool {
+		if st.InstalledAt != "" {
+			return false
+		}
+		st.InstalledAt = now.UTC().Format(time.RFC3339)
+		return true
+	})
 }

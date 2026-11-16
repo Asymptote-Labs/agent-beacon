@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRecordTracesSendsOneEventPerNewSession(t *testing.T) {
@@ -71,5 +72,21 @@ func TestRecordTracesIsOffWithTelemetry(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, TracesPath)); !os.IsNotExist(err) {
 		t.Fatalf("a development build wrote the seen file: %v", err)
+	}
+}
+
+func TestLiveTraceIsKeptBetweenRuns(t *testing.T) {
+	setup(t, nil)
+	Init(options(nil, nil))
+	if _, ok := LiveTrace(); ok {
+		t.Fatal("a fresh home has a position")
+	}
+	saved := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	want := LiveTracePosition{Offset: 4096, LogID: "abc", SavedAt: saved}
+	SetLiveTrace(want)
+	Close()
+	Init(options(nil, nil))
+	if got, ok := LiveTrace(); !ok || got != want {
+		t.Fatalf("position after a new run = %+v, %t; want %+v", got, ok, want)
 	}
 }
