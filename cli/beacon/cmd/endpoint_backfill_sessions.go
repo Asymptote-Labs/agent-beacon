@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -73,4 +74,24 @@ func sessionsWrittenSince(path string, offset int64) []sweptSession {
 			return sessions
 		}
 	}
+}
+
+// Swapped by tests.
+var (
+	telemetryRecordTraces  = telemetry.RecordTraces
+	traceEndpointConnected = asymptote.Connected
+)
+
+// recordLocalTraces sends cli_trace_recorded for the sessions a sweep wrote that this machine has
+// not reported before. Only a local-only endpoint does: one connected to Beacon Cloud forwards the
+// sessions themselves, and the cloud counts them there.
+func recordLocalTraces(source string, userMode bool, result endpointBackfillResult) {
+	if len(result.Sessions) == 0 || traceEndpointConnected(userMode) {
+		return
+	}
+	traces := make([]telemetry.Trace, 0, len(result.Sessions))
+	for _, session := range result.Sessions {
+		traces = append(traces, telemetry.Trace{Harness: session.Harness, ID: session.ID})
+	}
+	telemetryRecordTraces(source, traces)
 }
