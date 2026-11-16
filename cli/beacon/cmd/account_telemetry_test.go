@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -251,5 +252,189 @@ func TestWizardWithoutAccountKeepsTheInstallEmail(t *testing.T) {
 	}
 	if len(h.saved) != 1 || h.saved[0].Onboarding.Email != "ada@acme.io" || h.saved[0].Onboarding.Outcome != onboarding.OutcomeSkipped {
 		t.Fatalf("saved %+v", h.saved)
+	}
+}
+
+// The wizard's optional email question: an address is submitted and identified and recorded on the
+// profile, a blank answer is skipped, and a run that never asked sends nothing.
+func TestWizardEmailPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		result       onboarding.WizardResult
+		wantEvents   []string
+		wantKind     string
+		wantIdentify []identified
+		wantEmail    string
+	}{
+		{
+			name:         "submitted",
+			result:       onboarding.WizardResult{EmailAsked: true, Email: "ada@acme.io"},
+			wantEvents:   []string{telemetry.EventEmailSubmitted},
+			wantKind:     telemetry.EmailDomainWork,
+			wantIdentify: []identified{{"ada@acme.io", ""}},
+			wantEmail:    "ada@acme.io",
+		},
+		{
+			name:         "submitted personal",
+			result:       onboarding.WizardResult{EmailAsked: true, Email: "ada@gmail.com"},
+			wantEvents:   []string{telemetry.EventEmailSubmitted},
+			wantKind:     telemetry.EmailDomainFree,
+			wantIdentify: []identified{{"ada@gmail.com", ""}},
+			wantEmail:    "ada@gmail.com",
+		},
+		{name: "skipped", result: onboarding.WizardResult{EmailAsked: true}, wantEvents: []string{telemetry.EventEmailPromptSkipped}},
+		{name: "not asked", result: onboarding.WizardResult{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newOnboardingHarness(t)
+			h.accountStatus = account.Status{}
+			events := recordTelemetry(t)
+			calls := recordIdentify(t)
+			var asked bool
+			onboardingRunWizard = func(_ io.Reader, _ io.Writer, options onboarding.WizardOptions) (onboarding.WizardResult, error) {
+				asked = options.AskEmail
+				result := tc.result
+				result.Completed, result.WithoutAccount, result.Destination = true, true, onboarding.DestinationLocal
+				return result, nil
+			}
+			if _, err := runOnboarding(t, h.cmd); err != nil {
+				t.Fatal(err)
+			}
+			if !asked {
+				t.Fatal("a profile without an email did not ask for one")
+			}
+			var names []string
+			for _, e := range *events {
+				names = append(names, e.name)
+			}
+			if !reflect.DeepEqual(names, tc.wantEvents) {
+				t.Fatalf("events = %v, want %v", names, tc.wantEvents)
+			}
+			if tc.wantKind != "" {
+				props := (*events)[0].props
+				if props[telemetry.PropEmailSource] != telemetry.EmailSourcePrompt || props[telemetry.PropEmailDomainKind] != tc.wantKind {
+					t.Fatalf("props = %+v", props)
+				}
+			}
+			if len(*calls) != len(tc.wantIdentify) || (len(*calls) > 0 && !reflect.DeepEqual(*calls, tc.wantIdentify)) {
+				t.Fatalf("identified %+v, want %+v", *calls, tc.wantIdentify)
+			}
+			// A typed address is saved once when it is sent, then again by Persist.
+			wantSaves := 1
+			if tc.wantEmail != "" {
+				wantSaves = 2
+			}
+			if len(h.saved) != wantSaves || h.saved[len(h.saved)-1].Onboarding.Email != tc.wantEmail {
+				t.Fatalf("saved %+v, want %d saves ending with email %q", h.saved, wantSaves, tc.wantEmail)
+			}
+		})
+	}
+}
+
+// An install that was already given an email does not ask again.
+func TestWizardDoesNotAskForAnEmailItAlreadyHas(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.accountStatus = account.Status{}
+	recordTelemetry(t)
+	recordIdentify(t)
+	h.loaded = onboarding.Profile{Onboarding: onboarding.Onboarding{Email: "ada@acme.io"}}
+	onboardingRunWizard = func(_ io.Reader, _ io.Writer, options onboarding.WizardOptions) (onboarding.WizardResult, error) {
+		if options.AskEmail {
+			t.Error("asked for an email the install was given")
+		}
+		return onboarding.WizardResult{Completed: true, WithoutAccount: true, Destination: onboarding.DestinationLocal}, nil
+	}
+	if _, err := runOnboarding(t, h.cmd); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An email given by --email or BEACON_EMAIL is not asked for again, even on a profile that is
+// already onboarded without one (a destination-only re-run). A malformed one does not count.
+func TestWizardDoesNotAskForAnEmailGivenByFlagOrEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		flag    string
+		env     string
+		profile onboarding.Profile
+		wantAsk bool
+	}{
+		{name: "flag", flag: "ada@acme.io", wantAsk: false},
+		{name: "env", env: "ada@acme.io", wantAsk: false},
+		{
+			name:    "env on an onboarded profile without an email",
+			env:     "ada@acme.io",
+			profile: onboarding.Profile{Onboarding: onboarding.Onboarding{CompletedAt: "2026-09-01T00:00:00Z", Outcome: onboarding.OutcomeSkipped}},
+			wantAsk: false,
+		},
+		{name: "malformed env", env: "not-an-email", wantAsk: true},
+		{name: "none", wantAsk: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newOnboardingHarness(t)
+			h.accountStatus = account.Status{}
+			recordTelemetry(t)
+			recordIdentify(t)
+			h.loaded = tc.profile
+			endpointOpts.email = tc.flag
+			t.Setenv(installEmailEnv, tc.env)
+			t.Setenv(onboardingEnvEnabled, "1")
+			var ran, asked bool
+			onboardingRunWizard = func(_ io.Reader, _ io.Writer, options onboarding.WizardOptions) (onboarding.WizardResult, error) {
+				ran, asked = true, options.AskEmail
+				return onboarding.WizardResult{Completed: true, WithoutAccount: true, Destination: onboarding.DestinationLocal}, nil
+			}
+			if _, err := runOnboarding(t, h.cmd); err != nil {
+				t.Fatal(err)
+			}
+			if !ran {
+				t.Fatal("the wizard did not run")
+			}
+			if asked != tc.wantAsk {
+				t.Fatalf("AskEmail = %v, want %v", asked, tc.wantAsk)
+			}
+		})
+	}
+}
+
+// The typed address is saved when it is sent, before the install. A retry after a failed install
+// (Persist never ran) then neither asks for it again nor sends it a second time.
+func TestWizardEmailSurvivesAFailedInstall(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.accountStatus = account.Status{}
+	events := recordTelemetry(t)
+	calls := recordIdentify(t)
+	var asks []bool
+	onboardingRunWizard = func(_ io.Reader, _ io.Writer, options onboarding.WizardOptions) (onboarding.WizardResult, error) {
+		asks = append(asks, options.AskEmail)
+		result := onboarding.WizardResult{Completed: true, WithoutAccount: true, Destination: onboarding.DestinationLocal}
+		if options.AskEmail {
+			result.EmailAsked, result.Email = true, "ada@acme.io"
+		}
+		return result, nil
+	}
+
+	// First run: the install fails, so Persist is never called.
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.saved) != 1 || h.saved[0].Onboarding.Email != "ada@acme.io" || h.saved[0].Prompted() {
+		t.Fatalf("saved %+v, want only the email recorded on a still-open profile", h.saved)
+	}
+
+	// The retry loads what was saved.
+	h.loaded = h.saved[0]
+	if _, err := runOnboarding(t, h.cmd); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(asks, []bool{true, false}) {
+		t.Fatalf("AskEmail per run = %v, want [true false]", asks)
+	}
+	if len(*events) != 1 || (*events)[0].name != telemetry.EventEmailSubmitted || len(*calls) != 1 {
+		t.Fatalf("events %+v, identify %+v: want one cli_email_submitted and one identify", *events, *calls)
+	}
+	last := h.saved[len(h.saved)-1]
+	if !last.Prompted() || last.Onboarding.Email != "ada@acme.io" {
+		t.Fatalf("final profile %+v", last)
 	}
 }

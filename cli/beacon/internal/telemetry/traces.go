@@ -103,3 +103,29 @@ func RecordTraces(source string, traces []Trace) {
 		})
 	}
 }
+
+// LiveTrace is where the scheduled scan for live sessions stopped reading the runtime log. ok is
+// false before the scan's first run, and when telemetry is off.
+func LiveTrace() (pos LiveTracePosition, ok bool) {
+	r := active()
+	if r == nil {
+		return LiveTracePosition{}, false
+	}
+	st := loadState(r.home)
+	if st.LiveTrace == nil {
+		return LiveTracePosition{}, false
+	}
+	return *st.LiveTrace, true
+}
+
+// SetLiveTrace records where the scan for live sessions stopped reading the runtime log.
+func SetLiveTrace(pos LiveTracePosition) {
+	r := active()
+	if r == nil || !r.persist {
+		return
+	}
+	updateState(r.home, func(st *state) bool {
+		st.LiveTrace = &pos
+		return true
+	})
+}

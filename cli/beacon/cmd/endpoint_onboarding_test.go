@@ -71,6 +71,8 @@ func newOnboardingHarness(t *testing.T) *onboardingHarness {
 	endpointOpts.jsonOutput = false
 	endpointOpts.onboardingReset = false
 	endpointOpts.onboardingResend = false
+	endpointOpts.email = ""
+	t.Setenv(installEmailEnv, "")
 
 	for _, key := range []string{"CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "JENKINS_URL", "TEAMCITY_VERSION"} {
 		t.Setenv(key, "")
