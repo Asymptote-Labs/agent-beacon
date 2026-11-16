@@ -25,6 +25,10 @@ type state struct {
 	PHDistinctID string `json:"ph_distinct_id,omitempty"`
 	// Company is the company group of the identified person, "" for a personal mailbox.
 	Company string `json:"company,omitempty"`
+	// InstalledAt is when `beacon endpoint install` first succeeded for this home. It outlives
+	// `beacon endpoint uninstall`, which removes the install manifest, so a reinstall is not
+	// counted as the device's first install.
+	InstalledAt string `json:"installed_at,omitempty"`
 }
 
 func statePath(home string) string {
