@@ -3,7 +3,8 @@
 // It is the only place the CLI talks to PostHog, and it is built so that it can never cost a
 // command anything: events are queued in memory and sent in the background, Close waits at most
 // FlushTimeout on exit, and every error is swallowed. Development builds, BEACON_TELEMETRY=0 and
-// DO_NOT_TRACK send nothing. The hook adapter and the collector do not link it.
+// DO_NOT_TRACK send nothing, and system mode (--system or root) sends nothing unless
+// BEACON_TELEMETRY=1. The hook adapter and the collector do not link it.
 //
 // Events carry counts, names from fixed lists and the super properties, never session content,
 // prompts, file paths, repository names, hostnames or error text. An email is sent only as a
@@ -79,8 +80,8 @@ var (
 	current *recorder
 )
 
-// Init turns telemetry on for this process unless it is a development build or the environment
-// opts out. It makes sure the machine's install ID exists in profile.json, prints the first-run
+// Init turns telemetry on for this process unless it is a development build, the environment opts
+// out, or it is system mode and the environment does not opt in. It makes sure the machine's install ID exists in profile.json, prints the first-run
 // notice once to an interactive terminal, and never touches the network: the PostHog client starts with the first event.
 func Init(opts Options) {
 	r := newRecorder(opts)
@@ -110,6 +111,9 @@ func newRecorder(opts Options) *recorder {
 		now = time.Now
 	}
 	if !releaseBuild(opts.Version) || OptedOut(getenv) {
+		return nil
+	}
+	if opts.InstallMode == InstallModeSystem && !OptedIn(getenv) {
 		return nil
 	}
 	home, err := os.UserHomeDir()
