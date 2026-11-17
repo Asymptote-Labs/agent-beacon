@@ -90,8 +90,8 @@ never undo each other's change; an update that cannot get the lock within a seco
 | Event | When | Properties |
 |-------|------|------------|
 | `$create_alias`, `$set` | The CLI learns your email | Your email, `has_beacon`, your Beacon account ID when signed in, and `first_product`/`first_surface` set once, all as person properties |
-| `cli_sign_in_completed` | A sign-in succeeds, followed by `$create_alias` and `$set` | `trigger` (`wizard` or `login_command`) |
-| `cli_email_submitted` | `beacon endpoint install` is given an email with `--email` or `BEACON_EMAIL` and no valid sign-in, or in the wizard's optional email question, followed by `$create_alias` and `$set` | `email_source` (`flag`, `env` or `prompt`), `email_domain_kind` (`work` or `free`); never the address |
+| `cli_sign_in_completed` | A sign-in succeeds, sent after `$create_alias` and `$set` as the signed-in person | `trigger` (`wizard` or `login_command`) |
+| `cli_email_submitted` | `beacon endpoint install` is given an email with `--email` or `BEACON_EMAIL` and no valid sign-in, or in the wizard's optional email question, sent after `$create_alias` and `$set` as that person | `email_source` (`flag`, `env` or `prompt`), `email_domain_kind` (`work` or `free`); never the address |
 | `cli_email_prompt_skipped` | The wizard's optional email question is left blank | None |
 | `cli_install_started` | `beacon endpoint install` begins (not on `--dry-run`) | `setup_path` (`wizard`, `agent`, `ci`, `package`, or `noninteractive`), `detected_harnesses` (the runtime names discovery found), `is_first_for_device` |
 | `cli_install_completed` | `beacon endpoint install` succeeds, after hooks, skills, the session backfill and any Beacon Cloud connect | `destination` (`local` or `cloud`), `harnesses_configured` (the install targets), `backfill_session_count`, `duration_ms`, `is_first_for_device` |

@@ -109,7 +109,8 @@ const (
 	DestinationCloud = "cloud"
 )
 
-// Identity events. Each is followed by Identify, so the person it names is known from then on.
+// Identity events. Each is sent right after Identify, as the person it names, who is known from
+// then on.
 const (
 	// EventSignInCompleted is sent when a Beacon sign-in succeeds.
 	EventSignInCompleted = "cli_sign_in_completed"

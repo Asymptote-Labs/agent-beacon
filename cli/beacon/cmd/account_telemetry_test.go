@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,79 @@ func TestWizardFallbackLoginSendsSignIn(t *testing.T) {
 	if h.loginRuns != 1 || len(eventsNamed(*events, telemetry.EventSignInCompleted)) != 1 || len(*ids) != 1 {
 		t.Fatalf("login runs %d, events %+v, identified %+v", h.loginRuns, *events, *ids)
 	}
+}
+
+// recordIdentityOrder records identify calls and captured events in one sequence, as
+// "identify <email>" and "capture <event>".
+func recordIdentityOrder(t *testing.T) *[]string {
+	t.Helper()
+	recordTelemetry(t)
+	recordIdentify(t)
+	var order []string
+	capture, identify := telemetryCapture, telemetryIdentify
+	telemetryCapture = func(name string, props map[string]any) {
+		order = append(order, "capture "+name)
+		capture(name, props)
+	}
+	telemetryIdentify = func(email, userID string) {
+		order = append(order, "identify "+email)
+		identify(email, userID)
+	}
+	return &order
+}
+
+// The identity events are sent as the person they name: identified first, they go out under the
+// email's distinct ID instead of the anonymous install's.
+func TestIdentityEventsAreSentAfterIdentify(t *testing.T) {
+	t.Run("login", func(t *testing.T) {
+		withAccountFakes(t)
+		order := recordIdentityOrder(t)
+		session, status := accountFixture()
+		accountLogin = func(context.Context, account.LoginOptions) (*account.Session, error) { return session, nil }
+		accountSave = func(account.Session) error { return nil }
+		accountInspect = func(time.Time) account.Status { return status }
+		loginCmd.SetOut(io.Discard)
+		loginCmd.SetErr(io.Discard)
+		if err := runLogin(loginCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"identify person@example.com", "capture " + telemetry.EventSignInCompleted}
+		if !slices.Equal(*order, want) {
+			t.Fatalf("order = %q, want %q", *order, want)
+		}
+	})
+	t.Run("wizard sign-in", func(t *testing.T) {
+		h := newOnboardingHarness(t)
+		h.accountStatus = account.Status{}
+		order := recordIdentityOrder(t)
+		onboardingRunWizard = func(_ io.Reader, _ io.Writer, opts onboarding.WizardOptions) (onboarding.WizardResult, error) {
+			acct, err := opts.SignIn(context.Background(), onboarding.SignInRequest{}, discardReporter{})
+			if err != nil {
+				return onboarding.WizardResult{}, err
+			}
+			return onboarding.WizardResult{Completed: true, SignedInEmail: acct.Email, Destination: onboarding.DestinationLocal}, nil
+		}
+		if _, err := runOnboarding(t, h.cmd); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"identify shukan@asymptotelabs.ai", "capture " + telemetry.EventSignInCompleted}
+		if !slices.Equal(*order, want) {
+			t.Fatalf("order = %q, want %q", *order, want)
+		}
+	})
+	t.Run("install email", func(t *testing.T) {
+		h := newOnboardingHarness(t)
+		h.accountStatus = account.Status{}
+		order := recordIdentityOrder(t)
+		t.Setenv(installEmailEnv, "")
+		endpointOpts.email = "ada@acme.io"
+		t.Cleanup(func() { endpointOpts.email = "" })
+		submitInstallEmail(h.stderr)
+		want := []string{"identify ada@acme.io", "capture " + telemetry.EventEmailSubmitted}
+		if !slices.Equal(*order, want) {
+			t.Fatalf("order = %q, want %q", *order, want)
+		}
+	})
 }
 
 func TestWizardWithASignedInAccountIdentifiesWithoutASignInEvent(t *testing.T) {

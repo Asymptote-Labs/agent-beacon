@@ -31,10 +31,11 @@ var (
 	}
 )
 
-// recordSignIn sends cli_sign_in_completed and then identifies the signed-in person.
+// recordSignIn identifies the signed-in person and then sends cli_sign_in_completed, so the event
+// is the person's and not the anonymous install's.
 func recordSignIn(trigger string, user account.User) {
-	telemetryCapture(telemetry.EventSignInCompleted, map[string]any{telemetry.PropTrigger: trigger})
 	telemetryIdentify(user.Email, user.ID)
+	telemetryCapture(telemetry.EventSignInCompleted, map[string]any{telemetry.PropTrigger: trigger})
 }
 
 // identifySignedIn identifies the person of a session that was already signed in, without an event:
@@ -80,8 +81,8 @@ func validateInstallEmailFlag() error {
 	return nil
 }
 
-// submitInstallEmail handles an email given to this install without signing in: it sends
-// cli_email_submitted, identifies the person, and records the email in a profile that has not been
+// submitInstallEmail handles an email given to this install without signing in: it identifies the
+// person, sends cli_email_submitted, and records the email in a profile that has not been
 // onboarded yet.
 //
 // A valid sign-in already names who this is, so then the email is ignored altogether: identifying it
@@ -116,22 +117,23 @@ func submitInstallEmail(stderr io.Writer) {
 	}
 }
 
-// recordEmailSubmitted sends cli_email_submitted for an email given without signing in, then
-// identifies the person. email is already normalized.
+// recordEmailSubmitted identifies the person behind an email given without signing in, then sends
+// cli_email_submitted. email is already normalized.
 func recordEmailSubmitted(source, email string) {
 	kind := telemetry.EmailDomainWork
 	if telemetry.IsFreeEmailDomain(email) {
 		kind = telemetry.EmailDomainFree
 	}
+	// Identified first, so the event is sent as the person it names.
+	telemetryIdentify(email, "")
 	telemetryCapture(telemetry.EventEmailSubmitted, map[string]any{
 		telemetry.PropEmailSource:     source,
 		telemetry.PropEmailDomainKind: kind,
 	})
-	telemetryIdentify(email, "")
 }
 
-// recordWizardEmail sends what the wizard's optional email question got: cli_email_submitted and
-// Identify for an address, cli_email_prompt_skipped for a blank answer, nothing when it was not asked.
+// recordWizardEmail sends what the wizard's optional email question got: Identify and
+// cli_email_submitted for an address, cli_email_prompt_skipped for a blank answer, nothing when it was not asked.
 func recordWizardEmail(result onboarding.WizardResult) {
 	switch {
 	case !result.EmailAsked:

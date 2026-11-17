@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -509,6 +510,38 @@ func TestIdentifyAliasesTheInstallAndSetsThePerson(t *testing.T) {
 	if next := s2.byEvent("cli_next"); len(next) != 1 || next[0]["distinct_id"] != id {
 		t.Fatalf("next run's event = %v", next)
 	}
+}
+
+// An identity event captured right after Identify, as the CLI sends cli_sign_in_completed and
+// cli_email_submitted, follows the alias and goes out as the person, not as the anonymous install.
+func TestIdentityEventAfterIdentifyIsThePersons(t *testing.T) {
+	s, _ := setup(t, nil)
+	Init(options(nil, io.Discard))
+	Identify("ada@example.com", "user_123")
+	Capture(EventSignInCompleted, map[string]any{PropTrigger: TriggerLoginCommand})
+	Close()
+
+	id := DistinctIDForEmail("ada@example.com")
+	var order []string
+	for _, msg := range s.all() {
+		order = append(order, msg["event"].(string))
+	}
+	if want := []string{"$create_alias", eventSet, EventSignInCompleted}; !slices.Equal(order, want) {
+		t.Fatalf("messages = %q, want %q", order, want)
+	}
+	for _, msg := range s.all() {
+		if properties(t, msg)["$geoip_disable"] != true {
+			t.Fatalf("%s does not disable GeoIP: %v", msg["event"], msg["properties"])
+		}
+	}
+	signIn := s.byEvent(EventSignInCompleted)[0]
+	if signIn["distinct_id"] != id {
+		t.Fatalf("%s distinct_id = %v, want the email's %s", EventSignInCompleted, signIn["distinct_id"], id)
+	}
+	if _, ok := properties(t, signIn)[propProcessPersonProfile]; ok {
+		t.Fatalf("%s is personless", EventSignInCompleted)
+	}
+	assertNoPII(t, s.all())
 }
 
 func TestIdentifyWithAPersonalEmailHasNoCompany(t *testing.T) {

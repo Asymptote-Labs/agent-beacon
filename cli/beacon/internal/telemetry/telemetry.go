@@ -277,6 +277,7 @@ func (r *recorder) enqueue(msg posthog.Message) {
 			ShutdownTimeout:        FlushTimeout,
 			BatchUploadTimeout:     FlushTimeout,
 			MaxRetries:             posthog.Ptr(0),
+			DisableGeoIP:           posthog.Ptr(true), // posthog-go's default: no location from the sender's IP
 			Logger:                 quietLogger{},
 			DefaultEventProperties: r.supers,
 		})
