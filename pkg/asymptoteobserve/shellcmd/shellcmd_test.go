@@ -260,6 +260,12 @@ func TestFileWrites(t *testing.T) {
 		// What is not a write is not one as written either: a source, a read, a device.
 		{"cat ~/.bashrc", nil},
 		{"cp ~/.bashrc \"$BACKUP\" 2> /dev/null", []string{"write $BACKUP"}},
+		// An option whose value is unknown is still an option, for writes as for reads.
+		{`cp --target-directory="$HOME/.ssh" authorized_keys`, []string{"write $HOME/.ssh/authorized_keys"}},
+		{`cp --suffix="$S" a b`, []string{"write b"}},
+		{`truncate --size="$N" ~/.bash_history`, []string{"truncate ~/.bash_history"}},
+		// A header's value is no URL to save a download under.
+		{`curl -O https://a.example/x --header "Referer: https://b.example/y"`, []string{"write x"}},
 		{"grep -q x ~/.zshrc > /dev/null", nil},
 	} {
 		commands, err := Parse(tc.command)

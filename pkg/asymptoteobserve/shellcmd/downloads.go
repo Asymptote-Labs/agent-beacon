@@ -16,32 +16,12 @@ import (
 // is, or is under, a directory it cares about, and a caller that needs the exact file written
 // (FileEffects) is told nothing it cannot use.
 
-// wgetValueOptions are wget's short options that take a value.
-const wgetValueOptions = "aoOiBtTwQPUelARDIX"
-
 // gitCloneOptions are git clone's options that take a value.
 var gitCloneOptions = optionTable{values: optionSpec{short: "boucj", long: []string{
 	"--branch", "--origin", "--upload-pack", "--config", "--jobs", "--reference", "--reference-if-able",
 	"--separate-git-dir", "--depth", "--shallow-since", "--shallow-exclude", "--filter", "--template",
 	"--server-option", "--bundle-uri", "--revision",
 }}}
-
-// tarExtractOptions are tar's options that take a value, and the ones that say it extracts.
-var tarExtractOptions = optionTable{values: tarOptions.values, flags: optionSpec{short: "x", long: []string{"--extract", "--get"}}}
-
-// writesInto reports whether the command may put files into a directory it names (or the one
-// it runs in), which only FileWrites reports.
-func (c Command) writesInto() bool {
-	switch program, args := c.program(); program {
-	case "tar", "unzip", "rsync":
-		return true
-	case "git":
-		return isSub(args, "clone")
-	case "gh":
-		return isSub(args, "repo", "clone")
-	}
-	return false
-}
 
 // intoDirectory returns the directory the command extracts or clones into, written with a
 // trailing slash, when it does that. name and args are the command's program and the words
@@ -54,7 +34,7 @@ func intoDirectory(name string, args []Word) (string, bool) {
 	case name == "unzip":
 		dir, ok = unzipDirectory(args)
 	case name == "git" && isSub(args, "clone"):
-		dir, ok = cloneDirectory(gitCloneOptions.parse(args[1:], true).operands)
+		dir, ok = cloneDirectory(gitCloneOptions.parse(args[1:]).operands)
 	case name == "gh" && isSub(args, "repo", "clone"):
 		operands := args[2:]
 		if i := slices.IndexFunc(operands, func(w Word) bool { return w.Unquoted == "--" }); i >= 0 {
@@ -80,31 +60,17 @@ func asDirectory(p string) string {
 // tarExtractDirectory returns where tar extracts to (-C, --directory, or the directory it runs
 // in), and ok only when it extracts.
 func tarExtractDirectory(args []Word) (Word, bool) {
-	extracts := false
-	dir := Word{Unquoted: "."}
-	// The first word may be option letters without a dash (tar xzf in.tgz): each letter that
-	// takes a value takes the next word, in order.
-	if len(args) > 0 {
-		if bundle := args[0].Unquoted; bundle != "" && isLetters(bundle) {
-			values := 1
-			for i := 0; i < len(bundle); i++ {
-				extracts = extracts || bundle[i] == 'x'
-				if strings.IndexByte(tarOptions.values.short, bundle[i]) >= 0 {
-					if bundle[i] == 'C' && values < len(args) {
-						dir = args[values]
-					}
-					values++
-				}
-			}
-			if values > len(args) {
-				return Word{}, false
-			}
-			args = args[values:]
-		}
-	}
-	opts := tarExtractOptions.parse(args, true)
-	if !extracts && !opts.flags["x"] && !opts.flags["--extract"] && !opts.flags["--get"] {
+	letters, values, args, ok := tarBundle(args)
+	if !ok {
 		return Word{}, false
+	}
+	opts := tarOptions.parse(args)
+	if !strings.Contains(letters, "x") && !opts.flags["x"] && !opts.flags["--extract"] && !opts.flags["--get"] {
+		return Word{}, false
+	}
+	dir := literalWord(".")
+	if v, ok := values['C']; ok {
+		dir = v
 	}
 	for _, name := range []string{"C", "--directory"} {
 		if v, ok := opts.values[name]; ok && v.Unquoted != "" {
@@ -117,7 +83,7 @@ func tarExtractDirectory(args []Word) (Word, bool) {
 // unzipDirectory returns where unzip extracts to (-d, or the directory it runs in), and ok only
 // when it extracts: -l, -t, -v and -Z list or test, and -p and -c write to standard output.
 func unzipDirectory(args []Word) (Word, bool) {
-	dir := Word{Unquoted: "."}
+	dir := literalWord(".")
 	for i := 0; i < len(args); i++ {
 		switch t := args[i].Unquoted; {
 		case t == "-d":
@@ -146,35 +112,32 @@ func cloneDirectory(operands []Word) (Word, bool) {
 		if repo == "" {
 			return Word{}, false
 		}
-		return Word{Unquoted: repo}, true
+		return attachedValue(operands[0], repo), true
 	}
 	return operands[1], true
 }
 
-// outputFile is the effect of writing the file w names, unless it names none: standard output
-// (-) or a device. under is the directory a relative name is put in, when the command names one.
-func outputFile(w Word, under *Word, written bool) (FileEffect, bool) {
-	p, ok := wordPath(w, written)
-	if !ok || !isFile(p) {
-		return FileEffect{}, false
+// outputFile is the write of the file w names, unless it names none: standard output (-) or a
+// device. under is the directory a relative name is put in, when the command names one.
+func outputFile(w Word, under *Word) (write, bool) {
+	p, exact := wordPath(w)
+	if !isFile(p) {
+		return write{}, false
 	}
 	if under != nil && !path.IsAbs(p) {
-		dir, ok := wordPath(*under, written)
-		if !ok {
-			return FileEffect{}, false
+		dir, dirExact := wordPath(*under)
+		if dir == "" {
+			return write{}, false
 		}
-		p = path.Join(dir, p)
+		p, exact = path.Join(dir, p), exact && dirExact
 	}
-	return FileEffect{Path: p, Op: OpWrite}, true
+	return write{FileEffect: FileEffect{Path: p, Op: OpWrite}, exact: exact}, true
 }
 
 // urlFileName is the name a download is saved under when the command takes it from the URL:
 // what follows the last slash of its path. ok is false for a word that is no URL or names none.
-func urlFileName(w Word, written bool) (Word, bool) {
-	u, ok := wordPath(w, written)
-	if !ok {
-		return Word{}, false
-	}
+func urlFileName(w Word) (Word, bool) {
+	u := w.Unquoted
 	scheme := strings.Index(u, "://")
 	if scheme < 0 {
 		return Word{}, false
@@ -187,173 +150,61 @@ func urlFileName(w Word, written bool) (Word, bool) {
 	if i < 0 || i+1 == len(rest) {
 		return Word{}, false
 	}
-	name := rest[i+1:]
-	return Word{Text: name, Unquoted: name, Known: w.Known}, true
+	return attachedValue(w, rest[i+1:]), true
 }
 
-// optionValue is the value of an option written in the word at i: attached to it when rest is
-// not empty, and otherwise the next word. It returns the index of the last word read.
-func optionValue(args []Word, i int, rest string) (Word, int, bool) {
-	switch {
-	case rest != "":
-		return attachedValue(args[i], rest), i, true
-	case i+1 < len(args):
-		return args[i+1], i + 1, true
-	}
-	return Word{}, i, false
-}
-
-// outputFiles are the effects of the words of outputs that name a file, each under dir.
-func outputFiles(outputs []Word, dir *Word, written bool) []FileEffect {
-	var effects []FileEffect
+// outputFiles are the writes of the words of outputs that name a file, each under dir.
+func outputFiles(outputs []Word, dir *Word) []write {
+	var out []write
 	for _, w := range outputs {
-		if e, ok := outputFile(w, dir, written); ok {
-			effects = append(effects, e)
+		if e, ok := outputFile(w, dir); ok {
+			out = append(out, e)
 		}
 	}
-	return effects
+	return out
 }
 
 // curlOutputs returns the files curl saves: the file of each -o/--output, and with
 // -O/--remote-name the name each URL ends in, both under --output-dir when it is given.
-func curlOutputs(args []Word, written bool) []FileEffect {
-	var outputs, urls []Word
-	var dir *Word
-	remote := false
-	for i := 0; i < len(args); i++ {
-		t := args[i].Unquoted
-		if len(t) < 2 || t[0] != '-' {
-			urls = append(urls, args[i])
-			continue
-		}
-		if t[1] == '-' {
-			name, attached, _ := strings.Cut(t, "=")
-			switch name {
-			case "--remote-name", "--remote-name-all":
-				remote = true
-			case "--output", "--output-dir":
-				value, last, ok := optionValue(args, i, attached)
-				if !ok {
-					return outputFiles(outputs, dir, written)
-				}
-				i = last
-				if name == "--output-dir" {
-					dir = &value
-				} else {
-					outputs = append(outputs, value)
-				}
-			case "--proxy", "--preproxy", "--referer", "--doh-url":
-				// The address of a proxy or a referring page is no download.
-				if attached == "" {
-					i++
-				}
-			}
-			continue
-		}
-		j := 1
-		for j < len(t) && t[j] != '$' && t[j] != '`' && strings.IndexByte(curlValueOptions, t[j]) < 0 {
-			remote = remote || t[j] == 'O'
-			j++
-		}
-		if j == len(t) || t[j] == '$' || t[j] == '`' {
-			continue // only options without a value
-		}
-		value, last, ok := optionValue(args, i, t[j+1:])
-		if !ok {
-			break
-		}
-		i = last
-		if t[j] == 'o' {
-			outputs = append(outputs, value)
-		}
-	}
-	if remote {
-		for _, u := range urls {
-			if name, ok := urlFileName(u, written); ok {
+func curlOutputs(args []Word) []write {
+	a := readCurl(args)
+	outputs := a.outputs
+	if a.remote {
+		for _, u := range a.urls {
+			if name, ok := urlFileName(u); ok {
 				outputs = append(outputs, name)
 			}
 		}
 	}
-	return outputFiles(outputs, dir, written)
+	return outputFiles(outputs, a.dir)
 }
 
 // wgetOutputs returns the files wget saves: the file of -O/--output-document, or else the name
 // each URL ends in, under -P/--directory-prefix when it is given. A recursive download and
 // --spider name none.
-func wgetOutputs(args []Word, written bool) []FileEffect {
-	var urls []Word
-	var output, dir *Word
-	named := true
-	for i := 0; i < len(args); i++ {
-		t := args[i].Unquoted
-		if len(t) < 2 || t[0] != '-' {
-			urls = append(urls, args[i])
-			continue
-		}
-		if t[1] == '-' {
-			name, attached, _ := strings.Cut(t, "=")
-			switch name {
-			case "--recursive", "--mirror", "--spider", "--page-requisites":
-				named = false
-			case "--output-document", "--directory-prefix":
-				value, last, ok := optionValue(args, i, attached)
-				if !ok {
-					return nil
-				}
-				i = last
-				if name == "--output-document" {
-					output = &value
-				} else {
-					dir = &value
-				}
-			}
-			continue
-		}
-		j := 1
-		for j < len(t) && t[j] != '$' && t[j] != '`' && strings.IndexByte(wgetValueOptions, t[j]) < 0 {
-			if t[j] == 'n' {
-				j += 2 // -nv, -nc, -np, -nH: one option of two letters
-				continue
-			}
-			named = named && t[j] != 'r' && t[j] != 'm' && t[j] != 'p'
-			j++
-		}
-		if j >= len(t) || t[j] == '$' || t[j] == '`' {
-			continue
-		}
-		value, last, ok := optionValue(args, i, t[j+1:])
-		if !ok {
-			break
-		}
-		i = last
-		switch t[j] {
-		case 'O':
-			output = &value
-		case 'P':
-			dir = &value
-		}
-	}
+func wgetOutputs(args []Word) []write {
+	a := readWget(args)
 	var outputs []Word
 	switch {
-	case output != nil:
+	case a.output != nil:
 		// -O takes the whole download, and -P does not apply to it.
-		outputs, dir = append(outputs, *output), nil
-	case named:
-		for _, u := range urls {
-			if name, ok := urlFileName(u, written); ok {
+		return outputFiles([]Word{*a.output}, nil)
+	case a.named:
+		for _, u := range a.urls {
+			if name, ok := urlFileName(u); ok {
 				outputs = append(outputs, name)
 			}
 		}
 	}
-	return outputFiles(outputs, dir, written)
+	return outputFiles(outputs, a.dir)
 }
 
 // ddOutput returns the file dd writes: its of= operand.
-func ddOutput(args []Word, written bool) []FileEffect {
+func ddOutput(args []Word) []write {
 	for _, w := range args {
 		if value, ok := strings.CutPrefix(w.Unquoted, "of="); ok {
-			if e, ok := outputFile(attachedValue(w, value), nil, written); ok {
-				return []FileEffect{e}
+			if e, ok := outputFile(attachedValue(w, value), nil); ok {
+				return []write{e}
 			}
 		}
 	}
@@ -364,8 +215,8 @@ func ddOutput(args []Word, written bool) []FileEffect {
 // another one, and otherwise that operand, or each source's base name under it when it is
 // written as a directory or there are several sources, as cp does. An rsync source written
 // with a trailing slash puts the directory's contents into the destination, which is then a
-// directory whose new files are not named: only FileWrites (written) reports it.
-func copiedHere(name string, args []Word, written bool) []FileEffect {
+// directory whose new files are not named: a write that is no effect.
+func copiedHere(name string, args []Word) []write {
 	operands := readers[name].files(args)
 	if len(operands) < 2 {
 		return nil
@@ -374,17 +225,19 @@ func copiedHere(name string, args []Word, written bool) []FileEffect {
 	if remotePath(target.Unquoted) || strings.Contains(target.Unquoted, "://") {
 		return nil
 	}
-	dest, ok := wordPath(target, written)
-	if !ok || !isFile(dest) {
+	dest, destExact := wordPath(target)
+	if !isFile(dest) {
 		return nil
 	}
 	sources := operands[:len(operands)-1]
-	into := len(sources) > 1 || writtenAsDirectory(target, written)
-	var effects []FileEffect
-	add := func(p string) {
-		if !slices.ContainsFunc(effects, func(e FileEffect) bool { return e.Path == p }) {
-			effects = append(effects, FileEffect{Path: p, Op: OpWrite})
+	into := len(sources) > 1 || writtenAsDirectory(target)
+	var out []write
+	add := func(p string, exact bool) {
+		if k := slices.IndexFunc(out, func(w write) bool { return w.Path == p }); k >= 0 {
+			out[k].exact = out[k].exact || exact
+			return
 		}
+		out = append(out, write{FileEffect: FileEffect{Path: p, Op: OpWrite}, exact: exact})
 	}
 	for _, s := range sources {
 		src := s.Unquoted
@@ -393,14 +246,12 @@ func copiedHere(name string, args []Word, written bool) []FileEffect {
 		}
 		switch {
 		case name == "rsync" && strings.HasSuffix(src, "/"):
-			if written {
-				add(asDirectory(dest))
-			}
+			add(asDirectory(dest), false)
 		case !into:
-			add(dest)
-		case (s.Known || written) && namesFile(src):
-			add(path.Join(dest, path.Base(src)))
+			add(dest, destExact)
+		case namesFile(src):
+			add(path.Join(dest, path.Base(src)), s.Known && destExact)
 		}
 	}
-	return effects
+	return out
 }

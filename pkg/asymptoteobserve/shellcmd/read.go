@@ -1,6 +1,8 @@
 package shellcmd
 
 import (
+	"slices"
+
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -71,13 +73,23 @@ func Read(command string) Line {
 		return line
 	}
 	line.Commands = commands
-	line.Reads = fileReads(commands)
+	writes := make([][]write, len(commands))
+	for i := range commands {
+		writes[i] = commands[i].writes()
+	}
+	line.Reads = fileReads(commands, writes)
 	line.Sockets = socketRedirects(commands)
 	line.Effects = make([][]FileEffect, len(commands))
 	line.Writes = make([][]FileEffect, len(commands))
-	for i := range commands {
-		line.Effects[i] = commands[i].FileEffects()
-		line.Writes[i] = commands[i].FileWrites()
+	for i, ws := range writes {
+		// Most commands write nothing, or only files whose paths are known: the effects are
+		// the writes, and one list is both.
+		line.Writes[i] = fileEffects(ws, false)
+		if slices.ContainsFunc(ws, func(w write) bool { return !w.exact }) {
+			line.Effects[i] = fileEffects(ws, true)
+		} else {
+			line.Effects[i] = line.Writes[i]
+		}
 	}
 	line.Spans = spans(commands, line.Writes)
 	line.Earlier, line.Later = stageLists(commands)

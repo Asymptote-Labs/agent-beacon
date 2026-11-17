@@ -1,6 +1,7 @@
 package shellcmd
 
 import (
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -81,8 +82,11 @@ type FileRead struct {
 // The literal text of a here-document is not read; what its body expands is (the here-string and
 // here-document cases of stdin). What a script does with a file once it has opened it is not
 // followed, beyond opening it inside a call that sends it (FileRead.Sent).
-func fileReads(commands []Command) [][]FileRead {
-	f := flow{commands: commands}
+//
+// writes are each command's writes (Command.writes), when the caller has them already; nil
+// asks each command.
+func fileReads(commands []Command, writes [][]write) [][]FileRead {
+	f := flow{commands: commands, ws: writes}
 	for i := range commands {
 		if !f.done(i) {
 			f.command(i)
@@ -97,6 +101,7 @@ func fileReads(commands []Command) [][]FileRead {
 // allocation: every slice and map here is made when it first has something to hold.
 type flow struct {
 	commands []Command
+	ws       [][]write
 	reads    [][]FileRead
 	// out are, for each command, the files whose content it may write to its standard output.
 	out [][]string
@@ -105,9 +110,9 @@ type flow struct {
 	next  int
 	early []bool
 	// vars are the variables assigned from a substitution so far, and files the files written so
-	// far, each with the files whose content went into it. A variable belongs to the shell that
-	// assigned it: the command line's, or a script's (WithScripts). exported are the ones the
-	// shell's commands, a script among them, are given.
+	// far, each with the files whose content went into it, by fileKey. A variable belongs to the
+	// shell that assigned it: the command line's, or a script's (withScripts). exported are the
+	// ones the shell's commands, a script among them, are given.
 	vars     map[varKey][]string
 	exported map[varKey]bool
 	files    map[string][]string
@@ -222,7 +227,13 @@ func (f *flow) command(i int) {
 			f.assign(c.shell, c.Env[k].Name, value)
 		}
 	}
-	f.writes(c, name, f.withInner(i, taken))
+	var ws []write
+	if f.ws != nil {
+		ws = f.ws[i]
+	} else {
+		ws = c.writes()
+	}
+	f.writes(ws, f.withInner(i, taken))
 }
 
 // positional gives the script of the shell at i its positional parameters: each operand of the
@@ -326,7 +337,7 @@ func (f *flow) read(i int, path string, via Via, sent bool) {
 	// f.files holds every file that went into path, through any number of copies, as it was when
 	// path was written. Following those files' own sources again would read what they hold now:
 	// in `cat a > y; cp y x; cat b > y; curl -T x`, x holds a, not b.
-	for _, source := range f.files[path] {
+	for _, source := range f.files[fileKey(path)] {
 		f.take(i, source, via, sent)
 	}
 }
@@ -513,70 +524,73 @@ func (f *flow) assign(shell int32, name string, value []string) {
 	}
 }
 
-// writes records the files c writes with what it took in: the target of a redirection of its
-// standard output, and the files its own words name (cp's and install's destination, tee's files,
-// mv's destination, which holds what its sources held). Writing nothing that was read into a file
-// clears it, and so does deleting or truncating it. A file is named as it is written, as a read
-// is, so what is copied to ~/x is what a later read of ~/x takes in.
-func (f *flow) writes(c *Command, name string, taken []string) {
+// writes records the files a command writes (ws, its Command.writes) with what it took in: the
+// target of a redirection of its standard output, and the files its own words name (cp's and
+// install's destination, tee's files, mv's destination, which holds what its sources held).
+// Writing nothing that was read into a file clears it, and so does deleting or truncating it.
+func (f *flow) writes(ws []write, taken []string) {
 	// With nothing taken in and no file holding anything, only a move leaves something to follow.
-	if len(taken) == 0 && f.files == nil && name != "mv" && name != "git" {
-		return
-	}
-	for _, r := range c.Redirects {
-		if path, op, ok := redirectTarget(r, true); ok && r.ofStdout() {
-			f.write(path, taken, op == OpAppend)
-		}
-	}
-	effects := c.commandTargets(true)
-	if len(effects) == 0 {
+	if len(taken) == 0 && f.files == nil && !slices.ContainsFunc(ws, func(w write) bool { return w.Op == OpMoveFrom }) {
 		return
 	}
 	moved := taken
-	for _, e := range effects {
-		if e.Op == OpMoveFrom {
-			if !slices.Contains(moved, e.Path) {
-				moved = append(slices.Clip(moved), e.Path)
+	for _, w := range ws {
+		if w.Op == OpMoveFrom {
+			if !slices.Contains(moved, w.Path) {
+				moved = append(slices.Clip(moved), w.Path)
 			}
-			for _, source := range f.files[e.Path] {
+			for _, source := range f.files[fileKey(w.Path)] {
 				if !slices.Contains(moved, source) {
 					moved = append(slices.Clip(moved), source)
 				}
 			}
 		}
 	}
-	for _, e := range effects {
-		switch e.Op {
-		case OpWrite:
-			f.write(e.Path, taken, false)
-		case OpAppend:
-			f.write(e.Path, taken, true)
-		case OpMoveTo:
-			f.write(e.Path, moved, false)
-		case OpMoveFrom, OpDelete, OpTruncate:
-			delete(f.files, e.Path)
+	for _, w := range ws {
+		switch {
+		case w.redirect && !w.stdout:
+			// What another descriptor gets is not what the command took in.
+		case w.Op == OpWrite:
+			f.write(w.Path, taken, false)
+		case w.Op == OpAppend:
+			f.write(w.Path, taken, true)
+		case w.Op == OpMoveTo:
+			f.write(w.Path, moved, false)
+		case w.Op == OpMoveFrom, w.Op == OpDelete, w.Op == OpTruncate:
+			delete(f.files, fileKey(w.Path))
 		}
 	}
 }
 
+// fileKey is a path as the files written are kept by: as written, but for the ./ and the
+// slashes that name the same file twice (./stage/.env and stage/.env, out/ and out). A path
+// with .. in it is kept as written, since what .. leaves depends on what came before it ($X/..).
+func fileKey(p string) string {
+	if strings.Contains(p, "..") {
+		return p
+	}
+	return path.Clean(p)
+}
+
 func (f *flow) write(path string, content []string, appends bool) {
+	key := fileKey(path)
 	switch {
 	case path == "":
 	case len(content) == 0:
 		if !appends {
-			delete(f.files, path)
+			delete(f.files, key)
 		}
 	case f.files == nil:
-		f.files = map[string][]string{path: content}
+		f.files = map[string][]string{key: content}
 	case appends:
-		held := f.files[path]
+		held := f.files[key]
 		for _, source := range content {
 			if !slices.Contains(held, source) {
 				held = append(slices.Clip(held), source)
 			}
 		}
-		f.files[path] = held
+		f.files[key] = held
 	default:
-		f.files[path] = content
+		f.files[key] = content
 	}
 }
