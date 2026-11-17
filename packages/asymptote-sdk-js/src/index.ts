@@ -651,6 +651,7 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
       },
     };
     const controls = new Map<Function, Function>();
+    let nativeDisposal: Function | undefined;
     const stream: AsyncGenerator<unknown> = new Proxy(iterator, {
       get(_target, key) {
         if (key === Symbol.asyncIterator) return iteratorForStream;
@@ -658,6 +659,12 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
         const value = Reflect.get(result, key, result);
         if (typeof value !== "function" || key === "constructor") return value;
         let control = controls.get(value);
+        if (key === Symbol.asyncDispose && value === Reflect.get(iterator, key, iterator)) {
+          // Native disposal calls this.return(). Keep it on the traced wrapper;
+          // custom controls must retain their original receiver for private fields.
+          nativeDisposal ??= value.bind(stream);
+          return nativeDisposal;
+        }
         if (!control) { control = value.bind(result); controls.set(value, control!); }
         return control;
       },

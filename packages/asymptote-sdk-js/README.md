@@ -143,6 +143,11 @@ const plan = Observe.observe(
 );
 ```
 
+On runtimes supporting native async-generator disposal, `Symbol.asyncDispose`
+(and `await using`) on an observed generator closes its tracing span through the
+same path as `return()`, including cleanup errors and cleanup span context.
+Custom stream control methods retain their original receiver.
+
 Call `Observe.flush()` before short-lived scripts exit, or
 `Observe.shutdown()` when the process owns the provider lifecycle.
 
