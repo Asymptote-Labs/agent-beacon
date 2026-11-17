@@ -173,7 +173,7 @@ spec: threat-rules/v1.3
 match: credential_file_read(e)
 ```
 
-A predicate is expanded where it is called, before the rule is checked, so the rule is evaluated exactly as if it carried the predicate's body. The pack's **definitions** say what its predicates mean. They are the files beside the rules whose names end in `.predicates.yaml` or `.catalog.yaml`, and they travel with the pack: `beacon rules add` and `beacon rules pull` install them with the rules, and `beacon rules lint` runs their fixtures.
+A predicate is expanded where it is called, before the rule is checked, so the rule is evaluated exactly as if it carried the predicate's body. The pack's **definitions** say what its predicates mean. They are the files beside the rules whose names end in `.predicates.yaml` or `.catalog.yaml`, and they travel with the pack: `beacon rules add` and `beacon rules pull` install them with the rules, and `beacon rules lint` runs their fixtures. Their structure has JSON Schemas of its own, `spec/threat-rules/predicates.schema.json` and `spec/threat-rules/catalog.schema.json`.
 
 The rule corpus defines these:
 

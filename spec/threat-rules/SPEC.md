@@ -12,7 +12,9 @@ produces the same `verdict` for a rule's fixtures conforms to this spec.
 - Spec version: `threat-rules/v1.3` (see `VERSION` and [Versioning](#versioning)).
 - Canonical event schema: the Beacon endpoint event
   (`pkg/asymptoteobserve` `Event`, `schema_version: "1.0"`).
-- Machine-readable structural schema: `schema.json` (JSON Schema, draft 2020-12).
+- Machine-readable structural schemas (JSON Schema, draft 2020-12): `schema.json` for a
+  rule, `predicates.schema.json` for a predicate definitions file and `catalog.schema.json`
+  for a catalog.
 - Event fields a rule can match on: `FIELDS.md` (generated from the event schema;
   regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`).
 - Reference engine and CLI: `pkg/asymptoteobserve/threatrules` is one conformant
