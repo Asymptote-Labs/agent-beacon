@@ -224,6 +224,10 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		"authorization headers":        "authorization: bearer ,",
 		"cookie headers":               "\ncookie: ",
 		"assignments":                  "token=abcdefgh12345678 ",
+		// Substitutions that open after labels, flags and curl's -u and never close, or close
+		// with text beside them: each is read to its closing parenthesis.
+		"unclosed substitutions":    "TOKEN=$(cat --token $(a ",
+		"substitutions beside text": "curl -u a:$(cat x)b TOKEN=$(cat x)y ",
 		// Secrets written right after another one (redact_adjacent.go): chains of keys of fixed
 		// length, of tokens that run on into the next, of key ids that end only where the next
 		// key starts, of JWT first segments that never complete, and URLs, Bearer tokens, curl

@@ -925,7 +925,7 @@ func (e *redactEngine) redactAfterMarkers(t string) (string, bool) {
 			if m, use := c.followerAt(p); m != nil {
 				// The shape rules run after the followers, also over what a follower keeps of
 				// its match, ${1}: a URL whose scheme starts with a key.
-				replacement, end := use.rule.replacing(t, m)
+				replacement, end := use.rule.replacing(t, use.pattern, m)
 				var items [][]int
 				var uses []redactUse
 				if si, sm := c.secretAt(p); sm != nil && strings.HasPrefix(replacement, "${1}") {

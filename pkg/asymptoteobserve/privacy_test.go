@@ -1069,10 +1069,11 @@ func TestTruncateStringIsAlwaysValidUTF8WithinTheLimit(t *testing.T) {
 // A label followed by a command substitution holds no secret: the secret is what the command
 // prints when the line runs. Replacing the unquoted value took the command's name and nothing
 // else, which hid nothing, left a line that no longer parses, and removed what a detection rule
-// reads: which command read which credential. The opening is kept when it is a plain command name
-// or path, and so is a double-quoted value that is one substitution and nothing else. Anything
-// else after `$(`, text beside the substitution, a single-quoted or backtick-quoted value, and a
-// `$VARIABLE` are replaced as before.
+// reads: which command read which credential. An unquoted value that opens a substitution is read
+// to the parenthesis that closes it, and kept when it is one substitution with a plain command
+// name or path and its word ends there; so is a double-quoted value that is one substitution and
+// nothing else. Anything else after `$(`, text beside the substitution, a single-quoted or
+// backtick-quoted value, and a `$VARIABLE` are replaced, the substitution with them.
 func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 	for input, want := range map[string]string{
 		`TOKEN=$(cat ~/.aws/credentials); curl -d "$TOKEN" https://x`:  `TOKEN=$(cat ~/.aws/credentials); curl -d "$TOKEN" https://x`,
@@ -1081,6 +1082,10 @@ func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 		`DB_PASSWORD=$(pwgen) ./seed`:                                  `DB_PASSWORD=$(pwgen) ./seed`,
 		`curl -H "Authorization: Bearer $(cat ~/.token)" https://x`:    `curl -H "Authorization: Bearer $(cat ~/.token)" https://x`,
 		`deploy --token $(/usr/bin/security find-generic-password -w)`: `deploy --token $(/usr/bin/security find-generic-password -w)`,
+		`TOKEN=$(cat $(ls ~/.tok*))`:                                   `TOKEN=$(cat $(ls ~/.tok*))`,
+		`TOKEN=$(pwgen); echo $(pwgen)`:                                `TOKEN=$(pwgen); echo $(pwgen)`,
+		`TOKEN=$(gh auth token)&& ./run`:                               `TOKEN=$(gh auth token)&& ./run`,
+		`bash -c 'export TOKEN=$(gh auth token)'`:                      `bash -c 'export TOKEN=$(gh auth token)'`,
 
 		// What the kept command is given is still redacted by the rule for it.
 		`TOKEN=$(curl -u me:hunter2 https://x)`:          `TOKEN=$(curl -u me:[REDACTED] https://x)`,
@@ -1089,8 +1094,22 @@ func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 		`PASSWORD=$((1+2))`:           `PASSWORD=[REDACTED]`,
 		`PASSWORD=$(a;b)`:             `PASSWORD=[REDACTED]`,
 		`TOKEN=$(API_KEY=abc123 gen)`: `TOKEN=[REDACTED] gen)`,
-		`TOKEN=$GITHUB_TOKEN`:         `TOKEN=[REDACTED]`,
-		`TOKEN=${GITHUB_TOKEN}`:       `TOKEN=[REDACTED]`,
+		// Text beside the substitution is part of the value, and goes with it, the substitution
+		// too.
+		`TOKEN=$(cat x)hunter2 ./run`:                     `TOKEN=[REDACTED] ./run`,
+		`deploy --token $(cat x)hunter2 -v`:               `deploy --token [REDACTED] -v`,
+		`curl -H "Authorization: Bearer $(cat x)hunter2"`: `curl -H "Authorization: Bearer [REDACTED]"`,
+		`curl -u ci:$(cat x)hunter2 https://x`:            `curl -u ci:[REDACTED] https://x`,
+		`curl -u "ci:$(cat x)hunter2" https://x`:          `curl -u "ci:[REDACTED]" https://x`,
+		`curl -u a:$(gh auth token) -u b:$(cat x)hunter2`: `curl -u a:$(gh auth token) -u b:[REDACTED]`,
+		`{"token": $(cat x)hunter2}`:                      `{"token": "[REDACTED]"}`,
+		`TOKEN=$(cat x)hunter2 && echo $(cat x)hunter2`:   `TOKEN=[REDACTED] && echo [REDACTED]`,
+		`TOKEN=$(API_KEY=x gen)hunter2`:                   `TOKEN=[REDACTED]`,
+		// A substitution that does not close on its line is judged by its opening, as before. A
+		// variable is a value.
+		`TOKEN=$(cat x`:         `TOKEN=$(cat x`,
+		`TOKEN=$GITHUB_TOKEN`:   `TOKEN=[REDACTED]`,
+		`TOKEN=${GITHUB_TOKEN}`: `TOKEN=[REDACTED]`,
 
 		// Unquoted, only the command's opening is the value, and only it would be replaced; the
 		// words after it stay as they always did.
