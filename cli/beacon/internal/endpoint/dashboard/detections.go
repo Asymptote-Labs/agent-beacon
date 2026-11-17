@@ -91,80 +91,55 @@ type FailedRuleView struct {
 	Error          string `json:"error"`
 }
 
-// RunScan loads and compiles the active rules, streams the runtime log (optionally
-// filtered to one session), runs detection, and returns findings sorted highest
-// severity first. It mirrors `beacon scan` and is read-only and offline. minSeverity,
-// when set, drops lower-severity findings from the result (display filter only).
+// RunScan runs the scan `beacon scan` runs (detect.Scan) over the runtime log, optionally
+// filtered to sessions whose ID contains session, and returns findings sorted highest severity
+// first. It is read-only and offline. minSeverity, when set, drops lower-severity findings from
+// the result (display filter only).
 func RunScan(userMode bool, logPath, rulesDir, session, minSeverity string) (FindingsResponse, error) {
 	minRank := 0
 	if s := strings.TrimSpace(minSeverity); s != "" {
-		sev := asymptoteobserve.Severity(s)
-		switch sev {
-		case asymptoteobserve.SeverityInfo, asymptoteobserve.SeverityLow, asymptoteobserve.SeverityMedium,
-			asymptoteobserve.SeverityHigh, asymptoteobserve.SeverityCritical:
-			minRank = threatrules.SeverityRank(sev)
-		default:
+		rank, ok := detect.ParseSeverity(s)
+		if !ok {
 			return FindingsResponse{}, fmt.Errorf("invalid min_severity %q (info|low|medium|high|critical)", s)
 		}
+		minRank = rank
 	}
 
-	compiled, skipped, err := compileActiveRules(userMode, rulesDir)
+	report, err := detect.Scan(userMode, rulesDir, func() ([]asymptoteobserve.Event, error) {
+		return ReadScanEvents(logPath, session)
+	})
 	if err != nil {
 		return FindingsResponse{}, err
 	}
+	findings := report.Findings
+	if minRank > 0 {
+		findings = threatrules.FilterBySeverity(findings, minRank)
+	}
+	if findings == nil {
+		findings = []threatrules.Finding{}
+	}
+	var failed []FailedRuleView
+	for _, f := range report.Failed {
+		failed = append(failed, FailedRuleView{RuleID: f.RuleID, Events: f.Events, FirstEventID: f.First.EventID, FirstSessionID: f.First.SessionID, Error: f.First.Err.Error()})
+	}
+	return FindingsResponse{Findings: findings, Scanned: report.Scanned, Count: len(findings), Skipped: detect.SkippedStrings(report.Skipped), Failed: failed}, nil
+}
 
-	sessionFilter := strings.TrimSpace(session)
+// ReadScanEvents reads the events a scan of the runtime log judges: every event in the log and
+// its rotated archives, in append order, or, when session is set, those of the sessions whose ID
+// contains it (case-insensitive).
+func ReadScanEvents(logPath, session string) ([]asymptoteobserve.Event, error) {
+	query := strings.ToLower(strings.TrimSpace(session))
 	var events []asymptoteobserve.Event
-	err = StreamEvents(logPath, func(e schema.Event) error {
-		if sessionFilter != "" && (e.Session == nil || !strings.Contains(strings.ToLower(e.Session.ID), strings.ToLower(sessionFilter))) {
+	err := StreamEvents(logPath, func(e schema.Event) error {
+		if query != "" && (e.Session == nil || !strings.Contains(strings.ToLower(e.Session.ID), query)) {
 			return nil
 		}
 		events = append(events, e)
 		return nil
 	})
 	if err != nil {
-		return FindingsResponse{}, fmt.Errorf("read telemetry %s: %w", logPath, err)
+		return nil, fmt.Errorf("read telemetry %s: %w", logPath, err)
 	}
-
-	// The rules engine evaluates the sequence it is handed, and the log is in append
-	// order, which is not the order the events happened: a hook writes the instant it
-	// intercepts a tool call while the exporter writes on its export interval. Ordered
-	// correlation rules silently miss without this.
-	threatrules.SortEvents(events)
-
-	result := threatrules.Scan(compiled, events)
-	findings := result.Findings
-	if minRank > 0 {
-		findings = threatrules.FilterBySeverity(findings, minRank)
-	}
-	threatrules.SortFindings(findings)
-	if findings == nil {
-		findings = []threatrules.Finding{}
-	}
-	var failed []FailedRuleView
-	for _, f := range threatrules.FailuresByRule(result.Failures) {
-		failed = append(failed, FailedRuleView{RuleID: f.RuleID, Events: f.Events, FirstEventID: f.First.EventID, FirstSessionID: f.First.SessionID, Error: f.First.Err.Error()})
-	}
-	return FindingsResponse{Findings: findings, Scanned: len(events), Count: len(findings), Skipped: skipped, Failed: failed}, nil
-}
-
-// compileActiveRules loads and compiles the rules `beacon scan` would run. It returns a
-// *detect.NoRulesError when none are active, so callers can tell "no rules" from a broken rule.
-func compileActiveRules(userMode bool, rulesDir string) ([]*threatrules.CompiledRule, []string, error) {
-	loaded, skipped, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(rulesDir))
-	if err != nil {
-		return nil, nil, fmt.Errorf("load rules: %w", err)
-	}
-	if len(loaded) == 0 {
-		return nil, nil, &detect.NoRulesError{Skipped: skipped}
-	}
-	compiled := make([]*threatrules.CompiledRule, 0, len(loaded))
-	for _, lr := range loaded {
-		c, err := threatrules.Compile(lr.Rule)
-		if err != nil {
-			return nil, nil, fmt.Errorf("compile rule %q: %w", lr.Rule.ID, err)
-		}
-		compiled = append(compiled, c)
-	}
-	return compiled, detect.SkippedStrings(skipped), nil
+	return events, nil
 }

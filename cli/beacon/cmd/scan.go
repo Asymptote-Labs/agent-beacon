@@ -11,7 +11,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/detect"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
@@ -43,17 +42,6 @@ Scanning is read-only and never touches the network.`,
 	RunE:         runScan,
 }
 
-// severityRanks maps --min-severity / --fail-on flag values to comparable ranks,
-// delegating to the shared ordering in the threatrules package.
-func severityRankOf(s asymptoteobserve.Severity) (int, bool) {
-	switch s {
-	case asymptoteobserve.SeverityInfo, asymptoteobserve.SeverityLow, asymptoteobserve.SeverityMedium,
-		asymptoteobserve.SeverityHigh, asymptoteobserve.SeverityCritical:
-		return threatrules.SeverityRank(s), true
-	}
-	return 0, false
-}
-
 func runScan(cmd *cobra.Command, args []string) error {
 	userMode := scanOpts.userMode
 	if scanOpts.systemMode {
@@ -62,7 +50,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	var minRank int
 	if s := strings.TrimSpace(scanOpts.minSeverity); s != "" {
-		r, ok := severityRankOf(asymptoteobserve.Severity(s))
+		r, ok := detect.ParseSeverity(s)
 		if !ok {
 			return fmt.Errorf("invalid --min-severity %q (info|low|medium|high|critical)", s)
 		}
@@ -70,55 +58,24 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 	failRank := -1
 	if s := strings.TrimSpace(scanOpts.failOn); s != "" {
-		r, ok := severityRankOf(asymptoteobserve.Severity(s))
+		r, ok := detect.ParseSeverity(s)
 		if !ok {
 			return fmt.Errorf("invalid --fail-on %q (info|low|medium|high|critical)", s)
 		}
 		failRank = r
 	}
 
-	// Load and compile the active rule set.
-	loaded, skipped, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(scanOpts.rulesDir))
-	if err != nil {
-		return fmt.Errorf("load rules: %w", err)
-	}
-	if len(loaded) == 0 {
-		// The error names any skipped rules itself, so they are not also warned about.
-		return &detect.NoRulesError{Skipped: skipped}
-	}
-	detect.WarnSkipped(cmd.ErrOrStderr(), skipped)
-	compiled := make([]*threatrules.CompiledRule, 0, len(loaded))
-	for _, lr := range loaded {
-		c, err := threatrules.Compile(lr.Rule)
-		if err != nil {
-			return fmt.Errorf("compile rule %q: %w", lr.Rule.ID, err)
-		}
-		compiled = append(compiled, c)
-	}
-
-	// Stream the runtime log into memory (correlation needs the full ordered stream).
+	// Correlation needs the full ordered stream, so the whole log is read into memory.
 	runtimeLog := lifecycle.ResolveRuntimeLog(userMode, scanOpts.logPath)
-	sessionFilter := strings.TrimSpace(scanOpts.session)
-	var events []asymptoteobserve.Event
-	err = dashboard.StreamEvents(runtimeLog.EffectiveLogPath, func(e schema.Event) error {
-		if sessionFilter != "" && (e.Session == nil || !scanSessionMatches(e.Session.ID, sessionFilter)) {
-			return nil
-		}
-		events = append(events, e)
-		return nil
+	report, err := detect.Scan(userMode, scanOpts.rulesDir, func() ([]asymptoteobserve.Event, error) {
+		return dashboard.ReadScanEvents(runtimeLog.EffectiveLogPath, scanOpts.session)
 	})
 	if err != nil {
-		return fmt.Errorf("read telemetry %s: %w", runtimeLog.EffectiveLogPath, err)
+		// A *detect.NoRulesError names any skipped rules itself, so they are not also warned about.
+		return err
 	}
-
-	// The rules engine evaluates the sequence it is handed, and the log is in append
-	// order, which is not the order the events happened: a hook writes the instant it
-	// intercepts a tool call while the exporter writes on its export interval. Ordered
-	// correlation rules silently miss without this.
-	threatrules.SortEvents(events)
-
-	result := threatrules.Scan(compiled, events)
-	findings := result.Findings
+	detect.WarnSkipped(cmd.ErrOrStderr(), report.Skipped)
+	findings := report.Findings
 	// The --fail-on gate is a CI signal that must reflect every detection in the
 	// scan, so count it before --min-severity (a display-only filter) drops
 	// findings from the output slice.
@@ -129,8 +86,6 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if minRank > 0 {
 		findings = threatrules.FilterBySeverity(findings, minRank)
 	}
-	// Highest severity first, then rule id, for stable, useful ordering.
-	threatrules.SortFindings(findings)
 
 	out := cmd.OutOrStdout()
 	if scanOpts.jsonOutput {
@@ -143,11 +98,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	} else {
-		printFindings(cmd, findings, len(events), runtimeLog.EffectiveLogPath)
+		printFindings(cmd, findings, report.Scanned, runtimeLog.EffectiveLogPath)
 	}
 
 	var errs []error
-	if failed := threatrules.FailuresByRule(result.Failures); len(failed) > 0 {
+	if failed := report.Failed; len(failed) > 0 {
 		// The findings are what the rules found everywhere else; a rule that could not be
 		// evaluated on an event has no verdict there, so the scan exits non-zero for a script.
 		warnFailures(cmd, failed)
@@ -163,17 +118,16 @@ func runScan(cmd *cobra.Command, args []string) error {
 func warnFailures(cmd *cobra.Command, failed []threatrules.RuleFailures) {
 	w := cmd.ErrOrStderr()
 	for _, f := range failed {
-		session := f.First.SessionID
+		event, session := f.First.EventID, f.First.SessionID
+		if event == "" {
+			event = "-"
+		}
 		if session == "" {
 			session = "-"
 		}
 		fmt.Fprintf(w, "warning: rule %q could not be evaluated on %d event(s), so its verdict there is unknown (first: event %s, session %s): %v\n",
-			f.RuleID, f.Events, f.First.EventID, session, f.First.Err)
+			f.RuleID, f.Events, event, session, f.First.Err)
 	}
-}
-
-func scanSessionMatches(sessionID, query string) bool {
-	return strings.Contains(strings.ToLower(sessionID), strings.ToLower(strings.TrimSpace(query)))
 }
 
 func printFindings(cmd *cobra.Command, findings []threatrules.Finding, scanned int, logPath string) {
