@@ -13,6 +13,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 Changes on `main` since v1.3.61. They ship in the next release.
 
+- **`doctor` no longer tells Windows to run `sudo`** · On a system endpoint, `beacon endpoint doctor` suggested `sudo beacon endpoint repair --system`, `sudo beacon endpoint install --system` or `sudo beacon endpoint user-config repair-installed --system`, and a system install with nobody logged in printed the last one too. Windows has no `sudo`, so these now say `beacon endpoint repair --system (from an elevated shell)`, as the log-access checks already did. macOS and Linux are unchanged.
+
 ## November 2026
 
 ### v1.3.61 · November 13, 2026

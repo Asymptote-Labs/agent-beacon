@@ -2211,7 +2211,7 @@ func TestRepairInstalledEndpointUserConfigReportsNobodyToConfigure(t *testing.T)
 	var out strings.Builder
 	reportUserConfigRepair(&out, result)
 	if !strings.Contains(out.String(), "No logged-in user to configure") ||
-		!strings.Contains(out.String(), "sudo beacon endpoint user-config repair-installed --system") {
+		!strings.Contains(out.String(), diagnostics.ElevatedCommand("beacon endpoint user-config repair-installed --system")) {
 		t.Fatalf("report = %q, want the skip explained with the command to run", out.String())
 	}
 }

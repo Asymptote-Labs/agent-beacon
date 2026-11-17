@@ -16,6 +16,7 @@ import (
 	"time"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/spf13/cobra"
@@ -75,7 +76,8 @@ func runEndpointUserConfigRepairInstalled(cmd *cobra.Command, args []string) err
 func reportUserConfigRepair(w io.Writer, result endpointUserConfigRepairResult) {
 	if result.SkippedReason == "no_active_console_user" {
 		fmt.Fprintln(w, "No logged-in user to configure: nobody is logged in, or only root is, so no one's agent runtime points at the collector yet.")
-		fmt.Fprintln(w, "Each person who runs agents on this machine configures themselves once, logged in: sudo beacon endpoint user-config repair-installed --system")
+		fmt.Fprintln(w, "Each person who runs agents on this machine configures themselves once, logged in: "+
+			diagnostics.ElevatedCommand("beacon endpoint user-config repair-installed --system"))
 		return
 	}
 	for _, user := range result.Users {
