@@ -130,9 +130,44 @@ func checkUntracked(t *testing.T, m matcher, act *eventActivation, c sizeClass, 
 	}
 	bound := m.untracked.bound(c)
 	if cost := *det.ActualCost(); cost > bound || bound > evalCostLimit {
-		long, word, top, nested := c.sizes()
+		z := c.sizes()
 		t.Fatalf("%s: tracked cost %d, estimate %d, limit %d (strings %d and %d, lists %d and %d)\n%s",
-			what, cost, bound, evalCostLimit, long, word, top, nested, expr)
+			what, cost, bound, evalCostLimit, z[measureLong], z[measureWord], z[measureTop], z[measureNested], expr)
+	}
+}
+
+// A rule whose bound on an ordinary event is over the limit runs metered on nearly every event,
+// three to four times slower, and nothing else shows it: its findings are the same. The corpus
+// was rewritten rule by rule to keep each under it (CLAUDE.md, "What a rule expression costs").
+// An ordinary event is the class every small one is widened to: a command line up to 1 KiB,
+// words up to 256 bytes, up to 16 commands of up to 16 words. The rules metered there today are
+// pinned; a rule that joins them fails, and one that leaves them is only noted.
+func TestNoRuleIsMeteredOnOrdinaryEvents(t *testing.T) {
+	known := map[string]bool{
+		"approval-bypass-via-renamed-binary": true,
+		"archive-then-upload":                true,
+		"secret-read-and-egress":             true,
+	}
+	ordinary := classTiers{}.widened().class()
+	metered := map[string]bool{}
+	for _, r := range corpusRules(t) {
+		for _, expr := range ruleExpressions(r) {
+			m, err := compileMatcher(r.lib, expr)
+			if err != nil {
+				t.Fatalf("%s: %v", r.ID, err)
+			}
+			if m.untracked == nil || !m.untracked.fits(ordinary) {
+				metered[r.ID] = true
+				if !known[r.ID] {
+					t.Errorf("%s is metered on an ordinary event (sizes %v):\n%s", r.ID, ordinary.sizes(), expr)
+				}
+			}
+		}
+	}
+	for id := range known {
+		if !metered[id] {
+			t.Logf("%s is no longer metered on an ordinary event; take it off the list", id)
+		}
 	}
 }
 
@@ -206,31 +241,30 @@ func TestEventSizes(t *testing.T) {
 		return withDerivedFields(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{Command: command}})
 	}
 	for _, tc := range []struct {
-		name                    string
-		event                   asymptoteobserve.Event
-		long, word, top, nested uint64
+		name  string
+		event asymptoteobserve.Event
+		sizes classSizes // long, word, top, nested
 	}{
 		{"a 5,000-byte command line, and raw values no rule reads",
 			asymptoteobserve.Event{
 				Command: &asymptoteobserve.CommandInfo{Command: strings.Repeat("x", 5000)},
 				Raw:     map[string]interface{}{"huge": strings.Repeat("y", 1<<20)},
-			}, 16 << 10, 64, 2, 4},
-		{"one command of 40 words", derived(strings.Repeat("a ", 40)), 1 << 10, 64, 2, 64},
-		{"20 commands of two words", derived(strings.Repeat("ls a; ", 20)), 1 << 10, 64, 32, 4},
-		{"five commands of five words", derived(strings.Repeat("ls a b c d; ", 5)), 1 << 10, 64, 8, 8},
-		{"a 100-byte word", derived("echo " + strings.Repeat("w", 100)), 1 << 10, 128, 2, 4},
-		{"a 300-byte word", derived("echo " + strings.Repeat("w", 300)), 1 << 10, 1 << 10, 2, 4},
-		{"a 300-byte path written", derived("ls > /tmp/" + strings.Repeat("p", 300)), 1 << 10, 1 << 10, 2, 4},
-		{"a 2,000-byte line of short words", derived(strings.Repeat("abc ", 500)), 4 << 10, 64, 2, 1024},
+			}, classSizes{16 << 10, 64, 2, 4}},
+		{"one command of 40 words", derived(strings.Repeat("a ", 40)), classSizes{1 << 10, 64, 2, 64}},
+		{"20 commands of two words", derived(strings.Repeat("ls a; ", 20)), classSizes{1 << 10, 64, 32, 4}},
+		{"five commands of five words", derived(strings.Repeat("ls a b c d; ", 5)), classSizes{1 << 10, 64, 8, 8}},
+		{"a 100-byte word", derived("echo " + strings.Repeat("w", 100)), classSizes{1 << 10, 128, 2, 4}},
+		{"a 300-byte word", derived("echo " + strings.Repeat("w", 300)), classSizes{1 << 10, 1 << 10, 2, 4}},
+		{"a 300-byte path written", derived("ls > /tmp/" + strings.Repeat("p", 300)), classSizes{1 << 10, 1 << 10, 2, 4}},
+		{"a 2,000-byte line of short words", derived(strings.Repeat("abc ", 500)), classSizes{4 << 10, 64, 2, 1024}},
 	} {
 		c, ok := newEventActivation(tc.event).class()
 		if !ok {
 			t.Errorf("%s: no size class", tc.name)
 			continue
 		}
-		if long, word, top, nested := c.sizes(); long != tc.long || word != tc.word || top != tc.top || nested != tc.nested {
-			t.Errorf("%s: strings %d and %d, lists %d and %d; want %d and %d, %d and %d",
-				tc.name, long, word, top, nested, tc.long, tc.word, tc.top, tc.nested)
+		if got := c.sizes(); got != tc.sizes {
+			t.Errorf("%s: sizes (long, word, top, nested) %v; want %v", tc.name, got, tc.sizes)
 		}
 	}
 	if _, ok := newEventActivation(asymptoteobserve.Event{Message: strings.Repeat("z", 70000)}).class(); ok {
@@ -246,12 +280,31 @@ func TestEventSizes(t *testing.T) {
 		}
 	}
 	for c := range sizeClass(sizeClasses) {
-		long, word, top, nested := c.sizes()
-		if got := classOf(eventSizes{long: int(long), word: int(word), top: int(top), nested: int(nested)}); got != c {
-			t.Fatalf("class %d has sizes %d, %d, %d, %d, which are class %d", c, long, word, top, nested, got)
+		z := c.sizes()
+		var sizes eventSizes
+		for m := range sizes {
+			sizes[m] = int(z[m])
+		}
+		if got := classOf(sizes); got != c {
+			t.Fatalf("class %d has sizes %v, which are class %d", c, z, got)
 		}
 		if tiers := c.tiers(); !tiers.within(tiers.widened()) || tiers.class() != c {
 			t.Fatalf("class %d: tiers %v, widened %v", c, tiers, tiers.widened())
+		}
+	}
+	// Every value is in the measure its depth says, for a measured event as for the estimator.
+	for depth := range 4 {
+		for _, text := range []bool{true, false} {
+			path := []string{eventVar, "command", "parsed_commands"}
+			for range depth {
+				path = append(path, "@items")
+			}
+			if d, ok := eventPathDepth(path); !ok || d != depth {
+				t.Fatalf("path %v is at depth %d, %v; want %d", path, d, ok, depth)
+			}
+			if m := measureOf(text, depth); (m == measureLong || m == measureWord) != text {
+				t.Fatalf("a value at depth %d (text %v) is measured as %d", depth, text, m)
+			}
 		}
 	}
 }

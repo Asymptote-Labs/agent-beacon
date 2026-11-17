@@ -254,6 +254,33 @@ var (
 	nestedTiers = [...]int{4, 8, 16, 32, 64, 256, 1024}
 )
 
+// measure is one of the four sizes of an event a size class bounds (eventSizes).
+type measure uint8
+
+const (
+	measureLong   measure = iota // the longest string in no list, or in the entries of one
+	measureWord                  // the longest string deeper
+	measureTop                   // the longest list or map in no other
+	measureNested                // the longest list or map inside the entries of another
+	measures
+)
+
+// measureOf returns the measure a value counts in: a string or bytes value (text), or a list or
+// map, inside depth lists or maps. An event is measured with it (eventSizes) and cel-go's
+// estimator told with it (classSizes), so the two cannot put a value in different measures: if
+// they did, an evaluation would run untracked on a bound worked out for the wrong size.
+func measureOf(text bool, depth int) measure {
+	switch {
+	case text && depth <= longDepth:
+		return measureLong
+	case text:
+		return measureWord
+	case depth == 0:
+		return measureTop
+	}
+	return measureNested
+}
+
 // sizeClass is one tier of each measure, as one index; noSizeClass is an event beyond a tier.
 type sizeClass int
 
@@ -262,25 +289,30 @@ const (
 	noSizeClass sizeClass = -1
 )
 
-// classTiers is a size class as the tier of each measure: long, word, top, nested.
-type classTiers [4]uint8
+// classTiers is a size class as the tier of each measure.
+type classTiers [measures]uint8
 
-var measureTiers = [len(classTiers{})][]int{longTiers[:], wordTiers[:], topTiers[:], nestedTiers[:]}
+var measureTiers = [measures][]int{
+	measureLong:   longTiers[:],
+	measureWord:   wordTiers[:],
+	measureTop:    topTiers[:],
+	measureNested: nestedTiers[:],
+}
 
 // widerTiers gives, for each tier of each measure, the tier a class is widened to before its
 // cost is estimated (untracked.resolve): strings in a list up to 256 bytes, 4 KiB or 64 KiB,
 // lists up to 16, 64 or 1024 entries.
-var widerTiers = [len(classTiers{})][]uint8{
-	{0, 1, 2, 3},
-	{2, 2, 2, 4, 4, 5},
-	{3, 3, 3, 3, 5, 5, 7, 7},
-	{2, 2, 2, 4, 4, 6, 6},
+var widerTiers = [measures][]uint8{
+	measureLong:   {0, 1, 2, 3},
+	measureWord:   {2, 2, 2, 4, 4, 5},
+	measureTop:    {3, 3, 3, 3, 5, 5, 7, 7},
+	measureNested: {2, 2, 2, 4, 4, 6, 6},
 }
 
 // classOf returns the smallest class that holds sizes.
 func classOf(z eventSizes) sizeClass {
 	var t classTiers
-	for m, n := range [...]int{z.long, z.word, z.top, z.nested} {
+	for m, n := range z {
 		tier := -1
 		for i, size := range measureTiers[m] {
 			if n <= size {
@@ -314,11 +346,15 @@ func (c sizeClass) tiers() classTiers {
 }
 
 // sizes returns the largest sizes of the class.
-func (t classTiers) sizes() (long, word, top, nested uint64) {
-	return uint64(longTiers[t[0]]), uint64(wordTiers[t[1]]), uint64(topTiers[t[2]]), uint64(nestedTiers[t[3]])
+func (t classTiers) sizes() classSizes {
+	var z classSizes
+	for m, tier := range t {
+		z[m] = uint64(measureTiers[m][tier])
+	}
+	return z
 }
 
-func (c sizeClass) sizes() (long, word, top, nested uint64) { return c.tiers().sizes() }
+func (c sizeClass) sizes() classSizes { return c.tiers().sizes() }
 
 // within reports whether every event of the class is an event of o: no tier of it is above o's.
 func (t classTiers) within(o classTiers) bool {
@@ -430,8 +466,7 @@ func (u *untracked) resolve(t classTiers) uint64 {
 // estimate returns cel-go's estimate of the expression's cost on the largest event of the class
 // with tiers t, or one more than the limit when it is over the limit.
 func (u *untracked) estimate(t classTiers) uint64 {
-	long, word, top, nested := t.sizes()
-	est, err := u.env.EstimateCost(u.ast, classSizes{long: long, word: word, top: top, nested: nested})
+	est, err := u.env.EstimateCost(u.ast, t.sizes())
 	if err != nil || est.Max > u.limit {
 		return u.limit + 1
 	}
@@ -556,9 +591,7 @@ func untrackedShape(ast *cel.Ast) bool {
 // written (`[c.span].exists(t, ..)` gives t the size of a span, and a loop over literals the
 // size of the longest), the result of a conditional as large as the larger branch. Where
 // cel-go knows no size it assumes the largest there is, and the expression keeps the tracker.
-type classSizes struct {
-	long, word, top, nested uint64
-}
+type classSizes [measures]uint64
 
 func (z classSizes) EstimateSize(n checker.AstNode) *checker.SizeEstimate {
 	var text bool
@@ -570,20 +603,10 @@ func (z classSizes) EstimateSize(n checker.AstNode) *checker.SizeEstimate {
 		return nil
 	}
 	depth, ok := eventPathDepth(n.Path())
-	var size uint64
-	switch {
-	case !ok:
+	if !ok {
 		return nil
-	case text && depth <= longDepth:
-		size = z.long
-	case text:
-		size = z.word
-	case depth == 0:
-		size = z.top
-	default:
-		size = z.nested
 	}
-	return &checker.SizeEstimate{Min: 0, Max: size}
+	return &checker.SizeEstimate{Min: 0, Max: z[measureOf(text, depth)]}
 }
 
 func (classSizes) EstimateCallCost(string, string, *checker.AstNode, []checker.AstNode) *checker.CallEstimate {
