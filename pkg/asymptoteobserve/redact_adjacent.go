@@ -1227,10 +1227,8 @@ func (c *redactChain) followerAt(p int) ([]int, redactUse) {
 			continue
 		}
 		rule, re := &redactionRules[f.rule], c.pattern(f.rule)
-		if rule.keep != nil {
-			if g := 2 * valueGroup(re, m); m[g] >= 0 && rule.keep(t[m[g]:m[g+1]]) {
-				continue
-			}
+		if rule.keeps(t, re, m) {
+			continue
 		}
 		return m, redactUse{re, rule}
 	}

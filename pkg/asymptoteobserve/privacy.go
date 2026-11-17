@@ -90,10 +90,20 @@ func quotedRules(kind quotedKind, keep func(string) bool) []redactionRule {
 		}
 		rules = append(rules, redactionRule{
 			expr: `(?i)(` + prefix + quoted[0] + `)(?P<value>` + quoted[1] + `)`, replacement: "${1}" + redactedValue,
-			keep: keep, needles: needles, start: start, runsOn: awsPairRunsOn,
+			keep: keep, value: quotedValueKind(quoted[0]), needles: needles, start: start, runsOn: awsPairRunsOn,
 		})
 	}
 	return rules
+}
+
+// quotedValueKind is the kind of a value opened with open, a quotedValues entry: in double quotes,
+// escaped or not, the shell still runs a command substitution; in single quotes it is text, and a
+// backtick-quoted value is as often a secret in prose as a command.
+func quotedValueKind(open string) valueKind {
+	if strings.HasSuffix(open, `"`) {
+		return valueDoubleQuoted
+	}
+	return valueOther
 }
 
 // redactValueStops are the bytes an unquoted labeled value stops at: a quote, a comma and
@@ -170,6 +180,9 @@ type redactionRule struct {
 	replacement string
 	// keep, when set, leaves a match alone if its value (the group named value) passes.
 	keep func(value string) bool
+	// value is how the value is written, which says whether it can be a command substitution
+	// that is kept (keeps).
+	value valueKind
 	// needles are literals the pattern cannot match without: when the text holds none of them,
 	// the rule is skipped without running the pattern.
 	needles *redactNeedles
@@ -579,10 +592,43 @@ func isSubstitutionOpening(value string) bool {
 	return word != ""
 }
 
-// isAuthSchemeOrSubstitution is what an unquoted labeled value keeps: isAuthScheme and
-// isSubstitutionOpening.
-func isAuthSchemeOrSubstitution(value string) bool {
-	return isAuthScheme(value) || isSubstitutionOpening(value)
+// valueKind is how a rule's value is written, which says whether it can be a command substitution
+// the shell runs. Where it is, the text holds the command and not the secret, and the value is
+// kept (keepsSubstitution): each rule that reads a value states its kind where it is built, so a
+// new one cannot leave the command out by omission.
+type valueKind uint8
+
+const (
+	// valueOther is a value no substitution is kept in: one in single quotes or backticks, a
+	// token of a fixed shape, or a rule that reads no value a command could stand in.
+	valueOther valueKind = iota
+	// valueUnquoted is a value that ends at a blank: kept where it opens a substitution with a
+	// plain command name (isSubstitutionOpening).
+	valueUnquoted
+	// valueDoubleQuoted is a value that runs to its closing double quote, escaped or not: never
+	// kept, a substitution or not, as on main, since what its words hold cannot be told from its
+	// text.
+	valueDoubleQuoted
+)
+
+// keepsSubstitution reports whether the value t[start:end], written as kind says, is a command
+// substitution that stays.
+func (kind valueKind) keepsSubstitution(t string, start, end int) bool {
+	return kind == valueUnquoted && isSubstitutionOpening(t[start:end])
+}
+
+// keeps reports whether a match of the rule stays: its value, the group named value, is a
+// command substitution its kind keeps, or passes the rule's own keep. A match whose value took no
+// part is not kept.
+func (rule *redactionRule) keeps(t string, re *regexp.Regexp, match []int) bool {
+	if rule.value == valueOther && rule.keep == nil {
+		return false
+	}
+	g := 2 * valueGroup(re, match)
+	if match[g] < 0 {
+		return false
+	}
+	return rule.value.keepsSubstitution(t, match[g], match[g+1]) || rule.keep != nil && rule.keep(t[match[g]:match[g+1]])
 }
 
 var redactionRules = concatRules([]redactionRule{
@@ -595,7 +641,7 @@ var redactionRules = concatRules([]redactionRule{
 	// keeps its public `eyJ` prefix, as the shape rules below keep theirs, so `Bearer eyJ[REDACTED]`
 	// still says a token was there where `Bearer [REDACTED]` may only have been the word "token" or
 	// a `$VARIABLE`. Digest's parameters go together (redactAuthCredentials).
-	foldedRule(`(?i)(`+redactAuthorizationLabel+`(?:`+redactListedAuthSchemes+`)[ \t]+(?-i:eyJ)?)(`+redactAuthCredentials+`)()`, "${1}"+redactedValue, isSubstitutionOpening, "authorization"),
+	foldedRule(`(?i)(`+redactAuthorizationLabel+`(?:`+redactListedAuthSchemes+`)[ \t]+(?-i:eyJ)?)(`+redactAuthCredentials+`)()`, "${1}"+redactedValue, nil, "authorization").withValue(valueUnquoted),
 	foldedRule(`(?i)(\bbearer[ \t]+(?-i:eyJ)?)(?P<value>[a-z0-9._~+/=-]+)`, "${1}"+redactedValue, isRedactedJWTPrefix, "bearer"),
 	// An Authorization header with any other scheme: `ApiKey` (Elasticsearch), `SSWS` (Okta), `Bot`
 	// (Discord), `Splunk`, `Negotiate`, Hawk and AWS Signature V4's parameter lists, and whatever a
@@ -629,7 +675,7 @@ var redactionRules = concatRules([]redactionRule{
 	{
 		expr: `(?i)(?:([?&]` + redactLabel + `=)(?P<value>` + redactParamValue + `)|` +
 			`(\b` + redactLabel + `\s*[:=]\s*)(?P<value>` + redactUnquoted + `))`,
-		replacement: "${1}${3}" + redactedValue, keep: isAuthSchemeOrSubstitution, needles: redactLabelNeedles, start: startParam,
+		replacement: "${1}${3}" + redactedValue, keep: isAuthScheme, value: valueUnquoted, needles: redactLabelNeedles, start: startParam,
 		runsOn: awsPairRunsOn,
 	},
 	// A command-line flag: `--password x`, `--token=x`, `--api-key x`, and quoted, the way agents
@@ -637,7 +683,7 @@ var redactionRules = concatRules([]redactionRule{
 	// with `=` or `:`, which is an assignment's separator after a word that only looks like a flag:
 	// a diff's removed line `-SECRET_KEY = 'x'`.
 }, quotedRules(quotedFlag, nil), []redactionRule{
-	{expr: `(?i)(` + redactFlag + `)([^\s"'=:-][^\s"']*)`, replacement: "${1}" + redactedValue, keep: isSubstitutionOpening, needles: redactFlagNeedles, start: startFlag, runsOn: awsPairRunsOn},
+	{expr: `(?i)(` + redactFlag + `)([^\s"'=:-][^\s"']*)`, replacement: "${1}" + redactedValue, value: valueUnquoted, needles: redactFlagNeedles, start: startFlag, runsOn: awsPairRunsOn},
 	// A flag and its value as two quoted items of an argument list, the way an MCP server's args
 	// are written in JSON, TOML and YAML: `"args": ["--api-key", "x"]`.
 	{
@@ -747,7 +793,13 @@ func (rule redactionRule) runningOn(runsOn func(rule *redactionRule, t string, m
 	return rule
 }
 
-// apply replaces every match of the rule in the gate's text, except one whose value keep passes.
+// withValue returns the rule with its value written as kind says.
+func (rule redactionRule) withValue(kind valueKind) redactionRule {
+	rule.value = kind
+	return rule
+}
+
+// apply replaces every match of the rule in the gate's text, except one it keeps (keeps).
 func (rule redactionRule) apply(text *redactGate, slot *redactSlot) string {
 	value := text.value
 	var out []byte
@@ -756,11 +808,9 @@ func (rule redactionRule) apply(text *redactGate, slot *redactSlot) string {
 		if match[0] < last {
 			continue // inside a match that ran on (redactionRule.runsOn)
 		}
-		if keep := use.rule.keep; keep != nil {
-			if group := 2 * valueGroup(use.pattern, match); match[group] >= 0 && keep(value[match[group]:match[group+1]]) {
-				text.hidden = text.hidden || keptLabel(value, match[group+1])
-				continue
-			}
+		if use.rule.keeps(value, use.pattern, match) {
+			text.hidden = text.hidden || keptLabel(value, match[2*valueGroup(use.pattern, match)+1])
+			continue
 		}
 		out = append(out, value[last:match[0]]...)
 		replacement, end := use.rule.replacing(value, match)
