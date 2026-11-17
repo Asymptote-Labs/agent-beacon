@@ -1,19 +1,21 @@
 ---
 title: "beacon rules remove"
-description: "Remove a Beacon threat-detection rule from the local store"
+description: "Remove a Beacon threat-detection rule, or a definitions file, from the local store"
 ---
 
 ## Command overview
 
-`beacon rules remove` removes one installed threat-detection rule from the local store by rule id.
+`beacon rules remove` removes one installed threat-detection rule from the local store by rule id, or one definitions file by the name the store keeps it under.
 
 ```bash title="Command syntax"
-beacon rules remove <id> [flags]
+beacon rules remove <id | definitions file> [flags]
 ```
 
-Use [`beacon rules list`](/cli/rules-list) first when you need to confirm the active rule ids.
+Use [`beacon rules list`](/cli/rules-list) first when you need to confirm the active rule ids or the names of the store's definitions files.
 
 Built-in baseline rules are not in the store and cannot be removed. When the removed store rule shares its id with a baseline rule, the baseline copy becomes active again and the command says so.
+
+A definitions file (`*.catalog.yaml` or `*.predicates.yaml`) is installed with the rules that call its predicates, and stays in the store when those rules are removed. Remove it by the name `beacon rules list` shows, such as `tokens.catalog.yaml`. Beacon refuses while a rule in the store still calls one of its predicates, directly or through another predicate, and names each rule and predicate; it also refuses while a predicate left in the store calls one of them. Remove those rules, or those definitions, first.
 
 ## Examples
 
@@ -21,6 +23,12 @@ Remove one rule from the user-mode store:
 
 ```bash title="Remove a rule"
 beacon rules remove suspicious-egress-command
+```
+
+Remove a catalog once no rule in the store calls it:
+
+```bash title="Remove a definitions file"
+beacon rules remove tokens.catalog.yaml
 ```
 
 Remove one rule from the system-mode store:

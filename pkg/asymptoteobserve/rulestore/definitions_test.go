@@ -337,3 +337,49 @@ func TestTheStoreIsReadAsALoadReadsIt(t *testing.T) {
 		t.Errorf("Remove = %q, %v; want the copied rule", removed, err)
 	}
 }
+
+// The store's definitions are listed by the name a removal takes, with the predicates each
+// provides, and removed by it once nothing calls them: no rule, directly or through another
+// predicate, and no definitions left behind.
+func TestDefinitionsAreListedAndRemovedOnceNothingCallsThem(t *testing.T) {
+	store := t.TempDir()
+	if _, err := InstallFiles(store, tokenPack(t), false); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := ListDefinitions(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, d := range listed {
+		got = append(got, d.File+" "+d.Head.String()+" "+strings.Join(d.Predicates, ",")+" "+filepath.Base(d.Path))
+	}
+	if want := "tokens.catalog.yaml catalog tokens token_command tokens.catalog.yaml; tokens.predicates.yaml library tokens prints_token tokens.predicates.yaml"; strings.Join(got, "; ") != want {
+		t.Errorf("ListDefinitions = %q, want %q", strings.Join(got, "; "), want)
+	}
+
+	refuse := func(name, want string) {
+		t.Helper()
+		if _, err := Remove(store, name); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Remove(%s) = %v, want an error saying %q", name, err, want)
+		}
+	}
+	// The rule calls prints_token, whose body calls token_command.
+	refuse("tokens.catalog.yaml", `the rule "token-printed" calls token_command`)
+	refuse("tokens.predicates.yaml", `the rule "token-printed" calls prints_token`)
+	refuse("missing.catalog.yaml", `definitions "missing.catalog.yaml" are not installed`)
+	refuse("../tokens.catalog.yaml", `are not installed`)
+	if _, err := Remove(store, "token-printed"); err != nil {
+		t.Fatal(err)
+	}
+	// No rule left, but the predicates left would call into the catalog.
+	refuse("tokens.catalog.yaml", "the definitions left would fail predicate prints_token")
+	for _, name := range []string{"tokens.predicates.yaml", "tokens.catalog.yaml"} {
+		if removed, err := Remove(store, name); err != nil || removed != filepath.Join(store, name) {
+			t.Errorf("Remove(%s) = %q, %v", name, removed, err)
+		}
+	}
+	if got := storeFiles(t, store); got != "" {
+		t.Errorf("the store holds %q, want nothing", got)
+	}
+}

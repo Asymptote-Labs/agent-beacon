@@ -3,6 +3,7 @@ package threatrules
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"sort"
@@ -544,6 +545,33 @@ func (l *Library) Catalogs() []*concepts.Catalog {
 // Definitions returns the definitions the rule was loaded with: those of its pack. It is nil
 // for a rule decoded on its own, and for one of a pack that has none.
 func (r *Rule) Definitions() *Library { return r.lib }
+
+// Calls returns the names, sorted, of the predicates of the rule's definitions that the rule
+// calls: in its expressions as written, and in the bodies of those, all the way down. It does not
+// need the rule to validate, so it can be asked of any rule a pack holds.
+func (r *Rule) Calls() []string {
+	if r.lib == nil {
+		return nil
+	}
+	called := map[string]bool{}
+	var visit func(name string)
+	visit = func(name string) {
+		p := r.lib.predicates[name]
+		if p == nil || called[name] {
+			return
+		}
+		called[name] = true
+		for _, callee := range p.uses {
+			visit(callee)
+		}
+	}
+	for _, e := range r.written() {
+		for _, name := range calls(e) {
+			visit(name)
+		}
+	}
+	return slices.Sorted(maps.Keys(called))
+}
 
 // uses returns the predicates expr calls by name, or nil when it calls none or does not parse. A
 // call to a predicate this engine set aside for a newer spec makes the rule ruleID need that

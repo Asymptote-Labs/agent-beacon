@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -445,16 +446,25 @@ func rollbackInstall(installed []Installed, tmpDir string) {
 	}
 }
 
-// Remove deletes a rule by id from storeDir. Returns the removed path. The id is
-// validated against the rule-id grammar before use so it can never contain path
-// separators or ".." segments that would resolve outside the store.
+// Remove deletes from storeDir a rule, by id, or a definitions file, by the name the store keeps
+// it under (credential-stores.catalog.yaml, as ListDefinitions gives it). Returns the removed path.
+// A rule id is validated against the rule-id grammar, and a definitions file is looked up among
+// the store's own, so that neither can resolve outside the store.
+//
+// Definitions are not removed while a rule the store holds calls one of their predicates,
+// directly or through another predicate, or while the definitions left behind would fail their
+// checks (a predicate whose body calls one of them): the error names each. Remove the rules
+// first, or install the pack again.
 func Remove(storeDir, id string) (string, error) {
-	if !threatrules.ValidID(id) {
-		return "", fmt.Errorf("invalid rule id %q", id)
-	}
 	held, err := readStore(storeDir)
 	if err != nil {
 		return "", err
+	}
+	if kind, ok := threatrules.PackFileKind(id); ok && kind.Definitions() {
+		return removeDefinitions(storeDir, held, id)
+	}
+	if !threatrules.ValidID(id) {
+		return "", fmt.Errorf("invalid rule id %q", id)
 	}
 	file, ok := held.rules[id]
 	if !ok {
@@ -465,6 +475,104 @@ func Remove(storeDir, id string) (string, error) {
 		return "", err
 	}
 	return target, nil
+}
+
+// removeDefinitions is Remove for the definitions the store keeps under name.
+func removeDefinitions(store string, held storeIndex, name string) (string, error) {
+	gone, ok := held.definitions[name]
+	if !ok {
+		return "", fmt.Errorf("definitions %q are not installed in the store", name)
+	}
+	var all, rest []threatrules.DefinitionFile
+	for other, d := range held.definitions {
+		all = append(all, d.file)
+		if other != name {
+			rest = append(rest, d.file)
+		}
+	}
+	lib, _, err := threatrules.NewLibrary(all)
+	if err != nil {
+		return "", fmt.Errorf("definitions: %w", err)
+	}
+	provided := map[string]bool{}
+	for _, p := range lib.Predicates() {
+		if p.Source == gone.file.Name {
+			provided[p.Name] = true
+		}
+	}
+	var callers []string
+	for _, id := range slices.Sorted(maps.Keys(held.rules)) {
+		data, err := os.ReadFile(filepath.Join(store, filepath.FromSlash(held.rules[id])))
+		if err != nil {
+			return "", err
+		}
+		// Decoded, not validated: a rule set aside for a newer spec still calls what it calls.
+		rule, err := lib.DecodeRule(data)
+		if err != nil {
+			continue // no rule a load would run, now or later
+		}
+		if used := slices.DeleteFunc(rule.Calls(), func(p string) bool { return !provided[p] }); len(used) > 0 {
+			callers = append(callers, fmt.Sprintf("the rule %q calls %s", id, strings.Join(used, ", ")))
+		}
+	}
+	if len(callers) > 0 {
+		return "", fmt.Errorf("%s (%s) is still in use: %s; remove those rules first", name, gone.head, strings.Join(callers, "; "))
+	}
+	left, _, err := threatrules.NewLibrary(rest)
+	if err != nil {
+		return "", fmt.Errorf("%s is still in use: the definitions left would not load: %w", name, err)
+	}
+	for _, res := range left.Check() {
+		if !res.OK() {
+			return "", fmt.Errorf("%s is still in use: the definitions left would fail %s", name, res.String())
+		}
+	}
+	target := filepath.Join(store, filepath.FromSlash(gone.file.Name))
+	if err := os.Remove(target); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+// Definitions describes a definitions file the store holds.
+type Definitions struct {
+	// File is the name the store keeps it under, which Remove takes; Path is where it is.
+	File, Path string
+	// Head is what it declares: its kind, its name and the spec it needs.
+	Head threatrules.Head
+	// Predicates are the names of the predicates it provides, sorted; none for a file this
+	// engine sets aside for a newer spec (Head.Unsupported).
+	Predicates []string
+}
+
+// ListDefinitions returns the definitions files storeDir holds, by File. An absent store holds
+// none.
+func ListDefinitions(storeDir string) ([]Definitions, error) {
+	held, err := readStore(storeDir)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]threatrules.DefinitionFile, 0, len(held.definitions))
+	for _, d := range held.definitions {
+		files = append(files, d.file)
+	}
+	lib, _, err := threatrules.NewLibrary(files)
+	if err != nil {
+		return nil, fmt.Errorf("definitions: %w", err)
+	}
+	provided := map[string][]string{}
+	for _, p := range lib.Predicates() {
+		provided[p.Source] = append(provided[p.Source], p.Name)
+	}
+	list := make([]Definitions, 0, len(held.definitions))
+	for _, name := range slices.Sorted(maps.Keys(held.definitions)) {
+		d := held.definitions[name]
+		list = append(list, Definitions{
+			File: name, Path: filepath.Join(storeDir, filepath.FromSlash(d.file.Name)),
+			Head: d.head, Predicates: provided[d.file.Name],
+		})
+	}
+	return list, nil
 }
 
 // packFilesAt returns the pack files at src, which may be a single file of any kind or a

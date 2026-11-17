@@ -623,6 +623,44 @@ func TestRulesLintRunsAPacksDefinitions(t *testing.T) {
 	}
 }
 
+// `rules list` shows the definitions the store holds, by the name `rules remove` takes, and
+// `rules remove` refuses definitions an installed rule still calls, saying which.
+func TestRulesListAndRemoveDefinitions(t *testing.T) {
+	pullTestSetup(t)
+	cmd, buf := newCmd()
+	if err := rulesAddCmd.RunE(cmd, []string{writePack(t, packWithDefinitions)}); err != nil {
+		t.Fatalf("rules add: %v", err)
+	}
+	buf.Reset()
+	if err := rulesListCmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("rules list: %v", err)
+	}
+	for _, want := range []string{
+		"Definitions in the store:",
+		"tokens.catalog.yaml",
+		"catalog tokens",
+		"token_command",
+		"tokens.predicates.yaml",
+		"library tokens",
+		"prints_token",
+		"; 2 definitions file(s) in the store.",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("want %q in:\n%s", want, buf.String())
+		}
+	}
+	err := rulesRemoveCmd.RunE(cmd, []string{"tokens.predicates.yaml"})
+	if err == nil || !strings.Contains(err.Error(), `the rule "token-printed" calls prints_token`) {
+		t.Errorf("rules remove of definitions a rule calls: %v", err)
+	}
+	for _, name := range []string{"token-printed", "tokens.predicates.yaml", "tokens.catalog.yaml"} {
+		buf.Reset()
+		if err := rulesRemoveCmd.RunE(cmd, []string{name}); err != nil || !strings.Contains(buf.String(), "removed "+name) {
+			t.Errorf("rules remove %s: %v\n%s", name, err, buf.String())
+		}
+	}
+}
+
 // `rules lint` fails a rule that spells out a catalog's stores in a regular expression of its
 // own instead of calling the catalog: the copy would drift from it.
 func TestRulesLintFailsARuleThatCopiesItsPacksCatalog(t *testing.T) {

@@ -50,11 +50,19 @@ always active: a store rule replaces a baseline rule only when it has the same i
 }
 
 var rulesListCmd = &cobra.Command{
-	Use:          "list",
-	Short:        "List the active threat-detection rules",
+	Use:   "list",
+	Short: "List the active threat-detection rules and the store's definitions",
+	Long: `Lists the active rules: the store's, and the built-in baseline's that no store rule
+replaces. Then lists the definitions files the store holds (*.catalog.yaml and
+*.predicates.yaml, installed with the rules that call them), each by the name
+'beacon rules remove' takes, with what it declares and the predicates it provides.`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		loaded, skipped, err := detect.LoadActiveSkipping(rulesUserMode(), "")
+		if err != nil {
+			return err
+		}
+		definitions, err := detect.ListDefinitions(rulesUserMode())
 		if err != nil {
 			return err
 		}
@@ -62,10 +70,22 @@ var rulesListCmd = &cobra.Command{
 		out := cmd.OutOrStdout()
 		if len(loaded) == 0 {
 			fmt.Fprintln(out, "No rules.")
-			return nil
+			if len(definitions) == 0 {
+				return nil
+			}
 		}
 		for _, lr := range loaded {
 			fmt.Fprintf(out, "%-32s %-8s %-12s %s\n", lr.Rule.ID, lr.Rule.Severity, lr.Rule.Status, lr.Source)
+		}
+		if len(definitions) > 0 {
+			fmt.Fprintln(out, "\nDefinitions in the store:")
+			for _, d := range definitions {
+				provides := strings.Join(d.Predicates, ", ")
+				if unsupported := d.Head.Unsupported(); unsupported != nil {
+					provides = "needs a newer Beacon (" + unsupported.Required + ")"
+				}
+				fmt.Fprintf(out, "%-40s %-32s %s\n", d.File, d.Head, cmp.Or(provides, "no predicates"))
+			}
 		}
 		fromStore := 0
 		for _, lr := range loaded {
@@ -73,8 +93,11 @@ var rulesListCmd = &cobra.Command{
 				fromStore++
 			}
 		}
-		fmt.Fprintf(out, "\n%d rule(s): %d from the store, %d from the built-in baseline. Store: %s\n",
-			len(loaded), fromStore, len(loaded)-fromStore, detect.StoreDir(rulesUserMode()))
+		fmt.Fprintf(out, "\n%d rule(s): %d from the store, %d from the built-in baseline", len(loaded), fromStore, len(loaded)-fromStore)
+		if len(definitions) > 0 {
+			fmt.Fprintf(out, "; %d definitions file(s) in the store", len(definitions))
+		}
+		fmt.Fprintf(out, ". Store: %s\n", detect.StoreDir(rulesUserMode()))
 		return nil
 	},
 }
@@ -120,8 +143,13 @@ func printInstalled(out io.Writer, installed []detect.Installed) {
 }
 
 var rulesRemoveCmd = &cobra.Command{
-	Use:          "remove <id>",
-	Short:        "Remove a rule from the store by id",
+	Use:   "remove <id | definitions file>",
+	Short: "Remove a rule, or a definitions file, from the store",
+	Long: `Removes the rule with the given id from the store, or the definitions file the store
+keeps under the given name (as 'beacon rules list' shows it: credential-stores.catalog.yaml).
+Definitions are not removed while a rule in the store calls one of their predicates,
+directly or through another predicate, or while the definitions left would fail their
+checks; the error names each rule and predicate. Remove those rules first.`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {

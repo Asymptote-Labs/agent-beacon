@@ -111,7 +111,16 @@ func WarnSkipped(w io.Writer, skipped []threatrules.SkippedRule) {
 	}
 }
 
-// Remove deletes a rule by id from the store and returns the removed path.
+// Remove deletes a rule, by id, or a definitions file, by the name the store keeps it under,
+// from the store and returns the removed path. See rulestore.Remove.
 func Remove(userMode bool, id string) (string, error) {
 	return rulestore.Remove(StoreDir(userMode), id)
+}
+
+// Definitions describes a definitions file the store holds.
+type Definitions = rulestore.Definitions
+
+// ListDefinitions returns the definitions files the store holds. See rulestore.ListDefinitions.
+func ListDefinitions(userMode bool) ([]Definitions, error) {
+	return rulestore.ListDefinitions(StoreDir(userMode))
 }
