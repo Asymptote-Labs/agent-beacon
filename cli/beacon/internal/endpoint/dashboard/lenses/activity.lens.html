@@ -91,17 +91,32 @@
     }
 
     root.appendChild(el("h2", "Findings"));
-    if (!data.findings) {
+    var scan = data.findings;
+    if (!scan) {
       root.appendChild(el("p", "This trace was not scanned.", "muted"));
-    } else if (!data.findings.items || data.findings.items.length === 0) {
-      root.appendChild(el("p", "No rule matched (" + fmt.format(data.findings.rules_evaluated || 0) + " rules evaluated).", "muted"));
     } else {
-      root.appendChild(table([{ label: "Severity" }, { label: "Rule" }, { label: "Evidence" }], data.findings.items.map(function (f) {
-        var evidence = (f.event_ids || []).map(function (id) {
-          return byId[id] ? "#" + byId[id].number : "outside this bundle";
-        }).join(", ");
-        return [el("td", f.severity || "—"), el("td", f.title || f.rule_id), el("td", evidence || "—")];
-      })));
+      var items = scan.items || [];
+      var failed = scan.failed || [];
+      var skipped = scan.skipped || [];
+      if (items.length === 0) {
+        // A rule that failed or was skipped has no verdict here, so "no rule matched" would overstate.
+        var none = failed.length || skipped.length ? "No findings" : "No rule matched";
+        root.appendChild(el("p", none + " (" + fmt.format(scan.rules_evaluated || 0) + " rules evaluated).", "muted"));
+      } else {
+        root.appendChild(table([{ label: "Severity" }, { label: "Rule" }, { label: "Evidence" }], items.map(function (f) {
+          var evidence = (f.event_ids || []).map(function (id) {
+            return byId[id] ? "#" + byId[id].number : "outside this bundle";
+          }).join(", ");
+          return [el("td", f.severity || "—"), el("td", f.title || f.rule_id), el("td", evidence || "—")];
+        })));
+      }
+      if (failed.length) {
+        root.appendChild(el("p", "The scan is incomplete: " + failed.join(", ") + " could not be evaluated on some events, so the verdict there is unknown.", "fail"));
+      }
+      if (skipped.length) {
+        root.appendChild(el("p", fmt.format(skipped.length) + (skipped.length === 1 ? " rule was" : " rules were") +
+          " skipped because " + (skipped.length === 1 ? "it needs" : "they need") + " a newer Beacon.", "muted"));
+      }
     }
 
     if (data.truncated) {
