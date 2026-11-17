@@ -67,6 +67,10 @@ type WizardOptions struct {
 	// offered whichever destination is chosen; Beacon Cloud MCP only with Beacon Cloud. Every
 	// offered tool starts selected: turning one off is the person's choice to make.
 	OfferAgentTools bool
+	// AskEmail adds an optional email question for a person who finishes without an account, so
+	// Beacon still knows who installed it. The caller leaves it off when the install was already
+	// given an email.
+	AskEmail bool
 	// BackfillDays is how far back the install reads agent sessions from their local session
 	// stores, and a first connect uploads them; zero when the backfill is off. The confirm screen
 	// names it, because it is part of what confirming Beacon Cloud sends.
@@ -106,6 +110,11 @@ type WizardResult struct {
 	// destination is Beacon Cloud.
 	ConnectCloudMCP bool
 	InstallSkills   bool
+
+	// EmailAsked is true when the optional email question was shown, and Email is the normalized
+	// address the person gave there, "" when they left it blank.
+	EmailAsked bool
+	Email      string
 }
 
 type wizardScreen int
@@ -119,8 +128,12 @@ const (
 	managedDisclosureScreen
 	privacyScreen
 	agentToolsScreen
+	emailScreen
 	confirmScreen
 )
+
+// maxEmailInput bounds what the email question accepts: the longest address SMTP allows.
+const maxEmailInput = 254
 
 // Agent tools the wizard can offer.
 const (
@@ -152,6 +165,11 @@ type wizardModel struct {
 	startedAt time.Time
 	now       time.Time
 	frame     int
+
+	// emailInput is what has been typed on the email screen, and emailErr why the last answer
+	// was not accepted.
+	emailInput string
+	emailErr   string
 }
 
 // spinnerFrames animate the wait. Braille is what every terminal capable of the
@@ -298,6 +316,9 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case signInDoneMsg:
 		return m.signInFinished(msg)
 	case tea.KeyMsg:
+		if m.screen == emailScreen {
+			return m.emailKey(msg)
+		}
 		if step := menuStep(msg); step != 0 {
 			if n := m.choiceCount(); m.isPicker() && n > 0 {
 				m.selected = (m.selected + step + n) % n
@@ -590,11 +611,52 @@ func (m wizardModel) recover() (tea.Model, tea.Cmd) {
 		// would show an account on the confirm screen next to "not signed in".
 		m.options.Email = ""
 		m.options.SignedIn = false
+		if m.options.AskEmail {
+			m.screen = emailScreen
+			return m, nil
+		}
 		m.toConfirm()
 		return m, nil
 	default:
 		return m, tea.Quit
 	}
+}
+
+// emailKey is the email screen's input: it takes free text, so letters type rather than move a
+// cursor. Enter accepts a valid address, or a blank one to skip.
+func (m wizardModel) emailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyCtrlC, tea.KeyEsc:
+		return m.cancelAndQuit()
+	case tea.KeyBackspace:
+		if runes := []rune(m.emailInput); len(runes) > 0 {
+			m.emailInput = string(runes[:len(runes)-1])
+		}
+		m.emailErr = ""
+	case tea.KeyRunes:
+		if msg.Alt {
+			return m, nil
+		}
+		// A paste arrives as one message; an address has no spaces or line breaks.
+		input := m.emailInput + strings.Join(strings.Fields(string(msg.Runes)), "")
+		if len(input) <= maxEmailInput {
+			m.emailInput = input
+		}
+		m.emailErr = ""
+	case tea.KeyEnter:
+		raw := strings.TrimSpace(m.emailInput)
+		if raw != "" {
+			email, err := NormalizeEmail(raw)
+			if err != nil {
+				m.emailErr = err.Error()
+				return m, nil
+			}
+			m.result.Email = email
+		}
+		m.result.EmailAsked = true
+		m.toConfirm()
+	}
+	return m, nil
 }
 
 func (m wizardModel) View() string {
@@ -719,6 +781,14 @@ func (m wizardModel) View() string {
 			rows = append(rows, line, choiceDetail(detail, contentWidth))
 		}
 		body += strings.Join(rows, "\n")
+	case emailScreen:
+		title = "Your email (optional)"
+		body = "You are installing without an account. Leave an email so Beacon knows who is using it; " +
+			"it is never added to your agents' telemetry, which stays on this machine.\n\n" +
+			"Email: " + m.emailInput + "█"
+		if m.emailErr != "" {
+			body += "\n\n" + wizardWarn.Render(m.emailErr)
+		}
 	case confirmScreen:
 		title = "Ready to set up Beacon"
 		if m.result.Destination == DestinationAsymptote {
@@ -752,6 +822,9 @@ func (m wizardModel) View() string {
 			}
 			if m.result.WithoutAccount {
 				body += " You are not signed in; connect later with `beacon endpoint connect`."
+			}
+			if m.result.Email != "" {
+				body += "\nEmail: " + m.result.Email
 			}
 		}
 		if m.options.OfferAgentTools {
@@ -917,6 +990,8 @@ func (m wizardModel) wizardHint(screen wizardScreen) string {
 		return "esc go back · ctrl+c cancel setup"
 	case signInFailedScreen:
 		return "↑/↓ choose · enter continue · esc cancel"
+	case emailScreen:
+		return "enter continue (leave blank to skip) · esc cancel"
 	case confirmScreen:
 		return "enter install · esc cancel"
 	default:

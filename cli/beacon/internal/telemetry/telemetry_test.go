@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -82,7 +83,7 @@ func options(env map[string]string, stderr io.Writer) Options {
 		Getenv:      func(key string) string { return env[key] },
 		Environ:     func() []string { return environ },
 		Stderr:      stderr,
-		Interactive: true,
+		ShowNotice:  true,
 	}
 }
 
@@ -254,27 +255,27 @@ func TestInitSavesTheInstallIDAndPrintsTheNoticeOnce(t *testing.T) {
 	}
 }
 
-// A run nobody reads (a scheduled job, an internal child, redirected output) must not use up the
-// notice: it is neither printed nor recorded, and the person's first terminal run still shows it.
-func TestNonInteractiveRunLeavesTheNoticeForTheFirstInteractiveOne(t *testing.T) {
+// A run nobody reads (a scheduled job, an internal child) must not use up the notice: it is neither
+// printed nor recorded, and the first run someone reads still shows it.
+func TestUnreadRunLeavesTheNoticeForTheFirstReadOne(t *testing.T) {
 	_, home := setup(t, nil)
 	var stderr bytes.Buffer
 	opts := options(nil, &stderr)
-	opts.Interactive = false
+	opts.ShowNotice = false
 	Init(opts)
 	if !Enabled() {
-		t.Fatal("telemetry is off in a non-interactive run")
+		t.Fatal("telemetry is off in an unread run")
 	}
 	if stderr.Len() != 0 {
-		t.Fatalf("non-interactive run printed %q", stderr.String())
+		t.Fatalf("an unread run printed %q", stderr.String())
 	}
 	if st := loadState(home); st.NoticeShownAt != "" {
-		t.Fatalf("non-interactive run recorded the notice as shown at %s", st.NoticeShownAt)
+		t.Fatalf("an unread run recorded the notice as shown at %s", st.NoticeShownAt)
 	}
 
 	Init(options(nil, &stderr))
 	if got := strings.Count(stderr.String(), Notice); got != 1 {
-		t.Fatalf("first interactive run printed the notice %d times: %q", got, stderr.String())
+		t.Fatalf("the first read run printed the notice %d times: %q", got, stderr.String())
 	}
 }
 
@@ -511,6 +512,38 @@ func TestIdentifyAliasesTheInstallAndSetsThePerson(t *testing.T) {
 	}
 }
 
+// An identity event captured right after Identify, as the CLI sends cli_sign_in_completed and
+// cli_email_submitted, follows the alias and goes out as the person, not as the anonymous install.
+func TestIdentityEventAfterIdentifyIsThePersons(t *testing.T) {
+	s, _ := setup(t, nil)
+	Init(options(nil, io.Discard))
+	Identify("ada@example.com", "user_123")
+	Capture(EventSignInCompleted, map[string]any{PropTrigger: TriggerLoginCommand})
+	Close()
+
+	id := DistinctIDForEmail("ada@example.com")
+	var order []string
+	for _, msg := range s.all() {
+		order = append(order, msg["event"].(string))
+	}
+	if want := []string{"$create_alias", eventSet, EventSignInCompleted}; !slices.Equal(order, want) {
+		t.Fatalf("messages = %q, want %q", order, want)
+	}
+	for _, msg := range s.all() {
+		if properties(t, msg)["$geoip_disable"] != true {
+			t.Fatalf("%s does not disable GeoIP: %v", msg["event"], msg["properties"])
+		}
+	}
+	signIn := s.byEvent(EventSignInCompleted)[0]
+	if signIn["distinct_id"] != id {
+		t.Fatalf("%s distinct_id = %v, want the email's %s", EventSignInCompleted, signIn["distinct_id"], id)
+	}
+	if _, ok := properties(t, signIn)[propProcessPersonProfile]; ok {
+		t.Fatalf("%s is personless", EventSignInCompleted)
+	}
+	assertNoPII(t, s.all())
+}
+
 func TestIdentifyWithAPersonalEmailHasNoCompany(t *testing.T) {
 	s, _ := setup(t, nil)
 	Init(options(nil, io.Discard))
@@ -595,6 +628,53 @@ func TestIdentifyIfAnonymousWithTelemetryOffSendsNothing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, StatePath)); !os.IsNotExist(err) {
 		t.Fatalf("telemetry.json written with telemetry off: %v", err)
 	}
+}
+
+// A home where the person cannot be remembered sends nothing, rather than the alias and $set again
+// on every run.
+func TestIdentifyIfAnonymousSendsNothingItCannotSave(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root writes through the read-only directory")
+	}
+	s, home := setup(t, nil)
+	Init(options(nil, io.Discard))
+	dir := filepath.Dir(filepath.Join(home, StatePath))
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	IdentifyIfAnonymous("ada@example.com", "user_123")
+	Capture("cli_after", nil)
+	Close()
+	if n := len(s.byEvent("$create_alias")) + len(s.byEvent(eventSet)); n != 0 {
+		t.Fatalf("identified a person it could not save: %v", s.all())
+	}
+	if after := s.byEvent("cli_after"); len(after) != 1 || after[0]["distinct_id"] == DistinctIDForEmail("ada@example.com") {
+		t.Fatalf("event after a refused identify = %v", after)
+	}
+}
+
+// A child started with telemetry off here is told so, whatever its own mode would decide: a
+// system-mode parent's console-user children run in user mode.
+func TestOptOutEnvCarriesThisProcesssDecision(t *testing.T) {
+	t.Setenv(EnvTelemetry, "")
+	os.Unsetenv(EnvTelemetry)
+	t.Setenv(EnvDoNotTrack, "")
+	os.Unsetenv(EnvDoNotTrack)
+	setup(t, nil)
+
+	Init(Options{Version: testVersion, InstallMode: InstallModeSystem, Getenv: func(string) string { return "" }, Environ: func() []string { return nil }})
+	if env := OptOutEnv(); !slices.Equal(env, []string{EnvTelemetry + "=0"}) {
+		t.Fatalf("system mode: OptOutEnv() = %v", env)
+	}
+	Close()
+
+	Init(options(nil, io.Discard))
+	if env := OptOutEnv(); len(env) != 0 {
+		t.Fatalf("telemetry on: OptOutEnv() = %v", env)
+	}
+	Close()
 }
 
 // One run that identifies the same person twice (the install's start, then the wizard) sends one

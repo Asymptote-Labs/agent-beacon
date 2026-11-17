@@ -13,6 +13,10 @@ const (
 	// EnvDoNotTrack is the cross-tool convention (https://consoledonottrack.com); any value other
 	// than empty, 0 or false turns CLI telemetry off.
 	EnvDoNotTrack = "DO_NOT_TRACK"
+	// EnvInternalChild marks a beacon process another beacon process started for its own purposes
+	// (a repair run as the console user), whose stderr the parent captures. It never shows the
+	// first-run notice, which would be printed into a buffer and recorded as seen.
+	EnvInternalChild = "BEACON_INTERNAL_CHILD"
 )
 
 // OptedOut reports whether the environment turns telemetry off.
@@ -135,13 +139,28 @@ func normalizeAgentName(raw string) string {
 var OptOutVariables = []string{EnvTelemetry, EnvDoNotTrack}
 
 // OptOutEnv returns NAME=value for each of OptOutVariables set in this process's environment, for a
-// beacon child process started with an environment of its own, so an opt-out reaches it.
+// beacon child process started with an environment of its own, so an opt-out reaches it. When
+// telemetry is off in this process its BEACON_TELEMETRY is 0, so a child run as the console user by
+// a system-mode parent, which is off by default, does not turn telemetry on in user mode and
+// identify that person.
 func OptOutEnv() []string {
+	off := !Enabled()
 	var env []string
 	for _, name := range OptOutVariables {
+		if off && name == EnvTelemetry {
+			continue
+		}
 		if value, ok := os.LookupEnv(name); ok {
 			env = append(env, name+"="+value)
 		}
 	}
+	if off {
+		env = append(env, EnvTelemetry+"=0")
+	}
 	return env
+}
+
+// InternalChildEnv is the NAME=value that marks a beacon child process as internal (EnvInternalChild).
+func InternalChildEnv() string {
+	return EnvInternalChild + "=1"
 }

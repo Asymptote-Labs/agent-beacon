@@ -483,6 +483,7 @@ func consoleUserCommand(ctx context.Context, info consoleUserInfo, bin string, a
 		"LOGNAME="+info.Username)
 	// sudo and runuser reset the environment, so a CLI telemetry opt-out is passed on by hand.
 	cmdArgs = append(cmdArgs, telemetry.OptOutEnv()...)
+	cmdArgs = append(cmdArgs, telemetry.InternalChildEnv())
 	cmdArgs = append(cmdArgs, bin)
 	cmdArgs = append(cmdArgs, args...)
 	return exec.CommandContext(ctx, launcher, cmdArgs...)
@@ -512,6 +513,8 @@ func runHookRepairInProfile(ctx context.Context, bin string, info consoleUserInf
 	for _, entry := range profileEnvironment(info.HomeDir) {
 		env = append(env, entry[0]+"="+entry[1])
 	}
+	env = append(env, telemetry.OptOutEnv()...)
+	env = append(env, telemetry.InternalChildEnv())
 	// Appended rather than replaced: a later assignment wins in Go's exec, so these override the
 	// inherited values while everything else the child needs -- PATH, SystemRoot -- survives. Dropping
 	// SystemRoot in particular makes Windows networking and crypto calls fail in ways that read as

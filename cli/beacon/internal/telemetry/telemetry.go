@@ -55,11 +55,12 @@ type Options struct {
 	Environ func() []string
 	// Stderr receives the first-run notice.
 	Stderr io.Writer
-	// Interactive is true when Stderr is a terminal a person is reading. The notice is printed
-	// and recorded as shown only then, so a background job, an internal child process or a
-	// redirected run leaves it for the person's own first command.
-	Interactive bool
-	Now         func() time.Time
+	// ShowNotice is true when whoever ran the command reads its stderr: a person at a terminal, or
+	// a coding agent or script that ran it, which is how most installs happen. The notice is
+	// printed and recorded as shown only then, so a scheduled job or an internal child process,
+	// whose stderr goes to a log or a buffer, leaves it for a run someone sees.
+	ShowNotice bool
+	Now        func() time.Time
 }
 
 // recorder is the enabled state of one process.
@@ -85,7 +86,7 @@ var (
 
 // Init turns telemetry on for this process unless it is a development build, the environment opts
 // out, or it is system mode and the environment does not opt in. It makes sure the machine's install ID exists in profile.json, prints the first-run
-// notice once to an interactive terminal, and never touches the network: the PostHog client starts with the first event.
+// notice once to a run someone reads, and never touches the network: the PostHog client starts with the first event.
 func Init(opts Options) {
 	r := newRecorder(opts)
 	mu.Lock()
@@ -135,11 +136,18 @@ func newRecorder(opts Options) *recorder {
 	}
 
 	st := loadState(home)
-	if st.NoticeShownAt == "" && opts.Stderr != nil && opts.Interactive && persist {
+	if st.NoticeShownAt == "" && opts.Stderr != nil && opts.ShowNotice && persist {
 		// Recorded before it is printed, so a notice that could not be recorded is not printed and
-		// is never shown again on every run.
-		st.NoticeShownAt = now().UTC().Format(time.RFC3339)
-		if saveState(home, st) == nil {
+		// is never shown again on every run. Decided under the lock, so two runs starting together
+		// print it once.
+		shownAt := now().UTC().Format(time.RFC3339)
+		if updateState(home, func(st *state) bool {
+			if st.NoticeShownAt != "" {
+				return false
+			}
+			st.NoticeShownAt = shownAt
+			return true
+		}) {
 			fmt.Fprintln(opts.Stderr, Notice)
 		}
 	}
@@ -232,7 +240,9 @@ func Identify(email, userID string) {
 // IdentifyIfAnonymous identifies the person with email, as Identify does, only when this machine
 // is not tied to anyone yet and that can be remembered. It is for a sign-in an earlier version of
 // the CLI recorded: it fills in who an anonymous machine belongs to, once, and never replaces a
-// person a sign-in or a given email already named.
+// person a sign-in or a given email already named. The person is saved before anything is sent, so
+// a home it cannot be saved in (or another run that named someone first) sends nothing, rather than
+// the alias and $set again on every run.
 func IdentifyIfAnonymous(email, userID string) {
 	r := active()
 	if r == nil || !r.persist {
@@ -245,6 +255,17 @@ func IdentifyIfAnonymous(email, userID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.identified {
+		return
+	}
+	id, company := DistinctIDForEmail(email), CompanyDomain(email)
+	if !updateState(r.home, func(st *state) bool {
+		if st.PHDistinctID != "" {
+			return false
+		}
+		st.PHDistinctID = id
+		st.Company = company
+		return true
+	}) {
 		return
 	}
 	r.identify(email, userID)
@@ -278,10 +299,12 @@ func (r *recorder) identify(email, userID string) {
 	})
 	r.sentSet = email + "\x00" + userID
 	if r.persist {
-		st := loadState(r.home)
-		st.PHDistinctID = id
-		st.Company = r.company
-		_ = saveState(r.home, st)
+		company := r.company
+		updateState(r.home, func(st *state) bool {
+			st.PHDistinctID = id
+			st.Company = company
+			return true
+		})
 	}
 }
 
@@ -301,6 +324,7 @@ func (r *recorder) enqueue(msg posthog.Message) {
 			ShutdownTimeout:        FlushTimeout,
 			BatchUploadTimeout:     FlushTimeout,
 			MaxRetries:             posthog.Ptr(0),
+			DisableGeoIP:           posthog.Ptr(true), // posthog-go's default: no location from the sender's IP
 			Logger:                 quietLogger{},
 			DefaultEventProperties: r.supers,
 		})

@@ -109,12 +109,16 @@ const (
 	DestinationCloud = "cloud"
 )
 
-// Identity events. Each is followed by Identify, so the person it names is known from then on.
+// Identity events. Each is sent right after Identify, as the person it names, who is known from
+// then on.
 const (
 	// EventSignInCompleted is sent when a Beacon sign-in succeeds.
 	EventSignInCompleted = "cli_sign_in_completed"
 	// EventEmailSubmitted is sent when a person gives an email without signing in.
 	EventEmailSubmitted = "cli_email_submitted"
+	// EventEmailPromptSkipped is sent when a person leaves the install wizard's optional email
+	// question blank. It is not followed by Identify.
+	EventEmailPromptSkipped = "cli_email_prompt_skipped"
 )
 
 // Identity event properties.
