@@ -1,6 +1,7 @@
 package threatrules
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,12 @@ emit:
     events:
       - event: { action: file.read }
 `
+}
+
+// futureSpec is the spec one minor version past the engine's, which a rule must not need to
+// load. It moves with SupportedSpec, so raising the supported spec rewrites no test.
+func futureSpec() string {
+	return fmt.Sprintf("threat-rules/v%d.%d", supportedSpec.major, supportedSpec.minor+1)
 }
 
 func TestSupportedSpecMatchesVersionFile(t *testing.T) {
@@ -50,7 +57,7 @@ func TestDecodeRuleAcceptsSupportedSpecs(t *testing.T) {
 }
 
 func TestDecodeRuleRejectsNewerSpecClearly(t *testing.T) {
-	for _, spec := range []string{"threat-rules/v1.9", "threat-rules/v2"} {
+	for _, spec := range []string{futureSpec(), "threat-rules/v2"} {
 		// A future rule also carries the fields its version added; the spec check must
 		// come first so the error names the version rather than the unknown field.
 		_, err := DecodeRule([]byte(specRule("future-rule", "spec: "+spec, "future_field: true\n")))
@@ -102,7 +109,7 @@ func TestLoadDirSkippingSetsNewerSpecAside(t *testing.T) {
 	}
 	write("current.rule.yaml", specRule("current-rule", "spec: "+SupportedSpec, ""))
 	write("legacy.rule.yaml", specRule("legacy-rule", "", ""))
-	write("future.rule.yaml", specRule("future-rule", "spec: threat-rules/v1.9", "future_field: 1\n"))
+	write("future.rule.yaml", specRule("future-rule", "spec: "+futureSpec(), "future_field: 1\n"))
 
 	rules, skipped, err := LoadDirSkipping(dir)
 	if err != nil {
@@ -114,7 +121,7 @@ func TestLoadDirSkippingSetsNewerSpecAside(t *testing.T) {
 	if len(skipped) != 1 || skipped[0].Err.RuleID != "future-rule" || filepath.Base(skipped[0].Path) != "future.rule.yaml" {
 		t.Fatalf("want future-rule skipped, got %+v", skipped)
 	}
-	if !strings.Contains(skipped[0].String(), "future.rule.yaml: rule \"future-rule\" requires threat-rules/v1.9") {
+	if !strings.Contains(skipped[0].String(), "future.rule.yaml: rule \"future-rule\" requires "+futureSpec()) {
 		t.Errorf("skip message should name the file, rule, and version: %s", skipped[0])
 	}
 
