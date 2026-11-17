@@ -6,28 +6,25 @@ import (
 	"testing"
 )
 
-// tableAtoms returns the atoms of every pattern compiled so far.
+// tableAtoms returns the atoms of every pattern stored so far.
 func tableAtoms() []string {
-	atomTable.mu.Lock()
-	defer atomTable.mu.Unlock()
-	return append([]string(nil), atomTable.atoms...)
+	patternTable.mu.Lock()
+	defer patternTable.mu.Unlock()
+	return append([]string(nil), patternTable.atoms...)
 }
 
-// Reading a text's atoms with the automaton is another route to what a prefilter asks, and a
-// rule stops firing if the two ever differ. Every prefilter of the corpus is asked of every
-// fixture string and its fold-case spellings both ways: with an automaton that knows every
-// atom, with one that knows half of them, so that a prefilter mixes atoms it has read with
-// atoms it searches for, and with one that knows none.
+// Reading a text's atoms with the automaton is another route to what a search for them says,
+// and a rule stops firing if the two ever differ. Every prefilter of the corpus, as the pattern
+// table stores it with its atoms numbered, is asked of every fixture string and its fold-case
+// spellings both ways: with an automaton that knows every atom, with one that knows half of
+// them, so that a prefilter mixes atoms it has read with atoms it searches for, and with one
+// that knows none.
 func TestTextAtomsAgreeWithPrefilter(t *testing.T) {
 	rules := corpusRules(t)
 	var filters []*prefilter
 	for _, p := range corpusPatterns(t, rules) {
-		pf, err := compilePrefilter(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if pf.op != pfTrue {
-			filters = append(filters, pf)
+		if stored := compiledPattern(p); stored != nil && stored.pf != nil {
+			filters = append(filters, stored.pf)
 		}
 	}
 	texts := []string{"", "a\xffb", "my ſecret", "\u212aey", "É/é", strings.Repeat("rm -rf / ", 400)}
@@ -40,10 +37,9 @@ func TestTextAtomsAgreeWithPrefilter(t *testing.T) {
 	// A prefilter's answer for a text, by the search, is the same for every automaton.
 	want := make([][]bool, len(texts))
 	for i, text := range texts {
-		c := canon(text)
 		want[i] = make([]bool, len(filters))
 		for j, pf := range filters {
-			want[i][j] = pf.holds(c)
+			want[i][j] = pf.holds(plainText(text))
 		}
 	}
 	atoms := tableAtoms()
@@ -62,7 +58,7 @@ func TestTextAtomsAgreeWithPrefilter(t *testing.T) {
 			for i, text := range texts {
 				read := (&eventActivation{atoms: auto}).atomsOf(text)
 				for j, pf := range filters {
-					if got := pf.holdsIn(read); got != want[i][j] {
+					if got := pf.holds(read); got != want[i][j] {
 						t.Errorf("prefilter %d on %q: %v by the automaton, %v by the search", j, text, got, want[i][j])
 						if failures++; failures > 10 {
 							t.FailNow()
@@ -123,10 +119,11 @@ func TestAutomatonFindsEveryAtom(t *testing.T) {
 // An atom numbered after the automaton was built is not in it, and is searched for.
 func TestAtomNewerThanTheAutomatonIsSearchedFor(t *testing.T) {
 	auto := buildAutomaton(tableAtoms())
-	pf, err := compilePrefilter(`zqxjkv-newer-than-the-automaton`)
-	if err != nil {
-		t.Fatal(err)
+	stored := compiledPattern(`zqxjkv-newer-than-the-automaton`)
+	if stored == nil || stored.pf == nil {
+		t.Fatal("the pattern has no prefilter")
 	}
+	pf := stored.pf
 	if pf.op != pfAtom || int(pf.id) <= auto.n {
 		t.Fatalf("prefilter %+v is not one atom numbered after the automaton's %d", pf, auto.n)
 	}
@@ -134,7 +131,7 @@ func TestAtomNewerThanTheAutomatonIsSearchedFor(t *testing.T) {
 		"echo ZQXJKV-newer-than-the-AUTOMATON": true,
 		"echo zqxjkv-newer":                    false,
 	} {
-		if got := pf.holdsIn((&eventActivation{atoms: auto}).atomsOf(text)); got != want {
+		if got := pf.holds((&eventActivation{atoms: auto}).atomsOf(text)); got != want {
 			t.Errorf("%q: %v, want %v", text, got, want)
 		}
 	}

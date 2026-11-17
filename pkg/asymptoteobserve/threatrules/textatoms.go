@@ -3,8 +3,6 @@ package threatrules
 import (
 	"regexp"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"unicode/utf8"
 )
 
@@ -12,46 +10,9 @@ import (
 // that of the same few texts for every pattern of every rule: on real command lines, some 690
 // pattern questions an event about twenty distinct texts (the line, a few spans, the words),
 // each answered by its own substring searches, which together read a hundred times the text
-// there was. Here the question is turned round. Every atom of every compiled pattern is in one
-// table, and a text is read once, by an automaton that reports which atoms it holds (textAtoms).
-// A prefilter is then a few bit tests.
-
-// atomTable numbers the atoms of every pattern compiled so far. An atom's number never changes,
-// so a prefilter holds its atoms' numbers.
-var atomTable struct {
-	mu    sync.Mutex
-	ids   map[string]uint32 // a canonical atom -> its number, from 1
-	atoms []string          // atoms[number-1]
-	count atomic.Int32      // len(atoms)
-	built atomic.Pointer[automaton]
-}
-
-// maxAtoms bounds the table. A pack has a few thousand atoms; past the bound an atom has no
-// number and is searched for in the text, as every atom was before.
-const maxAtoms = 1 << 15
-
-// atomID returns the number of a canonical atom, or 0 when the table is full.
-func atomID(atom string) uint32 {
-	if atom == "" {
-		return 0
-	}
-	atomTable.mu.Lock()
-	defer atomTable.mu.Unlock()
-	if id, ok := atomTable.ids[atom]; ok {
-		return id
-	}
-	if len(atomTable.atoms) >= maxAtoms {
-		return 0
-	}
-	if atomTable.ids == nil {
-		atomTable.ids = map[string]uint32{}
-	}
-	atomTable.atoms = append(atomTable.atoms, atom)
-	id := uint32(len(atomTable.atoms))
-	atomTable.ids[atom] = id
-	atomTable.count.Store(int32(id))
-	return id
-}
+// there was. Here the question is turned round. Every atom of every stored pattern is numbered
+// in the pattern table (regexcall.go), and a text is read once, by an automaton that reports
+// which atoms it holds (textAtoms). A prefilter is then a few bit tests.
 
 // automaton is an Aho-Corasick automaton over the first n atoms of the table: it reads a
 // canonical text a byte at a time and reports every atom that ends at each byte. It is built
@@ -70,22 +31,25 @@ type automaton struct {
 
 // atomsFor returns an automaton to read texts with. Atoms numbered after it was built are not
 // in it and are searched for in the text instead (textAtoms.holds), so it is rebuilt only when
-// enough have been added: a process compiles its rules and then evaluates, and a test that
-// compiles a pattern between evaluations does not rebuild for each.
+// enough have been added (stale): a process compiles its rules and then evaluates, and a test
+// that compiles a pattern between evaluations does not rebuild for each.
 func atomsFor() *automaton {
-	a := atomTable.built.Load()
-	n := int(atomTable.count.Load())
-	if a != nil && n-a.n < max(32, a.n/8) {
+	if a := patternTable.built.Load(); !stale(a, int(patternTable.count.Load())) {
 		return a
 	}
-	atomTable.mu.Lock()
-	defer atomTable.mu.Unlock()
-	if a = atomTable.built.Load(); a != nil && len(atomTable.atoms)-a.n < max(32, a.n/8) {
+	patternTable.mu.Lock()
+	defer patternTable.mu.Unlock()
+	if a := patternTable.built.Load(); !stale(a, len(patternTable.atoms)) {
 		return a
 	}
-	a = buildAutomaton(atomTable.atoms)
-	atomTable.built.Store(a)
+	a := buildAutomaton(patternTable.atoms)
+	patternTable.built.Store(a)
 	return a
+}
+
+// stale reports whether an automaton misses enough of the n atoms numbered to be rebuilt.
+func stale(a *automaton, n int) bool {
+	return a == nil || n-a.n >= max(32, a.n/8)
 }
 
 func buildAutomaton(atoms []string) *automaton {
@@ -228,25 +192,12 @@ func (t *textAtoms) matches(re *regexp.Regexp) bool {
 	return matched
 }
 
-// holdsIn is holds for a text whose atoms have been read: holds(canon(text)) by another route.
-func (p *prefilter) holdsIn(t *textAtoms) bool {
-	switch p.op {
-	case pfAtom:
-		return t.holds(p)
-	case pfAnd:
-		for _, s := range p.subs {
-			if !s.holdsIn(t) {
-				return false
-			}
-		}
-		return true
-	case pfOr:
-		for _, s := range p.subs {
-			if s.holdsIn(t) {
-				return true
-			}
-		}
-		return false
-	}
-	return true
+// plainText is a text whose atoms nothing has read: every atom a prefilter asks of it is searched
+// for, as every atom was before the automaton. It is how a matches() call reads a text it is
+// handed outside an event's activation, and how the prefilter tests ask the walker a scan runs.
+func plainText(s string) *textAtoms {
+	return &textAtoms{text: s, auto: &noAtoms}
 }
+
+// noAtoms is an automaton that knows no atom.
+var noAtoms automaton
