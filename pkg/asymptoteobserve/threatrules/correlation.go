@@ -242,7 +242,6 @@ func (c *CompiledRule) assignFrom(s *sessionEvents, hits [][]int, start int) []i
 	return picked
 }
 
-
 // eventTime parses an event's timestamp. The bool is false when the timestamp is absent
 // or unparseable, in which case window enforcement is skipped for that event.
 func eventTime(e *asymptoteobserve.Event) (time.Time, bool) {
