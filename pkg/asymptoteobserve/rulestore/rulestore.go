@@ -256,8 +256,7 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 		if !f.Kind.Definitions() {
 			continue
 		}
-		file := threatrules.DefinitionFile{Name: f.Path, Data: f.Data}
-		head, err := file.Head()
+		file, head, err := threatrules.ReadDefinitionFile(f.Path, f.Data)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", f.Path, err)
 		}
@@ -276,8 +275,8 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 		dest := name
 		if old, ok := held.definitions[name]; ok {
 			replaced[name] = true
-			dest = old.Name
-			if bytes.Equal(old.Data, f.Data) {
+			dest = old.file.Name
+			if bytes.Equal(old.file.Data, f.Data) {
 				continue // already installed as it is
 			}
 			if !force {
@@ -286,9 +285,9 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 		}
 		todo = append(todo, pending{id: head.Name, file: dest, data: f.Data, definitions: true})
 	}
-	for name, file := range held.definitions {
+	for name, old := range held.definitions {
 		if !replaced[name] {
-			definitions = append(definitions, file)
+			definitions = append(definitions, old.file)
 		}
 	}
 	// The files it sets aside are the source's reported above, and the store's own, which every
@@ -497,19 +496,25 @@ func packFilesAt(src string) ([]threatrules.PackFile, error) {
 	return files, nil
 }
 
-// storeIndex is what a store holds, read as a load reads it: its rules by id, and its
-// definitions by the name a store keeps them under (threatrules.Head.StoreName), each with its
-// path in the store.
+// storeIndex is what a store holds, read as a load reads it: its rules by id, each with its path
+// in the store, and its definitions by the name a store keeps them under
+// (threatrules.Head.StoreName).
 type storeIndex struct {
-	rules map[string]string
-	// definitions are named by their paths in the store.
-	definitions map[string]threatrules.DefinitionFile
+	rules       map[string]string
+	definitions map[string]storedDefinitions
+}
+
+// storedDefinitions is a definitions file of the store, named by its path in the store, and what
+// it declares: read once, and carried to the library built from it.
+type storedDefinitions struct {
+	file threatrules.DefinitionFile
+	head threatrules.Head
 }
 
 // readStore indexes the store. An absent store holds nothing. A file whose head does not read
 // is indexed under its file name.
 func readStore(store string) (storeIndex, error) {
-	held := storeIndex{rules: map[string]string{}, definitions: map[string]threatrules.DefinitionFile{}}
+	held := storeIndex{rules: map[string]string{}, definitions: map[string]storedDefinitions{}}
 	files, err := threatrules.ReadPackFS(os.DirFS(store))
 	if errors.Is(err, fs.ErrNotExist) {
 		return held, nil
@@ -518,8 +523,8 @@ func readStore(store string) (storeIndex, error) {
 		return held, err
 	}
 	for _, f := range files {
-		head, _ := threatrules.ReadHead(f.Path, f.Data)
 		if f.Kind == threatrules.RuleFile {
+			head, _ := threatrules.ReadHead(f.Path, f.Data)
 			id := head.Name
 			if !threatrules.ValidID(id) {
 				id = strings.TrimSuffix(path.Base(f.Path), threatrules.RuleFileSuffix)
@@ -527,11 +532,15 @@ func readStore(store string) (storeIndex, error) {
 			held.rules[id] = f.Path
 			continue
 		}
+		file, head, err := threatrules.ReadDefinitionFile(f.Path, f.Data)
+		if err != nil {
+			file = threatrules.DefinitionFile{Name: f.Path, Data: f.Data}
+		}
 		name, err := head.StoreName()
 		if err != nil {
 			name = path.Base(f.Path)
 		}
-		held.definitions[name] = threatrules.DefinitionFile{Name: f.Path, Data: f.Data}
+		held.definitions[name] = storedDefinitions{file: file, head: head}
 	}
 	return held, nil
 }

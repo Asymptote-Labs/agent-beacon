@@ -24,11 +24,19 @@ type DefinitionFile struct {
 	// Name is the file's name or path; its suffix says which kind of definitions it holds.
 	Name string
 	Data []byte
+	// head is what the file declares about itself, set by ReadDefinitionFile so that NewLibrary
+	// does not read it again; NewLibrary reads it of a file built without.
+	head *Head
 }
 
-// Head reads what the file declares about itself (ReadHead).
-func (f DefinitionFile) Head() (Head, error) {
-	return ReadHead(f.Name, f.Data)
+// ReadDefinitionFile reads what the definitions file name, whose content is data, declares about
+// itself (ReadHead), once: the file it returns carries it to NewLibrary.
+func ReadDefinitionFile(name string, data []byte) (DefinitionFile, Head, error) {
+	head, err := ReadHead(name, data)
+	if err != nil {
+		return DefinitionFile{}, head, err
+	}
+	return DefinitionFile{Name: name, Data: data, head: &head}, head, nil
 }
 
 // predicatesFile is a *.predicates.yaml document.
@@ -185,7 +193,13 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 		}
 		// Predicates exist since v1.3, so that is what a definitions file needs at least.
 		spec := specV1_3
-		if head, err := readHead(kind, file.Data); err == nil {
+		head := file.head
+		if head == nil {
+			if read, err := readHead(kind, file.Data); err == nil {
+				head = &read
+			}
+		}
+		if head != nil {
 			declaredSpec, err := parseSpec(head.Spec)
 			if err != nil {
 				return nil, nil, fmt.Errorf("%s: %w", file.Name, err)
