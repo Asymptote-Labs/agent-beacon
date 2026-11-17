@@ -1,6 +1,6 @@
 id: approval-bypass-via-renamed-binary
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+version: 6
 title: Denied dangerous command re-invoked via a renamed copy of the binary
 description: >
   An approval for a destructive or high-impact shell command was explicitly denied
@@ -66,7 +66,7 @@ correlation:
             c.name == "chmod" && c.args.matches("(?m)^(-[A-Za-z]*R[A-Za-z]*|--recursive)$") && c.args.matches("(?m)^0?777$") ||
             size(c.argv) > 1 && c.argv[0].matches("(^|/)sudo$") && c.argv[1].matches("^(-[A-Za-z]*s[A-Za-z]*|--shell)$")
           ) ||
-          unread_text(e, t, t.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:^|[;&|(`]|(?:\\b(?:ba|z|da|k)?sh(?:\\s+-[a-z]+)*\\s+-c\\s+|\\beval\\s+)[\"'])\\s*(?:[a-z_][a-z0-9_]*=[^;&|\\s]*\\s+|(?:sudo|doas|env|nohup|exec|command|nice|time|xargs|timeout|stdbuf|setsid|eval)(?:\\s+(?:-[^;&|\\s]*(?:\\s+[a-z0-9_][^;&|\\s/]*)?|[0-9][^;&|\\s]*))*\\s+)*(?:/tmp/|/var/tmp/|\\$\\(mktemp[^)]*\\))[^;&|\\s\"'`]*(?:\\s+[^;&|\\s]+)*?\\s+-[dfirv]*(?:r[dfirv]*f|f[dfirv]*r)[dfirv]*(?:[\\s\"'`)]|$)|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)"))
+          unread_text(e, t, t.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:^|[;&|(`]|(?:\\b(?:ba|z|da|k)?sh(?:\\s+-[a-z]+)*\\s+-c\\s+|\\beval\\s+)[\"'])\\s*(?:[a-z_][a-z0-9_]*=[^;&|\\s]*\\s+|(?:sudo|doas|env|nohup|exec|command|nice|time|xargs|timeout|stdbuf|setsid|eval)(?:\\s+(?:-[^;&|\\s]*(?:\\s+[a-z0-9_][^;&|\\s/]*)?|[0-9][^;&|\\s]*))*\\s+)*(?:/tmp/|/var/tmp/|\\$\\(mktemp[^)]*\\))[^;&|\\s\"'`]*(?:\\s+[^;&|\\s]+)*?\\s+-[dfirv]*(?:r[dfirv]*f|f[dfirv]*r)[dfirv]*(?:[\\s\"'`)]|$)|\\bmkfs\\b|\\|\\s*(sudo(\\s+-\\S+(\\s+\\w+)?)*\\s+)?(\\S*/)?(env(\\s+-\\S+|\\s+\\w+=\\S*)*\\s+)?(\\S*/)?(ba|z|da|k)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)"))
         )
 
 emit:

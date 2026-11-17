@@ -1,6 +1,6 @@
 id: agent-extension-installed-by-command
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: Agent extension (MCP server, plugin, marketplace) installed by command
 description: >
   A command registers new code that an agent runtime will load on every later
@@ -37,7 +37,7 @@ match: >
         c.args.matches("(?mi)\\A(mcp\\n(add|add-json|add-from-claude-desktop|install)|plugins?\\n(install|add|i)|plugins?\\nmarketplace\\nadd|extensions?\\n(install|link))$")) ||
       c.name.matches("(?i)^code(-insiders)?(\\.exe|\\.cmd)?$") && c.args.matches("(?m)^--(add-mcp|install-extension)(=.*)?$")
     ) ||
-    unread_text(e, t, (t.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?((npx|bunx|pnpm\\s+dlx)\\s+(-y\\s+)?)?([^\\s;&|]*/)?(claude(-code)?|codex|gemini(-cli)?|qwen(-code)?|opencode(-ai)?|kiro-cli|amp|cursor-agent|copilot)\\s+(mcp\\s+(add|add-json|add-from-claude-desktop|install)\\b|plugins?\\s+(install|add|i)\\b|plugins?\\s+marketplace\\s+add\\b|extensions?\\s+(install|link)\\b)") ||
+    unread_text(e, t, (t.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?((npx|bunx|pnpm\\s+dlx)\\s+(-y\\s+)?)?([^\\s;&|]*/)?(claude(-code)?|codex|cursor-agent|aider|goose|opencode(-ai)?|gemini(-cli)?|qwen(-code)?|kiro-cli|amp|copilot)\\s+(mcp\\s+(add|add-json|add-from-claude-desktop|install)\\b|plugins?\\s+(install|add|i)\\b|plugins?\\s+marketplace\\s+add\\b|extensions?\\s+(install|link)\\b)") ||
       t.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?([^\\s;&|]*/)?code(-insiders)?(\\.exe|\\.cmd)?\\s+([^;&|\\n]*\\s)?--(add-mcp|install-extension)\\b")))
   )
 
@@ -230,4 +230,11 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git commit -m 'docs: cd tools && claude mcp add helper -- npx -y helper-mcp' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half lacked aider and goose until version 4.
+  - name: goose_extension_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh 'cd tools && goose extensions install helper'" }
         session: { id: s1 }

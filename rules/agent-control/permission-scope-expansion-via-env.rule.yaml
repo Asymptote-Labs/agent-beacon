@@ -1,6 +1,6 @@
 id: permission-scope-expansion-via-env
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+version: 6
 title: Agent runtime spawned with environment variables that elevate permissions
 description: >
   A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
@@ -48,7 +48,7 @@ match: >
         (x.name == "export" || x.name.matches("^(declare|typeset)$") && x.args.matches("(?m)^-[A-Za-z]*x[A-Za-z]*$")) &&
         x.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)="))) ||
     unread_text(e, t, t.matches("(?i)\\b((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)\\s*=") &&
-      t.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+|([A-Z_][A-Z0-9_]*\\s*=\\S+\\s+)+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b"))
+      agent_cli_mention(t))
   )
 
 emit:
@@ -156,4 +156,11 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git commit -m 'docs: never start it as ELEVATED=1 claude -p go' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half named seven agents until version 6; it is agent_cli_mention.
+  - name: copilot_scope_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./spawn.sh 'cd repo && ADMIN_MODE=1 copilot -p go'" }
         session: { id: s1 }

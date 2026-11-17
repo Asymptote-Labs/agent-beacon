@@ -11,7 +11,7 @@
 # The predicate takes the event, so it reads the command of an approval event as it reads the
 # command of a command.executed event: parsed_commands is derived for both.
 library: dangerous-commands
-version: 3
+version: 4
 spec: threat-rules/v1.3
 description: A command that destroys data or hands over the machine in one step.
 
@@ -39,7 +39,7 @@ definitions:
         c.name == "chmod" && c.args.matches("(?m)^(-[A-Za-z]*R[A-Za-z]*|--recursive)$") && c.args.matches("(?m)^0?777$")
       ) ||
       e.command.command.matches(":\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd") ||
-      unread_text(e, t, t.matches("(?i)(\\brm\\s+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)"))
+      unread_text(e, t, t.matches("(?i)(\\brm\\s+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(sudo(\\s+-\\S+(\\s+\\w+)?)*\\s+)?(\\S*/)?(env(\\s+-\\S+|\\s+\\w+=\\S*)*\\s+)?(\\S*/)?(ba|z|da|k)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)"))
     tests:
       - name: recursive_forced_removal
         verdict: match

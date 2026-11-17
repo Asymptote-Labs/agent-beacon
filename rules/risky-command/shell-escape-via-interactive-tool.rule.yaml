@@ -1,6 +1,6 @@
 id: shell-escape-via-interactive-tool
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+version: 5
 title: Shell escape via an interactive tool (GTFObins-style)
 description: >
   A command uses a known shell-escape idiom — spawning a shell through awk
@@ -36,12 +36,12 @@ match: >
       c.name.matches("^(ssh|scp|sftp)$") && c.args.matches("(?mi)^-o\\n?ProxyCommand(\\s*=|\\s+)")
     ) ||
     unread_text(e, t, (
-      t.matches("(?i)\\bawk\\b.*BEGIN\\s*\\{\\s*system\\s*\\(") ||
-      t.matches("(?i)\\bperl\\b\\s+-e\\b.*\\b(system|exec)\\b.*(/bin/)?(ba|z)?sh") ||
+      t.matches("(?i)\\b(awk|gawk|mawk|nawk)\\b.*BEGIN\\s*\\{\\s*system\\s*\\(") ||
+      t.matches("(?i)\\bperl[0-9.]*\\s+([^;&|\\n]*\\s)?-[a-z0-9]*e\\b.*\\b(system|exec)\\b.*\\b(ba|z|da|k)?sh\\b") ||
       t.matches("(?i)\\bpython[0-9.]*\\b.*\\bpty\\.spawn\\s*\\(") ||
-      t.matches("(?i)\\b(vim|vi|view|nvim)\\b\\s+-c\\s+[\"']?:\\s*(!|shell|py\\b)") ||
-      t.matches("(?i)\\bfind\\b.*-exec\\s+(/bin/|/usr/bin/)?(ba|z)?sh\\b") ||
-      t.matches("(?i)\\btar\\b.*--checkpoint-action=exec") ||
+      t.matches("(?i)\\b(vim|vi|view|nvim|vimdiff|rvim|gvim)\\b\\s+([^;&|\\n]*\\s)?((-c|--cmd)\\s+[\"']?|[\"']?\\+):?\\s*(!|shell\\b|py(thon)?3?\\b)") ||
+      t.matches("(?i)\\bfind\\b.*\\s-(exec|execdir|ok|okdir)\\s+[\"']?(/bin/|/usr/bin/)?(ba|z|da|k)?sh\\b") ||
+      t.matches("(?i)\\b(tar|gtar|bsdtar)\\b.*--checkpoint-action=exec") ||
       t.matches("(?i)\\b(ssh|scp|sftp)\\b.*-o\\s*[\"']?ProxyCommand(\\s*=|\\s+)")
     ))
   )
@@ -217,4 +217,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git commit -m 'docs: tar --checkpoint-action=exec is a shell escape' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half named awk, perl, -exec, tar and four vim names only until version 5.
+  - name: gawk_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./x.sh \"gawk 'BEGIN { system(\\\"/bin/sh\\\") }'\"" }
+        session: { id: s1 }
+  - name: find_execdir_zsh_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./x.sh 'find . -maxdepth 0 -execdir /bin/zsh \\;'" }
         session: { id: s1 }

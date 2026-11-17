@@ -255,6 +255,96 @@ func TestPackListsNoSenderOfItsOwn(t *testing.T) {
 	}
 }
 
+// TestPackAgentListsAgree keeps the coding agents in one list. agent_cli names them for a
+// parsed command; a text pattern that names agents (agent_cli_mention, or a rule's own text
+// half that has to spell them inside a longer pattern) names the same ones, so an agent added
+// to one half of a rule is not missed by the other.
+func TestPackAgentListsAgree(t *testing.T) {
+	lib, _, err := LoadLibraryDir(rulesDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := agentNames(lib.predicates["agent_cli"].text)
+	if !slices.Contains(want, "codex") || !slices.Contains(want, "claude-code") {
+		t.Fatalf("agent_cli names no agents: %q", want)
+	}
+	check := func(where, text string) {
+		if got := agentNames(text); !slices.Equal(got, want) {
+			t.Errorf("%s names agents %q, agent_cli %q", where, got, want)
+		}
+	}
+	check("agent_cli_mention", lib.predicates["agent_cli_mention"].text)
+	literal := regexp.MustCompile(`\.matches\(("(?:[^"\\]|\\.)*")\)`)
+	for _, r := range corpusRules(t) {
+		for _, m := range literal.FindAllStringSubmatch(strings.Join(ruleExpressions(r), " "), -1) {
+			// A group of agents, and not a path such as .codex/prompts.
+			if slices.Contains(agentNames(m[1]), "codex") {
+				check(r.ID+": "+m[1], m[1])
+			}
+		}
+	}
+}
+
+// agentNames is every name of each group of alternatives that holds "codex" in a pattern, an
+// optional suffix (claude(-code)?) giving both spellings.
+func agentNames(text string) []string {
+	suffix := regexp.MustCompile(`^([a-z][a-z-]*)\(([a-z-]+)\)\?$`)
+	var names []string
+	for off := 0; ; {
+		i := strings.Index(text[off:], "codex")
+		if i < 0 {
+			break
+		}
+		i += off
+		start, end := -1, -1
+		for k, depth := i, 0; k >= 0 && start < 0; k-- {
+			switch text[k] {
+			case ')':
+				depth++
+			case '(':
+				if depth == 0 {
+					start = k
+				}
+				depth--
+			}
+		}
+		for k, depth := i, 0; k < len(text) && end < 0; k++ {
+			switch text[k] {
+			case '(':
+				depth++
+			case ')':
+				if depth == 0 {
+					end = k
+				}
+				depth--
+			}
+		}
+		if start < 0 || end < 0 {
+			break
+		}
+		depth, from := 0, start+1
+		for k := start + 1; k <= end; k++ {
+			switch {
+			case text[k] == '(':
+				depth++
+			case text[k] == ')' && k < end:
+				depth--
+			case text[k] == '|' && depth == 0 || k == end:
+				alt := text[from:k]
+				if m := suffix.FindStringSubmatch(alt); m != nil {
+					names = append(names, m[1], m[1]+m[2])
+				} else {
+					names = append(names, alt)
+				}
+				from = k + 1
+			}
+		}
+		off = end
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
+}
+
 // TestPackCategoriesMatchDirectories pins taxonomy.beacon_category to the directory each rule
 // lives in. The rule store keeps rules flat, so the category travels inside the rule: it is what
 // groups findings by kind of risk (the Security Review lens, for one) once a rule is installed.

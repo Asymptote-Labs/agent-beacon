@@ -1,6 +1,6 @@
 id: disk-fill-attempt
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+version: 5
 title: Disk-fill primitive executed in a command
 description: >
   A command writes an unbounded or very large amount of data to a file: dd from
@@ -57,8 +57,12 @@ match: >
          e.command.command.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") &&
          !e.command.command.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b"))
     ) ||
-    unread_text(e, t, t.matches("(?i)\\bdd\\b[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom)\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+|\\bdd\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom)\\b|\\b(fallocate|truncate)\\b\\s+(-[ls]\\s+([0-9]+[KMGTP]|[0-9]+M|[0-9]+G)|--size\\s+[0-9]+[KMGTP])\\s+|(^|[^\\w=./-])yes\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") &&
-      !t.matches("(?i)(^|[^\\w=./-])yes\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b"))
+    unread_text(e, t,
+      t.matches("(?i)\\bdd\\b[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom|random)\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+|\\bdd\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom|random)\\b|\\b(fallocate|truncate)\\b\\s+([^;&|\\n]*\\s)?(-[ls]\\s*|--(length|size)(\\s+|=))\\+?[0-9]+[KMGTP]") ||
+      t.matches("(?i)(^|[^\\w=./-])yes\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") &&
+        !t.matches("(?i)(^|[^\\w=./-])yes\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b") ||
+      t.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") &&
+        !t.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b"))
   )
 
 emit:
@@ -374,4 +378,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git commit -m 'remove dd if=/dev/zero of=/var/tmp/fill from setup' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half knew -l, -s and --size, /dev/zero and /dev/urandom only, until version 5.
+  - name: fallocate_length_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./fill.sh 'fallocate --length 50G /var/tmp/big'" }
+        session: { id: s1 }
+  - name: random_device_redirected_in_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./fill.sh 'head -c 100G /dev/random > /srv/big'" }
         session: { id: s1 }
