@@ -231,15 +231,25 @@ func (r *Rule) validateExpressions() error {
 }
 
 func (r *Rule) validateExpression(expr string) error {
+	// A predicate set aside for a newer spec sets the rule aside: asked before compiling, where
+	// the call would be an unknown function.
+	used, err := r.lib.uses(r.ID, expr)
+	if err != nil {
+		return err
+	}
 	_, ast, err := r.lib.compileMatch(expr)
 	if err != nil {
 		return r.lib.explain(err)
 	}
 	// Already known to be parseable and supported (Validate checked it first). The newest field
-	// is checked first, so the error names the version the rule needs.
+	// is checked first, so the error names the version the rule needs. A rule needs the spec of
+	// the definitions of each predicate it calls, which is v1.3 at least: an engine before it
+	// does not expand predicates, or does not load those definitions.
 	v, _ := parseSpec(r.Spec)
-	if used := r.lib.uses(expr); len(used) > 0 && specV1_3.newerThan(v) {
-		return fmt.Errorf("the predicate %s requires spec: threat-rules/v1.3 or later (engines before v1.3 do not expand predicates)", used[0])
+	for _, p := range used {
+		if p.spec.newerThan(v) {
+			return fmt.Errorf("the predicate %s (%s) requires spec: %s or later (an engine before it does not load the predicate)", p.name, p.source, p.spec)
+		}
 	}
 	for _, f := range specFields() {
 		if f.since.newerThan(v) && selectsField(ast, f.name) {

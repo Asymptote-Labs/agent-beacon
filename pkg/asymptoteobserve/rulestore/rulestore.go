@@ -282,18 +282,23 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 	}
 	var todo []pending
 
-	// The definitions the store will hold: its own, with the source's laid over them.
+	// The definitions the store will hold: its own, with the source's laid over them. A source
+	// file that needs a newer spec is not laid over: the store keeps its version, which is what
+	// the rules are validated against. It is still given to the library, which sets it aside and
+	// with it the rules that call a predicate only it defines.
 	definitions, err := storeDefinitions(store)
 	if err != nil {
 		return nil, err
 	}
+	var files []threatrules.DefinitionFile
 	incoming := map[string]string{} // name in the store -> source path
 	for _, p := range definitionPaths {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			return nil, err
 		}
-		name, err := threatrules.DefinitionFile{Name: p, Data: data}.StoreName()
+		file := threatrules.DefinitionFile{Name: p, Data: data}
+		name, err := file.StoreName()
 		if err != nil {
 			return nil, err
 		}
@@ -301,6 +306,14 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 			return nil, fmt.Errorf("%s and %s are both the definitions %s", prev, p, name)
 		}
 		incoming[name] = p
+		if unsupported := file.Unsupported(); unsupported != nil {
+			if skipped == nil {
+				return nil, fmt.Errorf("%s: %w", p, unsupported)
+			}
+			*skipped = append(*skipped, threatrules.SkippedRule{Path: p, Err: unsupported})
+			files = append(files, file)
+			continue
+		}
 		if old, ok := definitions[name]; ok {
 			if bytes.Equal(old, data) {
 				continue // already installed as it is
@@ -312,31 +325,21 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 		definitions[name] = data
 		todo = append(todo, pending{id: definitionID(name), file: name, data: data, definitions: true})
 	}
-	files := make([]threatrules.DefinitionFile, 0, len(definitions))
 	for name, data := range definitions {
 		files = append(files, threatrules.DefinitionFile{Name: name, Data: data})
 	}
-	lib, tooNew, err := threatrules.NewLibrary(files)
+	// The files it sets aside are the source's reported above, and the store's own, which every
+	// load sets aside the same way.
+	lib, _, err := threatrules.NewLibrary(files)
 	if err != nil {
 		return nil, fmt.Errorf("definitions: %w", err)
-	}
-	for _, s := range tooNew {
-		from, isIncoming := incoming[s.Path]
-		if !isIncoming {
-			continue // already in the store, and set aside there on every load
-		}
-		if skipped == nil {
-			return nil, fmt.Errorf("%s: %w", from, s.Err)
-		}
-		*skipped = append(*skipped, threatrules.SkippedRule{Path: from, Err: s.Err})
-		todo = slices.DeleteFunc(todo, func(p pending) bool { return p.definitions && p.file == s.Path })
 	}
 	for _, res := range lib.Check() {
 		if !res.OK() {
 			return nil, fmt.Errorf("definitions: fixture %s", res.String())
 		}
 	}
-	changesDefinitions := len(todo) > 0
+	changesDefinitions := slices.ContainsFunc(todo, func(p pending) bool { return p.definitions })
 
 	staged := map[string]bool{}
 	for _, p := range rulePaths {
@@ -345,15 +348,20 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 			return nil, err
 		}
 		rule, err := lib.DecodeRule(data)
-		if unsupported, ok := threatrules.AsUnsupportedSpec(err); ok && skipped != nil {
-			*skipped = append(*skipped, threatrules.SkippedRule{Path: p, Err: unsupported})
-			continue
-		}
 		if err != nil {
+			if unsupported, ok := threatrules.AsUnsupportedSpec(err); ok && skipped != nil {
+				*skipped = append(*skipped, threatrules.SkippedRule{Path: p, Err: unsupported})
+				continue
+			}
 			return nil, fmt.Errorf("%s: %w", p, err)
 		}
 		results, err := threatrules.CheckRule(rule)
 		if err != nil {
+			// A rule that calls a predicate set aside for a newer spec is set aside with it.
+			if unsupported, ok := threatrules.AsUnsupportedSpec(err); ok && skipped != nil {
+				*skipped = append(*skipped, threatrules.SkippedRule{Path: p, Err: unsupported})
+				continue
+			}
 			return nil, fmt.Errorf("%s: %w", p, err)
 		}
 		for _, res := range results {

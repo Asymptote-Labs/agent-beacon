@@ -276,3 +276,36 @@ func TestInstallFilesSkippingLeavesNewerDefinitionsOut(t *testing.T) {
 		t.Error("strict InstallFiles: want an error for the newer-spec definitions")
 	}
 }
+
+// A newer version of definitions the store holds is left out, and the store's own version stays
+// what the incoming rules are validated against: the rule that calls its predicates installs. A
+// rule that calls a predicate only the newer file defines is left out with it.
+func TestInstallFilesSkippingKeepsTheStoresVersionOfNewerDefinitions(t *testing.T) {
+	store := t.TempDir()
+	if _, err := InstallFiles(store, tokenPack(t), false); err != nil {
+		t.Fatal(err)
+	}
+	newer := "spec: threat-rules/v1.9\ncatalog: tokens\nversion: 2\nshape: unknown to this engine\npredicates: {command: token_command, path: token_file}\n"
+	src := pack(t, map[string]string{
+		"again.rule.yaml":              strings.Replace(tokenRule, "id: token-printed", "id: token-printed-again", 1),
+		"file.rule.yaml":               strings.NewReplacer("id: token-printed", "id: token-file-read", "match: prints_token(e)", "match: token_file(e.file.path)").Replace(tokenRule),
+		"concepts/tokens.catalog.yaml": newer,
+	})
+	installed, skipped, err := InstallFilesSkipping(store, src, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installed) != 1 || installed[0].ID != "token-printed-again" {
+		t.Errorf("installed %+v, want token-printed-again alone", installed)
+	}
+	var got []string
+	for _, s := range skipped {
+		got = append(got, filepath.Base(s.Path)+" "+s.Err.Required)
+	}
+	if want := "tokens.catalog.yaml threat-rules/v1.9, file.rule.yaml threat-rules/v1.9"; strings.Join(got, ", ") != want {
+		t.Errorf("skipped %q, want %q", strings.Join(got, ", "), want)
+	}
+	if catalog, _ := os.ReadFile(filepath.Join(store, "tokens.catalog.yaml")); string(catalog) != tokenCatalog {
+		t.Error("the store's catalog changed")
+	}
+}

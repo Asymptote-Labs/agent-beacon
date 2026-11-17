@@ -61,6 +61,19 @@ func (f DefinitionFile) StoreName() (string, error) {
 	return name + suffix, nil
 }
 
+// Unsupported returns, for a file that declares a spec newer than this engine supports, the
+// error a loader sets it aside with; nil otherwise. A malformed spec is the decoder's to report.
+func (f DefinitionFile) Unsupported() *UnsupportedSpecError {
+	var head struct {
+		Spec string `yaml:"spec"`
+	}
+	if yaml.Unmarshal(f.Data, &head) != nil {
+		return nil
+	}
+	unsupported, _ := AsUnsupportedSpec(checkSpecSupported(f.Name, head.Spec))
+	return unsupported
+}
+
 // predicatesFile is a *.predicates.yaml document.
 type predicatesFile struct {
 	Name    string `yaml:"library"`
@@ -117,7 +130,17 @@ type Library struct {
 	info  []Predicate
 	// catalogs are the pack's catalogs, in the order of their files' names.
 	catalogs []*concepts.Catalog
-	matches  matchCache
+	// later are the predicates that need a newer spec than this engine supports: those of a
+	// definitions file it set aside, and those whose body calls one. What calls one is set aside
+	// with it (Rule.Validate returns an *UnsupportedSpecError).
+	later   map[string]laterPredicate
+	matches matchCache
+}
+
+// laterPredicate is a predicate set aside for a newer spec: the predicates from the one called
+// to the one a file set aside defines ("a -> b"), that file, and the spec it declares.
+type laterPredicate struct {
+	chain, source, required string
 }
 
 // predicateTest is one fixture Check runs: a definition's, or a catalog's examples, which stand
@@ -172,7 +195,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 	files = slices.Clone(files)
 	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 
-	l := &Library{predicates: map[string]*predicate{}}
+	l := &Library{predicates: map[string]*predicate{}, later: map[string]laterPredicate{}}
 	var definitions []PredicateDefinition
 	add := func(p *predicate, description, signature string) error {
 		switch {
@@ -197,6 +220,8 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 		return nil
 	}
 	for _, file := range files {
+		// Predicates exist since v1.3, so that is what a definitions file needs at least.
+		spec := specV1_3
 		var head struct {
 			Spec string `yaml:"spec"`
 		}
@@ -204,10 +229,17 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 			if err := checkSpecSupported(file.Name, head.Spec); err != nil {
 				if unsupported, ok := AsUnsupportedSpec(err); ok {
 					skipped = append(skipped, SkippedRule{Path: file.Name, Err: unsupported})
+					for _, name := range declaredPredicates(file.Data) {
+						if _, dup := l.later[name]; !dup {
+							l.later[name] = laterPredicate{chain: name, source: file.Name, required: head.Spec}
+						}
+					}
 					continue
 				}
 				return nil, nil, fmt.Errorf("%s: %w", file.Name, err)
 			}
+			declaredSpec, _ := parseSpec(head.Spec)
+			spec = newest(spec, declaredSpec)
 		}
 		switch {
 		case strings.HasSuffix(file.Name, CatalogFileSuffix):
@@ -232,7 +264,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 					continue
 				}
 				description := fmt.Sprintf("True for %s (%s): of either tier, or of the tier and the kinds given after it.", p.about, catalog.Name)
-				if err := add(&predicate{name: p.name, source: file.Name, catalog: catalog, render: p.render}, description, p.name+"("+subjectParam+"[, tier[, kind...]])"); err != nil {
+				if err := add(&predicate{name: p.name, source: file.Name, spec: spec, catalog: catalog, render: p.render}, description, p.name+"("+subjectParam+"[, tier[, kind...]])"); err != nil {
 					return nil, nil, err
 				}
 				l.tests = append(l.tests, predicateTest{predicate: p.name, test: PredicateTest{Name: CatalogExamples, Verdict: VerdictMatch}, catalog: catalog})
@@ -246,7 +278,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 				return nil, nil, err
 			}
 			for _, d := range decoded.Definitions {
-				p := &predicate{name: d.Name, source: file.Name, params: d.Params, text: d.Body}
+				p := &predicate{name: d.Name, source: file.Name, spec: spec, params: d.Params, text: d.Body}
 				if err := add(p, strings.TrimSpace(d.Description), d.Name+"("+strings.Join(d.Params, ", ")+")"); err != nil {
 					return nil, nil, err
 				}
@@ -256,7 +288,14 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 			return nil, nil, fmt.Errorf("%s: not a definitions file (want %s or %s)", file.Name, CatalogFileSuffix, PredicatesFileSuffix)
 		}
 	}
-	if len(l.predicates) == 0 {
+	base, err := Env()
+	if err != nil {
+		return nil, nil, fmt.Errorf("build CEL env: %w", err)
+	}
+	if definitions, err = l.setAside(base, definitions); err != nil {
+		return nil, nil, err
+	}
+	if len(l.predicates) == 0 && len(l.later) == 0 {
 		return nil, skipped, nil
 	}
 	for name := range l.predicates {
@@ -265,14 +304,10 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 	sort.Strings(l.order)
 	sort.Slice(l.info, func(i, j int) bool { return l.info[i].Name < l.info[j].Name })
 
-	base, err := Env()
-	if err != nil {
-		return nil, nil, fmt.Errorf("build CEL env: %w", err)
-	}
 	if l.env, err = l.extend(base); err != nil {
 		return nil, nil, fmt.Errorf("build CEL env: %w", err)
 	}
-	if err := l.resolve(base, definitions); err != nil {
+	if err := l.resolve(definitions); err != nil {
 		return nil, nil, err
 	}
 	for _, d := range definitions {
@@ -342,23 +377,83 @@ func (d PredicateDefinition) validate() error {
 	return nil
 }
 
-// resolve parses every definition's body, in an order that puts a predicate after the ones it
-// calls, so that each call in a body expands to a body already prepared.
-func (l *Library) resolve(base *cel.Env, definitions []PredicateDefinition) error {
+// declaredPredicates reads, leniently, the names of the predicates a definitions file provides:
+// what this engine knows of a file it does not decode, so that what calls one is set aside with
+// the file rather than failing to compile.
+func declaredPredicates(data []byte) []string {
+	var head struct {
+		Predicates  map[string]any   `yaml:"predicates"`
+		Definitions []map[string]any `yaml:"definitions"`
+	}
+	_ = yaml.Unmarshal(data, &head) // what does not read as these shapes is not known
+	var names []string
+	for _, name := range head.Predicates {
+		if s, ok := name.(string); ok {
+			names = append(names, s)
+		}
+	}
+	for _, d := range head.Definitions {
+		if s, ok := d["name"].(string); ok {
+			names = append(names, s)
+		}
+	}
+	return names
+}
+
+// setAside finds the predicates each definition's body calls, and sets aside, with the files
+// this engine left out, every definition that calls a predicate of one of them: its body cannot
+// be expanded here. It returns the definitions that remain.
+func (l *Library) setAside(base *cel.Env, definitions []PredicateDefinition) ([]PredicateDefinition, error) {
+	for name := range l.later {
+		if l.predicates[name] != nil {
+			delete(l.later, name) // a file this engine loads defines it
+		}
+	}
+	called := make(map[string][]string, len(definitions))
 	for _, d := range definitions {
 		p := l.predicates[d.Name]
 		// With the engine's environment alone a call to a predicate stays a call, which is how
 		// the ones a body uses are found.
 		parsed, iss := base.Parse(p.text)
 		if iss != nil && iss.Err() != nil {
-			return fmt.Errorf("%s: predicate %s: body: %w", p.source, p.name, iss.Err())
+			return nil, fmt.Errorf("%s: predicate %s: body: %w", p.source, p.name, iss.Err())
 		}
-		for _, name := range calls(parsed.NativeRep().Expr()) {
+		called[d.Name] = calls(parsed.NativeRep().Expr())
+	}
+	for more := len(l.later) > 0; more; {
+		more = false
+		for _, d := range definitions {
+			if l.predicates[d.Name] == nil {
+				continue
+			}
+			for _, name := range called[d.Name] {
+				if later, ok := l.later[name]; ok {
+					l.later[d.Name] = laterPredicate{chain: d.Name + " -> " + later.chain, source: later.source, required: later.required}
+					delete(l.predicates, d.Name)
+					more = true
+					break
+				}
+			}
+		}
+	}
+	definitions = slices.DeleteFunc(definitions, func(d PredicateDefinition) bool { return l.predicates[d.Name] == nil })
+	l.info = slices.DeleteFunc(l.info, func(p Predicate) bool { return l.predicates[p.Name] == nil })
+	for _, d := range definitions {
+		p := l.predicates[d.Name]
+		for _, name := range called[d.Name] {
 			if l.predicates[name] != nil {
 				p.uses = append(p.uses, name)
 			}
 		}
 	}
+	return definitions, nil
+}
+
+// resolve parses every definition's body, in an order that puts a predicate after the ones it
+// calls, so that each call in a body expands to a body already prepared. A body may call only a
+// predicate whose definitions need no newer spec than its own: an engine that reads the one file
+// and not the other could not expand it.
+func (l *Library) resolve(definitions []PredicateDefinition) error {
 	const (
 		unseen = iota
 		open
@@ -375,8 +470,12 @@ func (l *Library) resolve(base *cel.Env, definitions []PredicateDefinition) erro
 		}
 		state[p.name] = open
 		for _, name := range p.uses {
-			if err := visit(l.predicates[name], append(path, p.name)); err != nil {
+			callee := l.predicates[name]
+			if err := visit(callee, append(path, p.name)); err != nil {
 				return err
+			}
+			if callee.spec.newerThan(p.spec) {
+				return fmt.Errorf("%s: predicate %s calls %s (%s), which requires spec: %s: declare it in %s too", p.source, p.name, name, callee.source, callee.spec, p.source)
 			}
 		}
 		state[p.name] = done
@@ -474,26 +573,31 @@ func (l *Library) Catalogs() []*concepts.Catalog {
 // for a rule decoded on its own, and for one of a pack that has none.
 func (r *Rule) Definitions() *Library { return r.lib }
 
-// uses returns the predicates expr calls by name, or nil when it calls none or does not parse.
-func (l *Library) uses(expr string) []string {
+// uses returns the predicates expr calls by name, or nil when it calls none or does not parse. A
+// call to a predicate this engine set aside for a newer spec makes the rule ruleID need that
+// spec: it returns an *UnsupportedSpecError, so that the rule is set aside with the predicate.
+func (l *Library) uses(ruleID, expr string) ([]*predicate, error) {
 	if l == nil {
-		return nil
+		return nil, nil
 	}
 	base, err := Env()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	parsed, iss := base.Parse(expr)
 	if iss != nil && iss.Err() != nil {
-		return nil
+		return nil, nil
 	}
-	var used []string
+	var used []*predicate
 	for _, name := range calls(parsed.NativeRep().Expr()) {
-		if l.predicates[name] != nil {
-			used = append(used, name)
+		if later, ok := l.later[name]; ok {
+			return nil, &UnsupportedSpecError{RuleID: ruleID, Required: later.required, Predicate: later.chain, Source: later.source}
+		}
+		if p := l.predicates[name]; p != nil {
+			used = append(used, p)
 		}
 	}
-	return used
+	return used, nil
 }
 
 // DecodeRule is the package's DecodeRule for a rule of this library's pack: the rule's

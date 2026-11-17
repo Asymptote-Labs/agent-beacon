@@ -32,6 +32,19 @@ func (v specVersion) newerThan(o specVersion) bool {
 	return v.minor > o.minor
 }
 
+// String is the version as a spec field writes it: threat-rules/v1.3.
+func (v specVersion) String() string {
+	return fmt.Sprintf("threat-rules/v%d.%d", v.major, v.minor)
+}
+
+// newest is the newer of two versions.
+func newest(a, b specVersion) specVersion {
+	if b.newerThan(a) {
+		return b
+	}
+	return a
+}
+
 // parseSpec parses a rule's spec field. An empty value is the original spec, v1.
 func parseSpec(s string) (specVersion, error) {
 	if s == "" {
@@ -63,17 +76,26 @@ var supportedSpec = func() specVersion {
 }()
 
 // UnsupportedSpecError reports a rule that declares a spec version newer than this
-// engine implements. Loaders that can continue without the rule (LoadDirSkipping,
-// rulestore) skip it and surface this error as a warning.
+// engine implements, or that calls a predicate whose definitions do. Loaders that can
+// continue without the rule (LoadDirSkipping, rulestore) skip it and surface this error as
+// a warning.
 type UnsupportedSpecError struct {
 	RuleID   string // from a lenient read of the file; may be empty
-	Required string // the rule's spec field
+	Required string // the spec the rule needs
+	// Predicate and Source are set for a rule that needs Required because it calls a predicate
+	// whose definitions file declares it: the predicate (the one the rule calls, then the ones
+	// that one calls on the way, "a -> b") and that file.
+	Predicate, Source string
 }
 
 func (e *UnsupportedSpecError) Error() string {
 	id := e.RuleID
 	if id == "" {
 		id = "(no id)"
+	}
+	if e.Predicate != "" {
+		return fmt.Sprintf("rule %q calls the predicate %s (%s), which requires %s, but this Beacon supports up to %s; upgrade Beacon to load it",
+			id, e.Predicate, e.Source, e.Required, SupportedSpec)
 	}
 	return fmt.Sprintf("rule %q requires %s, but this Beacon supports up to %s; upgrade Beacon to load it",
 		id, e.Required, SupportedSpec)

@@ -28,8 +28,10 @@ import (
 // catalog's stores.
 type predicate struct {
 	name string
-	// source says where the predicate is defined, for error messages.
+	// source says where the predicate is defined, for error messages, and spec is the spec that
+	// file declares (v1.3 at least): what a rule that calls the predicate needs.
 	source string
+	spec   specVersion
 	// params and text are a definition's parameters and body as written; body is the body parsed,
 	// with its own variables renamed (see hygienic). binds are the parameters the body binds
 	// for its caller, and uses the predicates the body calls.

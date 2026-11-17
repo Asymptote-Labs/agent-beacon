@@ -377,13 +377,14 @@ func TestPredicateCallErrors(t *testing.T) {
 	}
 }
 
-// A rule that calls a predicate needs the spec that has predicates, and the definitions that
+// A rule that calls a predicate needs the spec its definitions file declares, v1.3 at least (the
+// spec that has predicates), and is told which file sets it; and it needs the definitions that
 // define it.
 func TestPredicatesRequireSpecV1_3AndTheirDefinitions(t *testing.T) {
 	lib := testLibrary(t)
 	for _, spec := range []string{"", "spec: threat-rules/v1.1", "spec: threat-rules/v1.2"} {
 		err := libraryRule(t, lib, spec, `credential_read(e)`).Validate()
-		if err == nil || !strings.Contains(err.Error(), "the predicate credential_read requires spec: threat-rules/v1.3") {
+		if err == nil || !strings.Contains(err.Error(), "the predicate credential_read (p.predicates.yaml) requires spec: threat-rules/v1.3") {
 			t.Errorf("%q: want the predicate/spec error, got %v", spec, err)
 		}
 	}
@@ -479,6 +480,69 @@ func TestNewLibrarySkipsNewerDefinitions(t *testing.T) {
 	}
 	if got := lib.Predicates(); len(got) != 1 || got[0].Name != "ok" || got[0].Signature != "ok(c)" || got[0].Source != "p.predicates.yaml" {
 		t.Errorf("Predicates = %+v, want ok alone", got)
+	}
+}
+
+// writePack writes a pack directory of the given files, by path under it.
+func writePack(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// callingRule is a single-event rule with the given spec line whose match calls a predicate.
+func callingRule(id, specLine, match string) string {
+	return strings.Replace(specRule(id, specLine, ""), `match: 'e.event.action == "file.read"'`, "match: '"+match+"'", 1)
+}
+
+// A definitions file written for a newer engine is set aside, and so is exactly what calls one of
+// its predicates: a rule, whatever spec it declares, and a predicate of another file, with the
+// rules that call that. The rest of the pack loads. A rule cannot call a predicate without
+// needing the spec of the file that defines it, so it is skipped with that file rather than
+// failing the whole pack on an older engine.
+func TestANewerDefinitionsFileSkipsTheRulesThatCallIt(t *testing.T) {
+	later := "spec: threat-rules/v1.9\nlibrary: later\nversion: 1\ndefinitions:\n" +
+		"  - name: later_name\n    params: [c]\n    description: d\n    body: c.name == \"x\"\n    weight: 3\n" +
+		"    tests: [{name: t, match: 'e.command.parsed_commands.exists(c, later_name(c))', verdict: no_match, events: [{event: {action: command.executed}}]}]\n"
+	dir := writePack(t, map[string]string{
+		"concepts/later.predicates.yaml": later,
+		"concepts/current.predicates.yaml": "spec: " + SupportedSpec + "\n" + definitions(
+			definition("current_name", "c", `c.name == "y"`, `e.command.parsed_commands.exists(c, current_name(c))`),
+			definition("through_later", "c", `later_name(c) || c.name == "z"`, `e.command.parsed_commands.exists(c, through_later(c))`)),
+		"calls-later.rule.yaml":   callingRule("calls-later", "spec: "+SupportedSpec, `e.command.parsed_commands.exists(c, later_name(c))`),
+		"calls-through.rule.yaml": callingRule("calls-through", "spec: "+SupportedSpec, `e.command.parsed_commands.exists(c, through_later(c))`),
+		"calls-current.rule.yaml": callingRule("calls-current", "spec: "+SupportedSpec, `e.command.parsed_commands.exists(c, current_name(c))`),
+	})
+	rules, skipped, err := LoadDirSkipping(dir)
+	if err != nil {
+		t.Fatalf("LoadDirSkipping: %v", err)
+	}
+	if got := ruleIDs(rules); len(got) != 1 || got[0] != "calls-current" {
+		t.Errorf("loaded %v, want calls-current alone", got)
+	}
+	var got []string
+	for _, s := range skipped {
+		got = append(got, filepath.Base(s.Path)+" "+s.Err.Required)
+	}
+	if want := "later.predicates.yaml threat-rules/v1.9, calls-later.rule.yaml threat-rules/v1.9, calls-through.rule.yaml threat-rules/v1.9"; strings.Join(got, ", ") != want {
+		t.Errorf("skipped %q, want %q", strings.Join(got, ", "), want)
+	}
+	for _, s := range skipped[1:] {
+		if msg := s.String(); !strings.Contains(msg, "later_name") || !strings.Contains(msg, "later.predicates.yaml") {
+			t.Errorf("the skip does not say which predicate needs the newer spec: %s", msg)
+		}
+	}
+	if _, err := LoadDir(dir); err == nil || !strings.Contains(err.Error(), "upgrade Beacon") {
+		t.Errorf("strict LoadDir: want the unsupported-spec error, got %v", err)
 	}
 }
 
