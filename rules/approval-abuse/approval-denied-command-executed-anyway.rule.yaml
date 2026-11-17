@@ -1,6 +1,6 @@
 id: approval-denied-command-executed-anyway
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: Denied dangerous command executed anyway within the session
 description: >
   An approval for a destructive or high-impact shell command was explicitly denied
@@ -15,8 +15,8 @@ description: >
   that both fall in the same dangerous command class. Both steps find that class by
   what the command line runs: the denied request and the executed line are read as
   bash, so rm under sudo, by absolute path or inside `bash -c` counts and the same
-  words in a commit message or a here-document do not. A line the parser cannot
-  vouch for (see command_unread) is matched on its text. A fork bomb and a
+  words in a commit message or a here-document do not. Where the parser cannot see
+  into a command, the text that reaches it is matched (unread_text). A fork bomb and a
   redirection to a disk device are matched on the text of every line, since neither
   is a command with words.
 severity: critical

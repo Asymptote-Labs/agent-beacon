@@ -197,17 +197,55 @@ func TestPackWritesOutNoPredicate(t *testing.T) {
 // TestPackListsNoSenderOfItsOwn keeps "this command sends data over the network" in one place:
 // the egress predicates of rules/concepts/egress.predicates.yaml. A rule that tests a parsed
 // command against a list that names netcat has a sender list of its own, and eight such copies
-// are what those predicates replaced. A text fallback for a command line that does not parse
-// matches e.command.command and is the rule's own.
+// are what those predicates replaced. A text pattern (over e.command.command, or the text
+// unread_text binds) has to spell the senders inside a longer pattern, so it may, but then it
+// names every client egress_sender knows that sends what it reads (all but curl and wget, which
+// the pattern qualifies), as egress_sender_mention names all of them: a client added to
+// egress_sender and not to the text would be seen on a parsed line and missed in the text.
 func TestPackListsNoSenderOfItsOwn(t *testing.T) {
-	literal := regexp.MustCompile(`([\w.]+)\.matches\(("(?:[^"\\]|\\.)*")\)`)
+	lib, _, err := LoadLibraryDir(rulesDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	// The name as a whole alternative, not letters inside another (truncate).
 	sender := regexp.MustCompile(`(^|[^A-Za-z])(ncat|netcat)([^A-Za-z]|$)`)
+	group := regexp.MustCompile(`\(([a-z0-9]+(?:\|[a-z0-9]+)+)\)`)
+	senderGroup := func(text string) []string {
+		for _, g := range group.FindAllStringSubmatch(text, -1) {
+			if names := strings.Split(g[1], "|"); slices.Contains(names, "ncat") {
+				return names
+			}
+		}
+		return nil
+	}
+	all := senderGroup(lib.predicates["egress_sender"].text)
+	if !slices.Contains(all, "curl") || !slices.Contains(all, "socat") {
+		t.Fatalf("egress_sender lists no senders: %q", lib.predicates["egress_sender"].text)
+	}
+	if got := senderGroup(lib.predicates["egress_sender_mention"].text); !slices.Equal(got, all) {
+		t.Errorf("egress_sender_mention names %q, egress_sender %q", got, all)
+	}
+	stdin := slices.DeleteFunc(slices.Clone(all), func(n string) bool { return n == "curl" || n == "wget" })
+	literal := regexp.MustCompile(`([\w.]+)\.matches\(("(?:[^"\\]|\\.)*")\)`)
+	bound := regexp.MustCompile(`unread_text\(\s*e\s*,\s*(\w+)\s*,`)
 	for _, r := range corpusRules(t) {
-		for _, m := range literal.FindAllStringSubmatch(strings.Join(ruleExpressions(r), " "), -1) {
+		expr := strings.Join(ruleExpressions(r), " ")
+		texts := map[string]bool{"e.command.command": true}
+		for _, m := range bound.FindAllStringSubmatch(expr, -1) {
+			texts[m[1]] = true
+		}
+		for _, m := range literal.FindAllStringSubmatch(expr, -1) {
 			receiver, list := m[1], m[2]
-			if receiver != "e.command.command" && sender.MatchString(list) {
+			if !sender.MatchString(list) {
+				continue
+			}
+			if !texts[receiver] {
 				t.Errorf("%s: %s.matches(%s) lists network senders; call egress_sender instead, so that every egress rule means the same senders", r.ID, receiver, list)
+				continue
+			}
+			names := senderGroup(list)
+			if missing := slices.DeleteFunc(slices.Clone(stdin), func(n string) bool { return slices.Contains(names, n) }); len(missing) > 0 {
+				t.Errorf("%s: %s.matches(%s) names senders without %q, which egress_sender knows; name them all or call egress_sender_mention", r.ID, receiver, list, missing)
 			}
 		}
 	}

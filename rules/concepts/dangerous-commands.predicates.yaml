@@ -11,7 +11,7 @@
 # The predicate takes the event, so it reads the command of an approval event as it reads the
 # command of a command.executed event: parsed_commands is derived for both.
 library: dangerous-commands
-version: 2
+version: 3
 spec: threat-rules/v1.3
 description: A command that destroys data or hands over the machine in one step.
 
@@ -22,10 +22,11 @@ definitions:
       The command line runs a recursive forced removal (rm, or git rm), makes a filesystem
       (mkfs), copies raw data with dd, pipes a download into a shell, asks sudo for a shell,
       or opens a tree to everyone (chmod -R 777); or its text defines the fork bomb or
-      redirects onto a disk device, which are shell syntax the parsed commands do not list. A
-      line the parser cannot vouch for (command_unread) is matched on its text. dd's input
-      operand is read as written (argv_raw): one that holds a variable (`if="$SRC"`) has no
-      known value.
+      redirects onto a disk device, which are shell syntax the parsed commands do not list.
+      Where the parser cannot see into a command, the text that reaches it is matched
+      (unread_text).
+      dd's input operand is read as written (argv_raw): one that holds a variable (`if="$SRC"`)
+      has no known value.
     body: >
       e.command.parsed_commands.exists(c,
         (c.name == "rm" || c.name == "git" && c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n)*?rm(\\n|\\z)")) &&
@@ -38,8 +39,7 @@ definitions:
         c.name == "chmod" && c.args.matches("(?m)^(-[A-Za-z]*R[A-Za-z]*|--recursive)$") && c.args.matches("(?m)^0?777$")
       ) ||
       e.command.command.matches(":\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd") ||
-      (e.command.command.matches("(?i)(\\brm\\s+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)") &&
-        command_unread(e))
+      unread_text(e, t, t.matches("(?i)(\\brm\\s+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)"))
     tests:
       - name: recursive_forced_removal
         verdict: match
@@ -108,6 +108,18 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "git commit -m 'stop running rm -rf on the cache'" }
+      - name: removal_named_in_a_commit_message_beside_a_project_script
+        # The text half was asked of the whole line whenever any command was opaque until
+        # version 3, so the script made the message a dangerous command.
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git commit -m 'stop running rm -rf on the cache' && ./run-tests.sh" }
+      - name: removal_handed_to_a_project_script
+        verdict: match
+        events:
+          - event: { action: approval.denied }
+            command: { command: "./cleanup.sh 'rm -rf /srv/app'" }
       - name: a_download_saved_to_a_file
         verdict: no_match
         events:
