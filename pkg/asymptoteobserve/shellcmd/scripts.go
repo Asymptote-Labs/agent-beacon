@@ -196,19 +196,13 @@ func inlineScript(l *language, c *Command, args []Word) (script string, stdin bo
 // HereInput returns the here-document or here-string that is the command's standard input: the
 // body of the document as written, or the string without its quotes.
 func (c Command) HereInput() (text string, ok bool) {
-	for k := len(c.Redirects) - 1; k >= 0; k-- {
-		r := &c.Redirects[k]
-		if r.Fd != "" && r.Fd != "0" {
-			continue
-		}
-		switch r.Op {
-		case "<<", "<<-":
-			return r.Body, true
-		case "<<<":
-			return r.Target.Unquoted, true
-		case "<", "<>", "<&":
-			return "", false
-		}
+	r, _ := c.stdinRedirect()
+	switch {
+	case r == nil:
+	case r.kind() == redirHereDoc:
+		return r.Body, true
+	case r.kind() == redirHereString:
+		return r.Target.Unquoted, true
 	}
 	return "", false
 }

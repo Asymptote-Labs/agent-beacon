@@ -155,7 +155,7 @@ func cloneDirectory(operands []Word) (Word, bool) {
 // (-) or a device. under is the directory a relative name is put in, when the command names one.
 func outputFile(w Word, under *Word, written bool) (FileEffect, bool) {
 	p, ok := wordPath(w, written)
-	if !ok || p == "" || p == "-" || strings.HasPrefix(p, "/dev/") {
+	if !ok || !isFile(p) {
 		return FileEffect{}, false
 	}
 	if under != nil && !path.IsAbs(p) {
@@ -375,7 +375,7 @@ func copiedHere(name string, args []Word, written bool) []FileEffect {
 		return nil
 	}
 	dest, ok := wordPath(target, written)
-	if !ok || dest == "" {
+	if !ok || !isFile(dest) {
 		return nil
 	}
 	sources := operands[:len(operands)-1]

@@ -317,7 +317,7 @@ func (f *flow) inside(i, k int) bool {
 // in the line.
 func (f *flow) read(i int, path string, via Via, sent bool) {
 	// Standard input, a device, and a process substitution, whose commands are followed instead.
-	if path == "" || path == "-" || isDevice(path) || strings.HasPrefix(path, "<(") {
+	if !isFile(path) || strings.HasPrefix(path, "<(") {
 		return
 	}
 	if !f.take(i, path, via, sent) {
@@ -346,13 +346,6 @@ func (f *flow) take(i int, path string, via Via, sent bool) bool {
 	return true
 }
 
-// isDevice reports whether path names a device or a descriptor rather than a file: /dev/null,
-// /dev/stdin, /dev/fd/3. /dev/shm is a directory of ordinary files, which a line can stage a
-// file in as it can in /tmp.
-func isDevice(path string) bool {
-	return strings.HasPrefix(path, "/dev/") && !strings.HasPrefix(path, "/dev/shm/")
-}
-
 // taken are the files command i takes in, by any way, each once.
 func (f *flow) taken(i int) []string {
 	if f.reads == nil {
@@ -371,13 +364,9 @@ func (f *flow) taken(i int) []string {
 // names, or else what the stage before it in its pipeline writes.
 func (f *flow) stdin(i int) {
 	c := &f.commands[i]
-	for k := len(c.Redirects) - 1; k >= 0; k-- {
-		r := &c.Redirects[k]
-		if r.Fd != "" && r.Fd != "0" {
-			continue
-		}
-		switch r.Op {
-		case "<", "<>":
+	if r, k := c.stdinRedirect(); r != nil {
+		switch r.kind() {
+		case redirIn, redirInOut:
 			// The target is a file, or a process substitution whose commands write it.
 			if value, substituted := f.wordValue(c, refRedirect, k); substituted {
 				for _, path := range value {
@@ -386,18 +375,15 @@ func (f *flow) stdin(i int) {
 			} else {
 				f.read(i, r.Target.Unquoted, ViaStdin, false)
 			}
-			return
-		case "<<<", "<<", "<<-":
+		case redirHereString, redirHereDoc:
 			// A here-string, or a here-document: what the substitutions and variables in it
 			// write is what the command reads.
 			value, _ := f.wordValue(c, refRedirect, k)
 			for _, path := range value {
 				f.read(i, path, ViaStdin, false)
 			}
-			return
-		case "<&":
-			return
 		}
+		return
 	}
 	if c.Stage == 0 {
 		// A command of a script reads the standard input of the shell that runs the script,
@@ -424,17 +410,7 @@ func (f *flow) stdin(i int) {
 // outputElsewhere reports whether the command's standard output is redirected, so that it reaches
 // neither the next stage of its pipeline nor the substitution it is in.
 func (c *Command) outputElsewhere() bool {
-	for _, r := range c.Redirects {
-		switch r.Op {
-		case "&>", "&>>":
-			return true
-		case ">", ">>", ">|", ">&":
-			if r.Fd == "" || r.Fd == "1" {
-				return true
-			}
-		}
-	}
-	return false
+	return slices.ContainsFunc(c.Redirects, func(r Redirect) bool { return r.ofStdout() })
 }
 
 // wordValue returns the files whose content the substitutions and variables in one word of c
@@ -548,7 +524,7 @@ func (f *flow) writes(c *Command, name string, taken []string) {
 		return
 	}
 	for _, r := range c.Redirects {
-		if path, op, ok := redirectTarget(r, true); ok && (r.Fd == "" || r.Fd == "1" || r.Op == "&>" || r.Op == "&>>") {
+		if path, op, ok := redirectTarget(r, true); ok && r.ofStdout() {
 			f.write(path, taken, op == OpAppend)
 		}
 	}

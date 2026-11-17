@@ -38,11 +38,11 @@ type FileEffect struct {
 }
 
 // writesContent reports whether the write puts content in a file a later command of the line
-// could read or run: not a deletion, an emptying or a touch, and not a device.
+// could read or run: not a deletion, an emptying or a touch. A device is no write (isFile).
 func (e FileEffect) writesContent() bool {
 	switch e.Op {
 	case OpWrite, OpAppend, OpEdit, OpMoveTo, OpLink:
-		return !strings.HasPrefix(e.Path, "/dev/")
+		return true
 	}
 	return false
 }
@@ -129,20 +129,20 @@ func wordPath(w Word, written bool) (string, bool) {
 // and here-strings write nothing, and neither does a duplicated descriptor (2>&1) or a device.
 func redirectTarget(r Redirect, written bool) (string, Op, bool) {
 	op := OpWrite
-	switch r.Op {
-	case ">", ">|", "&>":
-	case ">>", "&>>":
+	switch r.kind() {
+	case redirOut, redirOutErr:
+	case redirAppend, redirOutErrAppend:
 		op = OpAppend
-	case ">&":
+	case redirDupOut:
 		// >&word writes a file unless word names a descriptor, which an unknown word may.
-		if t := r.Target; !t.Known || t.Text == "-" || strings.Trim(t.Text, "0123456789") == "" {
+		if t := r.Target; !t.Known || t.Text == "" || isDescriptor(t.Text) {
 			return "", "", false
 		}
 	default:
 		return "", "", false
 	}
 	target, ok := wordPath(r.Target, written)
-	if !ok || target == "" || isDevice(target) {
+	if !ok || !isFile(target) {
 		return "", "", false
 	}
 	return target, op, true
@@ -456,7 +456,7 @@ func (c Command) commandTargets(written bool) []FileEffect {
 			// destination, and every known operand is a source.
 			effects := effectsOf(sources, OpMoveFrom, written)
 			if n := len(sources); n >= 2 {
-				if _, ok := wordPath(sources[n-1], written); ok {
+				if to, ok := wordPath(sources[n-1], written); ok && isFile(to) {
 					effects[len(effects)-1].Op = OpMoveTo
 				}
 			}
@@ -561,11 +561,11 @@ func scriptFiles(name string, args []Word) (files []Word, inPlace bool) {
 	return operands, inPlace
 }
 
-// effectsOf are the words of words that name a path (wordPath), each with op.
+// effectsOf are the words of words that name a file (wordPath, isFile), each with op.
 func effectsOf(words []Word, op Op, written bool) []FileEffect {
 	var out []FileEffect
 	for _, w := range words {
-		if p, ok := wordPath(w, written); ok {
+		if p, ok := wordPath(w, written); ok && isFile(p) {
 			out = append(out, FileEffect{Path: p, Op: op})
 		}
 	}

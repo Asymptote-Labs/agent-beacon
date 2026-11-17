@@ -93,6 +93,11 @@ func TestFileEffects(t *testing.T) {
 		{"cmd >| forced.txt", []string{"write forced.txt"}},
 		{"go build &> build.log", []string{"write build.log"}},
 		{"make 2>/dev/null", nil},
+		// A descriptor, also moved (3-), and a device are no file, whatever writes to them.
+		{"exec 1>&3-", nil},
+		{"echo hi >&2- 3>&-", nil},
+		{"echo x | tee /dev/stderr out.log", []string{"write out.log"}},
+		{"cp build.log /dev/null; mv a.txt /dev/null", []string{"move_from a.txt"}},
 		{"cat a.txt | tee copy.txt", []string{"write copy.txt"}},
 		{"sed -i 's/a/b/' x.go y.go", []string{"edit x.go", "edit y.go"}},
 		{"sed -i.bak -e 's/a/b/' x.go", []string{"edit x.go"}},

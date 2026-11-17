@@ -322,9 +322,10 @@ the steps in both orders still fires once. A single event never satisfies two st
   targets are all known the two lists are equal.
 
   The writes are the targets of the command's output redirections (`>`, `>|`, `&>` and
-  `>&file` are `write`, `>>` and `&>>` are `append`; a path under `/dev/` and the target of
-  `>&` when its value is unknown, which may be a descriptor, are left out), and the operands
-  of the command `name` names: `rm`, `unlink` and `git rm` (`delete`), `shred` (`write`, or
+  `>&file` are `write`, `>>` and `&>>` are `append`; the target of `>&` that names a
+  descriptor (`2`, `3-`, `-`) or whose value is unknown, which may be one, is left out), and
+  the operands of the command `name` names: `rm`, `unlink` and `git rm` (`delete`), `shred`
+  (`write`, or
   `delete` with `-u`), `touch`, `truncate`,
   `tee` (`write`, or `append` with `-a`), in-place `sed`, `gsed` and `perl` (`edit`), `cp`
   and `install` (`write`, the destination), `ln` (`link`) and `mv` and `git mv` (`move_from`
@@ -337,7 +338,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   URL ends in, under `-P`, and nothing for a recursive download or `--spider`; the `of=`
   file of `dd`; and, when the last operand of `scp` or `rsync` is on this host, that
   operand, or each source's base name under it as for `cp`. Standard output (`-`) and a path
-  under `/dev/` are no file.
+  under `/dev/` are no file, for every command and every redirection (`tee /dev/null` and
+  `cp x /dev/null` write none).
 
   `file_writes` alone also lists a directory a command puts files into, as the directory
   with one trailing slash and `op` `write`, because which files land there is not on the

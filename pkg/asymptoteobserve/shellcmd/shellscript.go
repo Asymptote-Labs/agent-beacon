@@ -116,10 +116,8 @@ func pipedScript(commands []Command, i int) (string, bool) {
 	if _, _, found, stdin := shell.scriptScan(); found || !stdin {
 		return "", false
 	}
-	for _, r := range shell.Redirects {
-		if (r.Fd == "" || r.Fd == "0") && strings.HasPrefix(r.Op, "<") {
-			return "", false // its standard input is not the pipe
-		}
+	if r, _ := shell.stdinRedirect(); r != nil {
+		return "", false // its standard input is not the pipe
 	}
 	var parts []string
 	for k := range commands {
@@ -144,12 +142,10 @@ func pipedScript(commands []Command, i int) (string, bool) {
 // here-document or here-string cat is given with no file. ok is false for any other command,
 // for one with a word whose value is unknown, and for one whose output is redirected.
 func (c Command) printed() (string, bool) {
-	name, args := c.program()
-	for _, r := range c.Redirects {
-		if (r.Fd == "" || r.Fd == "1") && (strings.HasPrefix(r.Op, ">") || strings.HasPrefix(r.Op, "&>")) {
-			return "", false
-		}
+	if c.outputElsewhere() {
+		return "", false
 	}
+	name, args := c.program()
 	for _, w := range args {
 		if !w.Known {
 			return "", false

