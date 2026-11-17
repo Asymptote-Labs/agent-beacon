@@ -1,12 +1,11 @@
 package cmd
 
 import (
-	"bytes"
-	"os"
 	"testing"
 
 	"github.com/spf13/cobra"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/mcpserver"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 )
 
@@ -82,15 +81,90 @@ func TestTelemetryStaysOutOfCompletionAndGitHooks(t *testing.T) {
 	}
 }
 
-// The first-run notice is only for a person reading a terminal: never a hidden command (scheduled
-// jobs and internal children) and never output that is not a terminal.
-func TestTelemetryNoticeOnlyForAPersonAtATerminal(t *testing.T) {
+// The first-run notice is for whoever ran the command, a person or an agent, terminal or not; never
+// for a hidden command, a --scheduled job or an internal child, which run on their own.
+func TestTelemetryNoticeIsForWhoeverRanTheCommand(t *testing.T) {
+	t.Setenv(telemetry.EnvInternalChild, "")
+	t.Setenv("SUDO_USER", "")
+	if !telemetryShowsNotice(endpointInstallCmd) {
+		t.Error("an install, run by a person or an agent, may not show the notice")
+	}
 	for _, hidden := range []*cobra.Command{endpointInventoryHeartbeatCmd, endpointInventoryResolvePackagesCmd, endpointUserConfigApplyNativeCmd} {
-		if telemetryInteractive(hidden, os.Stderr) {
+		if telemetryShowsNotice(hidden) {
 			t.Errorf("%s may show the notice", hidden.CommandPath())
 		}
 	}
-	if telemetryInteractive(endpointInstallCmd, &bytes.Buffer{}) {
-		t.Error("output that is not a terminal may show the notice")
+
+	scheduled := endpointSessionsSyncCmd.Flags().Lookup("scheduled")
+	if scheduled == nil {
+		t.Fatal("sessions sync has no --scheduled flag")
+	}
+	if err := scheduled.Value.Set("true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = scheduled.Value.Set("false") })
+	if telemetryShowsNotice(endpointSessionsSyncCmd) {
+		t.Error("a --scheduled job may show the notice")
+	}
+	_ = scheduled.Value.Set("false")
+	if !telemetryShowsNotice(endpointSessionsSyncCmd) {
+		t.Error("a manual sessions sync may not show the notice")
+	}
+
+	t.Setenv(telemetry.EnvInternalChild, "1")
+	if telemetryShowsNotice(endpointInstallCmd) {
+		t.Error("an internal child may show the notice")
+	}
+}
+
+func stubStderrTerminal(t *testing.T, terminal bool) {
+	t.Helper()
+	old := telemetryStderrIsTerminal
+	telemetryStderrIsTerminal = func() bool { return terminal }
+	t.Cleanup(func() { telemetryStderrIsTerminal = old })
+}
+
+func TestTelemetryNoticeSkipsSudoScriptsWithoutATerminal(t *testing.T) {
+	t.Setenv(telemetry.EnvInternalChild, "")
+	t.Setenv("SUDO_USER", "root")
+
+	// A Jamf or fleet script running `sudo -u "$CONSOLE_USER" beacon endpoint hooks install`.
+	stubStderrTerminal(t, false)
+	if telemetryShowsNotice(endpointHooksInstallCmd) {
+		t.Error("a script's sudo run as the console user may show the notice into its log")
+	}
+
+	// A person typing sudo -u at a terminal reads it.
+	stubStderrTerminal(t, true)
+	if !telemetryShowsNotice(endpointHooksInstallCmd) {
+		t.Error("a sudo run at a terminal may not show the notice")
+	}
+
+	// Without sudo, an agent's or script's run shows it on stderr.
+	t.Setenv("SUDO_USER", "")
+	stubStderrTerminal(t, false)
+	if !telemetryShowsNotice(endpointInstallCmd) {
+		t.Error("an agent's install without a terminal may not show the notice")
+	}
+}
+
+func TestTelemetryNoticeSkipsTheStdioMCPServer(t *testing.T) {
+	t.Setenv(telemetry.EnvInternalChild, "")
+	t.Setenv("SUDO_USER", "")
+	old := mcpOpts.transport
+	t.Cleanup(func() { mcpOpts.transport = old })
+
+	for _, transport := range []string{"", mcpserver.TransportStdio} {
+		mcpOpts.transport = transport
+		if telemetryShowsNotice(mcpServeCmd) {
+			t.Errorf("mcp serve on transport %q, started by a runtime, may show the notice", transport)
+		}
+	}
+	mcpOpts.transport = mcpserver.TransportHTTP
+	if !telemetryShowsNotice(mcpServeCmd) {
+		t.Error("mcp serve --transport http, run by a person, may not show the notice")
+	}
+	if !telemetryShowsNotice(mcpDoctorCmd) {
+		t.Error("mcp doctor may not show the notice")
 	}
 }

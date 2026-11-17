@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestRecordTracesSendsOneEventPerNewSession(t *testing.T) {
@@ -71,5 +73,69 @@ func TestRecordTracesIsOffWithTelemetry(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, TracesPath)); !os.IsNotExist(err) {
 		t.Fatalf("a development build wrote the seen file: %v", err)
+	}
+}
+
+func TestRecordTracesReportsEachSessionOnceAcrossConcurrentRuns(t *testing.T) {
+	s, _ := setup(t, nil)
+	Init(options(nil, io.Discard))
+	var traces []Trace
+	for i := 0; i < 10; i++ {
+		traces = append(traces, Trace{"codex", fmt.Sprint(i)})
+	}
+	// Each goroutine takes the lock through its own open file, as separate processes do.
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			RecordTraces(TraceSourceLive, traces)
+		}()
+	}
+	wg.Wait()
+	Close()
+	if got := len(s.byEvent(EventTraceRecorded)); got != len(traces) {
+		t.Fatalf("got %d events for %d sessions", got, len(traces))
+	}
+}
+
+func TestRecordTracesSendsNothingWhileAnotherRunHoldsTheLock(t *testing.T) {
+	s, home := setup(t, nil)
+	Init(options(nil, io.Discard))
+	oldWait := tracesLockWait
+	tracesLockWait = 50 * time.Millisecond
+	t.Cleanup(func() { tracesLockWait = oldWait })
+
+	unlock, ok := lockTraces(home)
+	if !ok {
+		t.Fatal("could not take the lock")
+	}
+	RecordTraces(TraceSourceLive, []Trace{{"codex", "a"}})
+	if _, err := os.Stat(filepath.Join(home, TracesPath)); !os.IsNotExist(err) {
+		t.Fatalf("a run without the lock wrote the reported set: %v", err)
+	}
+	unlock()
+
+	// The session was left unreported, so the next run sends it.
+	RecordTraces(TraceSourceLive, []Trace{{"codex", "a"}})
+	Close()
+	if got := len(s.byEvent(EventTraceRecorded)); got != 1 {
+		t.Fatalf("got %d events, want 1", got)
+	}
+}
+
+func TestLiveTraceIsKeptBetweenRuns(t *testing.T) {
+	setup(t, nil)
+	Init(options(nil, nil))
+	if _, ok := LiveTrace(); ok {
+		t.Fatal("a fresh home has a position")
+	}
+	saved := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	want := LiveTracePosition{Offset: 4096, LogID: "abc", SavedAt: saved}
+	SetLiveTrace(want)
+	Close()
+	Init(options(nil, nil))
+	if got, ok := LiveTrace(); !ok || got != want {
+		t.Fatalf("position after a new run = %+v, %t; want %+v", got, ok, want)
 	}
 }

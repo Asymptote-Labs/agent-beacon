@@ -58,6 +58,17 @@ func installEmailInput() (raw, source, name string) {
 	return "", "", ""
 }
 
+// installEmailGiven reports whether this install was given a usable email (--email,
+// BEACON_EMAIL), which the wizard then does not ask for again.
+func installEmailGiven() bool {
+	raw, _, _ := installEmailInput()
+	if raw == "" {
+		return false
+	}
+	_, err := onboarding.NormalizeEmail(raw)
+	return err == nil
+}
+
 // validateInstallEmailFlag rejects a malformed --email before the install changes anything. The
 // environment forms are only warned about later: a typo in a fleet variable must not fail an install.
 func validateInstallEmailFlag() error {
@@ -89,16 +100,7 @@ func submitInstallEmail(stderr io.Writer) {
 	if status := onboardingAccountInspect(onboardingClock()); status.SignedIn && !status.Expired {
 		return
 	}
-	kind := telemetry.EmailDomainWork
-	if telemetry.IsFreeEmailDomain(email) {
-		kind = telemetry.EmailDomainFree
-	}
-	// Identified first, so the event is sent as the person it names.
-	telemetryIdentify(email, "")
-	telemetryCapture(telemetry.EventEmailSubmitted, map[string]any{
-		telemetry.PropEmailSource:     source,
-		telemetry.PropEmailDomainKind: kind,
-	})
+	recordEmailSubmitted(source, email)
 
 	// A completed onboarding record stays as written: its email may be the account that signed in,
 	// and replacing it would name an unverified address as the authenticated one.
@@ -112,6 +114,44 @@ func submitInstallEmail(stderr io.Writer) {
 	profile.Onboarding.Email = email
 	if err := onboardingSave(profile); err != nil {
 		fmt.Fprintf(stderr, "beacon: could not record %s: %v\n", name, err)
+	}
+}
+
+// recordEmailSubmitted identifies the person behind an email given without signing in, then sends
+// cli_email_submitted. email is already normalized.
+func recordEmailSubmitted(source, email string) {
+	kind := telemetry.EmailDomainWork
+	if telemetry.IsFreeEmailDomain(email) {
+		kind = telemetry.EmailDomainFree
+	}
+	// Identified first, so the event is sent as the person it names.
+	telemetryIdentify(email, "")
+	telemetryCapture(telemetry.EventEmailSubmitted, map[string]any{
+		telemetry.PropEmailSource:     source,
+		telemetry.PropEmailDomainKind: kind,
+	})
+}
+
+// recordWizardEmail sends what the wizard's optional email question got: Identify and
+// cli_email_submitted for an address, cli_email_prompt_skipped for a blank answer, nothing when it was not asked.
+func recordWizardEmail(result onboarding.WizardResult) {
+	switch {
+	case !result.EmailAsked:
+	case result.Email != "":
+		recordEmailSubmitted(telemetry.EmailSourcePrompt, result.Email)
+	default:
+		telemetryCapture(telemetry.EventEmailPromptSkipped, nil)
+	}
+}
+
+// saveWizardEmail records the address typed at the wizard's email question as soon as it is sent.
+// A failed save is only reported: the install goes on, and Persist writes the profile again.
+func saveWizardEmail(stderr io.Writer, profile onboarding.Profile) {
+	if !onboardingProfileWritable() {
+		return
+	}
+	if err := onboardingSave(profile); err != nil {
+		fmt.Fprintf(stderr, "beacon: could not record the email: %v\n", err)
 	}
 }
 

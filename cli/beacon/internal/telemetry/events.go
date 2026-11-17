@@ -116,6 +116,9 @@ const (
 	EventSignInCompleted = "cli_sign_in_completed"
 	// EventEmailSubmitted is sent when a person gives an email without signing in.
 	EventEmailSubmitted = "cli_email_submitted"
+	// EventEmailPromptSkipped is sent when a person leaves the install wizard's optional email
+	// question blank. It is not followed by Identify.
+	EventEmailPromptSkipped = "cli_email_prompt_skipped"
 )
 
 // Identity event properties.

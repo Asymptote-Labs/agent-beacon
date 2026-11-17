@@ -118,8 +118,9 @@ func TestConsoleUserCommandRunsAsTheUserWithTheirHome(t *testing.T) {
 	if !strings.HasPrefix(args, "-u alice ") {
 		t.Fatalf("launcher args = %q, want it to run as alice", args)
 	}
-	// TestMain sets BEACON_TELEMETRY=0; sudo and runuser drop it, so it is passed on by hand.
-	if !strings.HasSuffix(args, "env HOME=/home/alice USER=alice LOGNAME=alice BEACON_TELEMETRY=0 /opt/beacon/bin/beacon endpoint user-config apply-native") {
-		t.Fatalf("launcher args = %q, want alice's HOME, the telemetry opt-out and the child command", args)
+	// TestMain sets BEACON_TELEMETRY=0; sudo and runuser drop it, so it is passed on by hand. The
+	// child is marked internal, so it never uses up the first-run notice in a buffer.
+	if !strings.HasSuffix(args, "env HOME=/home/alice USER=alice LOGNAME=alice BEACON_TELEMETRY=0 BEACON_INTERNAL_CHILD=1 /opt/beacon/bin/beacon endpoint user-config apply-native") {
+		t.Fatalf("launcher args = %q, want alice's HOME, the telemetry opt-out, the internal marker and the child command", args)
 	}
 }

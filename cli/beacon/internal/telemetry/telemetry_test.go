@@ -83,7 +83,7 @@ func options(env map[string]string, stderr io.Writer) Options {
 		Getenv:      func(key string) string { return env[key] },
 		Environ:     func() []string { return environ },
 		Stderr:      stderr,
-		Interactive: true,
+		ShowNotice:  true,
 	}
 }
 
@@ -255,27 +255,27 @@ func TestInitSavesTheInstallIDAndPrintsTheNoticeOnce(t *testing.T) {
 	}
 }
 
-// A run nobody reads (a scheduled job, an internal child, redirected output) must not use up the
-// notice: it is neither printed nor recorded, and the person's first terminal run still shows it.
-func TestNonInteractiveRunLeavesTheNoticeForTheFirstInteractiveOne(t *testing.T) {
+// A run nobody reads (a scheduled job, an internal child) must not use up the notice: it is neither
+// printed nor recorded, and the first run someone reads still shows it.
+func TestUnreadRunLeavesTheNoticeForTheFirstReadOne(t *testing.T) {
 	_, home := setup(t, nil)
 	var stderr bytes.Buffer
 	opts := options(nil, &stderr)
-	opts.Interactive = false
+	opts.ShowNotice = false
 	Init(opts)
 	if !Enabled() {
-		t.Fatal("telemetry is off in a non-interactive run")
+		t.Fatal("telemetry is off in an unread run")
 	}
 	if stderr.Len() != 0 {
-		t.Fatalf("non-interactive run printed %q", stderr.String())
+		t.Fatalf("an unread run printed %q", stderr.String())
 	}
 	if st := loadState(home); st.NoticeShownAt != "" {
-		t.Fatalf("non-interactive run recorded the notice as shown at %s", st.NoticeShownAt)
+		t.Fatalf("an unread run recorded the notice as shown at %s", st.NoticeShownAt)
 	}
 
 	Init(options(nil, &stderr))
 	if got := strings.Count(stderr.String(), Notice); got != 1 {
-		t.Fatalf("first interactive run printed the notice %d times: %q", got, stderr.String())
+		t.Fatalf("the first read run printed the notice %d times: %q", got, stderr.String())
 	}
 }
 
