@@ -28,20 +28,25 @@ type matcher struct {
 	untracked *untracked
 }
 
+// compileMatcher compiles expr against lib's environment: the program, the program without cost
+// tracking, the actions it can be true for and whether it reads derived fields.
+//
+// The result is kept (matchCache). Loading a rule validates its expressions, compiling a rule
+// validates it again and then compiles them, and each of those parsed, type-checked and
+// planned the same text: three times over for every expression of a pack, which was most of
+// what starting a scan cost before its first event. Rules that share an expression share its
+// matcher.
 func compileMatcher(lib *Library, expr string) (matcher, error) {
-	prog, ast, err := lib.compileMatch(expr)
-	if err != nil {
-		return matcher{}, err
+	if strings.TrimSpace(expr) == "" {
+		return matcher{}, fmt.Errorf("empty match expression")
 	}
-	env, err := lib.environment()
-	if err != nil {
-		return matcher{}, err
+	cache, key := lib.matchCache(), matchKey{expr: expr, limit: evalCostLimit}
+	if m, ok := cache.get(key); ok {
+		return m.match, m.err
 	}
-	u, err := newUntracked(env, ast, evalCostLimit)
-	if err != nil {
-		return matcher{}, fmt.Errorf("build CEL program: %w", err)
-	}
-	return matcher{prog: prog, ast: ast, actions: eventActions(ast.NativeRep().Expr()), derived: selectsDerivedField(ast), untracked: u}, nil
+	m, err := lib.compileMatcherUncached(expr)
+	cache.put(key, cachedMatch{match: m, err: err})
+	return m, err
 }
 
 // excludes reports whether the expression is false for every event with this action.

@@ -139,51 +139,44 @@ func compileMatch(expr string) (cel.Program, *cel.Ast, error) {
 }
 
 // compileMatch compiles expr against the library's environment: the engine's, with the
-// library's predicates expanded where expr calls them.
-//
-// The result is kept (matchCache). Loading a rule validates its expressions, compiling a rule
-// validates it again and then compiles them, and each of those parsed, type-checked and
-// planned the same text: three times over for every expression of a pack, which was most of
-// what starting a scan cost before its first event.
+// library's predicates expanded where expr calls them (compileMatcher).
 func (l *Library) compileMatch(expr string) (cel.Program, *cel.Ast, error) {
-	if strings.TrimSpace(expr) == "" {
-		return nil, nil, fmt.Errorf("empty match expression")
-	}
-	cache, key := l.matchCache(), matchKey{expr: expr, limit: evalCostLimit}
-	if m, ok := cache.get(key); ok {
-		return m.prog, m.ast, m.err
-	}
-	m := &compiledMatch{}
-	m.prog, m.ast, m.err = l.compileMatchUncached(expr)
-	cache.put(key, m)
-	return m.prog, m.ast, m.err
+	m, err := compileMatcher(l, expr)
+	return m.prog, m.ast, err
 }
 
-func (l *Library) compileMatchUncached(expr string) (cel.Program, *cel.Ast, error) {
+// compileMatcherUncached parses, checks and plans expr, tracked and untracked.
+func (l *Library) compileMatcherUncached(expr string) (matcher, error) {
 	env, err := l.environment()
 	if err != nil {
-		return nil, nil, fmt.Errorf("build CEL env: %w", err)
+		return matcher{}, fmt.Errorf("build CEL env: %w", err)
 	}
 	ast, iss := env.Compile(expr)
 	if iss != nil && iss.Err() != nil {
-		return nil, nil, fmt.Errorf("compile match: %w", iss.Err())
+		return matcher{}, fmt.Errorf("compile match: %w", iss.Err())
 	}
 	if ast.OutputType() != cel.BoolType {
-		return nil, nil, fmt.Errorf("match expression must evaluate to bool, got %s", ast.OutputType())
+		return matcher{}, fmt.Errorf("match expression must evaluate to bool, got %s", ast.OutputType())
 	}
 	prog, err := env.Program(ast, cel.CostLimit(evalCostLimit), cel.OptimizeRegex(prefilteredMatches))
 	if err != nil {
-		return nil, nil, fmt.Errorf("build CEL program: %w", err)
+		return matcher{}, fmt.Errorf("build CEL program: %w", err)
 	}
-	return prog, ast, nil
+	u, err := newUntracked(env, ast, evalCostLimit)
+	if err != nil {
+		return matcher{}, fmt.Errorf("build CEL program: %w", err)
+	}
+	return matcher{prog: prog, ast: ast, actions: eventActions(ast.NativeRep().Expr()), derived: selectsDerivedField(ast), untracked: u}, nil
 }
 
-// matchCache holds what compiling an expression gave, for one set of definitions: the program,
-// the checked expression, or the error. An expression means the same every time it is
-// compiled with the same definitions and the same cost limit, and a program is safe to share.
+// matchCache holds what compiling an expression gave, for one set of definitions: the matcher,
+// or the error. An expression means the same every time it is compiled with the same
+// definitions and the same cost limit, and a matcher is safe to share: its programs are, and
+// so is what its untracked program has learned of its bounds (untracked.learn), which the
+// rules that share the expression then share.
 type matchCache struct {
 	mu      sync.Mutex
-	matches map[matchKey]*compiledMatch
+	matches map[matchKey]cachedMatch
 }
 
 type matchKey struct {
@@ -191,14 +184,15 @@ type matchKey struct {
 	limit uint64
 }
 
-type compiledMatch struct {
-	prog cel.Program
-	ast  *cel.Ast
-	err  error
+type cachedMatch struct {
+	match matcher
+	err   error
 }
 
-// maxCachedMatches bounds a cache. A pack has a hundred expressions or so; a process that
-// compiles arbitrary ones (a linter run over many packs, a fuzzer) starts again when full.
+// maxCachedMatches bounds a cache. A pack has a hundred expressions or so. A process that
+// compiles arbitrary ones (a linter run over many packs, a fuzzer) fills it, and then the
+// cache keeps what it holds and an expression it does not hold is compiled where it is used:
+// the rule of every process-wide table here (the pattern table in regexcall.go).
 const maxCachedMatches = 4096
 
 // plainMatches is the cache of expressions compiled with no definitions.
@@ -211,20 +205,22 @@ func (l *Library) matchCache() *matchCache {
 	return &l.matches
 }
 
-func (c *matchCache) get(key matchKey) (*compiledMatch, bool) {
+func (c *matchCache) get(key matchKey) (cachedMatch, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	m, ok := c.matches[key]
 	return m, ok
 }
 
-func (c *matchCache) put(key matchKey, m *compiledMatch) {
+func (c *matchCache) put(key matchKey, m cachedMatch) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.matches == nil || len(c.matches) >= maxCachedMatches {
-		c.matches = map[matchKey]*compiledMatch{}
+	if c.matches == nil {
+		c.matches = map[matchKey]cachedMatch{}
 	}
-	c.matches[key] = m
+	if len(c.matches) < maxCachedMatches {
+		c.matches[key] = m
+	}
 }
 
 // selectsField reports whether the checked expression selects a field named name anywhere,
