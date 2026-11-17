@@ -56,22 +56,23 @@ var scriptRunCalls = map[*language]runCalls{
 const unknownWord = "\x00"
 
 // scriptRuns returns the command lines the interpreter's inline script runs, one per line, when
-// the command is an interpreter with an inline script and the script runs any that can be read.
-func (c Command) scriptRuns() (string, bool) {
+// the command is an interpreter with an inline script and the script runs any that can be read,
+// and whether the script is the interpreter's standard input (inlineScript).
+func (c Command) scriptRuns() (lines string, stdin, ok bool) {
 	name, args := c.program()
 	l, ok := scriptLanguage(name)
 	if !ok {
-		return "", false
+		return "", false, false
 	}
-	script := inlineScript(l, &c, args)
+	script, stdin := inlineScript(l, &c, args)
 	if script == "" {
-		return "", false
+		return "", false, false
 	}
 	commands := scriptCommands(l, script)
 	if len(commands) == 0 {
-		return "", false
+		return "", false, false
 	}
-	return strings.Join(commands, "\n"), true
+	return strings.Join(commands, "\n"), stdin, true
 }
 
 // scriptCommands returns the command lines a script runs through one of its language's calls

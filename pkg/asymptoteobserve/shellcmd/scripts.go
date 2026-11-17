@@ -128,23 +128,23 @@ func scriptLanguage(name string) (*language, bool) {
 }
 
 // inlineScript returns the script the interpreter is given as text: the value of its eval option,
-// or, when it is given no script file, the here-document or here-string on its standard input.
-// The text is as written, so a part the shell would expand is still its source. It is "" when the
-// interpreter runs a file, a module, or what a pipe sends it.
-func inlineScript(l *language, c *Command, args []Word) string {
+// or, when it is given no script file, the here-document or here-string on its standard input
+// (stdin). The text is as written, so a part the shell would expand is still its source. It is
+// "" when the interpreter runs a file, a module, or what a pipe sends it.
+func inlineScript(l *language, c *Command, args []Word) (script string, stdin bool) {
 	for i := 0; i < len(args); i++ {
 		t := args[i].Unquoted
 		switch {
 		case l.subcommand != "":
 			switch {
 			case i == 0 && t != l.subcommand:
-				return ""
+				return "", false
 			case i > 0 && !isOption(args[i]):
-				return t
+				return t, false
 			}
 			continue
 		case t == "-":
-			return stdinScript(c)
+			return stdinScript(c), true
 		case strings.HasPrefix(t, "--"):
 			name, value, attached := strings.Cut(t, "=")
 			if slices.Contains(l.valuesLong, name) {
@@ -159,26 +159,26 @@ func inlineScript(l *language, c *Command, args []Word) string {
 			if !attached && i+1 < len(args) {
 				value = args[i+1].Unquoted
 			}
-			return value
+			return value, false
 		case !isOption(args[i]):
-			return "" // a script file
+			return "", false // a script file
 		}
 	cluster:
 		for j := 1; j < len(t); j++ {
 			switch {
 			case strings.IndexByte(l.eval, t[j]) >= 0:
 				if j+1 < len(t) && !l.wordValues {
-					return t[j+1:]
+					return t[j+1:], false
 				}
 				if i+1 < len(args) {
 					if l.wordValues && isOption(args[i+1]) {
 						break cluster // node -p -e '..': the -e that follows has the script
 					}
-					return args[i+1].Unquoted
+					return args[i+1].Unquoted, false
 				}
-				return ""
+				return "", false
 			case strings.IndexByte(l.module, t[j]) >= 0:
-				return ""
+				return "", false
 			case strings.IndexByte(l.values, t[j]) >= 0:
 				if j+1 == len(t) {
 					i++ // the value is the next word
@@ -188,9 +188,9 @@ func inlineScript(l *language, c *Command, args []Word) string {
 		}
 	}
 	if l.subcommand != "" {
-		return ""
+		return "", false
 	}
-	return stdinScript(c)
+	return stdinScript(c), true
 }
 
 // HereInput returns the here-document or here-string that is the command's standard input: the

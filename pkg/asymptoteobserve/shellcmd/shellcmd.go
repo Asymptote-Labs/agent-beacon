@@ -97,20 +97,12 @@ type Command struct {
 	// the statement ends, or 0 outside any: what an exec of the statement leaves open is open up
 	// to there (SocketRedirects).
 	execEnd int
-	// shell is, for a command WithScripts added, one more than the index of the shell or
-	// carrier whose command line it is in, and 0 for a command of the command line itself.
-	// scripted is set on a shell or carrier whose commands follow it, runsRead when that
-	// command line was read to its end, and scriptOnStdin when a shell read its script from
-	// its standard input. ranCommands is set instead of scripted on an interpreter whose
-	// inline script runs the commands that follow it. scriptZero is one more than the index in
-	// Argv of the word that is the script's $0, or 0 where its operands are not the script's (a
-	// carrier, an interpreter, PowerShell).
-	shell         int32
-	scriptZero    int32
-	scripted      bool
-	runsRead      bool
-	ranCommands   bool
-	scriptOnStdin bool
+	// shell is, for a command WithScripts added, one more than the index of the command whose
+	// command line it is in, and 0 for a command of the command line itself. handed is what
+	// WithScripts read of the command line this command hands on, when it put its commands
+	// after it.
+	shell  int32
+	handed handOff
 	// unwrapped is what the command's wrappers leave of it, worked out when it is read.
 	unwrapped unwrapped
 	// source is the text the statement was parsed from (the command line, or the script it is

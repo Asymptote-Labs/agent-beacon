@@ -15,23 +15,24 @@ import (
 // command runs the script of its -Command option (powershellScript). WithScripts also reads
 // what a pipe sends a shell when the stage before it prints it literally.
 func (c Command) Script() (script string, ok bool) {
-	script, _, ok = c.script()
+	script, _, _, ok = c.script()
 	return script, ok
 }
 
-// script is Script, with zero, the index in Argv of the word that is the script's $0: the one
-// after the script with -c, and the one before the first operand with -s, so that each word after
-// it is $1, $2 and so on. zero is -1 where the operands are not the script's (PowerShell).
-func (c Command) script() (script string, zero int, ok bool) {
-	script, zero, found, stdin := c.scriptScan()
+// script is Script, with zero, the index in Argv of the word that is the script's $0 (the one
+// after the script with -c, and the one before the first operand with -s, so that each word
+// after it is $1, $2 and so on; -1 where the operands are not the script's, PowerShell's), and
+// whether the script is the command's standard input (stdin).
+func (c Command) script() (script string, zero int, stdin, ok bool) {
+	script, zero, found, onStdin := c.scriptScan()
 	switch {
 	case found:
-		return script, zero, true
-	case !stdin:
-		return "", -1, false
+		return script, zero, false, true
+	case !onStdin:
+		return "", -1, false, false
 	}
 	script, ok = c.HereInput()
-	return script, zero, ok
+	return script, zero, true, ok
 }
 
 // scriptScan reads the words after the first word of the command that names a shell
@@ -406,45 +407,81 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		if depth <= 0 {
 			continue
 		}
-		// A carrier's command line comes first: `find -exec sh -c .. \; -exec rm {} +` runs
-		// two, and Script would read the shell's alone. Its operands are not that line's $1.
-		script, ok := c.Carried()
-		carried, onStdin, interpreter, zero := ok, false, false, -1
-		if !ok {
-			if script, zero, ok = c.script(); ok {
-				// A script read from the shell's standard input leaves none for its commands.
-				here, isHere := c.HereInput()
-				onStdin = isHere && here == script
-			} else if script, ok = pipedScript(commands, idx); ok {
-				onStdin = true
-			} else if script, ok = c.scriptRuns(); ok {
-				// The commands an interpreter's inline script runs. The interpreter is not a
-				// shell: it is not read (RunsRead), and what it writes is also its own.
-				interpreter = true
-				_, onStdin = c.HereInput()
-			}
-		}
-		if !ok || len(script) > x.scriptBytes {
+		line, handed, ok := handOn(commands, idx)
+		if !ok || len(line) > x.scriptBytes {
 			continue
 		}
-		x.scriptBytes -= len(script)
-		if sub, err := parse(script, &x.braceWords); len(sub) > 0 {
+		x.scriptBytes -= len(line)
+		if sub, err := parse(line, &x.braceWords); len(sub) > 0 {
 			at := len(x.out)
-			x.out[at-1].scripted, x.out[at-1].ranCommands, x.out[at-1].scriptOnStdin = !interpreter, interpreter, onStdin
-			x.out[at-1].scriptZero = int32(zero + 1)
-			// A shell after other words (`tool sh -c ..`) runs the script, and the words
-			// before it run what this package does not know.
-			x.out[at-1].runsRead = err == nil && (carried || isShell(c.unwrapped.program))
+			handed.read = handed.read && err == nil
+			x.out[at-1].handed = handed
 			x.add(sub, int32(at), depth-1)
 		}
 	}
+}
+
+// handOff is what WithScripts read of the command line a command hands on.
+type handOff struct {
+	how handing
+	// stdin is set when the command line was the command's own standard input (a
+	// here-document, a here-string, a pipe), which leaves none for the commands it runs.
+	stdin bool
+	// read is set when the command line was read to its end and its commands are all the
+	// command runs: RunsRead.
+	read bool
+	// zero is one more than the index in Argv of the word that is the script's $0, or 0 where
+	// the command's operands are not the script's (a carrier, an interpreter, PowerShell).
+	zero int32
+}
+
+// handing is how a command hands a command line on, which says what its output is.
+type handing uint8
+
+const (
+	handsNothing handing = iota
+	// handsAll: a shell runs a script, a carrier or a wrapper a command line, and the
+	// command writes what they write.
+	handsAll
+	// handsSome: an interpreter's inline script runs commands, and the interpreter writes
+	// what they write beside what it took in itself.
+	handsSome
+)
+
+// handOn returns the command line commands[i] hands on, and how. A carrier's comes first
+// (Carried): `find -exec sh -c .. \; -exec rm {} +` runs two, and Script would read the
+// shell's alone. Then a shell's script (Script), what a pipe sends a shell (pipedScript), and
+// the commands an interpreter's inline script runs (scriptRuns). Each says where its text
+// came from, so a script that is the command's standard input is told from one given with
+// -c beside a here-string: `bash -c 'nc h 1' <<< "$(cat .env)"` and its python3 -c form
+// both give nc the here-string.
+func handOn(commands []Command, i int) (string, handOff, bool) {
+	c := &commands[i]
+	if line, ok := c.Carried(); ok {
+		return line, handOff{how: handsAll, read: true}, true
+	}
+	// A shell after other words (`tool sh -c ..`) runs the script, and the words before it
+	// run what this package does not know: the script is read, the command is not.
+	read := isShell(c.unwrapped.program)
+	if script, zero, stdin, ok := c.script(); ok {
+		return script, handOff{how: handsAll, stdin: stdin, read: read, zero: int32(zero + 1)}, true
+	}
+	if script, ok := pipedScript(commands, i); ok {
+		return script, handOff{how: handsAll, stdin: true, read: read}, true
+	}
+	// An interpreter is not a shell: a script can run what its text does not show, so it
+	// is never read (RunsRead), and what it writes is also its own.
+	if lines, stdin, ok := c.scriptRuns(); ok {
+		return lines, handOff{how: handsSome, stdin: stdin}, true
+	}
+	return "", handOff{}, false
 }
 
 // RunsRead reports whether WithScripts read the command line this command hands on (its
 // Script or what it Carried) to its end and put its commands after it. It is false for a
 // command that hands none on, one whose command line is not a known word or does not parse,
 // and one deeper than WithScripts was asked to read.
-func (c Command) RunsRead() bool { return c.runsRead }
+func (c Command) RunsRead() bool { return c.handed.read }
 
 // Carried returns the command line a command hands to another program to run, for the
 // programs whose words say where it is:
