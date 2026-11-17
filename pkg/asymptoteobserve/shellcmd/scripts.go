@@ -110,12 +110,12 @@ var (
 	}
 )
 
-// scriptLanguage returns the language of the interpreter a command runs, by its base name.
+// scriptLanguage returns the language of the interpreter a program is (programOf).
 func scriptLanguage(name string) (*language, bool) {
 	switch {
 	case strings.HasPrefix(name, "python"), strings.HasPrefix(name, "pypy"):
 		return &python, true
-	case name == "node", name == "nodejs", name == "bun":
+	case name == "node", name == "bun":
 		return &javascript, true
 	case name == "deno":
 		return &deno, true

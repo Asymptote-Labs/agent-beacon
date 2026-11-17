@@ -154,6 +154,14 @@ type optionSpec struct {
 	long  []string
 }
 
+// has reports whether opt, a letter or a long name with its dashes, is one of the options.
+func (s optionSpec) has(opt string) bool {
+	if len(opt) == 1 {
+		return strings.IndexByte(s.short, opt[0]) >= 0
+	}
+	return slices.Contains(s.long, opt)
+}
+
 var valueOptions = map[string]optionSpec{
 	"shred":    {short: "ns", long: []string{"--iterations", "--random-source", "--size"}},
 	"touch":    {short: "dtr", long: []string{"--date", "--reference"}},
@@ -353,13 +361,11 @@ func writtenAsDirectory(w Word, written bool) bool {
 }
 
 func (c Command) commandTargets(written bool) []FileEffect {
-	name := c.Name()
+	name, args := c.program()
 	if name == "" {
 		return nil
 	}
-	words, _ := c.Unwrapped()
-	args := words[1:]
-	if name == "git" && (c.Is("git", "mv") || c.Is("git", "rm")) {
+	if name == "git" && (isSub(args, "mv") || isSub(args, "rm")) {
 		name, args = "git-"+args[0].Text, args[1:]
 	}
 	switch name {
@@ -460,7 +466,7 @@ func (c Command) commandTargets(written bool) []FileEffect {
 				return effectsOf(sources[1:], dest, written)
 			}
 		}
-	case "sed", "perl", "gsed":
+	case "sed", "perl":
 		return effectsOf(inPlaceFiles(name, args), OpEdit, written)
 	case "curl":
 		return curlOutputs(args, written)
@@ -474,7 +480,7 @@ func (c Command) commandTargets(written bool) []FileEffect {
 	// A directory an archive is extracted or a repository is cloned into is a write, not an
 	// effect: which files land there is not on the command line.
 	if written {
-		if dir, ok := c.intoDirectory(name, args); ok {
+		if dir, ok := intoDirectory(name, args); ok {
 			return []FileEffect{{Path: dir, Op: OpWrite}}
 		}
 	}

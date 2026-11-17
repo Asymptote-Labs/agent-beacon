@@ -161,7 +161,7 @@ func (f *flow) command(i int) {
 			f.exported[varKey{c.shell, ref.name}] = true
 		}
 	}
-	name, args := c.run()
+	name, args := c.program()
 	var (
 		files, sent []string
 		data        dataWords

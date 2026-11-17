@@ -32,25 +32,30 @@ var tarExtractOptions = optionTable{values: tarOptions.values, flags: optionSpec
 // writesInto reports whether the command may put files into a directory it names (or the one
 // it runs in), which only FileWrites reports.
 func (c Command) writesInto() bool {
-	switch c.Name() {
-	case "tar", "gtar", "bsdtar", "unzip", "rsync":
+	switch program, args := c.program(); program {
+	case "tar", "unzip", "rsync":
 		return true
+	case "git":
+		return isSub(args, "clone")
+	case "gh":
+		return isSub(args, "repo", "clone")
 	}
-	return c.Is("git", "clone") || c.Is("gh", "repo", "clone")
+	return false
 }
 
 // intoDirectory returns the directory the command extracts or clones into, written with a
-// trailing slash, when it does that. args are the words after the command's name.
-func (c Command) intoDirectory(name string, args []Word) (string, bool) {
+// trailing slash, when it does that. name and args are the command's program and the words
+// after its name.
+func intoDirectory(name string, args []Word) (string, bool) {
 	dir, ok := Word{}, false
 	switch {
-	case name == "tar" || name == "gtar" || name == "bsdtar":
+	case name == "tar":
 		dir, ok = tarExtractDirectory(args)
 	case name == "unzip":
 		dir, ok = unzipDirectory(args)
-	case name == "git" && c.Is("git", "clone"):
+	case name == "git" && isSub(args, "clone"):
 		dir, ok = cloneDirectory(gitCloneOptions.parse(args[1:], true).operands)
-	case name == "gh" && c.Is("gh", "repo", "clone"):
+	case name == "gh" && isSub(args, "repo", "clone"):
 		operands := args[2:]
 		if i := slices.IndexFunc(operands, func(w Word) bool { return w.Unquoted == "--" }); i >= 0 {
 			operands = operands[:i]

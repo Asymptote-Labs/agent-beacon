@@ -97,6 +97,15 @@ func TestWithScriptsReadsCarriers(t *testing.T) {
 		{`sudo -l rm -rf /`, []string{""}},
 		{`uv run -m pytest -q`, []string{""}},
 		{`"$TOOL" sh -c 'id'`, []string{"", "id"}},
+		// A program is the same by any path, so a shell, a carrier and a wrapper by a path the
+		// parse does not evaluate are read as by their name.
+		{`~/bin/bash -c 'rm -rf /'`, []string{"bash*", "rm"}},
+		{`"$HOME"/.local/bin/sh -c 'id'`, []string{"sh*", "id"}},
+		{`git ls-files | ~/bin/xargs rm -rf`, []string{"git", "xargs*", "rm"}},
+		{`~/bin/ssh host.example 'rm -rf /srv'`, []string{"ssh*", "rm"}},
+		{`$HOME/bin/sudo -i rm -rf x`, []string{"*", "rm"}},
+		{`~/.docker/bin/docker exec web rm -rf /`, []string{"docker*", "rm"}},
+		{`find . -print0 | gxargs -0 rm -f`, []string{"find", "gxargs*", "rm"}},
 	} {
 		commands, err := Parse(tc.command)
 		if err != nil {

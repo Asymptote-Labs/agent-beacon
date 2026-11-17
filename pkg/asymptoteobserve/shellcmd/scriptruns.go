@@ -58,7 +58,7 @@ const unknownWord = "\x00"
 // scriptRuns returns the command lines the interpreter's inline script runs, one per line, when
 // the command is an interpreter with an inline script and the script runs any that can be read.
 func (c Command) scriptRuns() (string, bool) {
-	name, args := c.run()
+	name, args := c.program()
 	l, ok := scriptLanguage(name)
 	if !ok {
 		return "", false

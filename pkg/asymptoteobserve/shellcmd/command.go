@@ -14,35 +14,103 @@ import (
 // the runners that start a command in a project's environment: `uv run`, `poetry run`,
 // `pipenv run`, `bundle exec` and `mise exec ... --`. A wrapper is recognized by its base name,
 // so /usr/bin/env, ~/bin/sudo and $PREFIX/bin/timeout unwrap like env, sudo and timeout. ok is
-// false, with no words, when a wrapper option moves or replaces the command, runs none, or makes
-// the wrapper act on something else (sudo -i/-D/-R/-l, env -C/-S, doas -s, ionice -p, command
-// -v, uv run --directory/--module, and their long forms). It reads past a PowerShell
-// assignment's `$name =` when a bare name follows it ($t = az account get-access-token), which
-// bash would read as running the variable's value and no command line means; a quoted string or
-// a number there is a value, not a command.
+// false, with no words, when a wrapper option runs the command somewhere else (sudo -i/-D/-R,
+// env -C, uv run --directory: Carried reads it), runs none (sudo -l/-v, command -v), or makes
+// the wrapper act on something other than a command (sudo -e, env -S, doas -s, ionice -p,
+// uv run --module), and their long forms.
 func (c Command) Unwrapped() (words []Word, ok bool) {
-	words = c.Argv
+	if c.unwrapped.how != ran {
+		return nil, false
+	}
+	return c.Argv[c.unwrapped.at:], true
+}
+
+// outcome is what a command's wrappers do with the command after them.
+type outcome uint8
+
+const (
+	// ran: the words after the wrappers run here, as the command (or there are none).
+	ran outcome = iota
+	// moved: a wrapper option runs them somewhere else: after a login, in another directory
+	// or under another root.
+	moved
+	// runsNothing: a wrapper option makes the wrapper run no command (sudo -l, command -v).
+	runsNothing
+	// replaced: a wrapper option makes it act on something other than a command it runs
+	// (sudo -e edits files, env -S splits a string, ionice -p sets another process).
+	replaced
+)
+
+// unwrapped is a command as its wrappers leave it, worked out once when the command is read
+// (resolve): every fact that asks what a command is asks this.
+type unwrapped struct {
+	// at is the index in Argv of the first word after the wrappers: the command's name when how
+	// is ran, the command run elsewhere when it is moved.
+	at  int
+	how outcome
+	// name is the base name of the word at at when how is ran (commandBase), and program the
+	// program it names (programOf): "gtar" and "tar". Both are "" when there is none.
+	name, program string
+}
+
+// resolve works out c.unwrapped from c.Argv.
+func (c *Command) resolve() {
+	at, how := unwrap(c.Argv)
+	c.unwrapped = unwrapped{at: at, how: how}
+	if how == ran && at < len(c.Argv) {
+		c.unwrapped.name = commandBase(c.Argv[at])
+		c.unwrapped.program = programOf(c.unwrapped.name)
+	}
+}
+
+// unwrap walks the wrappers at the start of words: the index of the first word after them, and
+// what they do with it. It reads past a PowerShell assignment's `$name =` first when a bare name
+// follows it ($t = az account get-access-token), which bash would read as running the variable's
+// value and no command line means; a quoted string or a number there is a value, not a command.
+func unwrap(words []Word) (int, outcome) {
+	at := 0
 	if len(words) > 2 && isPowerShellVariable(words[0]) && words[1].Known && words[1].Text == "=" &&
 		words[2].Known && words[2].Raw == words[2].Text && words[2].Text != "" && !unicode.IsDigit(rune(words[2].Text[0])) {
-		words = words[2:]
+		at = 2
 	}
-	for len(words) > 0 {
-		spec, skip := wrapperOf(words)
+	for at < len(words) {
+		spec, skip := wrapperOf(words[at:])
 		if spec == nil {
-			return words, true
+			break
 		}
-		if words, ok = afterOptions(words[skip:], spec); !ok {
-			return nil, false
+		at += skip
+		n, how := spec.options(words[at:])
+		at += n
+		switch how {
+		case runsNothing, replaced:
+			return at, how
 		}
 		if spec.assignments {
-			words = afterAssignments(words)
+			at += assignments(words[at:])
 		}
-		if len(words) < spec.operands {
-			return nil, true
+		if how == moved {
+			return at, moved
 		}
-		words = words[spec.operands:]
+		if len(words)-at < spec.operands {
+			return len(words), ran
+		}
+		at += spec.operands
 	}
-	return words, true
+	return at, ran
+}
+
+// isPowerShellVariable reports whether w is a PowerShell variable alone: $t, $env:TOKEN.
+func isPowerShellVariable(w Word) bool {
+	name, ok := strings.CutPrefix(w.Unquoted, "$")
+	if w.Known || !ok || name == "" || name[0] >= '0' && name[0] <= '9' {
+		return false
+	}
+	for _, r := range name {
+		if r != '_' && r != ':' && !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // wrapperOf returns the wrapper the first of words names, and how many words name it (two for
@@ -51,7 +119,7 @@ func wrapperOf(words []Word) (spec *wrapperSpec, skip int) {
 	sub := func(names ...string) bool {
 		return len(words) > 1 && words[1].Known && slices.Contains(names, words[1].Text)
 	}
-	switch commandBase(words[0]) {
+	switch programOf(commandBase(words[0])) {
 	case "builtin", "nohup", "setsid", "chronic":
 		return &wrapperPlain, 1
 	case "command":
@@ -76,7 +144,7 @@ func wrapperOf(words []Word) (spec *wrapperSpec, skip int) {
 		return &wrapperDoas, 1
 	case "torsocks":
 		return &wrapperTorsocks, 1
-	case "proxychains", "proxychains4":
+	case "proxychains":
 		return &wrapperProxychains, 1
 	case "caffeinate":
 		return &wrapperCaffeinate, 1
@@ -150,38 +218,42 @@ func withoutWindowsSuffix(base string) string {
 	return base
 }
 
-// isPowerShellVariable reports whether w is a PowerShell variable alone: $t, $env:TOKEN.
-func isPowerShellVariable(w Word) bool {
-	name, ok := strings.CutPrefix(w.Unquoted, "$")
-	if w.Known || !ok || name == "" || name[0] >= '0' && name[0] <= '9' {
-		return false
-	}
-	for _, r := range name {
-		if r != '_' && r != ':' && !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
-			return false
-		}
-	}
-	return true
+// otherNames are programs installed under another name than the one this package reads them
+// by: GNU tools that Homebrew prefixes with g, the BSD and the other awks, the old names of
+// grep -E and -F. Every fact asks a command's program (programOf), so a name added here is read
+// as its program everywhere; Name stays the name as written.
+var otherNames = map[string]string{
+	"gtar": "tar", "bsdtar": "tar",
+	"gsed": "sed",
+	"gawk": "awk", "mawk": "awk", "nawk": "awk",
+	"egrep": "grep", "fgrep": "grep", "ggrep": "grep",
+	"gxargs": "xargs", "gfind": "find",
+	"proxychains4": "proxychains",
+	"nodejs":       "node",
 }
 
-// run returns the base name of the unwrapped command and the words after it: cat and [.env] for
-// `sudo timeout 5 cat .env`. The name is "" when there is none or it is unknown.
-func (c Command) run() (name string, args []Word) {
-	words, _ := c.Unwrapped()
-	if len(words) == 0 {
+// programOf is the program a base name names: tar for gtar, the name itself for most.
+func programOf(name string) string {
+	if program, ok := otherNames[name]; ok {
+		return program
+	}
+	return name
+}
+
+// program returns the program the unwrapped command runs (programOf its name) and the words
+// after its name: cat and [.env] for `sudo timeout 5 cat .env`, tar for gtar. It is "" and no
+// words when there is none or it is unknown.
+func (c *Command) program() (program string, args []Word) {
+	if c.unwrapped.name == "" {
 		return "", nil
 	}
-	if name = commandBase(words[0]); name == "" {
-		return "", nil
-	}
-	return name, words[1:]
+	return c.unwrapped.program, c.Argv[c.unwrapped.at+1:]
 }
 
 // Name is the program name of the unwrapped command (rm for /bin/rm, tool for ~/bin/tool,
 // ssh-add for ssh-add.exe), or "" when there is none or it is unknown (commandBase).
 func (c Command) Name() string {
-	name, _ := c.run()
-	return name
+	return c.unwrapped.name
 }
 
 // ArgsText returns the words after the unwrapped command's name as text, one word per line, so
@@ -190,7 +262,7 @@ func (c Command) Name() string {
 // word is written as a space, so a line is always one whole word. It is "" when the command has
 // no known name or nothing follows it.
 func (c Command) ArgsText() string {
-	_, args := c.run()
+	_, args := c.program()
 	if len(args) == 0 {
 		return ""
 	}
@@ -216,15 +288,20 @@ func (c Command) ArgsText() string {
 // Is reports whether the unwrapped command is name, followed by the known words sub
 // (Is("git", "mv") for git mv a b).
 func (c Command) Is(name string, sub ...string) bool {
-	if c.Name() != name {
+	if c.unwrapped.name != name {
 		return false
 	}
-	words, _ := c.Unwrapped()
-	if len(words) < 1+len(sub) {
+	_, args := c.program()
+	return isSub(args, sub...)
+}
+
+// isSub reports whether args begin with the known words sub.
+func isSub(args []Word, sub ...string) bool {
+	if len(args) < len(sub) {
 		return false
 	}
 	for i, s := range sub {
-		if w := words[1+i]; !w.Known || w.Text != s {
+		if w := args[i]; !w.Known || w.Text != s {
 			return false
 		}
 	}
@@ -232,14 +309,12 @@ func (c Command) Is(name string, sub ...string) bool {
 }
 
 // wrapperSpec is a wrapper that runs its command unchanged, in the same directory, after its own
-// options.
+// options, unless one of them says otherwise: moves, runsNothing and replaced name those, each
+// with the outcome of that name. An option of one of them that is also among the options that
+// take a value takes its value (sudo -D dir).
 type wrapperSpec struct {
 	optionSpec
-	// blocking are the short options that move or replace the command, or make the wrapper act
-	// on something other than a command it runs (ionice -p, doas -s); blockingLong are the long
-	// forms of the same.
-	blocking     string
-	blockingLong []string
+	moves, runsNothing, replaced optionSpec
 	// assignments is set when NAME=value words may follow the options (sudo, env), and operands
 	// is how many words of its own the wrapper takes before the command (timeout's duration).
 	assignments bool
@@ -247,39 +322,43 @@ type wrapperSpec struct {
 }
 
 var (
-	// sudo -l lists what the user may run and -v validates: with a command after it, -l says
-	// whether that command is allowed and does not run it. -e (sudoedit) edits its operands, and
-	// -K, -V and -h take no command.
+	// sudo -i, -D and -R run the command after a login, in another directory, under another
+	// root. -l lists what the user may run and -v validates: with a command after it, -l says
+	// whether that command is allowed and does not run it. -e (sudoedit) edits its operands,
+	// and -K, -V and -h take no command.
 	wrapperSudo = wrapperSpec{
-		optionSpec:   optionSpec{short: "CghpRTtUu", long: []string{"--close-from", "--group", "--host", "--prompt", "--role", "--command-timeout", "--type", "--other-user", "--user"}},
-		blocking:     "DRilveKV",
-		blockingLong: []string{"--chdir", "--chroot", "--login", "--list", "--validate", "--edit", "--remove-timestamp", "--version", "--help"},
-		assignments:  true,
+		optionSpec: optionSpec{short: "CDghpRTtUu", long: []string{
+			"--chdir", "--chroot", "--close-from", "--group", "--host", "--prompt", "--role",
+			"--command-timeout", "--type", "--other-user", "--user",
+		}},
+		moves:       optionSpec{short: "DRi", long: []string{"--chdir", "--chroot", "--login"}},
+		runsNothing: optionSpec{short: "lvKV", long: []string{"--list", "--validate", "--remove-timestamp", "--version", "--help"}},
+		replaced:    optionSpec{short: "e", long: []string{"--edit"}},
+		assignments: true,
 	}
 	wrapperEnv = wrapperSpec{
-		optionSpec:   optionSpec{short: "u", long: []string{"--unset"}},
-		blocking:     "CS",
-		blockingLong: []string{"--chdir", "--split-string"},
-		assignments:  true,
+		optionSpec:  optionSpec{short: "Cu", long: []string{"--chdir", "--unset"}},
+		moves:       optionSpec{short: "C", long: []string{"--chdir"}},
+		replaced:    optionSpec{short: "S", long: []string{"--split-string"}},
+		assignments: true,
 	}
 	// The rest run a command under a limit, a priority, a buffering mode, another account or a
 	// proxy.
 	wrapperTimeout = wrapperSpec{optionSpec: optionSpec{short: "ks", long: []string{"--kill-after", "--signal"}}, operands: 1}
 	wrapperNice    = wrapperSpec{optionSpec: optionSpec{short: "n", long: []string{"--adjustment"}}}
 	wrapperIonice  = wrapperSpec{
-		optionSpec:   optionSpec{short: "cn", long: []string{"--class", "--classdata"}},
-		blocking:     "pPu",
-		blockingLong: []string{"--pid", "--pgid", "--uid"},
+		optionSpec: optionSpec{short: "cn", long: []string{"--class", "--classdata"}},
+		replaced:   optionSpec{short: "pPu", long: []string{"--pid", "--pgid", "--uid"}},
 	}
 	wrapperStdbuf      = wrapperSpec{optionSpec: optionSpec{short: "ioe", long: []string{"--input", "--output", "--error"}}}
-	wrapperDoas        = wrapperSpec{optionSpec: optionSpec{short: "au"}, blocking: "sC"} // -s runs a shell, -C only checks the config
+	wrapperDoas        = wrapperSpec{optionSpec: optionSpec{short: "au"}, replaced: optionSpec{short: "sC"}} // -s runs a shell, -C only checks the config
 	wrapperTorsocks    = wrapperSpec{optionSpec: optionSpec{short: "aPup", long: []string{"--address", "--port", "--user", "--pass"}}}
 	wrapperProxychains = wrapperSpec{optionSpec: optionSpec{short: "f"}}
 	// builtin, nohup, setsid, chronic, and the two-word runners take the command as it is.
 	wrapperPlain = wrapperSpec{}
 	// command -v and -V say what a name is and run nothing; exec -a names the process; time
 	// (the program, not the shell's keyword, which is no word of the command) writes to -o.
-	wrapperCommand    = wrapperSpec{blocking: "vV"}
+	wrapperCommand    = wrapperSpec{runsNothing: optionSpec{short: "vV"}}
 	wrapperExec       = wrapperSpec{optionSpec: optionSpec{short: "a"}}
 	wrapperTime       = wrapperSpec{optionSpec: optionSpec{short: "of", long: []string{"--output", "--format"}}}
 	wrapperCaffeinate = wrapperSpec{optionSpec: optionSpec{short: "tw"}}
@@ -295,56 +374,70 @@ var (
 			"--refresh-package", "--reinstall-package", "--config-setting", "--config-settings-package",
 			"--no-binary-package", "--no-build-package", "--no-build-isolation-package", "--link-mode",
 			"--color", "--cache-dir", "--config-file", "--allow-insecure-host", "--torch-backend",
+			"--directory",
 		}},
-		blocking:     "mhV",
-		blockingLong: []string{"--directory", "--module", "--help", "--version"},
-	}
-	// The same wrappers read for a command they run somewhere else (movedCommand): the
-	// options that move it take their value or are plain flags, and the ones that run no
-	// command still stop the reading.
-	wrapperSudoMoved = wrapperSpec{
-		optionSpec:   optionSpec{short: wrapperSudo.short + "DR", long: append(slices.Clone(wrapperSudo.long), "--chdir", "--chroot")},
-		blocking:     "lveKV",
-		blockingLong: []string{"--list", "--validate", "--edit", "--remove-timestamp", "--version", "--help"},
-		assignments:  true,
-	}
-	wrapperEnvMoved = wrapperSpec{
-		optionSpec:   optionSpec{short: "uC", long: []string{"--unset", "--chdir"}},
-		blocking:     "S",
-		blockingLong: []string{"--split-string"},
-		assignments:  true,
-	}
-	wrapperUvRunMoved = wrapperSpec{
-		optionSpec:   optionSpec{short: wrapperUvRun.short, long: append(slices.Clone(wrapperUvRun.long), "--directory")},
-		blocking:     "mhV",
-		blockingLong: []string{"--module", "--help", "--version"},
+		moves:       optionSpec{long: []string{"--directory"}},
+		runsNothing: optionSpec{short: "hV", long: []string{"--help", "--version"}},
+		replaced:    optionSpec{short: "m", long: []string{"--module"}},
 	}
 )
 
-// afterOptions returns the words after a wrapper's own options. ok is false when one of them
-// moves or replaces the command.
-func afterOptions(words []Word, spec *wrapperSpec) ([]Word, bool) {
+// options reads the wrapper's own options at the start of words: how many words they take, and
+// what they do with the command after them.
+func (s *wrapperSpec) options(words []Word) (int, outcome) {
+	return scanOptions(words, s.optionSpec, s.does)
+}
+
+// does is what the wrapper's option opt (a letter, or a long name) does with its command.
+func (s *wrapperSpec) does(opt string) outcome {
+	switch {
+	case s.replaced.has(opt):
+		return replaced
+	case s.runsNothing.has(opt):
+		return runsNothing
+	case s.moves.has(opt):
+		return moved
+	}
+	return ran
+}
+
+// scanOptions walks the options at the start of words the way a wrapper or a carrier reads its
+// own, up to its first operand (an unknown word is one) or after `--`: a cluster's letters up to
+// one that takes a value, which takes the rest of the cluster or the next word, and a long option
+// with its value after `=` or as the next word. does, when it is not nil, says what each option
+// does: moved is remembered and the walk goes on, runsNothing and replaced end it. It returns the
+// index of the first word after the options and the outcome.
+func scanOptions(words []Word, values optionSpec, does func(opt string) outcome) (int, outcome) {
+	how := ran
 	for i := 0; i < len(words); i++ {
 		w := words[i]
 		switch {
-		case !w.Known || w.Text == "-" || !strings.HasPrefix(w.Text, "-"):
-			return words[i:], true
+		case !w.Known || !isOptionText(w.Text):
+			return i, how
 		case w.Text == "--":
-			return words[i+1:], true
+			return i + 1, how
 		case strings.HasPrefix(w.Text, "--"):
 			name, _, attached := strings.Cut(w.Text, "=")
-			if slices.Contains(spec.blockingLong, name) {
-				return nil, false
+			if does != nil {
+				if o := does(name); o == moved {
+					how = moved
+				} else if o != ran {
+					return i, o
+				}
 			}
-			if slices.Contains(spec.long, name) && !attached {
+			if slices.Contains(values.long, name) && !attached {
 				i++
 			}
 		default:
 			for j := 1; j < len(w.Text); j++ {
-				if strings.IndexByte(spec.blocking, w.Text[j]) >= 0 {
-					return nil, false
+				if does != nil {
+					if o := does(w.Text[j : j+1]); o == moved {
+						how = moved
+					} else if o != ran {
+						return i, o
+					}
 				}
-				if strings.IndexByte(spec.short, w.Text[j]) >= 0 {
+				if strings.IndexByte(values.short, w.Text[j]) >= 0 {
 					if j+1 == len(w.Text) {
 						i++
 					}
@@ -353,18 +446,32 @@ func afterOptions(words []Word, spec *wrapperSpec) ([]Word, bool) {
 			}
 		}
 	}
-	return nil, true
+	return len(words), how
 }
 
-func afterAssignments(words []Word) []Word {
-	for len(words) > 0 && words[0].Known {
-		name, _, ok := strings.Cut(words[0].Text, "=")
+// afterOptions returns the words after a carrier's own options (scanOptions).
+func afterOptions(words []Word, values optionSpec) []Word {
+	n, _ := scanOptions(words, values, nil)
+	return words[n:]
+}
+
+// isOptionText reports whether a word, by its text, is written as an option: a dash and
+// something after it. A lone `-` is an operand (standard input).
+func isOptionText(t string) bool {
+	return len(t) > 1 && t[0] == '-'
+}
+
+// assignments is how many NAME=value words words begin with.
+func assignments(words []Word) int {
+	n := 0
+	for n < len(words) && words[n].Known {
+		name, _, ok := strings.Cut(words[n].Text, "=")
 		if !ok || !isShellName(name) {
 			break
 		}
-		words = words[1:]
+		n++
 	}
-	return words
+	return n
 }
 
 func isShellName(name string) bool {

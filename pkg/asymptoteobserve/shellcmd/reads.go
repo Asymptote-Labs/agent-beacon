@@ -83,10 +83,7 @@ var (
 		}}}},
 		// GNU -i ignores garbage and BSD -i names the input: either way the file is an operand.
 		"base64": {optionTable: optionTable{values: optionSpec{short: "wbo", long: []string{"--wrap", "--break", "--output"}}}},
-
-		"grep":  grepReader,
-		"egrep": grepReader,
-		"fgrep": grepReader,
+		"grep":   grepReader,
 		"rg": {
 			optionTable: optionTable{
 				values: optionSpec{short: "efgtTmABCjMEdr", long: []string{
@@ -151,7 +148,7 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 	// base is the index in Argv of the first of args.
 	base := len(c.Argv) - len(args)
 	switch name {
-	case "sed", "gsed":
+	case "sed":
 		// In place, sed writes the files it reads back, which is an edit, not a read.
 		if files, inPlace := scriptFiles(name, args); !inPlace {
 			return unquoted(files), data
@@ -182,7 +179,7 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 	case "http", "https", "httpie", "xh", "xhs":
 		return httpieInputs(args, base)
 	case "gh":
-		if len(args) >= 2 && args[0].Known && args[0].Text == "gist" && args[1].Known && args[1].Text == "create" {
+		if isSub(args, "gist", "create") {
 			return unquoted(ghGistCreateOptions.parse(args[2:], true).operands), data
 		}
 	case "socat":

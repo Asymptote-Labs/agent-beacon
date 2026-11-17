@@ -111,6 +111,8 @@ type Command struct {
 	runsRead      bool
 	ranCommands   bool
 	scriptOnStdin bool
+	// unwrapped is what the command's wrappers leave of it, worked out when it is read.
+	unwrapped unwrapped
 	// source is the text the statement was parsed from (the command line, or the script it is
 	// in), end the offset where its words and redirections end, and hdocs its here-documents,
 	// each the offset of its body, which comes after the line it is named on, and the index
@@ -432,16 +434,15 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			c.scopeStart, c.scopeEnd = int(s.start), int(min(s.end, uint(len(p.source))))
 		}
 	}
+	c.resolve()
 	p.commands = append(p.commands, c)
 	if call == nil && stmt.Cmd != nil && len(stmt.Redirs) > 0 {
 		p.redirected = append(p.redirected, redirected{start: offset, end: stmt.End().Offset(), index: len(p.commands) - 1})
 	}
 	// After a cd, a relative path is relative to somewhere this parser does not track.
-	if words, _ := c.Unwrapped(); len(words) > 0 && words[0].Known {
-		switch words[0].Text {
-		case "cd", "pushd", "popd":
-			p.moved = true
-		}
+	switch c.unwrapped.program {
+	case "cd", "pushd", "popd":
+		p.moved = true
 	}
 }
 

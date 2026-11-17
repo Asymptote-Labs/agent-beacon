@@ -39,8 +39,8 @@ func SocketRedirects(commands []Command) [][]SocketRedirect {
 	var open []openDescriptor
 	for i := range commands {
 		c := &commands[i]
-		// Only a bare exec's redirections outlast the command.
-		keeps := len(c.Argv) == 1 && c.Argv[0].Known && c.Argv[0].Text == "exec"
+		// Only a bare exec's redirections outlast the command: by any path, as every program.
+		keeps := len(c.Argv) == 1 && programOf(commandBase(c.Argv[0])) == "exec"
 		for k, r := range c.Redirects {
 			found := SocketRedirect{Op: SocketWrite}
 			switch r.Op {
