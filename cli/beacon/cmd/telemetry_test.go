@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/mcpserver"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 )
@@ -166,5 +169,78 @@ func TestTelemetryNoticeSkipsTheStdioMCPServer(t *testing.T) {
 	}
 	if !telemetryShowsNotice(mcpDoctorCmd) {
 		t.Error("mcp doctor may not show the notice")
+	}
+}
+
+// stubStoredSignIn makes telemetry on or off, the stored account status, and records what
+// identifyStoredSignIn reads and identifies.
+func stubStoredSignIn(t *testing.T, enabled bool, status account.Status) (inspected *int, ids *[]identified) {
+	t.Helper()
+	inspected, ids = new(int), &[]identified{}
+	oldEnabled, oldIdentify, oldInspect := telemetryEnabled, telemetryIdentifyIfAnonymous, onboardingAccountInspect
+	telemetryEnabled = func() bool { return enabled }
+	telemetryIdentifyIfAnonymous = func(email, userID string) { *ids = append(*ids, identified{email, userID}) }
+	onboardingAccountInspect = func(time.Time) account.Status {
+		*inspected++
+		return status
+	}
+	t.Cleanup(func() {
+		telemetryEnabled, telemetryIdentifyIfAnonymous, onboardingAccountInspect = oldEnabled, oldIdentify, oldInspect
+	})
+	return inspected, ids
+}
+
+// A person who signed in with an earlier CLI is identified by the first command that runs with
+// telemetry on, whatever the install path, before the command sends anything.
+func TestEveryCommandIdentifiesAStoredSignIn(t *testing.T) {
+	stubRoot(t, false)
+	recordTelemetryInit(t)
+	user := account.User{ID: "usr_1", Email: "person@example.com"}
+	for _, tc := range []struct {
+		name          string
+		enabled       bool
+		status        account.Status
+		wantInspected int
+		want          []identified
+	}{
+		{name: "signed in", enabled: true, status: account.Status{SignedIn: true, User: user}, wantInspected: 1, want: []identified{{"person@example.com", "usr_1"}}},
+		{name: "expired", enabled: true, status: account.Status{SignedIn: true, Expired: true, User: user}, wantInspected: 1},
+		{name: "signed out", enabled: true, status: account.Status{}, wantInspected: 1},
+		{name: "telemetry off", enabled: false, status: account.Status{SignedIn: true, User: user}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inspected, ids := stubStoredSignIn(t, tc.enabled, tc.status)
+			if _, err := runBeaconCLI(t, "version"); err != nil {
+				t.Fatal(err)
+			}
+			if *inspected != tc.wantInspected || !slices.Equal(*ids, tc.want) {
+				t.Fatalf("inspected %d times, identified %+v; want %d, %+v", *inspected, *ids, tc.wantInspected, tc.want)
+			}
+		})
+	}
+}
+
+// Telemetry is not started for shell completion or the git hooks, so they read no session either.
+func TestCommandsWithoutTelemetryDoNotReadTheSession(t *testing.T) {
+	stubRoot(t, false)
+	recordTelemetryInit(t)
+	inspected, ids := stubStoredSignIn(t, true, account.Status{SignedIn: true, User: account.User{ID: "usr_1", Email: "person@example.com"}})
+	startTelemetry(&cobra.Command{Use: "__complete"}, nil)
+	if *inspected != 0 || len(*ids) != 0 {
+		t.Fatalf("inspected %d times, identified %+v", *inspected, *ids)
+	}
+}
+
+// login and logout replace or remove the stored session, so the session they start with does not
+// name the machine: a sign-in as someone else stays the first identify.
+func TestLoginAndLogoutDoNotIdentifyTheStoredSignIn(t *testing.T) {
+	stubRoot(t, false)
+	recordTelemetryInit(t)
+	inspected, ids := stubStoredSignIn(t, true, account.Status{SignedIn: true, User: account.User{ID: "usr_1", Email: "person@example.com"}})
+	for _, cmd := range []*cobra.Command{loginCmd, logoutCmd} {
+		startTelemetry(cmd, nil)
+	}
+	if *inspected != 0 || len(*ids) != 0 {
+		t.Fatalf("inspected %d times, identified %+v", *inspected, *ids)
 	}
 }

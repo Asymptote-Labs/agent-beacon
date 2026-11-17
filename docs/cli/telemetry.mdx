@@ -40,7 +40,8 @@ CLI telemetry is off by default for `--system` commands and for any command run 
 (`sudo`, package scripts, MDM, and the system scheduled jobs), so fleet installs make no
 CLI telemetry requests and write no telemetry state unless an administrator opts in with
 `BEACON_TELEMETRY=1` (`true`, `yes` and `on` work too). `DO_NOT_TRACK` still turns it off.
-On Windows, where a process is never root, this covers `--system` commands.
+On Windows, where a process is never root, this covers `--system` commands. The `beacon`
+processes such a run starts as the signed-in user are told telemetry is off too.
 
 With telemetry off, the CLI sends nothing and writes no telemetry state. A variable set
 in the shell you run `beacon endpoint install` from is also recorded in the user-mode
@@ -78,6 +79,12 @@ your email with `--email`, `BEACON_EMAIL`, or the install wizard's optional emai
 it sends events under from then on is the SHA-256 of your lower-cased email. Events from a
 work email are grouped under its domain; personal mailbox domains such as `gmail.com` are
 not. Signing out with `beacon logout` does not unlink the machine.
+
+If you are already signed in when the CLI does not know you yet, for example after signing in
+with a version that had no telemetry, the next command links the machine to that account the
+same way, once, whichever way Beacon is installed. It never replaces a person the CLI already
+knows, `beacon login` and `beacon logout` leave it to the new sign-in, and with telemetry off it
+does not read the sign-in at all.
 
 The CLI keeps this state in `~/.beacon/telemetry.json` (mode `0600`): when the notice was
 shown, the identified ID, when an install first succeeded, and where the scheduled inventory job
