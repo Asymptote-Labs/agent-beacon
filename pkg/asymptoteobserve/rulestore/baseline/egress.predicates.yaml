@@ -12,7 +12,7 @@
 # sender by its name after sudo, env, timeout and the like, inside `bash -c`, and in any stage
 # of a pipeline, and do not see one named in a quoted string, a comment or a here-document.
 library: egress
-version: 1
+version: 2
 spec: threat-rules/v1.3
 description: A command that sends data over the network.
 
@@ -21,12 +21,11 @@ definitions:
     params: [s]
     description: >
       A parsed command is a network client: curl, wget, HTTPie (http, https, httpie), xh, nc,
-      ncat, netcat or socat, by any path, or one of those run by a wrapper the parser did not
-      look through.
+      ncat, netcat or socat, by any path. Its name is the one after the wrappers the parser
+      looks through (sudo, env, timeout, nice, torsocks, proxychains and the like), so a
+      wrapped client is one too.
     body: >
-      s.name.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$") ||
-      s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") &&
-      s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"))
+      s.name.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$")
     tests:
       - name: curl
         match: e.command.parsed_commands.exists(s, egress_sender(s))
