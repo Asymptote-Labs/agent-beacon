@@ -55,7 +55,7 @@ func (f DefinitionFile) StoreName() (string, error) {
 		return "", fmt.Errorf("%s: %w", f.Name, err)
 	}
 	name, _ := head[key].(string)
-	if !idPattern.MatchString(name) {
+	if !concepts.IDPattern.MatchString(name) {
 		return "", fmt.Errorf("%s: the definitions have no name (%s: ...)", f.Name, key)
 	}
 	return name + suffix, nil
@@ -176,7 +176,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 	var definitions []PredicateDefinition
 	add := func(p *predicate, description, signature string) error {
 		switch {
-		case !predicateNamePattern.MatchString(p.name):
+		case !concepts.PredicateNamePattern.MatchString(p.name):
 			return fmt.Errorf("%s: predicate %q: want a name like credential_read", p.source, p.name)
 		case slices.Contains(reservedNames, p.name):
 			return fmt.Errorf("%s: predicate %q: the name is CEL's own", p.source, p.name)
@@ -294,7 +294,7 @@ func decodePredicatesFile(data []byte) (*predicatesFile, error) {
 		return nil, err
 	}
 	switch {
-	case !idPattern.MatchString(f.Name):
+	case !concepts.IDPattern.MatchString(f.Name):
 		return nil, fmt.Errorf("library %q: want a name like credentials", f.Name)
 	case f.Version < 1:
 		return nil, fmt.Errorf("version %d: want 1 or more", f.Version)
@@ -435,7 +435,7 @@ func (l *Library) extend(env *cel.Env) (*cel.Env, error) {
 }
 
 // undeclared finds the name in the checker's report of a call to a function it does not know.
-var undeclared = regexp.MustCompile(`undeclared reference to '([a-z][a-z0-9_]*)'`)
+var undeclared = regexp.MustCompile(`undeclared reference to '(` + strings.Trim(concepts.PredicateNamePattern.String(), "^$") + `)'`)
 
 // explain adds, to the error of an expression that calls something the library does not define,
 // what is most likely wrong: the rule was loaded without its pack's definitions.

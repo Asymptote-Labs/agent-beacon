@@ -48,11 +48,9 @@ type predicate struct {
 	selections map[string]celast.Expr
 }
 
-// predicateNamePattern is the form of a predicate's name and of a parameter's.
-var (
-	predicateNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	parameterPattern     = regexp.MustCompile(`^[a-z_][a-zA-Z0-9_]*$`)
-)
+// parameterPattern is the form of a definition's parameter. A predicate's name has the form of
+// concepts.PredicateNamePattern.
+var parameterPattern = regexp.MustCompile(`^[a-z_][a-zA-Z0-9_]*$`)
 
 // reservedNames cannot name a predicate: CEL's own functions, macros and reserved words, and
 // the event variable.

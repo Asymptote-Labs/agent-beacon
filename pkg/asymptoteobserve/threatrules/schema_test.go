@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -50,8 +51,8 @@ func TestSchemaJSONInSyncWithGo(t *testing.T) {
 		schema.Required)
 
 	// id pattern must match the Go validator's regexp.
-	if got := schema.Properties["id"].Pattern; got != idPattern.String() {
-		t.Errorf("id pattern: schema %q != Go %q", got, idPattern.String())
+	if got := schema.Properties["id"].Pattern; got != concepts.IDPattern.String() {
+		t.Errorf("id pattern: schema %q != Go %q", got, concepts.IDPattern.String())
 	}
 
 	// Enums must match the authoritative Go constants.
@@ -133,8 +134,8 @@ func TestDefinitionsSchemasInSyncWithGo(t *testing.T) {
 	assertSameSet(t, "definition test properties", yamlFields(reflect.TypeOf(PredicateTest{})), propertyNames(*test))
 	assertSameSet(t, "definition test verdict enum", []string{string(VerdictMatch), string(VerdictNoMatch)}, test.Properties["verdict"].Enum)
 	for _, c := range []struct{ what, schema, goPattern string }{
-		{"library", p.Properties["library"].Pattern, idPattern.String()},
-		{"definition name", definition.Properties["name"].Pattern, predicateNamePattern.String()},
+		{"library", p.Properties["library"].Pattern, concepts.IDPattern.String()},
+		{"definition name", definition.Properties["name"].Pattern, concepts.PredicateNamePattern.String()},
 		{"param", definition.Properties["params"].Items.Pattern, parameterPattern.String()},
 	} {
 		if c.schema != c.goPattern {
@@ -154,13 +155,41 @@ func TestDefinitionsSchemasInSyncWithGo(t *testing.T) {
 	assertSameSet(t, "catalog command properties", yamlFields(reflect.TypeOf(concepts.CommandMatch{})), propertyNames(*store.Properties["commands"].Items))
 	assertSameSet(t, "catalog tier enum", []string{string(concepts.TierDefinite), string(concepts.TierLikely)}, store.Properties["tier"].Enum)
 	for _, n := range []struct{ what, schema, goPattern string }{
-		{"catalog", c.Properties["catalog"].Pattern, idPattern.String()},
-		{"kind id", kind.Properties["id"].Pattern, idPattern.String()},
-		{"store id", store.Properties["id"].Pattern, idPattern.String()},
-		{"predicate name", c.Defs["predicateName"].Pattern, predicateNamePattern.String()},
+		{"catalog", c.Properties["catalog"].Pattern, concepts.IDPattern.String()},
+		{"kind id", kind.Properties["id"].Pattern, concepts.IDPattern.String()},
+		{"store id", store.Properties["id"].Pattern, concepts.IDPattern.String()},
+		{"predicate name", c.Defs["predicateName"].Pattern, concepts.PredicateNamePattern.String()},
 	} {
 		if n.schema != n.goPattern {
 			t.Errorf("catalog.schema.json %s pattern %q, Go %q", n.what, n.schema, n.goPattern)
+		}
+	}
+}
+
+// TestSchemasSpecPatternIsTheEngines holds the spec pattern of the three schemas to the grammar
+// the engine parses a spec with. The Go pattern captures the version's parts, so the two are
+// compared by what they accept rather than by their text.
+func TestSchemasSpecPatternIsTheEngines(t *testing.T) {
+	versions := []string{
+		"threat-rules/v1", "threat-rules/v1.3", "threat-rules/v1.0", "threat-rules/v10.12", "threat-rules/v2",
+		"threat-rules/v1.", "threat-rules/1.3", "threat-rules/v1.3.1", "threat-rules/vx", "threat-rules/v",
+		"v1.3", "threat-rules/V1.3", " threat-rules/v1.3", "threat-rules/v1.3 ", "threat-rules/v-1",
+	}
+	for _, name := range []string{"schema.json", "predicates.schema.json", "catalog.schema.json"} {
+		pattern := readSchema(t, name).Properties["spec"].Pattern
+		if pattern == "" {
+			t.Errorf("%s: spec has no pattern", name)
+			continue
+		}
+		schema, err := regexp.Compile(pattern)
+		if err != nil {
+			t.Errorf("%s: spec pattern %q: %v", name, pattern, err)
+			continue
+		}
+		for _, v := range versions {
+			if got, want := schema.MatchString(v), specPattern.MatchString(v); got != want {
+				t.Errorf("%s: spec pattern %q says %v for %q, the engine %v", name, pattern, got, v, want)
+			}
 		}
 	}
 }

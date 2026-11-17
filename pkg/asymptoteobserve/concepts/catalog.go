@@ -73,8 +73,16 @@ type Predicates struct {
 	Redacted string `yaml:"redacted,omitempty"`
 }
 
-// predicateName is the form of a predicate's name: a CEL identifier in lower case.
-var predicateName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+// The names threat rules and their definitions use. This package is the lowest that uses them,
+// so it holds them, and the rule engine and the JSON Schemas (spec/threat-rules) take them from
+// here; a test holds the schemas to them.
+var (
+	// IDPattern is the form of a rule's id and of the name of a catalog, a library of
+	// predicates, a kind and a store: a kebab slug, which admits no path separator or "." segment.
+	IDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+	// PredicateNamePattern is the form of a predicate's name: a CEL identifier in lower case.
+	PredicateNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+)
 
 // Kind is a group of stores a rule can select on its own: the Kubernetes ones, the browser ones.
 type Kind struct {
@@ -107,8 +115,6 @@ type Store struct {
 	// names are what a regular expression that copies the store spells out (see Named).
 	names []string
 }
-
-var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // Load reads and decodes the catalog file at path. It does not run the catalog's examples:
 // that is Check.
@@ -159,7 +165,7 @@ func (c *Catalog) Check() error {
 }
 
 func (c *Catalog) compile() error {
-	if !idPattern.MatchString(c.Name) {
+	if !IDPattern.MatchString(c.Name) {
 		return fmt.Errorf("catalog %q: want a name like credential-stores", c.Name)
 	}
 	if c.Version < 1 {
@@ -167,7 +173,7 @@ func (c *Catalog) compile() error {
 	}
 	kinds := map[string]bool{}
 	for _, k := range c.Kinds {
-		if !idPattern.MatchString(k.ID) || k.Title == "" || kinds[k.ID] {
+		if !IDPattern.MatchString(k.ID) || k.Title == "" || kinds[k.ID] {
 			return fmt.Errorf("kind %q: want a unique id like cloud, and a title", k.ID)
 		}
 		kinds[k.ID] = true
@@ -179,7 +185,7 @@ func (c *Catalog) compile() error {
 	for i := range c.Stores {
 		s := &c.Stores[i]
 		switch {
-		case !idPattern.MatchString(s.ID):
+		case !IDPattern.MatchString(s.ID):
 			return fmt.Errorf("stores[%d]: id %q: want lowercase letters, digits and hyphens", i, s.ID)
 		case ids[s.ID]:
 			return fmt.Errorf("store %s: defined twice", s.ID)
@@ -220,7 +226,7 @@ func (c *Catalog) compile() error {
 		switch {
 		case name == "":
 			continue
-		case !predicateName.MatchString(name):
+		case !PredicateNamePattern.MatchString(name):
 			return fmt.Errorf("predicates.%s %q: want a name like credential_path", form, name)
 		case !has:
 			return fmt.Errorf("predicates.%s %q: the catalog has no store it would be about", form, name)

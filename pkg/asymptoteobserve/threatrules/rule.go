@@ -3,21 +3,18 @@ package threatrules
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/concepts"
 )
 
-// idPattern constrains rule ids to a stable kebab slug.
-var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-
-// ValidID reports whether id is a well-formed rule id. The pattern admits no
-// path separators or "." segments, so a valid id is always a safe single
-// filename component when joined with the store directory.
-func ValidID(id string) bool { return idPattern.MatchString(id) }
+// ValidID reports whether id is a well-formed rule id (concepts.IDPattern). The pattern admits
+// no path separators or "." segments, so a valid id is always a safe single filename component
+// when joined with the store directory.
+func ValidID(id string) bool { return concepts.IDPattern.MatchString(id) }
 
 // Status is a rule's maturity level; it drives the conformance gates (see lint.go).
 type Status string
@@ -159,8 +156,8 @@ func validSeverity(s asymptoteobserve.Severity) bool {
 // expression compiling to bool against the event schema. A nil return means the rule is
 // loadable; it does not by itself assert maturity-ladder gates (see CheckMaturity).
 func (r *Rule) Validate() error {
-	if !idPattern.MatchString(r.ID) {
-		return fmt.Errorf("id %q must match %s", r.ID, idPattern.String())
+	if !ValidID(r.ID) {
+		return fmt.Errorf("id %q must match %s", r.ID, concepts.IDPattern)
 	}
 	if err := checkSpecSupported(r.ID, r.Spec); err != nil {
 		return err
