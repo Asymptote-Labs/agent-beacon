@@ -1,6 +1,7 @@
 package threatrules
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -229,9 +230,14 @@ func TestPackCategoriesMatchDirectories(t *testing.T) {
 	}
 }
 
+// update makes TestBaselineIsCorpusCopies copy the corpus files over their baseline copies.
+var update = flag.Bool("update", false, "copy the corpus files over their baseline copies")
+
 // TestBaselineIsCorpusCopies keeps the embedded baseline byte-identical to the corpus files it
 // was taken from: its rules, and the definitions embedded for them. A fix to a corpus rule or
-// catalog then cannot leave a stale copy in every binary.
+// catalog then cannot leave a stale copy in every binary. `go test ./threatrules -run
+// TestBaselineIsCorpusCopies -update` copies the corpus files over; a file new to the
+// baseline is copied in once by hand.
 func TestBaselineIsCorpusCopies(t *testing.T) {
 	baseline, err := filepath.Glob(filepath.Join(repoRoot(t), "pkg", "asymptoteobserve", "rulestore", "baseline", "*.yaml"))
 	if err != nil || len(baseline) == 0 {
@@ -243,11 +249,24 @@ func TestBaselineIsCorpusCopies(t *testing.T) {
 			t.Errorf("%s: want exactly one corpus copy, found %v", filepath.Base(path), matches)
 			continue
 		}
-		got, _ := os.ReadFile(path)
-		want, _ := os.ReadFile(matches[0])
-		if string(got) != string(want) {
-			t.Errorf("%s differs from %s; copy the corpus file over", path, matches[0])
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
 		}
+		want, err := os.ReadFile(matches[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) == string(want) {
+			continue
+		}
+		if *update {
+			if err := os.WriteFile(path, want, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		t.Errorf("%s differs from %s; run go test ./threatrules -run TestBaselineIsCorpusCopies -update", path, matches[0])
 	}
 }
 
