@@ -10,12 +10,12 @@ import (
 // equal spec/threat-rules/VERSION (a test pins the two together).
 const SupportedSpec = "threat-rules/v1.3"
 
+// The versions that added a rule feature. A field an event gained carries its version in a spec
+// tag instead (specFields).
 var (
 	// specV1_1 is the version that added correlation.order.
 	specV1_1 = specVersion{major: 1, minor: 1}
-	// specV1_2 is the version that added e.command.parsed_commands.
-	specV1_2 = specVersion{major: 1, minor: 2}
-	// specV1_3 is the version that added file_reads to each parsed command.
+	// specV1_3 is the version that added predicates.
 	specV1_3 = specVersion{major: 1, minor: 3}
 )
 

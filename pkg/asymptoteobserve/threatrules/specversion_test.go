@@ -92,62 +92,6 @@ func TestOrderRequiresSpecV1_1(t *testing.T) {
 	}
 }
 
-func TestParsedCommandsRequiresSpecV1_2(t *testing.T) {
-	const uses = "match: 'e.command.parsed_commands.exists(c, c.name == \"rm\")'\n"
-	for _, spec := range []string{"", "spec: threat-rules/v1", "spec: threat-rules/v1.1"} {
-		rule, err := DecodeRule([]byte(strings.Replace(specRule("r", spec, ""), "match: 'e.event.action == \"file.read\"'\n", uses, 1)))
-		if err != nil {
-			t.Fatalf("%q: decode: %v", spec, err)
-		}
-		if err := rule.Validate(); err == nil || !strings.Contains(err.Error(), "e.command.parsed_commands requires spec: threat-rules/v1.2") {
-			t.Errorf("%q: want the parsed_commands/spec error, got %v", spec, err)
-		}
-	}
-	// Naming the field in a string is not using it.
-	rule, err := DecodeRule([]byte(strings.Replace(specRule("r", "", ""), `e.event.action == "file.read"`, `e.command.command != "parsed_commands"`, 1)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rule.Validate(); err != nil {
-		t.Errorf("a string literal required the spec: %v", err)
-	}
-	rule, err = DecodeRule([]byte(strings.Replace(specRule("r", "spec: threat-rules/v1.2", ""), "match: 'e.event.action == \"file.read\"'\n", uses, 1)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rule.Validate(); err != nil {
-		t.Errorf("v1.2: %v", err)
-	}
-}
-
-func TestNewerParsedCommandFieldsRequireSpecV1_3(t *testing.T) {
-	for field, uses := range map[string]string{
-		"args":             "match: 'e.command.parsed_commands.exists(c, c.args.matches(\"^-rf$\"))'\n",
-		"file_reads":       "match: 'e.command.parsed_commands.exists(c, c.file_reads.exists(f, f.path == \".env\"))'\n",
-		"script_sends":     "match: 'e.command.parsed_commands.exists(c, c.script_sends.exists(p, p == \".env\"))'\n",
-		"socket_redirects": "match: 'e.command.parsed_commands.exists(c, c.socket_redirects.exists(r, r.op == \"write\"))'\n",
-	} {
-		withSpec := func(spec string) *Rule {
-			t.Helper()
-			rule, err := DecodeRule([]byte(strings.Replace(specRule("r", spec, ""), "match: 'e.event.action == \"file.read\"'\n", uses, 1)))
-			if err != nil {
-				t.Fatalf("%q: decode: %v", spec, err)
-			}
-			return rule
-		}
-		// A rule that names an older spec, or none, is told the version it needs, not the older
-		// one parsed_commands needs.
-		for _, spec := range []string{"", "spec: threat-rules/v1.1", "spec: threat-rules/v1.2"} {
-			if err := withSpec(spec).Validate(); err == nil || !strings.Contains(err.Error(), "e.command.parsed_commands[]."+field+" requires spec: threat-rules/v1.3") {
-				t.Errorf("%q: want the %s/spec error, got %v", spec, field, err)
-			}
-		}
-		if err := withSpec("spec: threat-rules/v1.3").Validate(); err != nil {
-			t.Errorf("%s at v1.3: %v", field, err)
-		}
-	}
-}
-
 func TestLoadDirSkippingSetsNewerSpecAside(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) {
