@@ -42,7 +42,9 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 			for _, m := range s.Commands {
 				matches = append(matches, m.String())
 			}
-			fmt.Fprintf(&b, "| `%s`: %s | %s | %s | %s | `%s` |\n", s.ID, s.Title, s.Tier, code(matches), code(s.Exclude), cell(s.Examples[0]))
+			// Decode does not require an example (Check does): a catalog without one gets an empty cell.
+			example := code(s.Examples[:min(len(s.Examples), 1)])
+			fmt.Fprintf(&b, "| `%s`: %s | %s | %s | %s | %s |\n", s.ID, s.Title, s.Tier, code(matches), code(s.Exclude), example)
 		}
 	}
 	b.WriteString("\n## Generated expressions\n\n" +

@@ -17,8 +17,6 @@ import (
 )
 
 var rulesCandidatesOpts struct {
-	userMode   bool
-	systemMode bool
 	logPath    string
 	rulesDir   string
 	jsonOutput bool
@@ -47,7 +45,7 @@ Nothing leaves the machine. The output holds file paths from your log.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		userMode := flagsUserMode(rulesCandidatesOpts.userMode, rulesCandidatesOpts.systemMode)
+		userMode := rulesUserMode()
 		loaded, skipped, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(rulesCandidatesOpts.rulesDir))
 		if err != nil {
 			return fmt.Errorf("load rules: %w", err)
@@ -77,10 +75,7 @@ Nothing leaves the machine. The output holds file paths from your log.`,
 		report.FilesRead = len(paths)
 		// A file is a candidate when no active catalog has it: the baseline's catalog and an
 		// installed pack's may both be active, and one may know what the other does not.
-		paths = slices.DeleteFunc(paths, func(path string) bool {
-			return slices.ContainsFunc(catalogs[1:], func(c *concepts.Catalog) bool { _, ok := c.Lookup(path); return ok })
-		})
-		report.Candidates = catalogs[0].Candidates(paths)
+		report.Candidates = concepts.Candidates(paths, catalogs...)
 
 		out := cmd.OutOrStdout()
 		if rulesCandidatesOpts.jsonOutput {
@@ -127,8 +122,8 @@ func pathsRead(logPath string) ([]string, error) {
 }
 
 func init() {
-	rulesCandidatesCmd.Flags().BoolVar(&rulesCandidatesOpts.userMode, "user", true, "Use per-user endpoint paths")
-	rulesCandidatesCmd.Flags().BoolVar(&rulesCandidatesOpts.systemMode, "system", false, "Use system endpoint paths")
+	rulesCandidatesCmd.Flags().BoolVar(&rulesOpts.userMode, "user", true, "Use per-user endpoint paths")
+	rulesCandidatesCmd.Flags().BoolVar(&rulesOpts.systemMode, "system", false, "Use system endpoint paths")
 	rulesCandidatesCmd.Flags().StringVar(&rulesCandidatesOpts.logPath, "log-path", "", "Runtime JSONL log path (default: resolved from config)")
 	rulesCandidatesCmd.Flags().StringVar(&rulesCandidatesOpts.rulesDir, "rules", "", "Rule directory whose catalog to check against, instead of the store and baseline")
 	rulesCandidatesCmd.Flags().BoolVar(&rulesCandidatesOpts.jsonOutput, "json", false, "Output as JSON")

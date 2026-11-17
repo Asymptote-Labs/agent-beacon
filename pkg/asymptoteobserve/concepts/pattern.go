@@ -276,9 +276,9 @@ func patternsRegex(patterns []pattern) string {
 	return `(?i)(?:^|` + separator + `)(?:` + strings.Join(alternatives, "|") + `)`
 }
 
-// plainWord reports whether the pattern is one component written without a ".", such as
+// undottedName reports whether the pattern is one component written without a ".", such as
 // "credentials" or "id_rsa": a word a text also uses for what is not a file.
-func (p *pattern) plainWord() bool {
+func (p *pattern) undottedName() bool {
 	if p.under || len(p.parts) != 1 || p.parts[0].any {
 		return false
 	}
@@ -315,12 +315,12 @@ func (p *pattern) mentionRegex() string {
 }
 
 // mentionsRegex returns one RE2 regular expression that matches a text which names a file any
-// of the patterns names. A plain word counts only with a directory before it: "the credentials"
-// is prose and "config/credentials" is a file.
+// of the patterns names. An undotted name counts only with a directory before it: "the
+// credentials" is prose and "config/credentials" is a file.
 func mentionsRegex(patterns []pattern) string {
 	var named, words []string
 	for i := range patterns {
-		if patterns[i].plainWord() {
+		if patterns[i].undottedName() {
 			words = append(words, patterns[i].mentionRegex())
 		} else {
 			named = append(named, patterns[i].mentionRegex())

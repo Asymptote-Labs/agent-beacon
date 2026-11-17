@@ -1,6 +1,7 @@
 package concepts
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -286,14 +287,18 @@ func TestDecodeAndCheckRefuse(t *testing.T) {
 	}
 }
 
-// credentialStores loads the catalog the rule pack ships.
+// credentialStores decodes and checks the catalog the rule pack ships.
 func credentialStores(t *testing.T) *Catalog {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	c, err := Load(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "rules", "concepts", "credential-stores.catalog.yaml"))
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "rules", "concepts", "credential-stores.catalog.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Decode(data)
 	if err == nil {
 		err = c.Check()
 	}
@@ -301,6 +306,22 @@ func credentialStores(t *testing.T) *Catalog {
 		t.Fatal(err)
 	}
 	return c
+}
+
+// Decode does not require a store to give an example, so the reference renders a catalog
+// without one, with an empty cell.
+func TestMarkdownWithoutAnExample(t *testing.T) {
+	c, err := Decode([]byte(strings.Replace(smallCatalog, `    examples: ["/home/u/.aws/credentials"]`+"\n", "", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	md, err := c.Markdown("test.catalog.yaml", "regenerate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "| `aws`: AWS shared credentials | definite | `.aws/credentials` |  |  |\n"; !strings.Contains(md, want) {
+		t.Errorf("Markdown has no row %q:\n%s", want, md)
+	}
 }
 
 // pathVariants are paths near path: the ones a careless pattern or expression gets wrong.
@@ -659,11 +680,21 @@ func TestNamedTellsACopyFromAWord(t *testing.T) {
 	}
 }
 
-// A candidate is a file that is read, named like a credential's and in no store: what the
-// catalog's reviewers have not seen. A store, source code, documentation and a template are not.
-func TestCandidatesAreCredentialLikeFilesTheCatalogLacks(t *testing.T) {
-	c := credentialStores(t)
-	got := c.Candidates([]string{
+// A candidate is a file that is read, named like a credential's and in no catalog's store: what
+// the catalogs' reviewers have not seen. A store of any catalog, source code, documentation and
+// a template are not.
+func TestCandidatesAreCredentialLikeFilesTheCatalogsLack(t *testing.T) {
+	other, err := Decode([]byte(`
+catalog: app-stores
+version: 1
+kinds: [{id: app, title: App}]
+stores:
+  - {id: backup-passphrase, title: Backup passphrase, kind: app, tier: definite, match: [backup-passphrase]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := Candidates([]string{
 		"/srv/app/config/master.key",
 		"/home/u/work/client_secret.json",
 		"/home/u/other/client_secret.json",
@@ -671,12 +702,13 @@ func TestCandidatesAreCredentialLikeFilesTheCatalogLacks(t *testing.T) {
 		"/home/u/.config/app/auth-token:1-20",
 		"/home/u/.aws/credentials",       // a store
 		"/repo/.env",                     // a store
+		"/opt/app/backup-passphrase",     // a store of the other catalog
 		"/repo/src/auth/credentials.go",  // source code
 		"/repo/docs/token-usage.mdx:26",  // documentation, with a line selector
 		"/repo/config/secrets.yaml.tmpl", // a template
 		"/repo/rules/x/credentials-in-curl-data.rule.yaml",
 		"/repo/README.md",
-	})
+	}, credentialStores(t), other)
 	want := []Candidate{
 		{Name: "client_secret.json", Reads: 2, Example: "/home/u/work/client_secret.json"},
 		{Name: "auth-token", Reads: 1, Example: "/home/u/.config/app/auth-token"},

@@ -159,7 +159,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 		switch {
 		case !concepts.PredicateNamePattern.MatchString(p.name):
 			return fmt.Errorf("%s: predicate %q: want a name like credential_read", p.source, p.name)
-		case slices.Contains(reservedNames, p.name):
+		case celsOwn(p.name):
 			return fmt.Errorf("%s: predicate %q: the name is CEL's own", p.source, p.name)
 		case l.predicates[p.name] != nil:
 			return fmt.Errorf("%s: predicate %s is already defined in %s", p.source, p.name, l.predicates[p.name].source)

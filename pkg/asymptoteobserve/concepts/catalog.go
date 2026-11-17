@@ -13,7 +13,6 @@ package concepts
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -39,6 +38,14 @@ const (
 // in. Definite is the stronger tier: a selection of likely stores takes the definite ones too.
 func (least Tier) includes(t Tier) bool {
 	return least == TierLikely || t == TierDefinite
+}
+
+// check returns an error when t is not a tier.
+func (t Tier) check() error {
+	if t != TierDefinite && t != TierLikely {
+		return fmt.Errorf("tier %q: want %s or %s", t, TierDefinite, TierLikely)
+	}
+	return nil
 }
 
 // Catalog is a list of stores.
@@ -142,20 +149,6 @@ type Store struct {
 	names []string
 }
 
-// Load reads and decodes the catalog file at path. It does not run the catalog's examples:
-// that is Check.
-func Load(path string) (*Catalog, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	c, err := Decode(data)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return c, nil
-}
-
 // Decode strictly decodes a catalog and checks its shape and its patterns. It is what a rule
 // engine does each time it loads a pack, so it does not run the catalog's examples: Check does,
 // when a catalog is linted, tested or installed, as a rule's fixtures are run then and not on
@@ -242,8 +235,11 @@ func (c *Catalog) compile() error {
 			return fmt.Errorf("store %s: no title", s.ID)
 		case !kinds[s.Kind]:
 			return fmt.Errorf("store %s: kind %q is not one of the catalog's kinds", s.ID, s.Kind)
-		case s.Tier != TierDefinite && s.Tier != TierLikely:
-			return fmt.Errorf("store %s: tier %q: want %s or %s", s.ID, s.Tier, TierDefinite, TierLikely)
+		}
+		if err := s.Tier.check(); err != nil {
+			return fmt.Errorf("store %s: %w", s.ID, err)
+		}
+		switch {
 		case len(s.Match) == 0 && len(s.Commands) == 0:
 			return fmt.Errorf("store %s: no match patterns and no commands", s.ID)
 		case len(s.Commands) > 0 && (len(s.Match) > 0 || len(s.Exclude) > 0):
@@ -461,8 +457,8 @@ type PathTerm struct {
 // every kind.
 func (c *Catalog) Select(min Tier, kinds ...string) (Selection, error) {
 	var selection Selection
-	if min != TierDefinite && min != TierLikely {
-		return selection, fmt.Errorf("tier %q: want %s or %s", min, TierDefinite, TierLikely)
+	if err := min.check(); err != nil {
+		return selection, err
 	}
 	for _, kind := range kinds {
 		if !slices.ContainsFunc(c.Kinds, func(k Kind) bool { return k.ID == kind }) {
