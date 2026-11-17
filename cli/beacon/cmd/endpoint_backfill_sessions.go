@@ -43,7 +43,7 @@ func logSize(path string) int64 {
 // A sweep never rotates the log (a collector stops before it would), so a log now shorter than
 // offset was replaced by something else and yields nothing.
 func sessionsWrittenSince(path string, offset int64) []sweptSession {
-	sessions, _ := sessionsInLog(path, offset, asymptoteobserve.CollectionMethodPoll)
+	sessions, _ := sessionsInLog(path, offset, asymptoteobserve.CollectionMethodPoll, time.Time{})
 	return sessions
 }
 
@@ -51,9 +51,10 @@ func sessionsWrittenSince(path string, offset int64) []sweptSession {
 // order they first appear, and the offset just past the last complete line it read. method keeps
 // only records of that collection method; "" keeps every record a collector wrote (any non-empty
 // collection method), never the records Beacon writes about a session itself, such as a share or
-// a commit link, which carry an old session's ID. A log shorter than offset yields nothing, and
-// offset back.
-func sessionsInLog(path string, offset int64, method string) ([]sweptSession, int64) {
+// a commit link, which carry an old session's ID. A non-zero pollSince also leaves out session-store
+// (poll) records from before it: a manual sync of old history writes them now, but they are not new
+// sessions. A log shorter than offset yields nothing, and offset back.
+func sessionsInLog(path string, offset int64, method string, pollSince time.Time) ([]sweptSession, int64) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, offset
@@ -83,14 +84,20 @@ func sessionsInLog(path string, offset int64, method string) ([]sweptSession, in
 			continue
 		}
 		var event struct {
-			Harness asymptoteobserve.HarnessInfo  `json:"harness"`
-			Session *asymptoteobserve.SessionInfo `json:"session"`
+			Timestamp string                        `json:"timestamp"`
+			Harness   asymptoteobserve.HarnessInfo  `json:"harness"`
+			Session   *asymptoteobserve.SessionInfo `json:"session"`
 		}
 		if json.Unmarshal(line, &event) != nil || event.Session == nil || event.Session.ID == "" || event.Harness.Name == "" {
 			continue
 		}
 		if event.Harness.CollectionMethod == "" || (method != "" && event.Harness.CollectionMethod != method) {
 			continue
+		}
+		if !pollSince.IsZero() && event.Harness.CollectionMethod == asymptoteobserve.CollectionMethodPoll {
+			if at, err := asymptoteobserve.ParseTimestamp(event.Timestamp); err != nil || at.Before(pollSince) {
+				continue
+			}
 		}
 		session := sweptSession{Harness: event.Harness.Name, ID: event.Session.ID}
 		if !seen[session] {
@@ -127,7 +134,9 @@ const (
 // recordLiveTraces sends cli_trace_recorded (source live) for the sessions any collector (hooks,
 // OTLP, session stores) wrote to the runtime log since the last scheduled inventory run, which is
 // on by default, unlike the session sync. The first run, and a run more than maxLiveTraceGap after
-// the last, only records where the log ends, so history is never reported as live; RecordTraces
+// the last, only records where the log ends, so history is never reported as live, and session-store
+// records count only when they happened since the last run (a manual sync of 30-day-old sessions
+// writes them after it, but they are history); RecordTraces
 // skips sessions already reported. When the log has rotated since the last run, the file it read
 // is found among the archives by its first line and read on from where it stopped, then every
 // newer archive, then the live log. An endpoint connected to Beacon Cloud only moves the position:
@@ -156,7 +165,7 @@ func recordLiveTraces(logPath string, userMode bool) {
 	var sessions []sweptSession
 	next := int64(0)
 	for _, part := range parts {
-		found, end := sessionsInLog(part.path, part.offset, "")
+		found, end := sessionsInLog(part.path, part.offset, "", last.SavedAt)
 		for _, session := range found {
 			if !seen[session] {
 				seen[session] = true

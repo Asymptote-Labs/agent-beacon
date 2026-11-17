@@ -77,7 +77,7 @@ func RecordTraces(source string, traces []Trace) {
 			break
 		}
 		Capture(EventTraceRecorded, map[string]any{
-			PropHarness:          t.Harness,
+			PropHarness:          traceHarness(t.Harness),
 			PropSource:           source,
 			PropIsFirstForDevice: first && i == 0,
 		})
