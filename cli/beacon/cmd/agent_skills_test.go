@@ -38,7 +38,7 @@ func TestAgentSkillsFrontmatterFollowsSpec(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		text := normalizeNewlines(data)
+		text := string(data)
 		if !strings.HasPrefix(text, "---\n") {
 			t.Fatalf("%s: missing frontmatter", path)
 		}
@@ -86,7 +86,7 @@ func TestAgentSkillsReferenceRealCommandsAndFlags(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, command := range beaconCommandsInMarkdown(normalizeNewlines(data)) {
+		for _, command := range beaconCommandsInMarkdown(string(data)) {
 			checkBeaconCommand(t, path, command)
 			checked++
 		}
@@ -178,15 +178,10 @@ func TestAgentSkillsManifestsAgree(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(normalizeNewlines(data), `version: "`+want.Version+`"`) {
+		if !strings.Contains(string(data), `version: "`+want.Version+`"`) {
 			t.Errorf("%s: metadata version should be %q like plugin.json", path, want.Version)
 		}
 	}
-}
-
-// normalizeNewlines undoes a CRLF checkout, which Windows runners may use.
-func normalizeNewlines(data []byte) string {
-	return strings.ReplaceAll(string(data), "\r\n", "\n")
 }
 
 func mustGlob(t *testing.T, pattern string) []string {

@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -106,8 +105,7 @@ func TestCredentialStoresReferenceInSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the reference (regenerate: %s): %v", regenerate, err)
 	}
-	// Compared after normalizing line endings: Git for Windows may check the file out with CRLF.
-	if strings.ReplaceAll(string(got), "\r\n", "\n") != want {
+	if string(got) != want {
 		t.Fatalf("rules/concepts/credential-stores.md is stale; regenerate with: %s", regenerate)
 	}
 }
