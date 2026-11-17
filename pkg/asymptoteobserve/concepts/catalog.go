@@ -95,7 +95,7 @@ func (c *Catalog) PredicateForms() []PredicateForm {
 		{"path", c.Predicates.Path, "p", "a path that is a store of files", false, Selection.PathCEL},
 		{"command", c.Predicates.Command, "c", "a parsed command that reads a store of commands", true, Selection.CommandCEL},
 		{"mention", c.Predicates.Mention, "s", "a text that names a store of files", false, Selection.MentionCEL},
-		{"redacted", c.Predicates.Redacted, "s", "a command line in which redaction took the name of a command that reads a store of commands", true, Selection.RedactedCEL},
+		{"redacted", c.Predicates.Redacted, "s", "a command line in which redaction took the name of a command that reads a store of commands, as a log of an older release holds it, or any log where the substitution opens with an assignment", true, Selection.RedactedCEL},
 	}
 }
 
@@ -520,9 +520,12 @@ func (s Selection) MentionCEL(subject string) string {
 
 // RedactedCEL returns a CEL boolean expression over subject, a string expression for a command
 // line (e.command.command), that is true when the text holds one of the selection's commands
-// with its name redacted: "ci:[REDACTED] auth token)", which is what a log keeps of
-// curl -u "ci:$(gh auth token)". A command told only by its name, or by its name and one-letter
-// options, has no such form. It is false for a selection without one.
+// with its name redacted, which is what a log keeps of a substitution redaction replaced: one
+// that opens with an assignment, `TOKEN=$(GH_TOKEN=$(gh auth token) ./x)` logged as
+// "TOKEN=[REDACTED] auth token) ./x)", and in logs of older releases every substitution after a
+// secret's label, "ci:[REDACTED] auth token)" for curl -u "ci:$(gh auth token)". A command told
+// only by its name, or by its name and one-letter options, has no such form. It is false for a
+// selection without one.
 func (s Selection) RedactedCEL(subject string) string {
 	if s.Redacted == "" {
 		return "false"

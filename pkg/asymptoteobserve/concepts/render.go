@@ -56,10 +56,11 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 		"is named by the characters a name is written with, a word that is also a file name\n" +
 		"(`credentials`) counts only after a directory, and a store that excludes some names is not\n" +
 		"named by a text that also holds one of those. And the commands as a log holds them when\n" +
-		"redaction took the command's name: `curl -u \"ci:$(gh auth token)\"` is logged as\n" +
-		"`curl -u \"ci:[REDACTED] auth token)\"`, and an older log holds `TOKEN=[REDACTED] auth token)`\n" +
-		"for `TOKEN=$(gh auth token)`. A command told only by its name, by one plain word or by\n" +
-		"one-letter options has no such form.\n")
+		"redaction took the command's name. A substitution that opens with an assignment still loses\n" +
+		"it: `TOKEN=$(GH_TOKEN=$(gh auth token) ./x)` is logged as `TOKEN=[REDACTED] auth token) ./x)`.\n" +
+		"Logs of older releases lost it after every secret's label: `curl -u \"ci:[REDACTED] auth token)\"`\n" +
+		"for `curl -u \"ci:$(gh auth token)\"`, `TOKEN=[REDACTED] auth token)` for `TOKEN=$(gh auth token)`.\n" +
+		"A command told only by its name, by one plain word or by one-letter options has no such form.\n")
 	if c.Predicates != (Predicates{}) {
 		b.WriteString("\nA rule of a pack that ships this catalog calls it by name instead of carrying the\nexpressions:\n\n")
 		for _, form := range c.PredicateForms() {

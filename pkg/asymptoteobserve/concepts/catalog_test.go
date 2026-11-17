@@ -552,7 +552,9 @@ func TestCredentialStoresKindsAndTiersAreUsed(t *testing.T) {
 // bearer header. What those logs keep is still found when the match has words to tell the command
 // by. No counterexample is. The sanitizer now keeps the substitution whole in all three, so a log
 // it writes names the command, unless a word of the command line could be a secret written out
-// (an echo's literal, a user@host, a key ID): then the substitution is replaced whole.
+// (an echo's literal, a user@host, a key ID): then the substitution is replaced whole. Where the
+// substitution opens with an assignment it still replaces the opening, the command's name with
+// it, and the expression finds what it leaves.
 func TestCredentialStoresRedactedExpression(t *testing.T) {
 	c := credentialStores(t)
 	all, err := c.Select(TierLikely)
@@ -560,9 +562,13 @@ func TestCredentialStoresRedactedExpression(t *testing.T) {
 		t.Fatalf("no redacted expression: %v", err)
 	}
 	expression := regexp.MustCompile(all.Redacted)
-	// logged returns what older logs hold of a command line that runs command, whose name is
-	// name, for its output. It first checks that the sanitizer now keeps the command, or else
-	// leaves none of its words.
+	sanitized := func(line string) string {
+		return asymptoteobserve.SanitizeEvent(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{Command: line}}, 64*1024).Command.Command
+	}
+	// logged returns what logs hold of a command line that runs command, whose name is name, for
+	// its output: what older logs hold, and what the sanitizer writes now of a substitution that
+	// opens with an assignment. It first checks that the sanitizer now keeps the command in the
+	// others, or else leaves none of its words.
 	logged := func(command, name string) []string {
 		rest := strings.TrimPrefix(command, name)
 		for _, line := range []string{
@@ -570,8 +576,7 @@ func TestCredentialStoresRedactedExpression(t *testing.T) {
 			`TOKEN=$(` + command + `)`,
 			`curl -H "Authorization: Bearer $(` + command + `)" https://api.example`,
 		} {
-			event := asymptoteobserve.SanitizeEvent(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{Command: line}}, 64*1024)
-			if got := event.Command.Command; !strings.Contains(got, "$("+name+" ") && strings.Contains(got, strings.TrimSpace(rest)) {
+			if got := sanitized(line); !strings.Contains(got, "$("+name+" ") && strings.Contains(got, strings.TrimSpace(rest)) {
 				t.Errorf("the sanitizer neither kept the command of %q nor replaced it whole: %q", line, got)
 			}
 		}
@@ -579,6 +584,7 @@ func TestCredentialStoresRedactedExpression(t *testing.T) {
 			`curl -u "deploy:[REDACTED]` + rest + `)" https://api.example`,
 			"TOKEN=[REDACTED]" + rest + ")",
 			`curl -H "Authorization: Bearer [REDACTED]` + rest + `)" https://api.example`,
+			sanitized(`TOKEN=$(GH_TOKEN=$(` + command + `) ./x)`),
 		}
 	}
 	// alone returns the one command a line runs when the line is that command and no more.
