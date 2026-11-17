@@ -55,11 +55,12 @@ type Options struct {
 	Environ func() []string
 	// Stderr receives the first-run notice.
 	Stderr io.Writer
-	// Interactive is true when Stderr is a terminal a person is reading. The notice is printed
-	// and recorded as shown only then, so a background job, an internal child process or a
-	// redirected run leaves it for the person's own first command.
-	Interactive bool
-	Now         func() time.Time
+	// ShowNotice is true when whoever ran the command reads its stderr: a person at a terminal, or
+	// a coding agent or script that ran it, which is how most installs happen. The notice is
+	// printed and recorded as shown only then, so a scheduled job or an internal child process,
+	// whose stderr goes to a log or a buffer, leaves it for a run someone sees.
+	ShowNotice bool
+	Now        func() time.Time
 }
 
 // recorder is the enabled state of one process.
@@ -82,7 +83,7 @@ var (
 
 // Init turns telemetry on for this process unless it is a development build, the environment opts
 // out, or it is system mode and the environment does not opt in. It makes sure the machine's install ID exists in profile.json, prints the first-run
-// notice once to an interactive terminal, and never touches the network: the PostHog client starts with the first event.
+// notice once to a run someone reads, and never touches the network: the PostHog client starts with the first event.
 func Init(opts Options) {
 	r := newRecorder(opts)
 	mu.Lock()
@@ -132,7 +133,7 @@ func newRecorder(opts Options) *recorder {
 	}
 
 	st := loadState(home)
-	if st.NoticeShownAt == "" && opts.Stderr != nil && opts.Interactive && persist {
+	if st.NoticeShownAt == "" && opts.Stderr != nil && opts.ShowNotice && persist {
 		// Recorded before it is printed, so a notice that could not be recorded is not printed and
 		// is never shown again on every run. Decided under the lock, so two runs starting together
 		// print it once.
