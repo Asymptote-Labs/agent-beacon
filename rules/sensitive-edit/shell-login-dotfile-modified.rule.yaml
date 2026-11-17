@@ -1,12 +1,13 @@
 id: shell-login-dotfile-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 5
+version: 6
 title: Shell rc / login dotfile modified
 description: >
   The agent modified a shell startup or login file: a user's dotfile (.bashrc,
   .bash_profile, .bash_login, .profile, .zshrc, .zprofile, .zshenv, .zlogin, .kshrc,
   .login, .cshrc, .tcshrc, or fish config.fish), the system's /etc/profile,
-  /etc/bash.bashrc, /etc/zshrc, /etc/zshenv or /etc/zprofile, or a file of /etc/zsh or
+  /etc/bash.bashrc, /etc/bashrc, /etc/zshrc, /etc/zshenv, /etc/zprofile, /etc/zlogin or
+  /etc/csh.cshrc, or a file of /etc/zsh or
   of a profile.d directory. These run on every new shell or login session, outside any
   agent sandbox, so an edit here is durable persistence (e.g. an injected command,
   alias, or PATH change), and a system-wide one reaches every user of the machine.
@@ -54,6 +55,12 @@ tests:
     events:
       - event: { action: file.modified }
         file: { path: "/etc/bash.bashrc" }
+        session: { id: s1 }
+  - name: red_hat_and_macos_system_bashrc_appended_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'alias sudo=/tmp/s' | sudo tee -a /etc/bashrc" }
         session: { id: s1 }
   - name: file_of_the_system_zsh_directory_written_inside_a_shell
     verdict: match

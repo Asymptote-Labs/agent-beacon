@@ -1,6 +1,6 @@
 id: telemetry-or-history-tampering
 spec: threat-rules/v1.3  # needed for args, file_writes and predicates
-version: 5
+version: 6
 title: Beacon telemetry or shell history disabled or removed
 description: >
   An agent deletes or truncates Beacon data, removes its managed plugin files,
