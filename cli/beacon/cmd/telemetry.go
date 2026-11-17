@@ -12,7 +12,11 @@ import (
 )
 
 // Swapped by tests.
-var telemetryInit = telemetry.Init
+var (
+	telemetryInit                = telemetry.Init
+	telemetryEnabled             = telemetry.Enabled
+	telemetryIdentifyIfAnonymous = telemetry.IdentifyIfAnonymous
+)
 
 // startTelemetry is the root command's PersistentPreRun: it turns telemetry on for the command
 // about to run. Scheduled jobs run through here too, so the events they send work there, but no
@@ -27,6 +31,26 @@ func startTelemetry(cmd *cobra.Command, _ []string) {
 		Stderr:      cmd.ErrOrStderr(),
 		ShowNotice:  telemetryShowsNotice(cmd),
 	})
+	// login and logout replace or remove the stored session, so it would name the wrong person:
+	// a sign-in as someone else must stay the first identify.
+	if cmd != loginCmd && cmd != logoutCmd {
+		identifyStoredSignIn()
+	}
+}
+
+// identifyStoredSignIn ties an anonymous machine to the account already signed in on it, so a
+// person who signed in with an earlier CLI is known to every path that never shows the wizard
+// (agent, script and CI installs, the scheduled jobs' trace events). It runs once per machine:
+// telemetry remembers the person, and a machine a sign-in or an install email already named is
+// left as it is. With telemetry off the session file is not even read.
+func identifyStoredSignIn() {
+	if !telemetryEnabled() {
+		return
+	}
+	status := onboardingAccountInspect(onboardingClock())
+	if status.SignedIn && !status.Expired && status.User.Email != "" {
+		telemetryIdentifyIfAnonymous(status.User.Email, status.User.ID)
+	}
 }
 
 // telemetryShowsNotice reports whether whoever ran this command reads its stderr, which is when the

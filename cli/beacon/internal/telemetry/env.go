@@ -139,13 +139,23 @@ func normalizeAgentName(raw string) string {
 var OptOutVariables = []string{EnvTelemetry, EnvDoNotTrack}
 
 // OptOutEnv returns NAME=value for each of OptOutVariables set in this process's environment, for a
-// beacon child process started with an environment of its own, so an opt-out reaches it.
+// beacon child process started with an environment of its own, so an opt-out reaches it. When
+// telemetry is off in this process its BEACON_TELEMETRY is 0, so a child run as the console user by
+// a system-mode parent, which is off by default, does not turn telemetry on in user mode and
+// identify that person.
 func OptOutEnv() []string {
+	off := !Enabled()
 	var env []string
 	for _, name := range OptOutVariables {
+		if off && name == EnvTelemetry {
+			continue
+		}
 		if value, ok := os.LookupEnv(name); ok {
 			env = append(env, name+"="+value)
 		}
+	}
+	if off {
+		env = append(env, EnvTelemetry+"=0")
 	}
 	return env
 }

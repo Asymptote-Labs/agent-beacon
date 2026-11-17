@@ -563,6 +563,134 @@ func TestIdentifyWithAPersonalEmailHasNoCompany(t *testing.T) {
 	}
 }
 
+// A sign-in an earlier CLI recorded names a machine nobody identified yet, once, and never
+// replaces the person a later run already knows.
+func TestIdentifyIfAnonymousNamesOnlyAnAnonymousMachine(t *testing.T) {
+	s, home := setup(t, nil)
+	Init(options(nil, io.Discard))
+	installID := onboarding.Load().InstallID
+	IdentifyIfAnonymous(" Ada@Example.com ", "user_123")
+	Capture("cli_after", nil)
+	Close()
+
+	id := DistinctIDForEmail("ada@example.com")
+	aliases := s.byEvent("$create_alias")
+	if len(aliases) != 1 || properties(t, aliases[0])["alias"] != installID || properties(t, aliases[0])["distinct_id"] != id {
+		t.Fatalf("aliases = %v", aliases)
+	}
+	sets := s.byEvent(eventSet)
+	if len(sets) != 1 {
+		t.Fatalf("got %d $set events, want 1", len(sets))
+	}
+	if set, _ := properties(t, sets[0])[propSet].(map[string]any); set[PersonEmail] != "ada@example.com" || set[PersonBeaconUserID] != "user_123" {
+		t.Fatalf("$set = %v", set)
+	}
+	if after := s.byEvent("cli_after"); len(after) != 1 || after[0]["distinct_id"] != id {
+		t.Fatalf("event after identify = %v", after)
+	}
+	if st := loadState(home); st.PHDistinctID != id {
+		t.Fatalf("state = %+v", st)
+	}
+
+	// The next run already knows the person: nothing is sent, even for another account, and its
+	// events stay the person's.
+	s2, _ := setupSink(t)
+	Init(options(nil, io.Discard))
+	IdentifyIfAnonymous("ada@example.com", "user_123")
+	IdentifyIfAnonymous("bob@example.com", "user_456")
+	Capture("cli_next", nil)
+	Close()
+	if n := len(s2.byEvent("$create_alias")) + len(s2.byEvent(eventSet)); n != 0 {
+		t.Fatalf("an identified machine was identified again: %v", s2.all())
+	}
+	if next := s2.byEvent("cli_next"); len(next) != 1 || next[0]["distinct_id"] != id {
+		t.Fatalf("next run's event = %v", next)
+	}
+
+	// Identify itself still re-identifies: a new sign-in names the machine's person.
+	s3, _ := setupSink(t)
+	Init(options(nil, io.Discard))
+	Identify("bob@example.com", "user_456")
+	Close()
+	if len(s3.byEvent("$create_alias")) != 1 || loadState(home).PHDistinctID != DistinctIDForEmail("bob@example.com") {
+		t.Fatalf("a sign-in did not re-identify: %v", s3.all())
+	}
+}
+
+func TestIdentifyIfAnonymousWithTelemetryOffSendsNothing(t *testing.T) {
+	s, home := setup(t, map[string]string{EnvTelemetry: "0"})
+	Init(options(map[string]string{EnvTelemetry: "0"}, io.Discard))
+	IdentifyIfAnonymous("ada@example.com", "user_123")
+	Close()
+	if len(s.all()) != 0 {
+		t.Fatalf("sent %v with telemetry off", s.all())
+	}
+	if _, err := os.Stat(filepath.Join(home, StatePath)); !os.IsNotExist(err) {
+		t.Fatalf("telemetry.json written with telemetry off: %v", err)
+	}
+}
+
+// A home where the person cannot be remembered sends nothing, rather than the alias and $set again
+// on every run.
+func TestIdentifyIfAnonymousSendsNothingItCannotSave(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root writes through the read-only directory")
+	}
+	s, home := setup(t, nil)
+	Init(options(nil, io.Discard))
+	dir := filepath.Dir(filepath.Join(home, StatePath))
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	IdentifyIfAnonymous("ada@example.com", "user_123")
+	Capture("cli_after", nil)
+	Close()
+	if n := len(s.byEvent("$create_alias")) + len(s.byEvent(eventSet)); n != 0 {
+		t.Fatalf("identified a person it could not save: %v", s.all())
+	}
+	if after := s.byEvent("cli_after"); len(after) != 1 || after[0]["distinct_id"] == DistinctIDForEmail("ada@example.com") {
+		t.Fatalf("event after a refused identify = %v", after)
+	}
+}
+
+// A child started with telemetry off here is told so, whatever its own mode would decide: a
+// system-mode parent's console-user children run in user mode.
+func TestOptOutEnvCarriesThisProcesssDecision(t *testing.T) {
+	t.Setenv(EnvTelemetry, "")
+	os.Unsetenv(EnvTelemetry)
+	t.Setenv(EnvDoNotTrack, "")
+	os.Unsetenv(EnvDoNotTrack)
+	setup(t, nil)
+
+	Init(Options{Version: testVersion, InstallMode: InstallModeSystem, Getenv: func(string) string { return "" }, Environ: func() []string { return nil }})
+	if env := OptOutEnv(); !slices.Equal(env, []string{EnvTelemetry + "=0"}) {
+		t.Fatalf("system mode: OptOutEnv() = %v", env)
+	}
+	Close()
+
+	Init(options(nil, io.Discard))
+	if env := OptOutEnv(); len(env) != 0 {
+		t.Fatalf("telemetry on: OptOutEnv() = %v", env)
+	}
+	Close()
+}
+
+// One run that identifies the same person twice (the install's start, then the wizard) sends one
+// $set.
+func TestIdentifyingTheSamePersonTwiceInARunSendsOneSet(t *testing.T) {
+	s, _ := setup(t, nil)
+	Init(options(nil, io.Discard))
+	IdentifyIfAnonymous("ada@example.com", "user_123")
+	Identify("ada@example.com", "user_123")
+	Identify("Ada@Example.com", " user_123 ")
+	Close()
+	if len(s.byEvent("$create_alias")) != 1 || len(s.byEvent(eventSet)) != 1 {
+		t.Fatalf("messages = %v", s.all())
+	}
+}
+
 func TestCloseIsCappedWhenTheEndpointHangs(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
