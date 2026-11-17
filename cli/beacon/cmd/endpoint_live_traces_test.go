@@ -139,8 +139,8 @@ func TestRecordLiveTracesReportsNewSessionsFromEveryCollector(t *testing.T) {
 }
 
 // A manual sync of old sessions writes their records after the last scan, but they are history:
-// only session-store records that happened since the last scan are live. Live collectors' lines
-// count whatever their time.
+// only session-store records from shortly before the last scan or later are live. Live collectors'
+// lines count whatever their time.
 func TestRecordLiveTracesSkipsSessionStoreHistory(t *testing.T) {
 	calls, pos, set := liveTraceHarness(t, false)
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
@@ -150,9 +150,11 @@ func TestRecordLiveTracesSkipsSessionStoreHistory(t *testing.T) {
 	appendSessionEventAt(t, logPath, "codex_cli", schema.CollectionMethodPoll, "month-old", old)
 	appendSessionEventAt(t, logPath, "claude_code", schema.CollectionMethodHook, "hook", old)
 	appendSessionEvent(t, logPath, "codex_cli", schema.CollectionMethodPoll, "new")
+	// A session that ended just before the last scan, which the session sync wrote after it.
+	appendSessionEventAt(t, logPath, "fx", schema.CollectionMethodPoll, "synced-after", pos.SavedAt.Add(-10*time.Minute))
 
 	recordLiveTraces(logPath, true)
-	if want := []string{"live:claude_code/hook", "live:codex_cli/new"}; !reflect.DeepEqual(*calls, want) {
+	if want := []string{"live:claude_code/hook", "live:codex_cli/new", "live:fx/synced-after"}; !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("recorded %v, want %v", *calls, want)
 	}
 	if pos.Offset != logSize(logPath) {

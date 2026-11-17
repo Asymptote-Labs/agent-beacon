@@ -125,6 +125,11 @@ const (
 	// a couple of inventory intervals, because the job's timer does not fire while a laptop sleeps:
 	// a night or a weekend closed must not cost the sessions of the evening before.
 	maxLiveTraceGap = 72 * time.Hour
+	// livePollMargin is how long before the last scan a session-store record may have happened and
+	// still count as live. Those records reach the log after the fact (the session sync runs every
+	// 15 minutes, and not while a laptop sleeps), so a session that ended just before a scan is
+	// written just after it; history a manual sync writes is weeks old.
+	livePollMargin = maxLiveTraceGap
 	// maxLiveTraceArchives is how many numbered archives beside the log a scan looks through for
 	// the file it last read. Writers keep writer.DefaultRotateArchives; the margin covers a log
 	// configured to keep more.
@@ -135,8 +140,8 @@ const (
 // OTLP, session stores) wrote to the runtime log since the last scheduled inventory run, which is
 // on by default, unlike the session sync. The first run, and a run more than maxLiveTraceGap after
 // the last, only records where the log ends, so history is never reported as live, and session-store
-// records count only when they happened since the last run (a manual sync of 30-day-old sessions
-// writes them after it, but they are history); RecordTraces
+// records count only when they happened no more than livePollMargin before the last run (a manual
+// sync of 30-day-old sessions writes them after it, but they are history); RecordTraces
 // skips sessions already reported. When the log has rotated since the last run, the file it read
 // is found among the archives by its first line and read on from where it stopped, then every
 // newer archive, then the live log. An endpoint connected to Beacon Cloud only moves the position:
@@ -164,8 +169,9 @@ func recordLiveTraces(logPath string, userMode bool) {
 	seen := map[sweptSession]bool{}
 	var sessions []sweptSession
 	next := int64(0)
+	pollSince := last.SavedAt.Add(-livePollMargin)
 	for _, part := range parts {
-		found, end := sessionsInLog(part.path, part.offset, "", last.SavedAt)
+		found, end := sessionsInLog(part.path, part.offset, "", pollSince)
 		for _, session := range found {
 			if !seen[session] {
 				seen[session] = true
