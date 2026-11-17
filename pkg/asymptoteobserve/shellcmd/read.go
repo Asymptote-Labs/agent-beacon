@@ -77,7 +77,8 @@ func Read(command string) Line {
 	for i := range commands {
 		writes[i] = commands[i].writes()
 	}
-	line.Reads = fileReads(commands, writes)
+	pipes := indexPipelines(commands)
+	line.Reads = fileReads(commands, writes, pipes)
 	line.Sockets = socketRedirects(commands)
 	line.Effects = make([][]FileEffect, len(commands))
 	line.Writes = make([][]FileEffect, len(commands))
@@ -91,8 +92,8 @@ func Read(command string) Line {
 			line.Effects[i] = line.Writes[i]
 		}
 	}
-	line.Spans = spans(commands, line.Writes)
-	line.Earlier, line.Later = stageLists(commands)
+	line.Spans = spans(commands, line.Writes, pipes)
+	line.Earlier, line.Later = stageLists(pipes)
 	return line
 }
 
@@ -101,7 +102,8 @@ func pastBound(commands, words int) bool {
 	return commands > MaxCommands || words > MaxWords
 }
 
-// stageLists works out Line.Earlier and Line.Later.
+// stageLists works out Line.Earlier and Line.Later from the pipeline index; both are nil when
+// no pipeline has two commands.
 //
 // A rule about two stages of a pipeline (a download piped to a shell, an environment dump
 // piped to a sender) used to find the second by asking every command of the line whether it
@@ -109,42 +111,16 @@ func pastBound(commands, words int) bool {
 // and most of what the costliest lines cost. The relation is worked out here once, and such a
 // rule asks the few commands of the pipeline. One pipeline of n stages still has n(n-1)/2
 // pairs; MaxCommands bounds n.
-func stageLists(commands []Command) (earlier, later [][]int) {
-	if len(commands) < 2 {
-		return nil, nil
-	}
-	pipelines := map[int][]int{}
-	for i := range commands {
-		pipelines[commands[i].Pipeline] = append(pipelines[commands[i].Pipeline], i)
-	}
-	for _, members := range pipelines {
-		if len(members) < 2 {
+func stageLists(pipes *pipelineIndex) (earlier, later [][]int) {
+	for i := range pipes.commands {
+		e, l := pipes.earlierLater(i)
+		if e == nil && l == nil {
 			continue
 		}
 		if earlier == nil {
-			earlier, later = make([][]int, len(commands)), make([][]int, len(commands))
+			earlier, later = make([][]int, len(pipes.commands)), make([][]int, len(pipes.commands))
 		}
-		for _, i := range members {
-			// One allocation holds both lists: the earlier stages, then the later ones.
-			both := make([]int, 0, len(members)-1)
-			for _, j := range members {
-				if commands[j].Stage < commands[i].Stage {
-					both = append(both, j)
-				}
-			}
-			n := len(both)
-			for _, j := range members {
-				if commands[j].Stage > commands[i].Stage {
-					both = append(both, j)
-				}
-			}
-			if n > 0 {
-				earlier[i] = both[:n:n]
-			}
-			if n < len(both) {
-				later[i] = both[n:]
-			}
-		}
+		earlier[i], later[i] = e, l
 	}
 	return earlier, later
 }

@@ -84,9 +84,9 @@ type FileRead struct {
 // followed, beyond opening it inside a call that sends it (FileRead.Sent).
 //
 // writes are each command's writes (Command.writes), when the caller has them already; nil
-// asks each command.
-func fileReads(commands []Command, writes [][]write) [][]FileRead {
-	f := flow{commands: commands, ws: writes}
+// asks each command. pipes is the index of commands by pipeline (indexPipelines).
+func fileReads(commands []Command, writes [][]write, pipes *pipelineIndex) [][]FileRead {
+	f := flow{commands: commands, ws: writes, pipes: pipes}
 	for i := range commands {
 		if !f.done(i) {
 			f.command(i)
@@ -102,6 +102,7 @@ func fileReads(commands []Command, writes [][]write) [][]FileRead {
 type flow struct {
 	commands []Command
 	ws       [][]write
+	pipes    *pipelineIndex
 	reads    [][]FileRead
 	// out are, for each command, the files whose content it may write to its standard output.
 	out [][]string
@@ -287,7 +288,7 @@ func (f *flow) withInner(i int, taken []string) []string {
 		written := f.written(j)
 		// A statement of the compound itself writes to it, and so does the last stage of a
 		// pipeline inside it.
-		if inner.Pipeline != c.Pipeline && !f.lastStage(j) {
+		if inner.Pipeline != c.Pipeline && !f.pipes.last(j) {
 			continue
 		}
 		for _, path := range written {
@@ -409,11 +410,12 @@ func (f *flow) stdin(i int) {
 		}
 		return
 	}
-	for j := range f.commands {
-		if before := &f.commands[j]; before.Pipeline == c.Pipeline && before.Stage == c.Stage-1 && f.reaches(j, i) {
-			for _, path := range f.written(j) {
-				f.read(i, path, ViaStdin, false)
-			}
+	for _, j := range f.pipes.at(i, c.Stage-1) {
+		if !f.reaches(j, i) {
+			continue
+		}
+		for _, path := range f.written(j) {
+			f.read(i, path, ViaStdin, false)
 		}
 	}
 }
@@ -464,7 +466,7 @@ func (f *flow) value(c *Command, ref wordRef) []string {
 			continue
 		}
 		written := f.written(j)
-		if !f.lastStage(j) || !f.reaches(j, -1) {
+		if !f.pipes.last(j) || !f.reaches(j, -1) {
 			continue
 		}
 		for _, path := range written {
@@ -485,7 +487,7 @@ func (f *flow) scriptOutput(i int) []string {
 			continue
 		}
 		written := f.written(k)
-		if !f.lastStage(k) {
+		if !f.pipes.last(k) {
 			continue
 		}
 		for _, path := range written {
@@ -495,17 +497,6 @@ func (f *flow) scriptOutput(i int) []string {
 		}
 	}
 	return out
-}
-
-// lastStage reports whether no later stage of command j's pipeline takes its output.
-func (f *flow) lastStage(j int) bool {
-	c := &f.commands[j]
-	for k := range f.commands {
-		if later := &f.commands[k]; later.Pipeline == c.Pipeline && later.Stage > c.Stage {
-			return false
-		}
-	}
-	return true
 }
 
 // assign records the files whose content a variable of a shell holds, as a substitution or

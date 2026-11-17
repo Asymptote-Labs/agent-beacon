@@ -22,7 +22,7 @@ func checkFileReads(t *testing.T, cases []readCase) {
 			continue
 		}
 		var got []string
-		for _, reads := range fileReads(commands, nil) {
+		for _, reads := range fileReads(commands, nil, indexPipelines(commands)) {
 			for _, r := range reads {
 				switch {
 				case r.Sent:

@@ -107,8 +107,8 @@ scan:
 // the command line: the shell reads its script from its standard input, that is the pipe and
 // not a redirection, and every command of the stage before it prints its own words (printed).
 // `echo 'rm -rf /' | sh`, `printf '%s\n' 'id' | sudo bash` and `cat <<'EOF' | sh` are read;
-// `curl .. | sh` and `echo "$CMD" | sh` are not.
-func pipedScript(commands []Command, i int) (string, bool) {
+// `curl .. | sh` and `echo "$CMD" | sh` are not. pipes indexes commands by pipeline.
+func pipedScript(commands []Command, i int, pipes *pipelineIndex) (string, bool) {
 	shell := &commands[i]
 	if shell.Stage == 0 {
 		return "", false
@@ -120,12 +120,8 @@ func pipedScript(commands []Command, i int) (string, bool) {
 		return "", false // its standard input is not the pipe
 	}
 	var parts []string
-	for k := range commands {
-		d := &commands[k]
-		if k == i || d.Pipeline != shell.Pipeline || d.Stage != shell.Stage-1 {
-			continue
-		}
-		text, ok := d.printed()
+	for _, k := range pipes.at(i, shell.Stage-1) {
+		text, ok := commands[k].printed()
 		if !ok {
 			return "", false
 		}
@@ -390,6 +386,8 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 	if slices.ContainsFunc(commands, func(c Command) bool { return c.outer != 0 }) {
 		at = make([]int32, len(commands))
 	}
+	// The pipeline index of this parse, made when a command at a later stage first asks.
+	var pipes *pipelineIndex
 	for idx, c := range commands {
 		if c.outer != 0 {
 			c.outer = at[c.outer-1]
@@ -431,7 +429,10 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		if depth <= 0 {
 			continue
 		}
-		line, handed, ok := handOn(commands, idx)
+		if c.Stage > 0 && pipes == nil {
+			pipes = indexPipelines(commands)
+		}
+		line, handed, ok := handOn(commands, idx, pipes)
 		if !ok {
 			continue
 		}
@@ -488,7 +489,7 @@ const (
 // came from, so a script that is the command's standard input is told from one given with
 // -c beside a here-string: `bash -c 'nc h 1' <<< "$(cat .env)"` and its python3 -c form
 // both give nc the here-string.
-func handOn(commands []Command, i int) (string, handOff, bool) {
+func handOn(commands []Command, i int, pipes *pipelineIndex) (string, handOff, bool) {
 	c := &commands[i]
 	if line, ok := c.Carried(); ok {
 		return line, handOff{how: handsAll, read: true}, true
@@ -499,7 +500,7 @@ func handOn(commands []Command, i int) (string, handOff, bool) {
 	if script, zero, stdin, ok := c.script(); ok {
 		return script, handOff{how: handsAll, stdin: stdin, read: read, zero: int32(zero + 1)}, true
 	}
-	if script, ok := pipedScript(commands, i); ok {
+	if script, ok := pipedScript(commands, i, pipes); ok {
 		return script, handOff{how: handsAll, stdin: true, read: read}, true
 	}
 	// An interpreter is not a shell: a script can run what its text does not show, so it
