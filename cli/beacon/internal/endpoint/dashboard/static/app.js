@@ -2863,6 +2863,7 @@ function renderFindings(resp) {
   state.findingsExpanded = remapFindingExpansions(state.findings, findings, state.findingsExpanded);
   state.findings = findings;
   setText("#findings-meta", `${findings.length} finding${findings.length === 1 ? "" : "s"} across ${resp?.scanned || 0} events`);
+  renderFindingsFailures(resp?.failed || []);
   const tbody = $("#findings-rows");
   if (!tbody) return;
   if (!findings.length) {
@@ -2885,6 +2886,22 @@ function renderFindings(resp) {
     row.addEventListener("click", () => toggleFinding(Number(row.dataset.findingRow)));
   });
   applyFindingExpansions();
+}
+
+// A rule the scan could not evaluate on some events (most often a command line that took it past
+// its cost limit) has no verdict there: the findings above leave those evaluations out.
+function renderFindingsFailures(failed) {
+  const notice = $("#findings-notice");
+  if (!notice) return;
+  if (!failed.length) {
+    notice.hidden = true;
+    notice.textContent = "";
+    return;
+  }
+  const rules = failed.map((f) => `${f.rule_id} on ${f.events} event${f.events === 1 ? "" : "s"}`
+    + (f.first_event_id ? ` (first ${f.first_event_id})` : "") + `: ${f.error}`);
+  notice.hidden = false;
+  notice.textContent = `The scan is incomplete. ${failed.length === 1 ? "A rule" : `${failed.length} rules`} could not be evaluated on some events, so their verdict there is unknown; everything else was scanned. ${rules.join("; ")}`;
 }
 
 function toggleFinding(i) {

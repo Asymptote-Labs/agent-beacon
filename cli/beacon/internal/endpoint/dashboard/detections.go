@@ -75,6 +75,20 @@ type FindingsResponse struct {
 	Count    int                   `json:"count"`
 	// Skipped lists rule files left out because they need a newer Beacon.
 	Skipped []string `json:"skipped,omitempty"`
+	// Failed lists the rules the scan could not evaluate on some events (most often a command
+	// line that took a rule past its cost limit). Their verdict on those events is unknown;
+	// everything else was scanned.
+	Failed []FailedRuleView `json:"failed,omitempty"`
+}
+
+// FailedRuleView is one rule the scan could not evaluate: on how many events, the first of them,
+// and why.
+type FailedRuleView struct {
+	RuleID         string `json:"rule_id"`
+	Events         int    `json:"events"`
+	FirstEventID   string `json:"first_event_id,omitempty"`
+	FirstSessionID string `json:"first_session_id,omitempty"`
+	Error          string `json:"error"`
 }
 
 // RunScan loads and compiles the active rules, streams the runtime log (optionally
@@ -118,10 +132,8 @@ func RunScan(userMode bool, logPath, rulesDir, session, minSeverity string) (Fin
 	// correlation rules silently miss without this.
 	threatrules.SortEvents(events)
 
-	findings, err := threatrules.ScanEvents(compiled, events)
-	if err != nil {
-		return FindingsResponse{}, fmt.Errorf("scan: %w", err)
-	}
+	result := threatrules.Scan(compiled, events)
+	findings := result.Findings
 	if minRank > 0 {
 		findings = threatrules.FilterBySeverity(findings, minRank)
 	}
@@ -129,7 +141,11 @@ func RunScan(userMode bool, logPath, rulesDir, session, minSeverity string) (Fin
 	if findings == nil {
 		findings = []threatrules.Finding{}
 	}
-	return FindingsResponse{Findings: findings, Scanned: len(events), Count: len(findings), Skipped: skipped}, nil
+	var failed []FailedRuleView
+	for _, f := range threatrules.FailuresByRule(result.Failures) {
+		failed = append(failed, FailedRuleView{RuleID: f.RuleID, Events: f.Events, FirstEventID: f.First.EventID, FirstSessionID: f.First.SessionID, Error: f.First.Err.Error()})
+	}
+	return FindingsResponse{Findings: findings, Scanned: len(events), Count: len(findings), Skipped: skipped, Failed: failed}, nil
 }
 
 // compileActiveRules loads and compiles the rules `beacon scan` would run. It returns a

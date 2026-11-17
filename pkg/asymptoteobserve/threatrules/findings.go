@@ -122,8 +122,54 @@ func (c *CompiledRule) newFinding(evidence []asymptoteobserve.Event) Finding {
 	}
 }
 
-// ScanEvents runs every compiled rule over the events and returns all findings, in rule
-// order. It is the aggregator backing the `beacon scan` command.
+// ScanFailure is one evaluation a scan could not finish: a rule on an event, most often stopped
+// at MaxEvalCost. The rule's verdict on that event is unknown, neither a match nor a no-match
+// (SPEC "Evaluation is bounded"). For a correlation rule it is a step on the event, which the
+// rule then takes not to hold there.
+type ScanFailure struct {
+	RuleID    string
+	EventID   string
+	SessionID string
+	Err       error
+}
+
+// ScanResult is what a scan found, and the evaluations it could not finish.
+type ScanResult struct {
+	Findings []Finding
+	Failures []ScanFailure
+}
+
+// RuleFailures is what one rule could not evaluate in a scan: on how many events, and the first
+// of them. A hostile log can fail one rule on every event, so callers report failures by rule.
+type RuleFailures struct {
+	RuleID string
+	Events int
+	First  ScanFailure
+}
+
+// FailuresByRule groups failures by rule, in the order each rule first failed.
+func FailuresByRule(failures []ScanFailure) []RuleFailures {
+	var out []RuleFailures
+	at := map[string]int{}
+	for _, f := range failures {
+		k, ok := at[f.RuleID]
+		if !ok {
+			k = len(out)
+			at[f.RuleID] = k
+			out = append(out, RuleFailures{RuleID: f.RuleID, First: f})
+		}
+		out[k].Events++
+	}
+	return out
+}
+
+// Scan runs every compiled rule over the events and returns all findings, in rule order, and
+// every evaluation that failed. It is what `beacon scan` and the dashboard run.
+//
+// An evaluation that fails is a failure of that rule on that event and nothing more: the other
+// rules still judge the event and the rule still judges the other events. One command line an
+// agent was made to run can reach the cost limit of a rule, and a scan that stopped there would
+// report nothing about any session in the log.
 //
 // The rules run event by event, as an EventScanner runs the single-event ones: only the rules
 // that can match an event's action are evaluated, and an event's derived fields (a parsed
@@ -131,7 +177,11 @@ func (c *CompiledRule) newFinding(evidence []asymptoteobserve.Event) Finding {
 // not once per rule, and dropped before the next event. The steps of the correlation rules are
 // evaluated in the same pass, on the same form of the event, and each rule is then matched
 // over the whole sequence from those answers (stepTable).
-func ScanEvents(rules []*CompiledRule, events []asymptoteobserve.Event) ([]Finding, error) {
+func Scan(rules []*CompiledRule, events []asymptoteobserve.Event) ScanResult {
+	var result ScanResult
+	failure := func(rule *CompiledRule, e *asymptoteobserve.Event, err error) {
+		result.Failures = append(result.Failures, ScanFailure{RuleID: rule.rule.ID, EventID: e.Event.ID, SessionID: sessionID(e), Err: err})
+	}
 	found := make([][]Finding, len(rules))
 	var single []*CompiledRule
 	var at []int // at[k] is the position of single[k] in rules
@@ -146,27 +196,35 @@ func ScanEvents(rules []*CompiledRule, events []asymptoteobserve.Event) ([]Findi
 		scanner := newEventScanner(single)
 		for i := range events {
 			in := &eventInput{event: &events[i]}
-			err := scanner.scan(in, func(k int) {
+			scanner.scan(in, func(k int) {
 				found[at[k]] = append(found[at[k]], single[k].newFinding([]asymptoteobserve.Event{events[i]}))
+			}, func(k int, err error) {
+				failure(single[k], &events[i], err)
 			})
-			if err != nil {
-				return nil, err
-			}
 			if steps != nil {
 				steps.fill(i, in)
 			}
 		}
 	}
-	var all []Finding
 	for r, rule := range rules {
 		if rule.steps != nil {
-			f, err := steps.findings(rule)
-			if err != nil {
-				return nil, fmt.Errorf("rule %q: %w", rule.Rule().ID, err)
-			}
-			found[r] = f
+			found[r] = steps.findings(rule, func(i int, err error) { failure(rule, &events[i], err) })
 		}
-		all = append(all, found[r]...)
+		result.Findings = append(result.Findings, found[r]...)
 	}
-	return all, nil
+	return result
+}
+
+// ScanEvents is Scan for a caller that must not act on an incomplete scan: an evaluation that
+// fails fails the scan, and the error names the rule. With several, it is the first a single-event
+// rule met in the order of the events, or else the first of the correlation rules in rule order.
+func ScanEvents(rules []*CompiledRule, events []asymptoteobserve.Event) ([]Finding, error) {
+	result := Scan(rules, events)
+	if len(result.Failures) > 0 {
+		f := result.Failures[0]
+		// Name the rule: an evaluation error belongs to the rule, not to the log, and the
+		// operator needs to know which to remove.
+		return nil, fmt.Errorf("rule %q: %w", f.RuleID, f.Err)
+	}
+	return result.Findings, nil
 }

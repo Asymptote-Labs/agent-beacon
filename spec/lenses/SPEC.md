@@ -82,7 +82,8 @@ const data = await window.beacon.getTrace();
   "findings": {                 // absent: the trace was not scanned
     "rules_evaluated": 42,
     "items": [ /* LensFindingV1 */ ],
-    "skipped": ["rule-needing-a-newer-spec"]
+    "skipped": ["rule-needing-a-newer-spec"],
+    "failed": ["rule-stopped-on-some-event"]
   },
   "token_coverage": {           // absent: unknown
     "harness": "claude_code",
@@ -130,10 +131,14 @@ trace view uses. Its main parts:
 `findings.items[]` are the active threat rules' matches over this trace's
 own events: `rule_id`, `title`, `severity` (`info` … `critical`), `posture`,
 `reason`, `taxonomy`, and `event_ids`. The evidence is referenced by
-`trace.events[].id`, not copied. Findings, `token_coverage` and
-`token_usage` are computed from the live runtime log. For a trace whose lines
-have been rotated out of that log (and are kept only in the opt-in trace
-history), they may be missing or partial while `trace` is still complete.
+`trace.events[].id`, not copied. `findings.skipped` names rules not evaluated
+because they need a newer spec, and `findings.failed` rules that could not be
+evaluated on some of the trace's events (most often one stopped at its cost
+limit): their verdict there is unknown, and `items` leaves it out. Findings,
+`token_coverage` and `token_usage` are computed from the live runtime log. For
+a trace whose lines have been rotated out of that log (and are kept only in
+the opt-in trace history), they may be missing or partial while `trace` is
+still complete.
 
 `token_usage` is the trace's usage as `beacon token-usage` counts it, with
 duplicate channels removed and cumulative counters turned into deltas. Each

@@ -13,9 +13,9 @@ import (
 // several rules share (the credential read of the read-then-egress rules) is evaluated once.
 //
 // A rule's matcher then asks the table instead of evaluating (see stepEval), in the order it
-// always did, so which events match, which evidence a finding carries and which error a scan
-// returns are what each rule finds on its own: an evaluation that fails is recorded with its
-// error, and the error is returned only when the matcher asks for that step on that event.
+// always did, so which events match, which evidence a finding carries and which evaluations
+// failed are what each rule finds on its own: an evaluation that fails is recorded with its
+// error, and reported only when the matcher asks for that step on that event.
 //
 // Only what a matcher can ask is evaluated ahead of it: the first step of a sequence and every
 // step of an order: any rule on every event, a later step of a sequence on the events that
@@ -209,8 +209,10 @@ func (t *stepTable) holds(c, i int) (bool, error) {
 }
 
 // findings returns what rule.correlationFindings returns for the scanned events, asking the
-// table for every step.
-func (t *stepTable) findings(rule *CompiledRule) ([]Finding, error) {
+// table for every step. A step that could not be evaluated on an event is handed to fail, with
+// the event's index in the scan, once for each event, and is taken not to hold there: the
+// rule goes on, and finds what it can from the evaluations that did not fail.
+func (t *stepTable) findings(rule *CompiledRule, fail func(event int, err error)) []Finding {
 	if t.sessions == nil {
 		at := map[string]int{}
 		for i := range t.events {
@@ -227,17 +229,28 @@ func (t *stepTable) findings(rule *CompiledRule) ([]Finding, error) {
 	}
 	columns := t.of[rule]
 	var findings []Finding
+	var failed map[int]bool
 	for k := range t.sessions {
 		session := &t.sessions[k]
-		seq, err := rule.matchSession(session.events, func(step, event int) (bool, error) {
-			return t.holds(columns[step], session.index[event])
+		// The matcher returns no error: every failure becomes "does not hold" here.
+		seq, _ := rule.matchSession(session.events, func(step, event int) (bool, error) {
+			i := session.index[event]
+			held, err := t.holds(columns[step], i)
+			if err != nil {
+				if !failed[i] {
+					if failed == nil {
+						failed = map[int]bool{}
+					}
+					failed[i] = true
+					fail(i, err)
+				}
+				return false, nil
+			}
+			return held, nil
 		})
-		if err != nil {
-			return nil, err
-		}
 		if seq != nil {
 			findings = append(findings, rule.newFinding(seq))
 		}
 	}
-	return findings, nil
+	return findings
 }

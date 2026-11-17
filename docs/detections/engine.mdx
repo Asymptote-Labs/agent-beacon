@@ -113,6 +113,8 @@ Human output summarizes findings by severity, rule, session, reason, and evidenc
 
 The fail gate is evaluated before display filtering, so automation can fail on all matching detections even when output is narrowed for readability.
 
+A rule that cannot be evaluated on an event (one stopped at the engine's cost limit) has no verdict on that event, and the scan goes on with every other rule and event. `beacon scan` names the rule on stderr and exits non-zero; the dashboard's findings page shows a notice naming it.
+
 ## Operational boundaries
 
 Scanning does not mutate endpoint telemetry, change rule files, or fetch remote content. Rule installation and remote rule pack retrieval are explicit `beacon rules` workflows.

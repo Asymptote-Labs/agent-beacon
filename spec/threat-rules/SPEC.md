@@ -141,8 +141,11 @@ the steps in both orders still fires once. A single event never satisfies two st
 - Evaluation is bounded. Macros (`.all`, `.exists`, `.map`, `.filter`) can nest, so an
   expression can do work exponential in its own length. An engine SHOULD cap the work one
   evaluation of one expression against one event may do, and MUST report an evaluation it
-  stops as an error for that rule, never as a `match` or `no_match`. The reference engine
-  uses cel-go's runtime cost limit at 5,000,000 (`threatrules.MaxEvalCost`); every rule in
+  stops as an error for that rule, never as a `match` or `no_match`. Such an error is about
+  that rule on that event: an engine scanning a log SHOULD report it and go on to the other
+  rules and events, and a correlation rule treats the step as not holding for that event.
+  The reference engine uses cel-go's runtime cost limit at 5,000,000
+  (`threatrules.MaxEvalCost`); every rule in
   the open corpus spends under 50,000 (a hundredth of the limit) on its fixtures, and under
   1,000,000 (a fifth) on a pessimistic event whose every string field is 64 KiB. A rule
   should stay orders of magnitude below the limit on any event the writer can produce (at

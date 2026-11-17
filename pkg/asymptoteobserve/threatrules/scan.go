@@ -67,7 +67,7 @@ func (s *EventScanner) ScanPrepared(p *PreparedEvent) ([]Finding, error) {
 	var findings []Finding
 	err := s.scan(&p.in, func(r int) {
 		findings = append(findings, s.rules[r].newFinding([]asymptoteobserve.Event{p.event}))
-	})
+	}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -90,8 +90,10 @@ func PrepareEvent(event asymptoteobserve.Event) *PreparedEvent {
 	return p
 }
 
-// scan calls hit with the index of every rule that matches the event, in rule order.
-func (s *EventScanner) scan(in *eventInput, hit func(rule int)) error {
+// scan calls hit with the index of every rule that matches the event, in rule order. An evaluation
+// that fails is handed to fail, and the scan goes on to the next rule; with no fail, it ends the
+// scan and is returned, naming the rule.
+func (s *EventScanner) scan(in *eventInput, hit func(rule int), fail func(rule int, err error)) error {
 	candidates, ok := s.byAction[in.event.Event.Action]
 	if !ok {
 		candidates = s.anyAction
@@ -101,6 +103,10 @@ func (s *EventScanner) scan(in *eventInput, hit func(rule int)) error {
 		act := in.activation(rule.derived)
 		matched, err := evalObserved(rule.match.program(act), act)
 		if err != nil {
+			if fail != nil {
+				fail(r, err)
+				continue
+			}
 			// Name the rule: an evaluation error belongs to the rule, not to the log, and the
 			// operator needs to know which to remove.
 			return fmt.Errorf("rule %q: %w", rule.rule.ID, err)

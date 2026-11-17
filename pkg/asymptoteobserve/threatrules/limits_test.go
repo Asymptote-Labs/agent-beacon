@@ -96,6 +96,71 @@ func TestScanNamesTheRuleThatExceededTheCostLimit(t *testing.T) {
 	}
 }
 
+// A failed evaluation is the failure of one rule on one event: every other rule still judges the
+// event, the rule still judges the other events, and a correlation rule takes the failed step not
+// to hold there and goes on to the events after it.
+func TestScanGoesOnPastAFailedEvaluation(t *testing.T) {
+	lowerCostLimit(t)
+	runaway := `e.event.action == "c" && ` + nestedAll(7)
+	curl := `e.event.action == "command.executed" && e.command.parsed_commands.exists(c, c.name == "curl")`
+	single := func(id, match string) *CompiledRule {
+		c, err := Compile(&Rule{
+			ID: id, Spec: SupportedSpec, Version: 1, Title: id,
+			Severity: asymptoteobserve.SeverityHigh, Status: StatusExperimental, Posture: PostureDetect,
+			Emit: Emit{Reason: "x"}, Match: match,
+			Tests: []Fixture{{Name: "x", Verdict: VerdictNoMatch, Events: []FixtureEvent{{Event: corrEvent("", "x", "s", nil)}}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	rules := []*CompiledRule{
+		single("runaway", runaway),
+		single("curl-alone", curl),
+		stepRule(t, "b-then-send", "", "30s", CorrelationStep{ID: "b", Match: `e.event.action == "b"`},
+			CorrelationStep{ID: "send", Match: runaway + " || " + curl}),
+	}
+	event := func(id, action, session string, mut func(*asymptoteobserve.Event)) asymptoteobserve.Event {
+		e := corrEvent("", action, session, mut)
+		e.Event.ID = id
+		return e
+	}
+	// In s2 the send step is never asked about, since no b comes before it.
+	events := []asymptoteobserve.Event{
+		event("e1", "b", "s1", nil),
+		event("e2", "c", "s1", nil),
+		event("e3", "command.executed", "s1", withCurl),
+		event("e4", "c", "s2", nil),
+	}
+	result := Scan(rules, events)
+	var found, failed []string
+	for _, f := range result.Findings {
+		var ids []string
+		for _, e := range f.Events {
+			ids = append(ids, e.Event.ID)
+		}
+		found = append(found, f.RuleID+"@"+strings.Join(ids, ","))
+	}
+	for _, f := range result.Failures {
+		if !strings.Contains(f.Err.Error(), "cost limit exceeded") {
+			t.Errorf("%s on %s failed with %v, want the cost limit", f.RuleID, f.EventID, f.Err)
+		}
+		failed = append(failed, f.RuleID+"@"+f.EventID+"/"+f.SessionID)
+	}
+	if want := []string{"curl-alone@e3", "b-then-send@e1,e3"}; !reflect.DeepEqual(found, want) {
+		t.Errorf("found %v, want %v", found, want)
+	}
+	if want := []string{"runaway@e2/s1", "runaway@e4/s2", "b-then-send@e2/s1"}; !reflect.DeepEqual(failed, want) {
+		t.Errorf("failed %v, want %v", failed, want)
+	}
+
+	// A caller that must not act on an incomplete scan gets no findings and the first failure.
+	if got, err := ScanEvents(rules, events); got != nil || err == nil || !strings.HasPrefix(err.Error(), `rule "runaway": `) {
+		t.Errorf("ScanEvents = %v, %v; want no findings and the runaway rule's error", got, err)
+	}
+}
+
 // corpusRules loads the open corpus and the embedded baseline.
 func corpusRules(t testing.TB) []*Rule {
 	t.Helper()
