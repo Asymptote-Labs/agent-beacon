@@ -522,10 +522,11 @@ func TestANewerDefinitionsFileSkipsTheRulesThatCallIt(t *testing.T) {
 		"calls-through.rule.yaml": callingRule("calls-through", "spec: "+SupportedSpec, `e.command.parsed_commands.exists(c, through_later(c))`),
 		"calls-current.rule.yaml": callingRule("calls-current", "spec: "+SupportedSpec, `e.command.parsed_commands.exists(c, current_name(c))`),
 	})
-	rules, skipped, err := LoadDirSkipping(dir)
+	pack, err := LoadPackDir(dir)
 	if err != nil {
-		t.Fatalf("LoadDirSkipping: %v", err)
+		t.Fatalf("LoadPackDir: %v", err)
 	}
+	rules, skipped := pack.Rules, pack.Skipped
 	if got := ruleIDs(rules); len(got) != 1 || got[0] != "calls-current" {
 		t.Errorf("loaded %v, want calls-current alone", got)
 	}
@@ -535,6 +536,9 @@ func TestANewerDefinitionsFileSkipsTheRulesThatCallIt(t *testing.T) {
 	}
 	if want := "later.predicates.yaml threat-rules/v1.9, calls-later.rule.yaml threat-rules/v1.9, calls-through.rule.yaml threat-rules/v1.9"; strings.Join(got, ", ") != want {
 		t.Errorf("skipped %q, want %q", strings.Join(got, ", "), want)
+	}
+	if !strings.Contains(filepath.ToSlash(skipped[0].String()), "concepts/later.predicates.yaml: the definitions (library later) require threat-rules/v1.9") {
+		t.Errorf("the skipped definitions are not told as definitions: %s", skipped[0])
 	}
 	for _, s := range skipped[1:] {
 		if msg := s.String(); !strings.Contains(msg, "later_name") || !strings.Contains(msg, "later.predicates.yaml") {
@@ -635,8 +639,9 @@ func TestLibraryCheckRunsTheDefinitionsFixtures(t *testing.T) {
 }
 
 // A pack's directory is loaded with its definitions, wherever under it they are, and each rule
-// compiles against them. A rule file loaded on its own has none.
-func TestLoadDirLoadsThePacksDefinitions(t *testing.T) {
+// compiles against them. A rule file loaded on its own has none. A file macOS writes beside a
+// pack file it copies (._name, __MACOSX/) is no pack file.
+func TestLoadPackDirLoadsThePacksDefinitions(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) string {
 		t.Helper()
@@ -653,12 +658,14 @@ func TestLoadDirLoadsThePacksDefinitions(t *testing.T) {
 	write("concepts/credentials.predicates.yaml", testPredicates)
 	rulePath := write("credential-access/read.rule.yaml", strings.Replace(specRule("read", "spec: "+SupportedSpec, ""), `match: 'e.event.action == "file.read"'`, `match: 'credential_read(e)'`, 1))
 	write("plain.rule.yaml", specRule("plain", "", ""))
+	write("._plain.rule.yaml", "\x00\x05\x16\x07 not YAML")
+	write("__MACOSX/concepts/._credentials.predicates.yaml", "\x00\x05\x16\x07 not YAML")
 
-	rules, skipped, err := LoadDirSkipping(dir)
-	if err != nil || len(skipped) != 0 || len(rules) != 2 {
-		t.Fatalf("LoadDirSkipping = %d rules, skipped %v, %v", len(rules), skipped, err)
+	pack, err := LoadPackDir(dir)
+	if err != nil || len(pack.Skipped) != 0 || len(pack.Rules) != 2 {
+		t.Fatalf("LoadPackDir = %+v, %v", pack, err)
 	}
-	for _, rule := range rules {
+	for _, rule := range pack.Rules {
 		if _, err := CheckRule(rule); err != nil {
 			t.Errorf("%s: %v", rule.ID, err)
 		}
@@ -680,7 +687,7 @@ func TestLoadDirLoadsThePacksDefinitions(t *testing.T) {
 
 	// Definitions that do not load fail the directory, naming the file.
 	write("concepts/broken.predicates.yaml", "library: broken\nversion: 1\n")
-	if _, _, err := LoadDirSkipping(dir); err == nil || !strings.Contains(err.Error(), "broken.predicates.yaml: no definitions") {
+	if _, err := LoadPackDir(dir); err == nil || !strings.Contains(err.Error(), "broken.predicates.yaml: no definitions") {
 		t.Errorf("a directory with broken definitions: got %v", err)
 	}
 }

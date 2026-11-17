@@ -99,7 +99,7 @@ func TestOrderRequiresSpecV1_1(t *testing.T) {
 	}
 }
 
-func TestLoadDirSkippingSetsNewerSpecAside(t *testing.T) {
+func TestLoadPackDirSetsNewerSpecAside(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) {
 		t.Helper()
@@ -111,10 +111,11 @@ func TestLoadDirSkippingSetsNewerSpecAside(t *testing.T) {
 	write("legacy.rule.yaml", specRule("legacy-rule", "", ""))
 	write("future.rule.yaml", specRule("future-rule", "spec: "+futureSpec(), "future_field: 1\n"))
 
-	rules, skipped, err := LoadDirSkipping(dir)
+	pack, err := LoadPackDir(dir)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
+	rules, skipped := pack.Rules, pack.Skipped
 	if len(rules) != 2 || rules[0].ID != "current-rule" || rules[1].ID != "legacy-rule" {
 		t.Fatalf("want current-rule and legacy-rule loaded, got %v", ruleIDs(rules))
 	}
@@ -131,7 +132,7 @@ func TestLoadDirSkippingSetsNewerSpecAside(t *testing.T) {
 	}
 	// Other failures still fail the whole skipping load.
 	write("broken.rule.yaml", specRule("broken-rule", "", "typo_field: 1\n"))
-	if _, _, err := LoadDirSkipping(dir); err == nil {
+	if _, err := LoadPackDir(dir); err == nil {
 		t.Fatal("an unknown field in a current-spec rule must still fail the load")
 	}
 }

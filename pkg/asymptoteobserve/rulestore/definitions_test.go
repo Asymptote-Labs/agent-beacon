@@ -179,13 +179,13 @@ func TestInstallRejectsDefinitions(t *testing.T) {
 	}{
 		"a catalog whose example fails": {func(f map[string]string) {
 			f["concepts/tokens.catalog.yaml"] = strings.Replace(tokenCatalog, `examples: ["gh auth token"]`, `examples: ["gh auth status"]`, 1)
-		}, true, `definitions: catalog tokens (tokens.catalog.yaml): store gh-token: example "gh auth status": not matched`},
+		}, true, `concepts/tokens.catalog.yaml): store gh-token: example "gh auth status": not matched`},
 		"a predicate whose fixture fails": {func(f map[string]string) {
 			f["concepts/anything.predicates.yaml"] = strings.Replace(tokenPredicates, "      - name: status\n        verdict: no_match", "      - name: status\n        verdict: match", 1)
 		}, true, "definitions: predicate prints_token/status: expected match, got no_match"},
 		"the same definitions twice": {func(f map[string]string) {
 			f["other/tokens.catalog.yaml"] = tokenCatalog
-		}, true, "are both the definitions tokens.catalog.yaml"},
+		}, true, "catalog tokens is already declared by"},
 		"definitions without a name": {func(f map[string]string) {
 			f["concepts/tokens.catalog.yaml"] = strings.Replace(tokenCatalog, "catalog: tokens", "catalog: ../../etc", 1)
 		}, true, "the definitions have no name"},
@@ -211,7 +211,7 @@ func TestInstallRejectsDefinitions(t *testing.T) {
 		}
 		tc.change(files)
 		_, err := InstallFiles(store, pack(t, files), tc.force)
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
+		if err == nil || !strings.Contains(filepath.ToSlash(err.Error()), tc.want) {
 			t.Errorf("%s: InstallFiles = %v, want an error about %q", name, err, tc.want)
 		}
 		after, _ := os.ReadFile(filepath.Join(store, "tokens.catalog.yaml"))
@@ -307,5 +307,33 @@ func TestInstallFilesSkippingKeepsTheStoresVersionOfNewerDefinitions(t *testing.
 	}
 	if catalog, _ := os.ReadFile(filepath.Join(store, "tokens.catalog.yaml")); string(catalog) != tokenCatalog {
 		t.Error("the store's catalog changed")
+	}
+}
+
+// The store is read for an install or a removal as every load reads it: recursively. A pack
+// someone copied into a directory of the store is what an install compares with and replaces in
+// place, so that the store never ends up with a second copy of a rule or of definitions, which
+// would fail every later load.
+func TestTheStoreIsReadAsALoadReadsIt(t *testing.T) {
+	store := pack(t, map[string]string{
+		"copied/token.rule.yaml":              tokenRule,
+		"copied/tokens.catalog.yaml":          tokenCatalog,
+		"copied/concepts/x.predicates.yaml":   tokenPredicates,
+		"copied/__MACOSX/._token.rule.yaml":   "\x00\x05\x16\x07",
+		"copied/concepts/._x.predicates.yaml": "\x00\x05\x16\x07",
+	})
+	if _, err := InstallFiles(store, tokenPack(t), false); err == nil || !strings.Contains(err.Error(), `rule "token-printed" already installed`) {
+		t.Fatalf("install over the copied pack without force: %v", err)
+	}
+	installed, err := InstallFiles(store, tokenPack(t), true)
+	if err != nil || len(installed) != 1 || installed[0].Path != filepath.Join(store, "copied", "token.rule.yaml") {
+		t.Fatalf("install over the copied pack with force = %+v, %v; want the copied rule replaced in place", installed, err)
+	}
+	if _, err := LoadActive(store, ""); err != nil {
+		t.Fatalf("the store does not load after the install: %v", err)
+	}
+	removed, err := Remove(store, "token-printed")
+	if err != nil || removed != filepath.Join(store, "copied", "token.rule.yaml") {
+		t.Errorf("Remove = %q, %v; want the copied rule", removed, err)
 	}
 }

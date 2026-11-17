@@ -19,10 +19,7 @@ import (
 //
 // A list changed in one place and not the other fails here, naming both.
 func TestPackCopiesAgree(t *testing.T) {
-	lib, _, err := LoadLibraryDir(rulesDir(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	lib := corpusPack(t).Library
 	var rulePatterns []string
 	for _, r := range corpusRules(t) {
 		rulePatterns = append(rulePatterns, celPatterns(strings.Join(ruleExpressions(r), " "))...)

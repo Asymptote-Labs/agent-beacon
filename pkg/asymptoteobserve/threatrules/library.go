@@ -3,7 +3,6 @@ package threatrules
 import (
 	"bytes"
 	"fmt"
-	"io/fs"
 	"os"
 	"regexp"
 	"slices"
@@ -20,16 +19,6 @@ import (
 // mean: catalogs (*.catalog.yaml, see package concepts) and predicate definitions
 // (*.predicates.yaml). They are part of the pack: found when its directory is loaded, installed
 // into the rule store with its rules, and embedded with the baseline.
-const (
-	CatalogFileSuffix    = ".catalog.yaml"
-	PredicatesFileSuffix = ".predicates.yaml"
-)
-
-// IsDefinitionFile reports whether a file name is one of a pack's definitions.
-func IsDefinitionFile(name string) bool {
-	return (strings.HasSuffix(name, CatalogFileSuffix) || strings.HasSuffix(name, PredicatesFileSuffix)) &&
-		!strings.HasPrefix(name[strings.LastIndexAny(name, `/\`)+1:], "._")
-}
 
 // DefinitionFile is one file of a pack's definitions.
 type DefinitionFile struct {
@@ -38,40 +27,9 @@ type DefinitionFile struct {
 	Data []byte
 }
 
-// StoreName returns the file name a definitions file is kept under in a flat store: the name the
-// file declares (its catalog, or its library of predicates) and its suffix, so that two versions
-// of the same definitions are one file, as two versions of a rule are. The declared name admits
-// no path separator, so the result is a safe single path component.
-func (f DefinitionFile) StoreName() (string, error) {
-	key, suffix := "catalog", CatalogFileSuffix
-	switch {
-	case strings.HasSuffix(f.Name, PredicatesFileSuffix):
-		key, suffix = "library", PredicatesFileSuffix
-	case !strings.HasSuffix(f.Name, CatalogFileSuffix):
-		return "", fmt.Errorf("%s: not a definitions file (want %s or %s)", f.Name, CatalogFileSuffix, PredicatesFileSuffix)
-	}
-	var head map[string]any
-	if err := yaml.Unmarshal(f.Data, &head); err != nil {
-		return "", fmt.Errorf("%s: %w", f.Name, err)
-	}
-	name, _ := head[key].(string)
-	if !concepts.IDPattern.MatchString(name) {
-		return "", fmt.Errorf("%s: the definitions have no name (%s: ...)", f.Name, key)
-	}
-	return name + suffix, nil
-}
-
-// Unsupported returns, for a file that declares a spec newer than this engine supports, the
-// error a loader sets it aside with; nil otherwise. A malformed spec is the decoder's to report.
-func (f DefinitionFile) Unsupported() *UnsupportedSpecError {
-	var head struct {
-		Spec string `yaml:"spec"`
-	}
-	if yaml.Unmarshal(f.Data, &head) != nil {
-		return nil
-	}
-	unsupported, _ := AsUnsupportedSpec(checkSpecSupported(f.Name, head.Spec))
-	return unsupported
+// Head reads what the file declares about itself (ReadHead).
+func (f DefinitionFile) Head() (Head, error) {
+	return ReadHead(f.Name, f.Data)
 }
 
 // predicatesFile is a *.predicates.yaml document.
@@ -182,34 +140,6 @@ func (r DefinitionResult) String() string {
 	return fmt.Sprintf("predicate %s/%s: expected %s, got %s", r.Name, r.Fixture, r.Expected, r.Actual)
 }
 
-// LoadLibraryDir builds the library of the definitions under root, searched recursively.
-func LoadLibraryDir(root string) (*Library, []SkippedRule, error) {
-	return LoadLibraryFS(os.DirFS(root))
-}
-
-// LoadLibraryFS builds the library of the definitions in fsys, searched recursively.
-func LoadLibraryFS(fsys fs.FS) (*Library, []SkippedRule, error) {
-	var files []DefinitionFile
-	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !IsDefinitionFile(path) {
-			return nil
-		}
-		data, err := fs.ReadFile(fsys, path)
-		if err != nil {
-			return err
-		}
-		files = append(files, DefinitionFile{Name: path, Data: data})
-		return nil
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return NewLibrary(files)
-}
-
 // NewLibrary builds a library from definition files. It checks what every load must be able to
 // rely on: each file's shape, a catalog's patterns, a predicate's name and body, a predicate
 // defined twice, predicates that call each other in a circle. It does not run a catalog's
@@ -250,29 +180,30 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 		return nil
 	}
 	for _, file := range files {
+		kind, ok := kindOf(file.Name)
+		if !ok || !kind.Definitions() {
+			return nil, nil, fmt.Errorf("%s: not a definitions file (want %s or %s)", file.Name, CatalogFileSuffix, PredicatesFileSuffix)
+		}
 		// Predicates exist since v1.3, so that is what a definitions file needs at least.
 		spec := specV1_3
-		var head struct {
-			Spec string `yaml:"spec"`
-		}
-		if yaml.Unmarshal(file.Data, &head) == nil {
-			if err := checkSpecSupported(file.Name, head.Spec); err != nil {
-				if unsupported, ok := AsUnsupportedSpec(err); ok {
-					skipped = append(skipped, SkippedRule{Path: file.Name, Err: unsupported})
-					for _, name := range declaredPredicates(file.Data) {
-						if _, dup := l.later[name]; !dup {
-							l.later[name] = laterPredicate{chain: name, source: file.Name, required: head.Spec}
-						}
-					}
-					continue
-				}
+		if head, err := readHead(kind, file.Data); err == nil {
+			declaredSpec, err := parseSpec(head.Spec)
+			if err != nil {
 				return nil, nil, fmt.Errorf("%s: %w", file.Name, err)
 			}
-			declaredSpec, _ := parseSpec(head.Spec)
+			if unsupported := head.Unsupported(); unsupported != nil {
+				skipped = append(skipped, SkippedRule{Path: file.Name, Err: unsupported})
+				for _, name := range declaredPredicates(file.Data) {
+					if _, dup := l.later[name]; !dup {
+						l.later[name] = laterPredicate{chain: name, source: file.Name, required: head.Spec}
+					}
+				}
+				continue
+			}
 			spec = newest(spec, declaredSpec)
 		}
-		switch {
-		case strings.HasSuffix(file.Name, CatalogFileSuffix):
+		switch kind {
+		case CatalogFile:
 			catalog, err := concepts.Decode(file.Data)
 			if err != nil {
 				return nil, nil, fmt.Errorf("%s: %w", file.Name, err)
@@ -294,7 +225,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 					return nil, nil, err
 				}
 			}
-		case strings.HasSuffix(file.Name, PredicatesFileSuffix):
+		case PredicatesFile:
 			decoded, err := decodePredicatesFile(file.Data)
 			if err != nil {
 				return nil, nil, fmt.Errorf("%s: %w", file.Name, err)
@@ -309,8 +240,6 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 				}
 				definitions = append(definitions, d)
 			}
-		default:
-			return nil, nil, fmt.Errorf("%s: not a definitions file (want %s or %s)", file.Name, CatalogFileSuffix, PredicatesFileSuffix)
 		}
 	}
 	base, err := Env()
@@ -642,6 +571,11 @@ func (l *Library) LoadRule(path string) (*Rule, error) {
 	if err != nil {
 		return nil, err
 	}
+	return l.decodeValid(path, data)
+}
+
+// decodeValid decodes and validates the rule file at path, whose content is data.
+func (l *Library) decodeValid(path string, data []byte) (*Rule, error) {
 	rule, err := l.DecodeRule(data)
 	if err != nil {
 		return nil, fmt.Errorf("%s: decode: %w", path, err)

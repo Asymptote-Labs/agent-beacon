@@ -62,6 +62,9 @@ type Rule struct {
 	// lib is the library of the pack the rule was loaded from: the predicates its expressions
 	// may call. Nil for a rule decoded on its own.
 	lib *Library
+	// validated is set when Validate last passed: a loader validates every rule it returns, and
+	// CheckRule and Compile do not validate it again (validate).
+	validated bool
 }
 
 // Order says whether a correlation's steps must occur in the order they are listed.
@@ -154,8 +157,24 @@ func validSeverity(s asymptoteobserve.Severity) bool {
 
 // Validate checks a rule against the spec: structural constraints plus every CEL match
 // expression compiling to bool against the event schema. A nil return means the rule is
-// loadable; it does not by itself assert maturity-ladder gates (see CheckMaturity).
+// loadable; it does not by itself assert maturity-ladder gates (see CheckMaturity). It checks
+// the rule as it is now, every time it is called: a rule changed after it passed is validated
+// again by calling it.
 func (r *Rule) Validate() error {
+	err := r.check()
+	r.validated = err == nil
+	return err
+}
+
+// validate is Validate for a rule that has not passed it yet.
+func (r *Rule) validate() error {
+	if r.validated {
+		return nil
+	}
+	return r.Validate()
+}
+
+func (r *Rule) check() error {
 	if !ValidID(r.ID) {
 		return fmt.Errorf("id %q must match %s", r.ID, concepts.IDPattern)
 	}

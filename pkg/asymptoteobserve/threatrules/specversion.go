@@ -75,13 +75,16 @@ var supportedSpec = func() specVersion {
 	return v
 }()
 
-// UnsupportedSpecError reports a rule that declares a spec version newer than this
-// engine implements, or that calls a predicate whose definitions do. Loaders that can
-// continue without the rule (LoadDirSkipping, rulestore) skip it and surface this error as
-// a warning.
+// UnsupportedSpecError reports a file that declares a spec version newer than this engine
+// implements (a rule, or definitions), or a rule that calls a predicate whose definitions do.
+// Loaders that can continue without it (LoadPackDir, rulestore) skip it and surface this error
+// as a warning.
 type UnsupportedSpecError struct {
 	RuleID   string // from a lenient read of the file; may be empty
-	Required string // the spec the rule needs
+	Required string // the spec the file needs
+	// Definitions is set for a definitions file instead of RuleID: what it declares, "catalog
+	// credential-stores" or "library egress" (Head.String).
+	Definitions string
 	// Predicate and Source are set for a rule that needs Required because it calls a predicate
 	// whose definitions file declares it: the predicate (the one the rule calls, then the ones
 	// that one calls on the way, "a -> b") and that file.
@@ -89,6 +92,10 @@ type UnsupportedSpecError struct {
 }
 
 func (e *UnsupportedSpecError) Error() string {
+	if e.Definitions != "" {
+		return fmt.Sprintf("the definitions (%s) require %s, but this Beacon supports up to %s; upgrade Beacon to load them and the rules that call their predicates",
+			e.Definitions, e.Required, SupportedSpec)
+	}
 	id := e.RuleID
 	if id == "" {
 		id = "(no id)"

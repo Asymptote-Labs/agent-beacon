@@ -30,7 +30,7 @@ const (
 // LoadedRule is a validated rule paired with its origin.
 type LoadedRule = rulestore.LoadedRule
 
-// Installed reports a rule written into the store.
+// Installed reports a file written into the store: a rule, or one of a pack's definitions.
 type Installed = rulestore.Installed
 
 // StoreDir returns the local rules store directory for the given mode.
@@ -64,7 +64,8 @@ func LoadActiveSkipping(userMode bool, rulesDir string) ([]LoadedRule, []threatr
 	return rulestore.LoadActiveSkipping(StoreDir(userMode), rulesDir)
 }
 
-// InstallFiles validates and installs the *.rule.yaml files at src into the store.
+// InstallFiles validates and installs the pack at src (its rules and definitions) into the
+// store.
 func InstallFiles(userMode bool, src string, force bool) ([]Installed, error) {
 	return rulestore.InstallFiles(StoreDir(userMode), src, force)
 }
@@ -75,9 +76,9 @@ func InstallFilesSkipping(userMode bool, src string, force bool) ([]Installed, [
 	return rulestore.InstallFilesSkipping(StoreDir(userMode), src, force)
 }
 
-// NoRulesError reports that no rules are left to run. Skipped holds the rules set aside
-// for needing a newer spec; when it is empty, the store is empty and the baseline is
-// missing.
+// NoRulesError reports that no rules are left to run. Skipped holds what was set aside for
+// needing a newer spec (rules, and definitions with the rules that call them); when it is
+// empty, the store is empty and the baseline is missing.
 type NoRulesError struct {
 	Skipped []threatrules.SkippedRule
 }
@@ -86,12 +87,8 @@ func (e *NoRulesError) Error() string {
 	if len(e.Skipped) == 0 {
 		return "no rules to run (store is empty and baseline missing)"
 	}
-	parts := make([]string, len(e.Skipped))
-	for i, s := range e.Skipped {
-		parts[i] = fmt.Sprintf("rule %q requires %s (%s)", s.Err.RuleID, s.Err.Required, s.Path)
-	}
-	return fmt.Sprintf("no rules to run: every rule needs a newer Beacon (this one supports up to %s): %s; upgrade Beacon to load them",
-		threatrules.SupportedSpec, strings.Join(parts, ", "))
+	return fmt.Sprintf("no rules to run: every rule needs a newer Beacon (this one supports up to %s): %s",
+		threatrules.SupportedSpec, strings.Join(SkippedStrings(e.Skipped), "; "))
 }
 
 // SkippedStrings renders skipped rules as one line each, for JSON payloads.

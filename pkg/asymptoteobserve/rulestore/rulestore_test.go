@@ -9,13 +9,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
 
-func TestBaselineRulePathUsesEmbedFSSeparator(t *testing.T) {
-	got := baselineRulePath("example.rule.yaml")
-	if got != "baseline/example.rule.yaml" {
-		t.Fatalf("embedded FS paths must use forward slashes, got %q", got)
-	}
-}
-
 const aRule = `
 id: %ID%
 version: 1
@@ -107,7 +100,7 @@ func TestLoadActiveStoreOverridesBaselineByID(t *testing.T) {
 		t.Fatalf("IsBaselineID disagrees with Baseline()")
 	}
 	store := t.TempDir()
-	if err := os.WriteFile(filepath.Join(store, id+RuleFileSuffix), []byte(ruleWithID(id)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(store, id+threatrules.RuleFileSuffix), []byte(ruleWithID(id)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := LoadActive(store, "")
@@ -172,7 +165,7 @@ func TestInstallRejectsInvalidRule(t *testing.T) {
 		t.Fatal("expected install to reject an invalid rule")
 	}
 	// Nothing should have been written.
-	if HasRuleFiles(store) {
+	if storeFiles(t, store) != "" {
 		t.Fatal("invalid rule must not be written to the store")
 	}
 }
@@ -191,7 +184,7 @@ func TestInstallRejectsFailingFixture(t *testing.T) {
 	if _, err := InstallFiles(store, src, false); err == nil {
 		t.Fatal("expected install to reject a rule with a failing fixture")
 	}
-	if HasRuleFiles(store) {
+	if storeFiles(t, store) != "" {
 		t.Fatal("rule with a failing fixture must not be written to the store")
 	}
 }
@@ -223,7 +216,7 @@ func TestInstallRollsBackWhenLaterWriteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blockedDest := filepath.Join(store, "b-rule"+RuleFileSuffix)
+	blockedDest := filepath.Join(store, "b-rule"+threatrules.RuleFileSuffix)
 	if err := os.Mkdir(blockedDest, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +224,7 @@ func TestInstallRollsBackWhenLaterWriteFails(t *testing.T) {
 	if _, err := InstallFiles(store, srcDir, false); err == nil {
 		t.Fatal("expected install to fail on blocked destination")
 	}
-	if _, err := os.Stat(filepath.Join(store, "a-rule"+RuleFileSuffix)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(store, "a-rule"+threatrules.RuleFileSuffix)); !os.IsNotExist(err) {
 		t.Fatalf("first rule should have been rolled back, stat err=%v", err)
 	}
 	if info, err := os.Stat(blockedDest); err != nil || !info.IsDir() {
@@ -259,7 +252,7 @@ func TestForceInstallRestoresOverwrittenRuleWhenLaterWriteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blockedDest := filepath.Join(store, "b-rule"+RuleFileSuffix)
+	blockedDest := filepath.Join(store, "b-rule"+threatrules.RuleFileSuffix)
 	if err := os.Mkdir(blockedDest, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +260,7 @@ func TestForceInstallRestoresOverwrittenRuleWhenLaterWriteFails(t *testing.T) {
 	if _, err := InstallFiles(store, srcDir, true); err == nil {
 		t.Fatal("expected force install to fail on blocked destination")
 	}
-	got, err := os.ReadFile(filepath.Join(store, "a-rule"+RuleFileSuffix))
+	got, err := os.ReadFile(filepath.Join(store, "a-rule"+threatrules.RuleFileSuffix))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +353,7 @@ func TestInstallFilesSkippingLeavesNewerSpecOut(t *testing.T) {
 	if _, err := InstallFiles(store, src, false); err == nil || !strings.Contains(err.Error(), "upgrade Beacon") {
 		t.Fatalf("strict InstallFiles want the unsupported-spec error, got %v", err)
 	}
-	if HasRuleFiles(store) {
+	if storeFiles(t, store) != "" {
 		t.Fatal("strict InstallFiles must not write anything when it fails")
 	}
 
@@ -374,7 +367,7 @@ func TestInstallFilesSkippingLeavesNewerSpecOut(t *testing.T) {
 	if len(skipped) != 1 || skipped[0].Err.RuleID != "future-rule" {
 		t.Fatalf("want future-rule skipped, got %+v", skipped)
 	}
-	if _, err := os.Stat(filepath.Join(store, "future-rule"+RuleFileSuffix)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(store, "future-rule"+threatrules.RuleFileSuffix)); !os.IsNotExist(err) {
 		t.Fatalf("skipped rule must not land in the store (stat err %v)", err)
 	}
 }

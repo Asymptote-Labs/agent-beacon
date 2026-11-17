@@ -248,8 +248,10 @@ func runRulesPull(cmd *cobra.Command, args []string) error {
 	}
 	urlPath := parsed.Path
 	isTarball := strings.HasSuffix(urlPath, ".tar.gz") || strings.HasSuffix(urlPath, ".tgz")
-	if !isTarball && !strings.HasSuffix(urlPath, ".rule.yaml") {
-		return fmt.Errorf("unsupported url: expected a .rule.yaml or .tar.gz/.tgz pack")
+	kind, isPackFile := threatrules.PackFileKind(path.Base(urlPath))
+	if !isTarball && !isPackFile {
+		return fmt.Errorf("unsupported url: expected a .tar.gz/.tgz pack, or one file of a pack (%s, %s or %s)",
+			threatrules.RuleFileSuffix, threatrules.CatalogFileSuffix, threatrules.PredicatesFileSuffix)
 	}
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Fetching %s (network)…\n", rawURL)
@@ -300,7 +302,7 @@ func runRulesPull(cmd *cobra.Command, args []string) error {
 		src = tmp
 	} else {
 		if int64(len(data)) > rulesPullMaxEntryBytes {
-			return fmt.Errorf("rule file is %d bytes, over the %d-byte limit for one rule", len(data), rulesPullMaxEntryBytes)
+			return fmt.Errorf("%s file is %d bytes, over the %d-byte limit for one %s", path.Base(urlPath), len(data), rulesPullMaxEntryBytes, packFileWhat(kind))
 		}
 		dest := filepath.Join(tmp, path.Base(urlPath))
 		if err := os.WriteFile(dest, data, 0o600); err != nil {
@@ -384,8 +386,8 @@ func extractRuleTarball(r io.Reader, dir string) error {
 		if entries > rulesPullMaxTarEntries {
 			return fmt.Errorf("tarball has more than %d entries", rulesPullMaxTarEntries)
 		}
-		isRule := strings.HasSuffix(hdr.Name, ".rule.yaml")
-		if hdr.Typeflag != tar.TypeReg || !isRule && !threatrules.IsDefinitionFile(hdr.Name) || isAppleDoubleArchiveEntry(hdr.Name) {
+		kind, isPackFile := threatrules.PackFileKind(hdr.Name)
+		if hdr.Typeflag != tar.TypeReg || !isPackFile {
 			continue
 		}
 		// Reject any entry whose name contains a path-traversal element before it is
@@ -395,11 +397,7 @@ func extractRuleTarball(r io.Reader, dir string) error {
 			return fmt.Errorf("archive entry %q contains a path traversal element", hdr.Name)
 		}
 		if hdr.Size > rulesPullMaxEntryBytes {
-			what := "rule"
-			if !isRule {
-				what = "definitions file"
-			}
-			return fmt.Errorf("archive entry %q is %d bytes, over the %d-byte limit for one %s", hdr.Name, hdr.Size, rulesPullMaxEntryBytes, what)
+			return fmt.Errorf("archive entry %q is %d bytes, over the %d-byte limit for one %s", hdr.Name, hdr.Size, rulesPullMaxEntryBytes, packFileWhat(kind))
 		}
 		// Preserve the entry's relative directory structure (rejecting absolute paths),
 		// then confirm the joined destination stays within cleanDir before any file
@@ -423,23 +421,20 @@ func extractRuleTarball(r io.Reader, dir string) error {
 			}
 			return err
 		}
-		if isRule {
-			count++
-		}
+		count++
 	}
 	if count == 0 {
-		return fmt.Errorf("tarball contained no .rule.yaml files")
+		return fmt.Errorf("tarball contained no rule or definitions files (%s, %s, %s)", threatrules.RuleFileSuffix, threatrules.CatalogFileSuffix, threatrules.PredicatesFileSuffix)
 	}
 	return nil
 }
 
-func isAppleDoubleArchiveEntry(name string) bool {
-	for _, part := range strings.Split(path.Clean(name), "/") {
-		if part == "__MACOSX" || strings.HasPrefix(part, "._") {
-			return true
-		}
+// packFileWhat names a pack file's kind in a message: a rule, or a definitions file.
+func packFileWhat(kind threatrules.FileKind) string {
+	if kind == threatrules.RuleFile {
+		return "rule"
 	}
-	return false
+	return "definitions file"
 }
 
 func writeReaderToFile(r io.Reader, dest string) error {
@@ -495,40 +490,45 @@ var rulesFieldsCmd = &cobra.Command{
 	},
 }
 
-// loadRuleFiles loads a rule file or directory for lint. Rules that need a newer spec
-// than this binary supports come back in skipped rather than failing the load.
-func loadRuleFiles(path string) ([]*threatrules.Rule, []threatrules.SkippedRule, error) {
+// loadPack loads a pack directory, or a single rule file, which has no definitions. What needs
+// a newer spec than this binary supports comes back in the pack's Skipped rather than failing
+// the load.
+func loadPack(path string) (*threatrules.Pack, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if info.IsDir() {
-		return threatrules.LoadDirSkipping(path)
+		return threatrules.LoadPackDir(path)
 	}
 	rule, err := threatrules.LoadRule(path)
 	if unsupported, ok := threatrules.AsUnsupportedSpec(err); ok {
-		return nil, []threatrules.SkippedRule{{Path: path, Err: unsupported}}, nil
+		return &threatrules.Pack{Skipped: []threatrules.SkippedRule{{Path: path, Err: unsupported}}}, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	return &threatrules.Pack{Rules: []*threatrules.Rule{rule}}, nil
+}
+
+// loadRuleFiles is loadPack's rules and what it set aside.
+func loadRuleFiles(path string) ([]*threatrules.Rule, []threatrules.SkippedRule, error) {
+	pack, err := loadPack(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	return []*threatrules.Rule{rule}, nil, nil
+	return pack.Rules, pack.Skipped, nil
 }
 
 func lintRulesPath(cmd *cobra.Command, path string) error {
 	out := cmd.OutOrStdout()
-	rules, skipped, err := loadRuleFiles(path)
+	// One load: the rules come back validated against the pack's definitions, which are then
+	// checked on their own.
+	pack, err := loadPack(path)
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)
 	}
-	// The pack's definitions loaded with the rules above, or the load would have failed; they
-	// are read again here for their own fixtures.
-	var lib *threatrules.Library
-	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
-		if lib, _, err = threatrules.LoadLibraryDir(path); err != nil {
-			return fmt.Errorf("load rules: %w", err)
-		}
-	}
+	rules, skipped, lib := pack.Rules, pack.Skipped, pack.Library
 	predicates := lib.Predicates()
 	if len(rules) == 0 && len(skipped) == 0 && lib == nil {
 		return fmt.Errorf("no *.rule.yaml files found under %s", filepath.Clean(path))
@@ -624,9 +624,28 @@ func lintRulesPath(cmd *cobra.Command, path string) error {
 	case failures > 0:
 		return fmt.Errorf("%d failure(s)", failures)
 	case len(skipped) > 0:
-		return fmt.Errorf("%d rule(s) need a newer Beacon (supports up to %s)", len(skipped), threatrules.SupportedSpec)
+		return fmt.Errorf("%s need a newer Beacon (supports up to %s)", skippedFiles(skipped), threatrules.SupportedSpec)
 	}
 	return nil
+}
+
+// skippedFiles counts what was set aside, rules and definitions files apart: "2 rule(s) and 1
+// definitions file(s)".
+func skippedFiles(skipped []threatrules.SkippedRule) string {
+	definitions := 0
+	for _, s := range skipped {
+		if s.Err.Definitions != "" {
+			definitions++
+		}
+	}
+	switch rules := len(skipped) - definitions; {
+	case definitions == 0:
+		return fmt.Sprintf("%d rule(s)", rules)
+	case rules == 0:
+		return fmt.Sprintf("%d definitions file(s)", definitions)
+	default:
+		return fmt.Sprintf("%d rule(s) and %d definitions file(s)", rules, definitions)
+	}
 }
 
 func init() {
