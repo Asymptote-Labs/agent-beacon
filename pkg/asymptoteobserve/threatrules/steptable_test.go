@@ -49,18 +49,10 @@ func ownFindings(c *CompiledRule, events []asymptoteobserve.Event) ([]Finding, e
 		}
 		return findings, first
 	}
-	var order []string
-	sessions := map[string][]asymptoteobserve.Event{}
-	for _, e := range events {
-		sid := sessionOf(&e)
-		if _, seen := sessions[sid]; !seen {
-			order = append(order, sid)
-		}
-		sessions[sid] = append(sessions[sid], e)
-	}
-	for _, sid := range order {
-		session := sessions[sid]
-		seq, _ := c.matchSession(session, func(step, event int) (bool, error) { return held(c.steps[step], session[event]), nil })
+	sessions, _ := groupSessions(events)
+	for k := range sessions {
+		session := &sessions[k]
+		seq := c.matchSession(session, func(step, event int) bool { return held(c.steps[step], *session.event(event)) })
 		if seq != nil {
 			findings = append(findings, c.newFinding(seq))
 		}

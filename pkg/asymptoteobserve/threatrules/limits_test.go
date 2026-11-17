@@ -314,7 +314,7 @@ func TestOrderedCorrelationIsLinearInTheSession(t *testing.T) {
 
 	// The same session with the external MCP call at the end, out of window from every
 	// anchor but the last few: still linear, and still finds the in-window alignment.
-	end, _ := eventTime(events[n-1])
+	end, _ := eventTime(&events[n-1])
 	events = append(events, corrEvent(end.Add(10*time.Second).Format(time.RFC3339), "mcp.tool_invoked", "s1", func(e *asymptoteobserve.Event) {
 		e.MCP = &asymptoteobserve.MCPInfo{Server: "https://api.example.com", Tool: "x"}
 	}))
@@ -342,7 +342,7 @@ func (c *CompiledRule) matchSessionInSequenceReference(events []asymptoteobserve
 		if !matched {
 			continue
 		}
-		startTime, startKnown := eventTime(events[start])
+		startTime, startKnown := eventTime(&events[start])
 		final := len(c.steps) - 1
 		stepIdx := 1
 		seq := []asymptoteobserve.Event{events[start]}
@@ -356,7 +356,7 @@ func (c *CompiledRule) matchSessionInSequenceReference(events []asymptoteobserve
 			}
 			seq = append(seq, events[j])
 			if stepIdx == final {
-				t, known := eventTime(events[j])
+				t, known := eventTime(&events[j])
 				if startKnown && known && t.Sub(startTime) > c.window {
 					seq = nil
 				}
@@ -409,11 +409,18 @@ func TestOrderedCorrelationMatchesExhaustiveSearch(t *testing.T) {
 			}
 			events[i] = corrEvent(ts, actions[rng.Intn(len(actions))], "s", nil)
 		}
+		session := &sessionEvents{all: events}
+		for i := range events {
+			session.at = append(session.at, i)
+		}
 		for ri, c := range rules {
-			got, err := c.matchSessionInSequence(events, func(step, event int) (bool, error) { return evalAlone(c.steps[step], events[event]) })
-			if err != nil {
-				t.Fatal(err)
-			}
+			got := c.matchSessionInSequence(session, func(step, event int) bool {
+				held, err := evalAlone(c.steps[step], events[event])
+				if err != nil {
+					t.Fatal(err)
+				}
+				return held
+			})
 			want, err := c.matchSessionInSequenceReference(events)
 			if err != nil {
 				t.Fatal(err)
