@@ -43,10 +43,7 @@ Scanning is read-only and never touches the network.`,
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
-	userMode := scanOpts.userMode
-	if scanOpts.systemMode {
-		userMode = false
-	}
+	userMode := flagsUserMode(scanOpts.userMode, scanOpts.systemMode)
 
 	var minRank int
 	if s := strings.TrimSpace(scanOpts.minSeverity); s != "" {

@@ -169,7 +169,7 @@ func resolveMCPRuntimeLog() lifecycle.RuntimeLogSource {
 }
 
 func mcpUserMode() bool {
-	return mcpOpts.userMode && !mcpOpts.systemMode
+	return flagsUserMode(mcpOpts.userMode, mcpOpts.systemMode)
 }
 
 func normalizedTransport() string {
