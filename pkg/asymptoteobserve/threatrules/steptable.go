@@ -37,10 +37,9 @@ type stepTable struct {
 	sessions []sessionEvents
 }
 
-// stepColumn is one distinct step: an expression, read on one form of the event.
+// stepColumn is one distinct step, and when a matcher can ask it.
 type stepColumn struct {
-	match   matcher
-	derived bool
+	distinctStep
 	// always is set when the step is asked on every event; otherwise it is asked on the events
 	// after one that a column in after holds for. feeds is set on a column listed in an after.
 	always bool
@@ -54,40 +53,74 @@ type sessionEvents struct {
 	index  []int
 }
 
+// distinctStep is one distinct step of a set of correlation rules: an expression, read on one
+// form of the event, and the first rule and step that write it.
+type distinctStep struct {
+	match   matcher
+	derived bool
+	rule    *CompiledRule
+	step    int
+}
+
 // stepKey identifies a step by what is evaluated: the expression and the definitions it was
-// compiled with.
+// compiled with. The same text means another expression in a pack whose predicates say
+// otherwise, and one rule set can hold rules of two packs (a store's rules beside the
+// baseline's).
 type stepKey struct {
 	lib   *Library
 	match string
 }
 
-// newStepTable returns the table for the correlation rules among rules over events, or nil when
-// there are none.
-func newStepTable(rules []*CompiledRule, events []asymptoteobserve.Event) *stepTable {
-	t := &stepTable{events: events, of: map[*CompiledRule][]int{}, byAction: map[string][]int{}}
-	columns := map[stepKey]int{}
+// distinctSteps returns the distinct steps of the correlation rules among rules, in rule and
+// step order, and each rule's steps as positions among them; a single-event rule has none.
+//
+// Which form of the event a step reads follows its rule (CompiledRule.eval). A step shared by
+// a rule that reads derived fields and one that does not selects none itself, so it is the
+// same on either form and reads the derived one.
+func distinctSteps(rules []*CompiledRule) ([]distinctStep, map[*CompiledRule][]int) {
+	var steps []distinctStep
+	of := map[*CompiledRule][]int{}
+	at := map[stepKey]int{}
 	for _, r := range rules {
 		if r.steps == nil {
 			continue
 		}
-		if _, done := t.of[r]; done {
+		if _, done := of[r]; done {
 			continue
 		}
 		own := make([]int, len(r.steps))
 		for s, step := range r.rule.Correlation.Steps {
-			// One column for a step however many rules write it. Which form of the event a
-			// step reads follows its rule (CompiledRule.eval); a step shared by a rule that
-			// reads derived fields and one that does not selects none itself, so it is the
-			// same on either form and reads the derived one.
 			key := stepKey{lib: r.rule.lib, match: step.Match}
-			c, ok := columns[key]
+			k, ok := at[key]
 			if !ok {
-				c = len(t.columns)
-				columns[key] = c
-				t.columns = append(t.columns, stepColumn{match: r.steps[s]})
+				k = len(steps)
+				at[key] = k
+				steps = append(steps, distinctStep{match: r.steps[s], rule: r, step: s})
 			}
-			t.columns[c].derived = t.columns[c].derived || r.derived
-			own[s] = c
+			steps[k].derived = steps[k].derived || r.derived
+			own[s] = k
+		}
+		of[r] = own
+	}
+	return steps, of
+}
+
+// newStepTable returns the table for the correlation rules among rules over events, or nil when
+// there are none.
+func newStepTable(rules []*CompiledRule, events []asymptoteobserve.Event) *stepTable {
+	steps, of := distinctSteps(rules)
+	if len(steps) == 0 {
+		return nil
+	}
+	t := &stepTable{events: events, of: of, byAction: map[string][]int{}}
+	t.columns = make([]stepColumn, len(steps))
+	for c, step := range steps {
+		t.columns[c].distinctStep = step
+	}
+	for _, r := range rules {
+		own := of[r]
+		for s := range own {
+			c := own[s]
 			switch {
 			case r.anyOrder || s == 0:
 				t.columns[c].always = true
@@ -96,10 +129,6 @@ func newStepTable(rules []*CompiledRule, events []asymptoteobserve.Event) *stepT
 				t.columns[own[s-1]].feeds = true
 			}
 		}
-		t.of[r] = own
-	}
-	if len(t.columns) == 0 {
-		return nil
 	}
 	for c, col := range t.columns {
 		if col.match.actions == nil {

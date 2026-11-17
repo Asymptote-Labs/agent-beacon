@@ -6,39 +6,24 @@ import (
 )
 
 // StepMatcher reports whether an event matches any step of a set of correlation rules: whether a
-// caller that keeps events for those rules needs to keep this one. Steps with the same expression,
-// read on the same form of the event, are evaluated once. It is built once and is safe for
-// concurrent use.
+// caller that keeps events for those rules needs to keep this one. A step several rules share
+// (distinctSteps) is evaluated once. It is built once and is safe for concurrent use.
 type StepMatcher struct {
-	steps     []step
+	steps     []distinctStep
 	byAction  map[string][]int // as EventScanner's, over steps
 	anyAction []int
-}
-
-type step struct {
-	match   matcher
-	derived bool // the step's rule reads derived fields, so the step reads the derived event
-	name    string
 }
 
 // NewStepMatcher returns a matcher over the steps of correlation rules, in rule and step order.
 // A single-event rule has no steps and is rejected.
 func NewStepMatcher(rules []*CompiledRule) (*StepMatcher, error) {
-	m := &StepMatcher{byAction: map[string][]int{}}
-	seen := map[[2]any]bool{}
 	for _, r := range rules {
 		if r.steps == nil {
 			return nil, fmt.Errorf("rule %q is a single-event rule; a step matcher runs correlation steps", r.rule.ID)
 		}
-		for i, st := range r.rule.Correlation.Steps {
-			key := [2]any{st.Match, r.derived}
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			m.steps = append(m.steps, step{match: r.steps[i], derived: r.derived, name: fmt.Sprintf("rule %q step %q", r.rule.ID, st.ID)})
-		}
 	}
+	m := &StepMatcher{byAction: map[string][]int{}}
+	m.steps, _ = distinctSteps(rules)
 	for i, st := range m.steps {
 		if st.match.actions == nil {
 			m.anyAction = append(m.anyAction, i)
@@ -74,7 +59,7 @@ func (m *StepMatcher) AnyStep(p *PreparedEvent) (bool, error) {
 		matched, err := evalObserved(st.match.program(act), act)
 		if err != nil {
 			if first == nil {
-				first = fmt.Errorf("%s: %w", st.name, err)
+				first = fmt.Errorf("rule %q step %q: %w", st.rule.rule.ID, st.rule.rule.Correlation.Steps[st.step].ID, err)
 			}
 			continue
 		}

@@ -142,12 +142,12 @@ func TestScanEventsSharesCorrelationWork(t *testing.T) {
 		})
 	}
 	// A step is one expression with one set of definitions, whichever rules write it.
-	firstSteps, steps := map[[2]any]bool{}, 0
+	firstSteps, steps := map[stepKey]bool{}, 0
 	for _, c := range rules {
 		for s, step := range c.rule.Correlation.Steps {
 			steps++
 			if (s == 0 || c.anyOrder) && !c.steps[s].excludes("command.executed") {
-				firstSteps[[2]any{c.rule.lib, step.Match}] = true
+				firstSteps[stepKey{c.rule.lib, step.Match}] = true
 			}
 		}
 	}
