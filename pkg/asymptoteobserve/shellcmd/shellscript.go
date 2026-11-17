@@ -160,7 +160,7 @@ func (c Command) printed() (string, bool) {
 		}
 		text := strings.Join(words, " ")
 		if escapes {
-			text = printfEscapes.Replace(text)
+			text = backslashEscapes.Replace(text)
 		}
 		return text, true
 	case "printf":
@@ -179,9 +179,10 @@ func (c Command) printed() (string, bool) {
 	return "", false
 }
 
-// printfEscapes are the backslash escapes a printf format and echo -e turn into characters,
-// as far as a command line needs them.
-var printfEscapes = strings.NewReplacer(`\n`, "\n", `\t`, "\t", `\\`, `\`, `\"`, `"`, `\'`, `'`)
+// backslashEscapes are the backslash escapes a printf format and echo -e turn into
+// characters, and an inline script's string literal holds, as far as a command line needs
+// them.
+var backslashEscapes = strings.NewReplacer(`\n`, "\n", `\t`, "\t", `\\`, `\`, `\"`, `"`, `\'`, `'`)
 
 // printfOutput returns what printf prints for a format whose only directives are %s, %b and
 // %%: the format once when it has none, and otherwise once for each group of arguments, as
@@ -204,13 +205,13 @@ func printfOutput(format string, args []Word) (string, bool) {
 		case '%':
 			b.WriteByte('%')
 		case 's', 'b':
-			literals = append(literals, printfEscapes.Replace(b.String()))
+			literals = append(literals, backslashEscapes.Replace(b.String()))
 			b.Reset()
 		default:
 			return "", false
 		}
 	}
-	tail := printfEscapes.Replace(b.String())
+	tail := backslashEscapes.Replace(b.String())
 	if len(literals) == 0 {
 		return tail, true
 	}

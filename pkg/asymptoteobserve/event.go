@@ -209,8 +209,9 @@ type CommandInfo struct {
 // uses, and a spec tag the Threat Rules version that added a field after parsed_commands itself
 // (CommandInfo.ParsedCommands). threatrules.ParsedCommands says how each field is derived.
 type ParsedCommand struct {
-	// Name is the base name of the command after its wrappers (sudo, env, exec, timeout, ...):
-	// rm for `sudo /bin/rm -rf x`. Empty when it is unknown.
+	// Name is the base name of the command after the wrappers that run it here unchanged
+	// (shellcmd's Command.Unwrapped says which): rm for `sudo /bin/rm -rf x`. Empty when it is
+	// unknown.
 	Name string `cel:"name"`
 	// Argv are the command's words as the shell passes them, wrappers included; a word whose
 	// value the parse cannot know (a parameter, substitution, glob or leading tilde) is "".

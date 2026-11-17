@@ -169,8 +169,9 @@ type Command struct {
 	Stage    int
 	// Nested is true inside a command substitution ($(...), `...`) or a process substitution.
 	Nested bool
-	// InScript is true for a command of the script a shell of the command line runs (its -c
-	// text, or the here-document it reads): WithScripts adds those after the shell.
+	// InScript is true for a command of a command line another command hands on, which
+	// withScripts adds after it: a shell's script, what a carrier runs, what an inline script
+	// runs (handOn).
 	InScript bool
 	// AfterCD is true when a cd, pushd or popd comes earlier in the command line, so a relative
 	// path no longer names the file it would at the start. It does not ask where.

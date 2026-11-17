@@ -254,11 +254,19 @@ the steps in both orders still fires once. A single event never satisfies two st
   here-document or here-string and no file, each with every word known and no output
   redirection (`echo 'rm -rf /' | sh`, `cat <<'EOF' | sudo bash`); and for the command lines
   the inline script of `python`, `node`, `bun`, `deno`, `ruby` or `php` (its `-c`/`-e`
-  value, or the here-document it reads) runs through `os.system`, `os.popen`,
-  `subprocess.run`/`call`/`check_call`/`check_output`/`Popen`/`getoutput`,
-  `child_process`'s `exec`/`execFile`/`spawn` and their `Sync` forms, Ruby's `system`,
-  `exec`, `spawn`, backticks and `%x(..)`, and PHP's `system`, `exec`, `shell_exec`,
-  `passthru`, `popen` and `proc_open`, when the command is written out: a string literal is
+  value, `deno eval`'s script, or the here-document it reads) runs through Python's
+  `os.system`, `os.popen`,
+  `subprocess.run`/`call`/`check_call`/`check_output`/`getoutput`/`getstatusoutput`,
+  `sp.run` and `sp.call` (subprocess imported as `sp`), and `Popen`, `check_output`,
+  `check_call`, `getoutput` and `getstatusoutput` as a function or a method of any name;
+  JavaScript's
+  `exec`, `execFile`, `spawn` and their `Sync` forms, in a script that names
+  `child_process`; Ruby's `system`, `exec`, `spawn`, `IO.popen`, `Process.spawn`,
+  `Open3.capture2`, `Open3.capture2e`, `Open3.capture3`, `Open3.popen3`, backticks and
+  `%x(..)` (also `%x{..}`, `%x[..]`, `%x<..>`), and PHP's `system`, `exec`, `shell_exec`,
+  `passthru`, `popen` and `proc_open` and backticks (a Ruby or PHP call only as written, so
+  `conn.exec(..)` and `$db->exec(..)` are not; a Ruby call also without parentheses), when
+  the command is written out: a string literal is
   a command line, a list of string literals its words, and an element or a further argument
   that is not a literal is a word whose value is unknown. A literal the language fills in
   (an f-string, `${..}`, `#{..}`) or that is an operand of an expression is not read.

