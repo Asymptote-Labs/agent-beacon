@@ -704,12 +704,13 @@ word such as `credentials`) counts only directly after a separator. A store with
 patterns is not mentioned by a text that also names something those patterns match.
 `redacted` is for a command line as a log holds it. A log's redaction replaces a value that
 looks like a secret, and where a command substitution is put in a secret's place the value
-can begin with the command's name: of `curl -u "ci:$(gh auth token)"` the log holds
-`curl -u "ci:[REDACTED] auth token)"`. (A Beacon before the release that introduced v1.3
-also wrote `TOKEN=[REDACTED] auth token)` for `TOKEN=$(gh auth token)`; redaction now keeps
-the opening of a substitution after a label, and that line is logged as written.) The
-predicate is true when the text
-holds `[REDACTED]`, whitespace, and then, within the same command, an entry's `words` in
+can begin with the command's name. Redaction keeps a substitution that opens with a plain
+command name, but one that opens with an assignment still loses it: of
+`TOKEN=$(GH_TOKEN=$(gh auth token) ./x)` the log holds `TOKEN=[REDACTED] auth token) ./x)`.
+(A Beacon before the release that introduced v1.3 lost it after every secret's label:
+`curl -u "ci:[REDACTED] auth token)"` for `curl -u "ci:$(gh auth token)"`, and
+`TOKEN=[REDACTED] auth token)` for `TOKEN=$(gh auth token)`.) The predicate is true when the
+text holds `[REDACTED]`, whitespace, and then, within the same command, an entry's `words` in
 order and one of its `flags`. An entry has this form only when what is left tells the
 command from another: two `words` or more, one word with `flags`, one word that is more than
 letters and digits, or no words and a flag that is a whole option word (which then follows
