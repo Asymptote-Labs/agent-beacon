@@ -1,349 +1,236 @@
 package cmd
 
 import (
-	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
+	"time"
 
-	"github.com/spf13/cobra"
-
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
-// liveLine is a runtime log line of one action in a session.
-func liveLine(harness, method, session, action string) string {
-	return `{"timestamp":"2026-11-16T00:00:00Z","event":{"id":"` + harness + session + action + `","action":"` + action +
-		`"},"harness":{"name":"` + harness + `","collection_method":"` + method + `"},"session":{"id":"` + session +
-		`"},"content":{"prompt":"secret prompt text"}}`
+func appendSessionEvent(t *testing.T, logPath, harnessName, method, session string) {
+	t.Helper()
+	event := schema.NewEvent(schema.NewEventOptions{
+		Action: "prompt.submitted", Category: "agent", Severity: schema.SeverityInfo,
+		Harness: schema.HarnessInfo{Name: harnessName, CollectionMethod: method},
+	})
+	event.Session = &schema.SessionInfo{ID: session}
+	if _, err := writer.AppendEvent(event, writer.Options{Path: logPath, UserMode: true}); err != nil {
+		t.Fatal(err)
+	}
 }
 
-func appendLog(t *testing.T, path string, lines ...string) {
-	t.Helper()
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+func TestSessionsInLogCountsEveryCollectionMethod(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "h1")
+	appendSessionEvent(t, logPath, "codex", schema.CollectionMethodPoll, "p1")
+	appendSessionEvent(t, logPath, "gemini_cli", "otlp", "o1")
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "h1")
+	// A record Beacon writes about an old session itself (a share, a commit link) has no collection
+	// method, and is not activity in that session.
+	appendSessionEvent(t, logPath, "codex", "", "shared-old")
+	end := logSize(logPath)
+	// A line still being written is left for the next read.
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	for _, line := range lines {
-		if _, err := f.WriteString(line + "\n"); err != nil {
-			t.Fatal(err)
-		}
+	_, _ = f.WriteString(`{"harness":{"name":"cursor"},"session":{"id":"partial"}`)
+	_ = f.Close()
+
+	got, next := sessionsInLog(logPath, 0, "")
+	want := []sweptSession{{"claude_code", "h1"}, {"codex", "p1"}, {"gemini_cli", "o1"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sessions = %+v, want %+v", got, want)
+	}
+	if next != end {
+		t.Fatalf("next offset = %d, want %d (before the partial line)", next, end)
 	}
 }
 
-func TestLineActiveSession(t *testing.T) {
+// liveTraceClock is the time the scans in these tests run at.
+var liveTraceClock = time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+
+// liveTraceHarness stubs the stored position, the clock and what recordLocalTraces sends.
+func liveTraceHarness(t *testing.T, connected bool) (calls *[]string, pos *telemetry.LiveTracePosition, set *bool) {
+	t.Helper()
+	recordTelemetry(t)
+	calls = recordTraces(t, connected)
+	pos, set = new(telemetry.LiveTracePosition), new(bool)
+	oldGet, oldSet, oldNow := telemetryLiveTrace, telemetrySetLiveTrace, liveTraceNow
+	telemetryLiveTrace = func() (telemetry.LiveTracePosition, bool) { return *pos, *set }
+	telemetrySetLiveTrace = func(v telemetry.LiveTracePosition) { *pos, *set = v, true }
+	liveTraceNow = func() time.Time { return liveTraceClock }
+	t.Cleanup(func() { telemetryLiveTrace, telemetrySetLiveTrace, liveTraceNow = oldGet, oldSet, oldNow })
+	return calls, pos, set
+}
+
+// readUpTo stores a position at the end of the log, saved an hour before the scan.
+func readUpTo(logPath string, pos *telemetry.LiveTracePosition, set *bool) {
+	*pos = telemetry.LiveTracePosition{Offset: logSize(logPath), LogID: runtimeLogID(logPath), SavedAt: liveTraceClock.Add(-time.Hour)}
+	*set = true
+}
+
+// rotate moves the log to path.1, the newer archives up first, as RotateRuntimeLog does.
+func rotate(t *testing.T, logPath string) {
+	t.Helper()
+	for i := maxLiveTraceArchives - 1; i >= 1; i-- {
+		from := fmt.Sprintf("%s.%d", logPath, i)
+		if _, err := os.Stat(from); err == nil {
+			if err := os.Rename(from, fmt.Sprintf("%s.%d", logPath, i+1)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.Rename(logPath, logPath+".1"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRecordLiveTracesReportsNewSessionsFromEveryCollector(t *testing.T) {
+	calls, pos, _ := liveTraceHarness(t, false)
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "history")
+
+	// The first run only records where the log ends: history is not live.
+	recordLiveTraces(logPath, true)
+	if len(*calls) != 0 || pos.Offset != logSize(logPath) || pos.LogID != runtimeLogID(logPath) || !pos.SavedAt.Equal(liveTraceClock) {
+		t.Fatalf("first run recorded %v, position %+v", *calls, *pos)
+	}
+
+	pos.SavedAt = liveTraceClock.Add(-6 * time.Hour)
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "h1")
+	appendSessionEvent(t, logPath, "codex", schema.CollectionMethodPoll, "p1")
+	recordLiveTraces(logPath, true)
+	want := []string{"live:claude_code/h1", "live:codex/p1"}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("recorded %v, want %v", *calls, want)
+	}
+	if pos.Offset != logSize(logPath) {
+		t.Fatalf("offset %d, want the log's end %d", pos.Offset, logSize(logPath))
+	}
+
+	// Nothing new, nothing sent.
+	recordLiveTraces(logPath, true)
+	if len(*calls) != 2 {
+		t.Fatalf("a run with nothing new recorded %v", *calls)
+	}
+}
+
+func TestRecordLiveTracesFollowsTheLogThroughARotation(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		line string
-		want bool
-	}{
-		{"hook prompt", liveLine("claude_code", "hook", "s1", "prompt.submitted"), true},
-		{"otlp token usage", liveLine("codex", "otlp", "s1", "token.usage"), true},
-		{"poll tool call", liveLine("cursor", "poll", "s1", "tool.invoked"), true},
-		{"session start", liveLine("pi_cli", "hook", "s1", "session.started"), false},
-		{"session end", liveLine("pi_cli", "hook", "s1", "session.ended"), false},
-		{"commit link", liveLine("claude_code", "", "s1", "session.commit_linked"), false},
-		{"share", liveLine("claude_code", "", "s1", "session.shared"), false},
-		{"no session", `{"event":{"action":"inventory.heartbeat"},"harness":{"name":"beacon"}}`, false},
-		{"empty session", liveLine("claude_code", "hook", "", "prompt.submitted"), false},
-		{"no harness", `{"event":{"action":"prompt.submitted"},"session":{"id":"s1"}}`, false},
-		{"not json", `{"session":`, false},
-	} {
+		// grow makes the new live log longer than the old offset, so a check on size alone would
+		// seek into the middle of it.
+		grow bool
+	}{{"new log shorter than the offset", false}, {"new log longer than the offset", true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, ok := lineActiveSession([]byte(tc.line)); ok != tc.want {
-				t.Fatalf("active = %t, want %t", ok, tc.want)
+			calls, pos, set := liveTraceHarness(t, false)
+			logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+			appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "history")
+			readUpTo(logPath, pos, set)
+			appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "before-rotation")
+			rotate(t, logPath)
+			appendSessionEvent(t, logPath, "codex", schema.CollectionMethodHook, "after-rotation")
+			want := []string{"live:claude_code/before-rotation", "live:codex/after-rotation"}
+			if tc.grow {
+				for i := 0; logSize(logPath) <= pos.Offset+512; i++ {
+					appendSessionEvent(t, logPath, "codex", schema.CollectionMethodHook, "after-rotation")
+				}
+			}
+
+			recordLiveTraces(logPath, true)
+			if !reflect.DeepEqual(*calls, want) {
+				t.Fatalf("recorded %v, want %v", *calls, want)
+			}
+			if pos.Offset != logSize(logPath) || pos.LogID != runtimeLogID(logPath) {
+				t.Fatalf("position %+v, want the new log's end %d", *pos, logSize(logPath))
 			}
 		})
 	}
 }
 
-func TestLiveSessionsSinceReadsOnlyNewActivity(t *testing.T) {
+func TestRecordLiveTracesReadsEveryArchiveNewerThanTheLastRead(t *testing.T) {
+	calls, pos, set := liveTraceHarness(t, false)
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	appendLog(t, logPath, liveLine("claude_code", "hook", "old", "prompt.submitted"))
-	cursor := liveTraceEndCursor(logPath)
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "history")
+	readUpTo(logPath, pos, set)
+	rotate(t, logPath)
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "middle")
+	rotate(t, logPath)
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "newest")
 
-	appendLog(t, logPath,
-		liveLine("claude_code", "hook", "s1", "session.started"),
-		liveLine("claude_code", "hook", "s1", "prompt.submitted"),
-		liveLine("claude_code", "hook", "s1", "tool.invoked"),
-		// An automated run that only started and ended is not a trace.
-		liveLine("pi_cli", "hook", "auto", "session.started"),
-		liveLine("pi_cli", "hook", "auto", "session.ended"),
-		liveLine("codex", "otlp", "s2", "token.usage"),
-		liveLine("cursor", "poll", "s1", "agent.message"),
-	)
-	// A line still being written is left for the next run.
-	partial := liveLine("gemini_cli", "hook", "s3", "prompt.submitted")
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString(partial[:20]); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-
-	sessions, next := liveSessionsSince(logPath, cursor, liveTraceScanBytes)
-	want := []sweptSession{{"claude_code", "s1"}, {"codex", "s2"}, {"cursor", "s1"}}
-	if !reflect.DeepEqual(sessions, want) {
-		t.Fatalf("sessions = %+v, want %+v", sessions, want)
-	}
-	info, _ := os.Stat(logPath)
-	if next.Offset != info.Size()-20 || next.Head != cursor.Head || next.Log != cursor.Log {
-		t.Fatalf("next = %+v, cursor %+v, size %d", next, cursor, info.Size())
-	}
-
-	f, err = os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString(partial[20:] + "\n"); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-	sessions, next = liveSessionsSince(logPath, next, liveTraceScanBytes)
-	if want := []sweptSession{{"gemini_cli", "s3"}}; !reflect.DeepEqual(sessions, want) {
-		t.Fatalf("after the line was finished: sessions = %+v, want %+v", sessions, want)
-	}
-	if sessions, _ := liveSessionsSince(logPath, next, liveTraceScanBytes); len(sessions) != 0 {
-		t.Fatalf("nothing new, yet sessions = %+v", sessions)
+	recordLiveTraces(logPath, true)
+	want := []string{"live:claude_code/middle", "live:claude_code/newest"}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("recorded %v, want %v", *calls, want)
 	}
 }
 
-func TestLiveSessionsSinceFollowsRotation(t *testing.T) {
+func TestRecordLiveTracesSkipsAStaleScan(t *testing.T) {
+	calls, pos, set := liveTraceHarness(t, false)
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	appendLog(t, logPath, liveLine("claude_code", "hook", "old", "prompt.submitted"))
-	cursor := liveTraceEndCursor(logPath)
-	appendLog(t, logPath, liveLine("claude_code", "hook", "before", "prompt.submitted"))
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "history")
+	readUpTo(logPath, pos, set)
+	pos.SavedAt = liveTraceClock.Add(-maxLiveTraceGap - time.Minute)
+	// Telemetry was off for days: the log rotated and its new file is short, which a size check
+	// alone would read from the start.
+	rotate(t, logPath)
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "old-while-off")
 
-	// Rotated twice since the last run: the cursor's file is now the second archive.
-	if err := os.Rename(logPath, logPath+".1"); err != nil {
-		t.Fatal(err)
+	recordLiveTraces(logPath, true)
+	if len(*calls) != 0 {
+		t.Fatalf("a stale scan recorded %v", *calls)
 	}
-	appendLog(t, logPath, liveLine("codex", "hook", "between", "prompt.submitted"))
-	if err := os.Rename(logPath+".1", logPath+".2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(logPath, logPath+".1"); err != nil {
-		t.Fatal(err)
-	}
-	appendLog(t, logPath, liveLine("cursor", "hook", "after", "prompt.submitted"))
-
-	sessions, next := liveSessionsSince(logPath, cursor, liveTraceScanBytes)
-	want := []sweptSession{{"claude_code", "before"}, {"codex", "between"}, {"cursor", "after"}}
-	if !reflect.DeepEqual(sessions, want) {
-		t.Fatalf("sessions = %+v, want %+v", sessions, want)
-	}
-	if end := liveTraceEndCursor(logPath); next != end {
-		t.Fatalf("next = %+v, want the live log's end %+v", next, end)
-	}
-
-	// The cursor's file rotated out of retention: what is still kept is read.
-	if err := os.Remove(logPath + ".2"); err != nil {
-		t.Fatal(err)
-	}
-	sessions, _ = liveSessionsSince(logPath, cursor, liveTraceScanBytes)
-	if want := []sweptSession{{"codex", "between"}, {"cursor", "after"}}; !reflect.DeepEqual(sessions, want) {
-		t.Fatalf("after retention: sessions = %+v, want %+v", sessions, want)
-	}
-
-	// The log was removed: nothing, and the cursor is kept; a log written again is read from its
-	// beginning, since its first line is not the cursor's.
-	for _, path := range []string{logPath, logPath + ".1"} {
-		if err := os.Remove(path); err != nil {
-			t.Fatal(err)
-		}
-	}
-	sessions, next = liveSessionsSince(logPath, cursor, liveTraceScanBytes)
-	if len(sessions) != 0 || next != cursor {
-		t.Fatalf("missing log: sessions = %+v, next = %+v", sessions, next)
-	}
-	appendLog(t, logPath, liveLine("gemini_cli", "hook", "new", "prompt.submitted"))
-	if sessions, _ := liveSessionsSince(logPath, next, liveTraceScanBytes); !reflect.DeepEqual(sessions, []sweptSession{{"gemini_cli", "new"}}) {
-		t.Fatalf("recreated log: sessions = %+v", sessions)
+	if pos.Offset != logSize(logPath) || !pos.SavedAt.Equal(liveTraceClock) {
+		t.Fatalf("position %+v, want the log's end now", *pos)
 	}
 }
 
-func TestLiveSessionsSinceReadsAtMostTheNewestBytes(t *testing.T) {
+func TestRecordLiveTracesOnlyMovesTheOffsetWhenConnected(t *testing.T) {
+	calls, pos, set := liveTraceHarness(t, true)
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	appendLog(t, logPath, liveLine("claude_code", "hook", "old", "prompt.submitted"))
-	cursor := liveTraceEndCursor(logPath)
-	var lines []string
-	for _, id := range []string{"a", "b", "c", "d"} {
-		lines = append(lines, liveLine("claude_code", "hook", id, "prompt.submitted"))
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "history")
+	readUpTo(logPath, pos, set)
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "h1")
+
+	recordLiveTraces(logPath, true)
+	if len(*calls) != 0 {
+		t.Fatalf("a connected endpoint recorded %v", *calls)
 	}
-	appendLog(t, logPath, lines...)
-	// Room for the last two lines and half of the one before: the cut line is skipped whole.
-	limit := int64(len(lines[2])+1+len(lines[3])+1) + int64(len(lines[1]))/2
-	sessions, next := liveSessionsSince(logPath, cursor, limit)
-	if want := []sweptSession{{"claude_code", "c"}, {"claude_code", "d"}}; !reflect.DeepEqual(sessions, want) {
-		t.Fatalf("sessions = %+v, want %+v", sessions, want)
-	}
-	if info, _ := os.Stat(logPath); next.Offset != info.Size() {
-		t.Fatalf("next offset %d, want the end %d", next.Offset, info.Size())
-	}
-	// A cut exactly at a line start keeps that line.
-	limit = int64(len(lines[2]) + 1 + len(lines[3]) + 1)
-	if sessions, _ := liveSessionsSince(logPath, cursor, limit); len(sessions) != 2 {
-		t.Fatalf("sessions = %+v, want c and d", sessions)
+	if pos.Offset != logSize(logPath) {
+		t.Fatalf("offset %d, want %d", pos.Offset, logSize(logPath))
 	}
 }
 
-// stubLiveTraces keeps the cursor in memory and records what recordLiveTraces sends.
-func stubLiveTraces(t *testing.T, enabled, connected bool) (cursor **telemetry.LogCursor, calls *[]string) {
-	t.Helper()
-	calls = recordTraces(t, connected)
-	cursor = new(*telemetry.LogCursor)
-	oldLoad, oldSave, oldEnabled := telemetryLoadLogCursor, telemetrySaveLogCursor, endpointSweepRecordsSessions
-	telemetryLoadLogCursor = func() (telemetry.LogCursor, bool) {
-		if *cursor == nil {
-			return telemetry.LogCursor{}, false
-		}
-		return **cursor, true
-	}
-	telemetrySaveLogCursor = func(c telemetry.LogCursor) bool {
-		*cursor = &c
-		return true
-	}
-	endpointSweepRecordsSessions = func() bool { return enabled }
-	t.Cleanup(func() {
-		telemetryLoadLogCursor, telemetrySaveLogCursor, endpointSweepRecordsSessions = oldLoad, oldSave, oldEnabled
-	})
-	return cursor, calls
-}
-
-func TestRecordLiveTraces(t *testing.T) {
-	t.Run("first run starts at the end", func(t *testing.T) {
-		logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-		appendLog(t, logPath, liveLine("claude_code", "hook", "history", "prompt.submitted"))
-		cursor, calls := stubLiveTraces(t, true, false)
-		recordLiveTraces(logPath, true)
-		if len(*calls) != 0 || *cursor == nil || **cursor != liveTraceEndCursor(logPath) {
-			t.Fatalf("calls %v, cursor %+v", *calls, *cursor)
-		}
-
-		appendLog(t, logPath,
-			liveLine("claude_code", "hook", "s1", "prompt.submitted"),
-			liveLine("pi_cli", "hook", "auto", "session.started"),
-			liveLine("pi_cli", "hook", "auto", "session.ended"))
-		recordLiveTraces(logPath, true)
-		if want := []string{"live:claude_code/s1"}; !reflect.DeepEqual(*calls, want) {
-			t.Fatalf("calls %v, want %v", *calls, want)
-		}
-		if **cursor != liveTraceEndCursor(logPath) {
-			t.Fatalf("cursor %+v not at the end", **cursor)
-		}
-		recordLiveTraces(logPath, true)
-		if len(*calls) != 1 {
-			t.Fatalf("a run with nothing new sent %v", *calls)
-		}
-	})
-	t.Run("telemetry off reads and writes nothing", func(t *testing.T) {
-		logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-		cursor, calls := stubLiveTraces(t, false, false)
-		start := liveTraceEndCursor(logPath)
-		*cursor = &start
-		appendLog(t, logPath, liveLine("claude_code", "hook", "s1", "prompt.submitted"))
-		recordLiveTraces(logPath, true)
-		if len(*calls) != 0 || **cursor != start {
-			t.Fatalf("calls %v, cursor %+v", *calls, **cursor)
-		}
-	})
-	t.Run("connected endpoint only moves the cursor", func(t *testing.T) {
-		logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-		cursor, calls := stubLiveTraces(t, true, true)
-		start := liveTraceEndCursor(logPath)
-		*cursor = &start
-		appendLog(t, logPath, liveLine("claude_code", "hook", "s1", "prompt.submitted"))
-		recordLiveTraces(logPath, true)
-		if len(*calls) != 0 || **cursor != liveTraceEndCursor(logPath) {
-			t.Fatalf("calls %v, cursor %+v", *calls, **cursor)
-		}
-	})
-	t.Run("a cursor for another log is reset", func(t *testing.T) {
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "runtime.jsonl")
-		cursor, calls := stubLiveTraces(t, true, false)
-		other := liveTraceEndCursor(filepath.Join(dir, "other.jsonl"))
-		*cursor = &other
-		appendLog(t, logPath, liveLine("claude_code", "hook", "s1", "prompt.submitted"))
-		recordLiveTraces(logPath, true)
-		if len(*calls) != 0 || **cursor != liveTraceEndCursor(logPath) {
-			t.Fatalf("calls %v, cursor %+v", *calls, **cursor)
-		}
-	})
-}
-
-func TestStartLiveTraceCursorKeepsAnExistingOne(t *testing.T) {
+func TestRecordLiveTracesSkipsALongGap(t *testing.T) {
+	calls, pos, set := liveTraceHarness(t, false)
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	appendLog(t, logPath, liveLine("claude_code", "hook", "s1", "prompt.submitted"))
-	cursor, _ := stubLiveTraces(t, true, false)
-	startLiveTraceCursor(logPath)
-	if *cursor == nil || **cursor != liveTraceEndCursor(logPath) {
-		t.Fatalf("cursor %+v", *cursor)
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "h1")
+	readUpTo(logPath, pos, set)
+	pos.Offset = 0
+	if err := os.Truncate(logPath, maxLiveTraceScanBytes+1); err != nil {
+		t.Fatal(err)
 	}
-	kept := telemetry.LogCursor{Log: liveTraceLogKey(logPath), Offset: 0}
-	*cursor = &kept
-	startLiveTraceCursor(logPath)
-	if **cursor != kept {
-		t.Fatalf("an existing cursor was replaced: %+v", **cursor)
-	}
-}
 
-// The scheduled inventory job reports new sessions, even with the heartbeat itself turned off; a
-// manual heartbeat does not.
-func TestScheduledInventoryJobRecordsLiveTraces(t *testing.T) {
-	for _, scheduled := range []bool{true, false} {
-		testenv.SetHome(t, t.TempDir())
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "runtime.jsonl")
-		configPath := filepath.Join(dir, "config.json")
-		disabled := false
-		data, err := json.Marshal(map[string]any{"log_path": logPath, "user_mode": true, "inventory_heartbeat": map[string]any{"enabled": &disabled}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(configPath, data, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		cursor, calls := stubLiveTraces(t, true, false)
-		start := liveTraceEndCursor(logPath)
-		*cursor = &start
-		appendLog(t, logPath, liveLine("claude_code", "hook", "s1", "prompt.submitted"))
-
-		oldOpts := endpointOpts
-		t.Cleanup(func() { endpointOpts = oldOpts })
-		endpointOpts.userMode, endpointOpts.systemMode = true, false
-		endpointOpts.inventoryScheduled = scheduled
-		endpointOpts.inventoryHeartbeatConfig = configPath
-		if err := runEndpointInventoryHeartbeat(&cobra.Command{}, nil); err != nil {
-			t.Fatal(err)
-		}
-		var want []string
-		if scheduled {
-			want = []string{"live:claude_code/s1"}
-		}
-		if !reflect.DeepEqual(*calls, want) {
-			t.Fatalf("scheduled=%t: recorded %v, want %v", scheduled, *calls, want)
-		}
+	recordLiveTraces(logPath, true)
+	if len(*calls) != 0 || pos.Offset != maxLiveTraceScanBytes+1 {
+		t.Fatalf("a long gap recorded %v, offset %d", *calls, pos.Offset)
 	}
 }
 
-// Nothing about a session but its harness and ID leaves the log reader.
-func TestLiveSessionsCarryNoContent(t *testing.T) {
+func TestRecordLiveTracesDoesNothingWithTelemetryOff(t *testing.T) {
+	calls, _, set := liveTraceHarness(t, false)
+	endpointSweepRecordsSessions = func() bool { return false }
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	cursor := liveTraceEndCursor(logPath)
-	appendLog(t, logPath, liveLine("claude_code", "hook", "s1", "prompt.submitted"))
-	sessions, next := liveSessionsSince(logPath, cursor, liveTraceScanBytes)
-	data, _ := json.Marshal(struct {
-		S []sweptSession
-		N telemetry.LogCursor
-	}{sessions, next})
-	if strings.Contains(string(data), "secret") || strings.Contains(string(data), filepath.Base(filepath.Dir(logPath))) {
-		t.Fatalf("leaked: %s", data)
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "h1")
+	recordLiveTraces(logPath, true)
+	if len(*calls) != 0 || *set {
+		t.Fatalf("telemetry off recorded %v or moved the offset", *calls)
 	}
 }

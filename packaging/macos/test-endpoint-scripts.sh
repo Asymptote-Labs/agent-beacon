@@ -388,6 +388,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     *=*)
+      [ -z "${SUDO_ENV_LOG:-}" ] || printf '%s\n' "$1" >>"$SUDO_ENV_LOG"
       shift
       ;;
     *)
@@ -404,7 +405,14 @@ FAKE_HOME="$FAKE_HOME" \
 BEACON_HOOK_HARNESSES="cursor,factory" \
 BEACON_HOOK_LEVEL="user" \
 STUB_LOG="$STUB_LOG" \
+SUDO_ENV_LOG="$TMP_DIR/cursor-hooks-sudo-env" \
 "$ROOT_DIR/packaging/macos/jamf/scripts/install-cursor-hooks.sh"
+
+# The console-user run is marked internal, so the CLI's telemetry notice stays out of the policy log.
+if ! grep -qx 'BEACON_INTERNAL_CHILD=1' "$TMP_DIR/cursor-hooks-sudo-env"; then
+  echo "install-cursor-hooks.sh does not mark its console-user run BEACON_INTERNAL_CHILD=1" >&2
+  exit 1
+fi
 
 HOOK_ARGS="$(cat "$STUB_LOG")"
 case "$HOOK_ARGS" in
@@ -1335,6 +1343,10 @@ fi
 if ! grep -qx "sudo -u hookuser mkdir -p $REPAIR_HOOKS_HOME/.beacon/endpoint/hooks" "$REPAIR_HOOKS_CALLS" ||
    [ ! -x "$REPAIR_HOOKS_HOME/.beacon/endpoint/hooks/beacon-hooks" ]; then
   echo "repair-hooks should create the hook directory as the console user and install hooks there" >&2
+  exit 1
+fi
+if ! grep -q "^sudo -u hookuser HOME=$REPAIR_HOOKS_HOME BEACON_INTERNAL_CHILD=1 .*endpoint hooks install" "$REPAIR_HOOKS_CALLS"; then
+  echo "repair-hooks should mark its console-user hook install BEACON_INTERNAL_CHILD=1" >&2
   exit 1
 fi
 # On a restricted endpoint (the marker beside the log) the script must leave the log's

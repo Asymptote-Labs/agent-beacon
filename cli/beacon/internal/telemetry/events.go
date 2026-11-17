@@ -109,12 +109,16 @@ const (
 	DestinationCloud = "cloud"
 )
 
-// Identity events. Each is followed by Identify, so the person it names is known from then on.
+// Identity events. Each is sent right after Identify, as the person it names, who is known from
+// then on.
 const (
 	// EventSignInCompleted is sent when a Beacon sign-in succeeds.
 	EventSignInCompleted = "cli_sign_in_completed"
 	// EventEmailSubmitted is sent when a person gives an email without signing in.
 	EventEmailSubmitted = "cli_email_submitted"
+	// EventEmailPromptSkipped is sent when a person leaves the install wizard's optional email
+	// question blank. It is not followed by Identify.
+	EventEmailPromptSkipped = "cli_email_prompt_skipped"
 )
 
 // Identity event properties.
@@ -148,8 +152,7 @@ const (
 )
 
 // EventTraceRecorded is sent once per agent session a local-only endpoint records for the first
-// time, from the install's session backfill, the scheduled session sync and the scheduled
-// inventory job. An endpoint that
+// time, from the install's session backfill and the scheduled session sync. An endpoint that
 // forwards to Beacon Cloud does not send it: the cloud counts its own sessions.
 const EventTraceRecorded = "cli_trace_recorded"
 
@@ -165,7 +168,6 @@ const (
 const (
 	// TraceSourceBackfill is the install's read of recent session history.
 	TraceSourceBackfill = "backfill"
-	// TraceSourceLive is a scheduled job reporting sessions as they happen: the session sync, or
-	// the inventory job reading what the runtime log recorded since its last run.
+	// TraceSourceLive is the scheduled session sync, reading sessions as they happen.
 	TraceSourceLive = "live"
 )

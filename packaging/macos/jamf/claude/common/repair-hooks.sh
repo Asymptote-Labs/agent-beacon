@@ -152,7 +152,9 @@ else
 fi
 
 echo "Installing Claude Code hooks as $CONSOLE_USER..."
-sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" "$BEACON_BIN" endpoint hooks install \
+# BEACON_INTERNAL_CHILD=1 keeps the CLI's one-time telemetry notice out of the policy log, where
+# the person would never see it, so it is left for a command they run themselves.
+sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" BEACON_INTERNAL_CHILD=1 "$BEACON_BIN" endpoint hooks install \
   --harness claude \
   --level user \
   --log-path "$RUNTIME_LOG"
