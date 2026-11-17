@@ -582,7 +582,10 @@ match: credential_file_read(e)
 A predicate is not a CEL function. An engine expands it where it is called, before the
 expression is type-checked, so a rule that calls one is the rule with the predicate's body
 written out: it has the same verdicts, the same errors, and the same evaluation cost. A rule
-whose expression calls a predicate MUST declare `spec: threat-rules/v1.3` or later.
+whose expression calls a predicate MUST declare `spec: threat-rules/v1.3` or later, and at
+least the `spec` of the definitions file that defines the predicate. An engine that sets a
+definitions file aside for needing a newer spec MUST set aside with it every rule, and every
+predicate definition, that calls one of its predicates, and load the rest of the pack.
 
 Predicates are defined by the **definitions** of the rule pack the rule belongs to: the files
 beside its rules whose names end in `.predicates.yaml` or `.catalog.yaml`, anywhere under the
@@ -616,7 +619,7 @@ definitions:
 |---|---|---|---|
 | `library` | yes | string `^[a-z0-9][a-z0-9-]*$` | The file's identity. Two files of a pack MUST NOT declare the same one. |
 | `version` | yes | int ≥ 1 | Content revision. |
-| `spec` | no | as a rule's | Minimum spec version the file needs. An engine MUST read it before it rejects any unknown field, and sets aside a file that needs a newer version than it implements, as it does a rule. |
+| `spec` | no | as a rule's | Minimum spec version the file needs. An engine MUST read it before it rejects any unknown field, and sets aside a file that needs a newer version than it implements, as it does a rule, with what calls its predicates. A body MUST NOT call a predicate whose file needs a newer version than its own. |
 | `description` | no | string | Documentation only. |
 | `definitions` | yes | list ≥ 1 | The predicates. |
 | `definitions[].name` | yes | string `^[a-z][a-z0-9_]*$` | How the predicate is called. Unique across the pack's definitions, and not a name CEL has (a function, a macro, a reserved word, or `e`). |
@@ -676,6 +679,11 @@ corpus has one, `credential-stores`: where credentials are kept and how they are
 | `stores[].commands` | one of `match` or `commands` | list of `{name, words, flags}` | The commands that read the store. |
 | `stores[].examples` | yes | list of strings | Paths for a store of files, command lines for a store of commands. Each MUST be this store, and there MUST be one for each pattern of `match` and each entry of `commands`. |
 | `stores[].counterexamples` | no | list of strings | Paths or command lines that MUST NOT be any store of the catalog, with one for each pattern of `exclude`. |
+
+A catalog's examples and counterexamples hold for every expression generated from it, as well
+as for its stores: an engine that checks a catalog (lint, install) evaluates the expression of
+each of its predicate forms, for each tier and for every kind and each kind, on every example
+and counterexample, and requires the answer the stores give.
 
 A catalog's predicate takes what it is asked about, then optionally a tier and then kinds,
 each a string literal: `credential_path(e.file.path)` is true for a store of either tier,
