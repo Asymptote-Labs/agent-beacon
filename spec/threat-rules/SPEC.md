@@ -81,7 +81,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`, `runs_read`, `span`, `earlier_stages` and `later_stages`, for `e.command.parsed_incomplete`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `cwd`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`, `runs_read`, `span`, `earlier_stages` and `later_stages`, for `e.command.parsed_incomplete`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -219,7 +219,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   follow each other), `env` (the `NAME=value`
   assignments before the command, `""` for an unknown value), `file_effects` (the files the
   command evidently writes, `{path, op}`, of the command `name` names), `file_writes` (the
-  same with every path as written, below), `file_reads` and
+  same with every path as written, below), `cwd` (the directory the command runs in, below),
+  `file_reads` and
   `script_sends` (the files it evidently takes as input and the ones its inline script
   sends, below), `socket_redirects` (its redirections to a network pseudo-file, below),
   `runs_read` and `span` (whether the command line it hands on was read, and the part of
@@ -348,6 +349,24 @@ the steps in both orders still fires once. A single event never satisfies two st
   creates (its second operand, else the repository's name), and the destination of `rsync`
   for a source written with a trailing slash. The reference derivation is
   `shellcmd.FileWrites`.
+- `cwd` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or later)
+  is a field of each `parsed_commands` entry: the directory the command runs in when the
+  line changed into it before the command, as a literal path, and `""` otherwise. It is the
+  operand of the last `cd` or `pushd` before the command, in line order, in the shell the
+  command runs in: a `cd` inside a subshell (`( .. )`), a command or process substitution,
+  a stage of a pipeline of two or more stages, or a statement run in the background
+  (`&`) reaches the commands after it inside that, and none after it. It is written with one
+  trailing slash, as `file_writes` writes a directory. An absolute operand is the path
+  cleaned (`/tmp/x/../y` is `/tmp/y/`); a relative one is joined to the `cwd` the
+  `cd` itself has, and unknown when that is `""`. Options (`-P`, `-L`) and `--` are skipped.
+  It is `""` when the line has not changed directory and when where it did is unknown: `cd`
+  alone, `cd -`, `pushd +1`, `popd`, an operand that is not a literal, any command after a
+  `cd`, `pushd` or `popd` inside a loop or a function's body, and every command of that
+  loop, or of the line for a function. A command line another command hands on starts in
+  that command's `cwd` when a shell, an interpreter, `eval` or `xargs` runs it, and in an
+  unknown directory otherwise (`ssh`, `docker exec`, `sudo -i`). A relative path of
+  `file_writes` names the file under `cwd`. The reference derivation is `shellcmd`'s
+  `Command.Dir`.
 - `file_reads` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) is a field of each `parsed_commands` entry: the files whose content the command
   evidently takes in, a list of `{path, via}`. `path` is the word as written with its quotes
@@ -742,7 +761,7 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
-- **v1.3**: `args`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`,
+- **v1.3**: `args`, `cwd`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`,
   `runs_read`, `span`, `earlier_stages` and `later_stages` on each entry of
   `e.command.parsed_commands`, and `e.command.parsed_incomplete`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,

@@ -173,8 +173,18 @@ type Command struct {
 	// text, or the here-document it reads): WithScripts adds those after the shell.
 	InScript bool
 	// AfterCD is true when a cd, pushd or popd comes earlier in the command line, so a relative
-	// path no longer names the file it would at the start. The directory itself is not tracked.
+	// path no longer names the file it would at the start. It does not ask where.
 	AfterCD bool
+	// Dir is the directory the command runs in when the line changed into it, as a literal
+	// path with one trailing slash (/tmp/probe/): the last cd or pushd before the command in
+	// the shell it runs in (not one inside a subshell, substitution or pipeline stage that has
+	// ended), with an absolute operand or a relative one from a known Dir. It is "" when the
+	// line has not changed directory, and
+	// when where it did is unknown (cd alone, cd -, popd, an operand that is not a literal, a
+	// change inside a loop or a function, a command line ssh or the like runs elsewhere).
+	// dirSet is true when the line has changed directory before the command.
+	Dir    string
+	dirSet bool
 	// within identifies the command or process substitution the statement is directly inside, or
 	// is 0. outer is 1 + the index of the innermost compound statement around it that carries
 	// redirections of its own ({ ..; } > f, (..) > f, if ..; fi > f), or 0: that statement's
@@ -301,6 +311,7 @@ func parseBash(command string) (*syntax.File, error) {
 func walk(source string, file *syntax.File, braceWords *int) ([]Command, error) {
 	p := parser{source: source, stages: map[*syntax.Stmt]stage{}, containers: map[*syntax.Stmt]bool{}, braceWords: braceWords}
 	syntax.Walk(file, p.visit)
+	p.directories()
 	if p.tooManyWords {
 		return nil, ErrTooManyWords
 	}
@@ -344,6 +355,9 @@ type parser struct {
 	// scopes are the byte ranges of the loops, and the whole source once per function
 	// declaration: a command inside one may run after anything in that range.
 	scopes []substitution
+	// isolated are the byte ranges that run in a shell of their own, whose cd ends with them:
+	// subshells, substitutions, pipeline stages and background statements (directories).
+	isolated []substitution
 	// braceWords counts the words brace expansions have produced, and tooManyWords is set
 	// once that passes maxBraceWords: the command line is then not read (ErrTooManyWords).
 	braceWords   *int
@@ -363,10 +377,13 @@ func (p *parser) visit(node syntax.Node) bool {
 	switch n := node.(type) {
 	case *syntax.CmdSubst:
 		p.nested = append(p.nested, substitution{n.Left.Offset(), n.Right.Offset(), p.substID(n)})
+		p.isolated = append(p.isolated, substitution{start: n.Left.Offset(), end: n.Right.Offset()})
 	case *syntax.ProcSubst:
 		p.nested = append(p.nested, substitution{n.OpPos.Offset(), n.Rparen.Offset(), p.substID(n)})
+		p.isolated = append(p.isolated, substitution{start: n.OpPos.Offset(), end: n.Rparen.Offset()})
 	case *syntax.Subshell:
 		p.subshells = append(p.subshells, substitution{n.Lparen.Offset(), n.Rparen.Offset(), int(n.Lparen.Offset()) + 1})
+		p.isolated = append(p.isolated, substitution{start: n.Lparen.Offset(), end: n.Rparen.Offset()})
 	case *syntax.ForClause:
 		p.scopes = append(p.scopes, substitution{start: n.Pos().Offset(), end: n.End().Offset()})
 	case *syntax.WhileClause:
@@ -395,6 +412,9 @@ func (p *parser) substID(node syntax.Node) int {
 }
 
 func (p *parser) stmt(stmt *syntax.Stmt) {
+	if stmt.Background {
+		p.isolated = append(p.isolated, substitution{start: stmt.Pos().Offset(), end: stmt.End().Offset()})
+	}
 	if p.containers[stmt] {
 		return
 	}
@@ -402,6 +422,7 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 		p.pipelines++
 		for i, s := range p.flatten(stmt, nil) {
 			p.stages[s] = stage{pipeline: p.pipelines, index: i}
+			p.isolated = append(p.isolated, substitution{start: s.Pos().Offset(), end: s.End().Offset()})
 		}
 		return
 	}

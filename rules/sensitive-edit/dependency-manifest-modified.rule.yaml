@@ -1,6 +1,6 @@
 id: dependency-manifest-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 5
+version: 6
 title: Dependency manifest or lockfile modified
 description: >
   The agent modified a dependency manifest or lockfile (package.json, lockfiles,
@@ -53,6 +53,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "cp go.mod /tmp/gomod.bak && echo '{\"type\":\"module\"}' > /tmp/probe/package.json" }
+        session: { id: s1 }
+  - name: requirement_appended_before_a_cd_into_tmp
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'evil==1.0' >> requirements.txt; cd /tmp/x" }
+        session: { id: s1 }
+  - name: manifest_written_after_a_cd_inside_a_subshell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "(cd /tmp/x && make) ; echo '{}' > package.json" }
+        session: { id: s1 }
+  - name: manifest_written_after_a_cd_into_tmp_itself
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /tmp && echo '{}' > package.json" }
         session: { id: s1 }
   - name: install_from_the_manifest
     verdict: no_match

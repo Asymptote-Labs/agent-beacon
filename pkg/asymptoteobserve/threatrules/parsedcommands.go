@@ -25,9 +25,9 @@ const ParsedCommandsLimit = shellcmd.LineLimit
 // for it: name (Command.Name, after the wrappers Command.Unwrapped looks through), args
 // (Command.ArgsText), argv and argv_raw (every word, wrappers included: its value, "" when
 // unknown, and as written), env, pipeline, stage, nested (inside a substitution or a command
-// line another command hands on), file_effects, file_writes, file_reads with script_sends,
-// socket_redirects, runs_read, span, and earlier_stages and later_stages. SPEC.md ("Derived
-// fields") is the contract for each; this is its reference derivation.
+// line another command hands on), cwd (Command.Dir), file_effects, file_writes, file_reads with
+// script_sends, socket_redirects, runs_read, span, and earlier_stages and later_stages.
+// SPEC.md ("Derived fields") is the contract for each; this is its reference derivation.
 //
 // It is exported so that another engine implementing the Threat Rules contract can derive the
 // field the same way; fixtures that exercise it only conform if the derivation agrees.
@@ -82,6 +82,7 @@ func parsedCommand(line *shellcmd.Line, i int) asymptoteobserve.ParsedCommand {
 		ArgvRaw:  make([]string, len(c.Argv)),
 		Pipeline: c.Pipeline,
 		Stage:    c.Stage,
+		Cwd:      c.Dir,
 		Nested:   c.Nested || c.InScript,
 		RunsRead: c.RunsRead(),
 		Span:     line.Spans[i],

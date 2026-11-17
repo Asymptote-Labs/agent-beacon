@@ -1,6 +1,6 @@
 id: auth-security-code-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 7
+version: 8
 title: Authentication, payment, or security source modified
 description: >
   The agent modified a source file in the auth / payment / security surface (basename

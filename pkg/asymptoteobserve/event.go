@@ -230,6 +230,14 @@ type ParsedCommand struct {
 	// written without its quotes, also where the value depends on an expansion (~/.bashrc,
 	// $HOME/.ssh/authorized_keys), which FileEffects leaves out. Every effect is a write.
 	FileWrites []ParsedFileEffect `cel:"file_writes" spec:"v1.3"`
+	// Cwd is the directory the command runs in when the line changed into it before the
+	// command, as a literal path with one trailing slash (`cd /tmp/probe && echo x > f`:
+	// /tmp/probe/ for echo), in line order and in the shell the command runs in: a cd inside a
+	// subshell, a substitution or a pipeline stage does not reach past it. "" when the line
+	// has not changed directory or where it did is unknown (cd alone, cd -, popd, an operand
+	// that depends on an expansion, a cd inside a loop or a function). A relative path of
+	// FileWrites is under it.
+	Cwd string `cel:"cwd" spec:"v1.3"`
 	// FileReads are the files whose content the command evidently takes in, and how: directly
 	// (what it prints, searches, copies, archives or sends), on its standard input, or written
 	// into one of its words by a substitution. A path is as written without its quotes, also

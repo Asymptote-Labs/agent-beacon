@@ -397,6 +397,15 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		c.Pipeline += pipelines
 		if shell != 0 {
 			c.InScript, c.shell = true, shell
+			// Before a cd of its own, a script runs where the command that hands it on does,
+			// unless that runs it elsewhere.
+			if !c.dirSet {
+				if parent := &x.out[shell-1]; parent.inheritsDir() {
+					c.Dir, c.dirSet = parent.Dir, parent.dirSet
+				} else {
+					c.dirSet = true
+				}
+			}
 			if c.within != 0 {
 				c.within += substs
 			}

@@ -20,7 +20,7 @@
 # Each predicate answers for a path under any directory, a home directory or a variable
 # included.
 library: sensitive-files
-version: 2
+version: 3
 spec: threat-rules/v1.3
 description: Files whose change gives code execution, access or supply-chain reach, by path.
 
@@ -387,36 +387,6 @@ definitions:
           - event: { action: command.executed }
             command: { command: "cp pyproject.toml tmp/pyproject.toml" }
 
-  - name: stays_in_scratch
-    params: [e]
-    description: >
-      The command line changes directory, and only into temporary ones
-      (`cd /tmp/probe && echo '{}' > package.json`), so a relative path it writes is under
-      one. A line that also changes into any other directory says nothing of where a
-      relative path lands.
-    body: >
-      e.command.parsed_commands.exists(d, d.name in ["cd", "pushd"] && scratch_path(d.args)) &&
-      e.command.parsed_commands.all(d, !(d.name in ["cd", "pushd"]) || scratch_path(d.args))
-    tests:
-      - name: a_cd_into_tmp
-        match: stays_in_scratch(e)
-        verdict: match
-        events:
-          - event: { action: command.executed }
-            command: { command: "cd /tmp/probe && npm init -y" }
-      - name: a_cd_into_tmp_and_back
-        match: stays_in_scratch(e)
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "cd /tmp/probe && npm pack && cd ~/project && npm install" }
-      - name: no_cd
-        match: stays_in_scratch(e)
-        verdict: no_match
-        events:
-          - event: { action: command.executed }
-            command: { command: "npm init -y" }
-
   - name: write_outside_scratch
     params: [e, f, cond]
     description: >
@@ -425,24 +395,16 @@ definitions:
       writes the condition over it:
       write_outside_scratch(e, f, f.op == "write" && dependency_manifest_file(f.path)).
       A write lands in a temporary directory when its path is under one (scratch_path), or
-      when the path is relative and the line changes directory only into temporary ones
-      (stays_in_scratch). Agents stage copies and throwaway projects there all the time, and
-      moving one back into the project is a write of its own.
-
-      Where the line's directory changes lead is one question about the line, so it is asked
-      of the line, and only once some write satisfies the condition outside a temporary
-      path: on most lines none does and nothing more is evaluated. Then, if the line stays
-      in temporary directories, one of those writes has to be by a path that does not
-      depend on the directory. Asked of every write instead, the question is a loop over the
-      commands inside the loop over the commands, whose worst case grows with the square of
-      their number: the rules that did so were metered on every line of nine or more
-      commands.
+      when the path is relative and does not start with ../, and the directory the command
+      runs in (c.cwd, which the parser works out in line order and per subshell, with a
+      trailing slash) is one: `cd /tmp/probe && echo x > package.json`, also `cd /tmp && ..`
+      into the directory itself. A write before the cd, or after a cd inside a subshell that
+      has ended, is not in it. Agents stage copies and throwaway projects there all the time,
+      and moving one back into the project is a write of its own.
     body: >
       e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-        cond && !scratch_path(f.path))) &&
-      (!stays_in_scratch(e) ||
-       e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-         cond && f.path.matches("^[/~$]") && !scratch_path(f.path))))
+        cond && !scratch_path(f.path) &&
+        !(c.cwd != "" && !f.path.matches("^([/~$]|\\.\\./)") && scratch_path(c.cwd))))
     tests:
       - name: a_relative_write_after_a_cd_into_tmp
         match: write_outside_scratch(e, f, f.op == "write")
@@ -480,3 +442,27 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "echo '{}' > package.json" }
+      - name: a_relative_write_before_a_cd_into_tmp
+        match: write_outside_scratch(e, f, f.op == "append")
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo 'evil==1.0' >> requirements.txt; cd /tmp/x" }
+      - name: a_relative_write_after_a_cd_inside_a_subshell
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "(cd /tmp/x && make) ; echo '{}' > package.json" }
+      - name: a_relative_write_after_a_cd_into_tmp_itself
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp && echo '{}' > package.json" }
+      - name: a_relative_write_in_a_script_after_a_cd_into_tmp
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp/probe && bash -c \"echo '{}' > package.json\"" }

@@ -231,6 +231,10 @@ var parsedCommandFieldDocs = map[string]string{
 		"`$HOME/.netrc`, which `file_effects` leaves out, is listed. A download's output file and the " +
 		"destination of `scp` and `rsync` are writes, and so is the directory an archive or a clone lands " +
 		"in, written with a trailing slash.",
+	"cwd": "The directory the command runs in when the line changed into it before the command, as a " +
+		"literal path with a trailing slash (`/tmp/probe/`), in line order and in the shell the command " +
+		"runs in, so a `cd` inside `( .. )`, `$( .. )` or a pipeline stage does not reach past it; \"\" when " +
+		"the line has not changed directory or where to is unknown.",
 	"file_reads": "The files whose content it takes in, each path as written without its quotes " +
 		"(`~/.aws/credentials`, `$HOME/.netrc`). `via` is `direct` for a file it opens, `stdin` for one " +
 		"that reaches its standard input by a redirection or a pipe, `argument` for one a substitution or " +
