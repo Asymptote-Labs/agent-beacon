@@ -14,7 +14,7 @@
 # Where the parser cannot see into a command, a rule asks the text that reaches it
 # (unread_text, commands.predicates.yaml), and egress_sender_mention is who sends there.
 library: egress
-version: 2
+version: 3
 spec: threat-rules/v1.3
 description: A command that sends data over the network.
 
@@ -69,8 +69,14 @@ definitions:
       into (unread_text), and names the same clients as egress_sender, so a client added to
       one is added to both. A URL (http://), a file name (notes.nc) or prose ("retry curl on
       failure", "an http request.") is not one.
+
+      The name and the whitespace after it are spelled out together, as `(names)[ \t]`,
+      `(names)\n` and `(names)[\f\r]`, rather than `(names)\s+`: the same text matches, and
+      the scan's prefilter then asks a line for `nc ` or `http ` rather than for `nc` or
+      `http`, which most lines (`sync`, a URL) hold. It runs the pattern on a sixth of the
+      lines it did.
     body: >
-      text.matches("(?i)(^|[^\\w.-])(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)\\s+(-|[^\\s;&|]*[.:/@$][^\\s;&|\"']|[0-9]|(get|post|put|patch|delete|head|options)\\s|[a-z][\\w-]*\\s+[0-9])")
+      text.matches("(?i)(^|[^\\w.-])((curl|wget|http|https|httpie|socat)[ \\t]|(curl|wget|http|https|httpie|socat)\\n|(curl|wget|http|https|httpie|socat)[\\f\\r]|(xh|xhs|nc|ncat|netcat)[ \\t]|(xh|xhs|nc|ncat|netcat)\\n|(xh|xhs|nc|ncat|netcat)[\\f\\r])\\s*(-|[^\\s;&|]*[.:/@$][^\\s;&|\"']|[0-9]|(get|post|put|patch|delete|head|options)\\s|[a-z][\\w-]*\\s+[0-9])")
     tests:
       - name: netcat_by_path
         match: egress_sender_mention(e.command.command)

@@ -210,13 +210,17 @@ func TestPackListsNoSenderOfItsOwn(t *testing.T) {
 	// The name as a whole alternative, not letters inside another (truncate).
 	sender := regexp.MustCompile(`(^|[^A-Za-z])(ncat|netcat)([^A-Za-z]|$)`)
 	group := regexp.MustCompile(`\(([a-z0-9]+(?:\|[a-z0-9]+)+)\)`)
+	// The senders a pattern names: every group of names that holds one, since a pattern may
+	// spell them in several groups (egress_sender_mention splits them for the prefilter).
 	senderGroup := func(text string) []string {
+		var names []string
 		for _, g := range group.FindAllStringSubmatch(text, -1) {
-			if names := strings.Split(g[1], "|"); slices.Contains(names, "ncat") {
-				return names
+			if ns := strings.Split(g[1], "|"); slices.Contains(ns, "ncat") || slices.Contains(ns, "curl") {
+				names = append(names, ns...)
 			}
 		}
-		return nil
+		slices.Sort(names)
+		return slices.Compact(names)
 	}
 	all := senderGroup(lib.predicates["egress_sender"].text)
 	if !slices.Contains(all, "curl") || !slices.Contains(all, "socat") {

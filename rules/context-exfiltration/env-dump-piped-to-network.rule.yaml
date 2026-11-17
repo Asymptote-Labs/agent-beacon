@@ -1,6 +1,6 @@
 id: env-dump-piped-to-network
 spec: threat-rules/v1.3  # needed for predicates
-version: 7
+version: 8
 title: Environment dump piped to an outbound network command
 description: >
   A single command sends the full process environment (env / printenv / `set` /
@@ -49,6 +49,7 @@ match: >
       e.command.command.matches("(?i)(^|[;&|`(\\n]|\\$\\()\\s*export\\s+-p\\b")) &&
       egress_dev_tcp(e) ||
     unread_text(e, t,
+      (t.matches("(?i)\\b(env|printenv|set)\\b") || t.matches("(?i)\\bexport\\s+-p\\b")) &&
       t.matches("(?i)(^|[;&|`(]|\\$\\()\\s*(env|printenv|set|export\\s+-p)\\b([^;&\\n]*\\|\\s*(sudo\\s+)?((\\S*/)?(curl|wget)\\b[^;&|\\n]*([@<](-|/dev/stdin)(['\"\\s]|$)|\\s(-[a-zA-Z]*T|--upload-file)(\\s+|=)?['\"]?(-|/dev/stdin)(['\"\\s]|$)|--post-file(\\s+|=)['\"]?(-|/dev/stdin))|(\\S*/)?(http|https|httpie|xh|xhs|nc|ncat|netcat|socat)\\b|gh\\s+gist\\s+create\\b|(python[0-9.]*|node)\\s+-[ce]\\b[\\s\\S]*(requests\\.(post|put)\\(|urllib\\.request|urlopen\\(|fetch\\(|https?\\.request\\()|[^;&|\\n]*>\\s*/dev/(tcp|udp)/)|[^;&|\\n]*>\\s*/dev/(tcp|udp)/)|\\b(curl|wget)\\b[^;&|\\n]*(\\$\\(|`)\\s*(env|printenv|export\\s+-p)\\b"))
   )
 

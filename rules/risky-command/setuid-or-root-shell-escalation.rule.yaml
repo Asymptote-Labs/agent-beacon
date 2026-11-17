@@ -1,6 +1,6 @@
 id: setuid-or-root-shell-escalation
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+version: 6
 title: Setuid bit installed or interactive root shell requested
 description: >
   A command either installs the setuid bit on a file (chmod u+s or +s, chmod with a
@@ -49,7 +49,7 @@ match: >
     ) ||
     unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
       t.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
-      t.matches("(?i)(^|[;&|]\\s*)su\\s+-\\s*$") ||
+      t.matches("(?i)(^|[;&|]\\s*)(?:(su)[ \\t]|(su)\\n|(su)[\\f\\r])\\s*-\\s*$") ||
       t.matches("(?i)(^|[;&|]\\s*)sudo\\s+(-[is]|--login|--shell|su)\\s*($|[;&|])") ||
       t.matches("(?i)(^|[;&|]\\s*)pkexec\\b")))
   )

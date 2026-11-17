@@ -1,6 +1,6 @@
 id: recursive-root-delete
 spec: threat-rules/v1.3  # needed for the commands a carrier or a pipe hands a shell
-version: 6
+version: 7
 title: Recursive delete targeting a sensitive root path
 description: >
   A recursive or forced `rm` with an operand that is a filesystem root, home, or a
@@ -29,7 +29,7 @@ match: >
       c.argv.exists(a, a.matches("^-[a-zA-Z]*[rRfF][a-zA-Z]*$") || a in ["--recursive", "--force"]) &&
       c.argv_raw.exists(a, a == "*" ||
         a.matches("^([\"']?(~|\\$HOME|\\$\\{HOME\\})[\"']?/*|[\"']?/+[\"']?)\\*?$"))) ||
-    unread_text(e, t, t.matches("(?i)\\brm(\\s+-{1,2}[a-z-]+)*\\s+-[a-z]*[rf][a-z]*[^;&|\\n]*?\\s(/+|\"/+\"|'/+'|(~|\\$HOME|\\$\\{HOME\\})/*|\"(\\$HOME|\\$\\{HOME\\})\"/*|\"(\\$HOME|\\$\\{HOME\\})/*\"|\\*)\\*?(\\s|$|[;&|)])"))
+    unread_text(e, t, t.matches("(?i)\\b(?:(rm)[ \\t]|(rm)\\n|(rm)[\\f\\r])\\s*(-{1,2}[a-z-]+\\s+)*-[a-z]*[rf][a-z]*[^;&|\\n]*?\\s(/+|\"/+\"|'/+'|(~|\\$HOME|\\$\\{HOME\\})/*|\"(\\$HOME|\\$\\{HOME\\})\"/*|\"(\\$HOME|\\$\\{HOME\\})/*\"|\\*)\\*?(\\s|$|[;&|)])"))
   )
 
 emit:
