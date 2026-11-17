@@ -92,10 +92,9 @@ func eventLabel(event asymptoteobserve.Event) string {
 func TakeSnapshot(rules []*Rule, events []asymptoteobserve.Event) (*Snapshot, error) {
 	type expression struct {
 		name  string
-		rule  *CompiledRule
 		match matcher
 	}
-	var expressions []expression
+	var named []expression
 	seen := map[string]bool{}
 	for _, r := range rules {
 		if seen[r.ID] {
@@ -107,19 +106,22 @@ func TakeSnapshot(rules []*Rule, events []asymptoteobserve.Event) (*Snapshot, er
 			return nil, fmt.Errorf("rule %q: %w", r.ID, err)
 		}
 		if c.steps == nil {
-			expressions = append(expressions, expression{r.ID, c, c.match})
+			named = append(named, expression{r.ID, c.match})
 			continue
 		}
 		for i, step := range r.Correlation.Steps {
-			expressions = append(expressions, expression{r.ID + "#" + step.ID, c, c.steps[i]})
+			named = append(named, expression{r.ID + "#" + step.ID, c.steps[i]})
 		}
 	}
-	sort.SliceStable(expressions, func(i, j int) bool { return expressions[i].name < expressions[j].name })
+	sort.SliceStable(named, func(i, j int) bool { return named[i].name < named[j].name })
 
 	s := &Snapshot{}
-	for _, x := range expressions {
+	match := make([]matcher, len(named))
+	for i, x := range named {
 		s.Matchers = append(s.Matchers, x.name)
+		match[i] = x.match
 	}
+	all := newExpressions(match)
 	asked := map[string]bool{}
 	for _, event := range events {
 		id := eventID(event)
@@ -128,24 +130,20 @@ func TakeSnapshot(rules []*Rule, events []asymptoteobserve.Event) (*Snapshot, er
 		}
 		asked[id] = true
 		verdicts := EventVerdicts{ID: id, Label: eventLabel(event)}
-		p := PrepareEvent(event)
-		for _, x := range expressions {
-			if x.match.excludes(event.Event.Action) {
-				continue
-			}
-			act := p.in.activation(x.rule.derived)
-			matched, err := evalObserved(x.match.program(act), act)
+		all.evaluate(&eventInput{event: &event}, nil, func(i int, held bool, err error) bool {
+			// A failure is counted and the snapshot goes on, as a scan does.
 			if err != nil {
 				if s.Errors == 0 {
-					s.FirstError = fmt.Sprintf("%s on %s: %v", x.name, verdicts.Label, err)
+					s.FirstError = fmt.Sprintf("%s on %s: %v", named[i].name, verdicts.Label, err)
 				}
 				s.Errors++
-				continue
+				return true
 			}
-			if matched {
-				verdicts.Matches = append(verdicts.Matches, x.name)
+			if held {
+				verdicts.Matches = append(verdicts.Matches, named[i].name)
 			}
-		}
+			return true
+		})
 		s.Events = append(s.Events, verdicts)
 	}
 	sort.Slice(s.Events, func(i, j int) bool { return s.Events[i].ID < s.Events[j].ID })

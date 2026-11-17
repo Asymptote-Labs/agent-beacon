@@ -319,9 +319,9 @@ func TestOrderedCorrelationIsLinearInTheSession(t *testing.T) {
 		e.MCP = &asymptoteobserve.MCPInfo{Server: "https://api.example.com", Tool: "x"}
 	}))
 	*evals = 0
-	findings, err := c.Findings(events)
-	if err != nil || len(findings) != 1 {
-		t.Fatalf("Findings = %v, %v; want one finding", findings, err)
+	findings := findingsOf(t, c, events)
+	if len(findings) != 1 {
+		t.Fatalf("findings = %v; want one finding", findingKeys(findings))
 	}
 	if got := findings[0].Events[0].Timestamp; got == events[0].Timestamp {
 		t.Fatalf("finding anchored at the first read (%s), which is outside the window", got)
@@ -335,7 +335,7 @@ func TestOrderedCorrelationIsLinearInTheSession(t *testing.T) {
 // anchor it re-scans every later event. It is the oracle for the equivalence test.
 func (c *CompiledRule) matchSessionInSequenceReference(events []asymptoteobserve.Event) ([]asymptoteobserve.Event, error) {
 	for start := range events {
-		matched, err := c.eval(c.steps[0], events[start])
+		matched, err := evalAlone(c.steps[0], events[start])
 		if err != nil {
 			return nil, err
 		}
@@ -347,7 +347,7 @@ func (c *CompiledRule) matchSessionInSequenceReference(events []asymptoteobserve
 		stepIdx := 1
 		seq := []asymptoteobserve.Event{events[start]}
 		for j := start + 1; j < len(events); j++ {
-			matched, err := c.eval(c.steps[stepIdx], events[j])
+			matched, err := evalAlone(c.steps[stepIdx], events[j])
 			if err != nil {
 				return nil, err
 			}
@@ -410,7 +410,7 @@ func TestOrderedCorrelationMatchesExhaustiveSearch(t *testing.T) {
 			events[i] = corrEvent(ts, actions[rng.Intn(len(actions))], "s", nil)
 		}
 		for ri, c := range rules {
-			got, err := c.matchSessionInSequence(events, c.ownSteps(events))
+			got, err := c.matchSessionInSequence(events, func(step, event int) (bool, error) { return evalAlone(c.steps[step], events[event]) })
 			if err != nil {
 				t.Fatal(err)
 			}

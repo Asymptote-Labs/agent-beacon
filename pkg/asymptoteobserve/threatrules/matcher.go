@@ -19,7 +19,9 @@ type matcher struct {
 	// ast is the checked expression prog was built from.
 	ast     *cel.Ast
 	actions map[string]bool // nil: the expression does not limit the action
-	// derived is set when the expression selects an engine-derived field.
+	// derived is set when the expression reads the event with its derived fields filled:
+	// compileMatcher sets it when the expression selects one, and Compile when its rule does
+	// anywhere, which is the form a rule has always read every expression on.
 	derived bool
 	// untracked, when set, is the expression without cost tracking, for events within a tier of
 	// sizes where its cost cannot reach the limit (matcher.go).

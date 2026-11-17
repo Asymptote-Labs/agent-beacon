@@ -143,7 +143,7 @@ func BenchmarkPreparedSteps(b *testing.B) {
 					b.Fatal(err)
 				}
 				for _, d := range each {
-					if _, err := d.rule.eval(d.step, bc.event); err != nil {
+					if _, err := evalAlone(d.step, bc.event); err != nil {
 						b.Fatal(err)
 					}
 				}

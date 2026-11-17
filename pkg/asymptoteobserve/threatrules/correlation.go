@@ -7,32 +7,10 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-// evaluateCorrelation runs the windowed step matcher. Events are grouped by session.id
-// (scope: session) and each group is evaluated independently; the rule matches if any
-// session satisfies the steps.
-func (c *CompiledRule) evaluateCorrelation(events []asymptoteobserve.Event) (Verdict, error) {
-	groups, order := groupBySession(events)
-	for _, sid := range order {
-		matched, err := c.matchSession(groups[sid], c.ownSteps(groups[sid]))
-		if err != nil {
-			return "", err
-		}
-		if matched != nil {
-			return VerdictMatch, nil
-		}
-	}
-	return VerdictNoMatch, nil
-}
-
 // stepEval reports whether a step of a rule holds for an event of the session being matched,
-// each by its index. A rule on its own evaluates the step (ownSteps); a scan answers from what
-// it worked out as it passed over the events (stepTable).
+// each by its index. A scan answers from what it worked out as it passed over the events
+// (stepTable).
 type stepEval func(step, event int) (bool, error)
-
-// ownSteps evaluates the rule's steps on the events of one session.
-func (c *CompiledRule) ownSteps(events []asymptoteobserve.Event) stepEval {
-	return func(step, event int) (bool, error) { return c.eval(c.steps[step], events[event]) }
-}
 
 // matchSession returns the matched step events for the first alignment in one session
 // that satisfies the steps within the window, or nil if none. It dispatches on the
@@ -245,23 +223,6 @@ func (c *CompiledRule) assignFrom(events []asymptoteobserve.Event, hits [][]int,
 	return picked
 }
 
-// groupBySession partitions events by session.id, preserving per-group input order and
-// recording the order in which sessions first appear for deterministic evaluation.
-func groupBySession(events []asymptoteobserve.Event) (map[string][]asymptoteobserve.Event, []string) {
-	groups := make(map[string][]asymptoteobserve.Event)
-	var order []string
-	for i := range events {
-		sid := ""
-		if events[i].Session != nil {
-			sid = events[i].Session.ID
-		}
-		if _, seen := groups[sid]; !seen {
-			order = append(order, sid)
-		}
-		groups[sid] = append(groups[sid], events[i])
-	}
-	return groups, order
-}
 
 // eventTime parses an event's timestamp. The bool is false when the timestamp is absent
 // or unparseable, in which case window enforcement is skipped for that event.

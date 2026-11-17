@@ -242,12 +242,12 @@ func selectsField(ast *cel.Ast, name string) bool {
 // EvalMatch runs a compiled match program against one event and reports whether it
 // matched. A non-bool result is treated as an evaluation error.
 //
-// Derived fields (see DerivedFields) are filled on a copy of the event first, so a caller
-// holding only a program sees the same values a CompiledRule does. CompiledRule skips that
-// step for rules that never reference a derived field, and ScanEvents and EventScanner do it
-// once per event for all the rules that do.
+// The program reads the event with its derived fields (see DerivedFields) filled, so a caller
+// holding only a program sees the same values a CompiledRule does; a rule that never reads a
+// derived field skips that step, and a scan does it once per event for all the rules that do.
+// It is evaluated as a scan evaluates a rule (expressions.evaluate), with no action to skip.
 func EvalMatch(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
-	return evalMatch(prog, newEventActivation(withDerivedFields(event)))
+	return evalAlone(matcher{prog: prog, derived: true}, event)
 }
 
 func evalMatch(prog cel.Program, act *eventActivation) (bool, error) {

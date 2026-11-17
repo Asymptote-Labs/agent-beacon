@@ -27,11 +27,53 @@ func stepRule(t *testing.T, id string, order Order, window string, steps ...Corr
 	return c
 }
 
+// ownFindings is what a rule finds in the events with no step table: a single-event rule's match
+// evaluated on every event, a correlation rule's sessions matched one by one with each step
+// evaluated on its own where the matcher asks it. An evaluation that fails does not hold; the
+// first, in the order the rule asks, is returned beside the findings.
+func ownFindings(c *CompiledRule, events []asymptoteobserve.Event) ([]Finding, error) {
+	var findings []Finding
+	var first error
+	held := func(m matcher, e asymptoteobserve.Event) bool {
+		ok, err := evalAlone(m, e)
+		if err != nil && first == nil {
+			first = err
+		}
+		return ok
+	}
+	if c.steps == nil {
+		for _, e := range events {
+			if held(c.match, e) {
+				findings = append(findings, c.newFinding([]asymptoteobserve.Event{e}))
+			}
+		}
+		return findings, first
+	}
+	var order []string
+	sessions := map[string][]asymptoteobserve.Event{}
+	for _, e := range events {
+		sid := sessionOf(&e)
+		if _, seen := sessions[sid]; !seen {
+			order = append(order, sid)
+		}
+		sessions[sid] = append(sessions[sid], e)
+	}
+	for _, sid := range order {
+		session := sessions[sid]
+		seq, _ := c.matchSession(session, func(step, event int) (bool, error) { return held(c.steps[step], session[event]), nil })
+		if seq != nil {
+			findings = append(findings, c.newFinding(seq))
+		}
+	}
+	return findings, first
+}
+
 // ScanEvents answers the correlation rules from one pass over the events. What it returns, the
 // findings with their evidence or the error of the first rule that fails, is what each rule
-// finds on its own: on random sessions, with steps several rules share, a step that reads a
-// derived field, and a step that exceeds the cost limit on some events, which fails a scan only
-// when a rule's matcher gets as far as asking it.
+// finds on its own, every step evaluated where its matcher asks (ownFindings): on random
+// sessions, with steps several rules share, a step that reads a derived field, and a step that
+// exceeds the cost limit on some events, which fails a scan only when a rule's matcher gets as
+// far as asking it.
 func TestScanEventsMatchesEachCorrelationRule(t *testing.T) {
 	lowerCostLimit(t)
 	runaway := `e.event.action == "c" && ` + nestedAll(7)
@@ -86,16 +128,17 @@ func TestScanEventsMatchesEachCorrelationRule(t *testing.T) {
 			scanned = append(scanned, single)
 		}
 
-		var want []Finding
+		var all, want []Finding
 		var wantErr error
 		for _, c := range scanned {
-			f, err := c.Findings(events)
-			if err != nil {
+			f, err := ownFindings(c, events)
+			all = append(all, f...)
+			if err != nil && wantErr == nil {
 				wantErr = fmt.Errorf("rule %q: %w", c.rule.ID, err)
-				want = nil
-				break
 			}
-			want = append(want, f...)
+		}
+		if wantErr == nil {
+			want = all
 		}
 		got, gotErr := ScanEvents(scanned, events)
 		if (gotErr == nil) != (wantErr == nil) || gotErr != nil && gotErr.Error() != wantErr.Error() {
@@ -103,6 +146,11 @@ func TestScanEventsMatchesEachCorrelationRule(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("iter %d: ScanEvents found %v, each rule found %v", iter, findingKeys(got), findingKeys(want))
+		}
+		// Scan goes on past a failure, and finds what each rule finds past its own.
+		result := Scan(scanned, events)
+		if !reflect.DeepEqual(result.Findings, all) || (len(result.Failures) > 0) != (wantErr != nil) {
+			t.Fatalf("iter %d: Scan found %v with %d failures, each rule found %v (failing: %v)", iter, findingKeys(result.Findings), len(result.Failures), findingKeys(all), wantErr)
 		}
 		switch {
 		case gotErr != nil:

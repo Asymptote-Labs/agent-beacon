@@ -346,7 +346,7 @@ func TestDerivingParsedCommandsLeavesTheEventAlone(t *testing.T) {
 }
 
 // ScanEvents derives an event's fields once for every rule that needs them, and reports what
-// each rule's own Findings does, in rule order. The rules are every one that derives fields,
+// each rule finds scanned alone, in rule order. The rules are every one that derives fields,
 // with every tenth other rule (correlations among them) between them, over their fixtures.
 func TestScanEventsDerivesOncePerEvent(t *testing.T) {
 	var rules []*CompiledRule
@@ -377,11 +377,7 @@ func TestScanEventsDerivesOncePerEvent(t *testing.T) {
 	}
 	var want []Finding
 	for _, c := range rules {
-		f, err := c.Findings(events)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want = append(want, f...)
+		want = append(want, findingsOf(t, c, events)...)
 	}
 
 	// The correlation rules among them read the same derivation: once per event for them all.

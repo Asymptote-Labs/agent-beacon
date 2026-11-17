@@ -22,11 +22,10 @@ import (
 // follow, in their session, one the step before it holds for (nextHit looks nowhere else).
 // That is a matter of cost alone: what the table does not hold is evaluated when it is asked.
 type stepTable struct {
-	events    []asymptoteobserve.Event
-	columns   []stepColumn
-	of        map[*CompiledRule][]int // a rule's steps, as columns
-	byAction  map[string][]int        // as EventScanner's, over columns
-	anyAction []int
+	events  []asymptoteobserve.Event
+	columns []stepColumn
+	steps   expressions             // the columns' expressions
+	of      map[*CompiledRule][]int // a rule's steps, as columns
 	// known and hit are one bit per event for each column: the step was evaluated on the event,
 	// and it held. failed holds the evaluations that returned an error.
 	known, hit [][]uint64
@@ -56,10 +55,17 @@ type sessionEvents struct {
 // distinctStep is one distinct step of a set of correlation rules: an expression, read on one
 // form of the event, and the first rule and step that write it.
 type distinctStep struct {
-	match   matcher
-	derived bool
-	rule    *CompiledRule
-	step    int
+	match matcher
+	rule  *CompiledRule
+	step  int
+}
+
+func stepMatchers(steps []distinctStep) []matcher {
+	match := make([]matcher, len(steps))
+	for i := range steps {
+		match[i] = steps[i].match
+	}
+	return match
 }
 
 // stepKey identifies a step by what is evaluated: the expression and the definitions it was
@@ -74,9 +80,9 @@ type stepKey struct {
 // distinctSteps returns the distinct steps of the correlation rules among rules, in rule and
 // step order, and each rule's steps as positions among them; a single-event rule has none.
 //
-// Which form of the event a step reads follows its rule (CompiledRule.eval). A step shared by
-// a rule that reads derived fields and one that does not selects none itself, so it is the
-// same on either form and reads the derived one.
+// Which form of the event a step reads follows its rule (Compile). A step shared by a rule that
+// reads derived fields and one that does not selects none itself, so it is the same on either
+// form and reads the derived one.
 func distinctSteps(rules []*CompiledRule) ([]distinctStep, map[*CompiledRule][]int) {
 	var steps []distinctStep
 	of := map[*CompiledRule][]int{}
@@ -97,7 +103,7 @@ func distinctSteps(rules []*CompiledRule) ([]distinctStep, map[*CompiledRule][]i
 				at[key] = k
 				steps = append(steps, distinctStep{match: r.steps[s], rule: r, step: s})
 			}
-			steps[k].derived = steps[k].derived || r.derived
+			steps[k].match.derived = steps[k].match.derived || r.derived
 			own[s] = k
 		}
 		of[r] = own
@@ -112,7 +118,7 @@ func newStepTable(rules []*CompiledRule, events []asymptoteobserve.Event) *stepT
 	if len(steps) == 0 {
 		return nil
 	}
-	t := &stepTable{events: events, of: of, byAction: map[string][]int{}}
+	t := &stepTable{events: events, of: of, steps: newExpressions(stepMatchers(steps))}
 	t.columns = make([]stepColumn, len(steps))
 	for c, step := range steps {
 		t.columns[c].distinctStep = step
@@ -130,22 +136,6 @@ func newStepTable(rules []*CompiledRule, events []asymptoteobserve.Event) *stepT
 			}
 		}
 	}
-	for c, col := range t.columns {
-		if col.match.actions == nil {
-			t.anyAction = append(t.anyAction, c)
-		}
-	}
-	for c, col := range t.columns {
-		for action := range col.match.actions {
-			if _, ok := t.byAction[action]; !ok {
-				t.byAction[action] = slices.Clone(t.anyAction)
-			}
-			t.byAction[action] = append(t.byAction[action], c)
-		}
-	}
-	for _, cs := range t.byAction {
-		slices.Sort(cs)
-	}
 	words := (len(events) + 63) / 64
 	t.known, t.hit = make([][]uint64, len(t.columns)), make([][]uint64, len(t.columns))
 	for c := range t.columns {
@@ -154,7 +144,8 @@ func newStepTable(rules []*CompiledRule, events []asymptoteobserve.Event) *stepT
 	return t
 }
 
-func sessionID(e *asymptoteobserve.Event) string {
+// sessionOf returns an event's session id, "" for an event of no session.
+func sessionOf(e *asymptoteobserve.Event) string {
 	if e.Session == nil {
 		return ""
 	}
@@ -163,25 +154,20 @@ func sessionID(e *asymptoteobserve.Event) string {
 
 // fill evaluates on event i, read through in, the steps a matcher can ask about it.
 func (t *stepTable) fill(i int, in *eventInput) {
-	candidates, ok := t.byAction[in.event.Event.Action]
-	if !ok {
-		candidates = t.anyAction
-	}
-	if len(candidates) == 0 {
-		return
-	}
-	sid := sessionID(in.event)
+	sid := sessionOf(in.event)
 	held := t.held[sid] // as it was before this event
 	var fed []int
-	for _, c := range candidates {
+	t.steps.evaluate(in, func(c int) bool {
 		col := &t.columns[c]
-		if !col.always && !slices.ContainsFunc(col.after, func(before int) bool { return held != nil && held[before] }) {
-			continue
-		}
-		if t.record(c, i, in) && col.feeds {
+		return col.always || slices.ContainsFunc(col.after, func(before int) bool { return held != nil && held[before] })
+	}, func(c int, holds bool, err error) bool {
+		// Every answer is kept, a failure with its error: it is reported only if a matcher asks.
+		t.record(c, i, holds, err)
+		if holds && t.columns[c].feeds {
 			fed = append(fed, c)
 		}
-	}
+		return true
+	})
 	if len(fed) == 0 {
 		return
 	}
@@ -197,11 +183,8 @@ func (t *stepTable) fill(i int, in *eventInput) {
 	}
 }
 
-// record evaluates column c on event i and reports whether it held.
-func (t *stepTable) record(c, i int, in *eventInput) bool {
-	col := &t.columns[c]
-	act := in.activation(col.derived)
-	matched, err := evalObserved(col.match.program(act), act)
+// record keeps the answer of column c on event i.
+func (t *stepTable) record(c, i int, holds bool, err error) {
 	word, bit := i/64, uint64(1)<<(i%64)
 	t.known[c][word] |= bit
 	if err != nil {
@@ -209,22 +192,21 @@ func (t *stepTable) record(c, i int, in *eventInput) bool {
 			t.failed = map[[2]int]error{}
 		}
 		t.failed[[2]int{c, i}] = err
-		return false
+		return
 	}
-	if matched {
+	if holds {
 		t.hit[c][word] |= bit
 	}
-	return matched
 }
 
 // holds reports whether column c holds for event i, as evaluating the step on the event does.
 func (t *stepTable) holds(c, i int) (bool, error) {
 	word, bit := i/64, uint64(1)<<(i%64)
 	if t.known[c][word]&bit == 0 {
-		if t.columns[c].match.excludes(t.events[i].Event.Action) {
-			return false, nil
-		}
-		t.record(c, i, &eventInput{event: &t.events[i]})
+		t.steps.evaluate(&eventInput{event: &t.events[i]}, func(k int) bool { return k == c }, func(_ int, holds bool, err error) bool {
+			t.record(c, i, holds, err)
+			return true
+		})
 	}
 	if t.hit[c][word]&bit != 0 {
 		return true, nil
@@ -237,15 +219,15 @@ func (t *stepTable) holds(c, i int) (bool, error) {
 	return false, nil
 }
 
-// findings returns what rule.correlationFindings returns for the scanned events, asking the
-// table for every step. A step that could not be evaluated on an event is handed to fail, with
-// the event's index in the scan, once for each event, and is taken not to hold there: the
-// rule goes on, and finds what it can from the evaluations that did not fail.
-func (t *stepTable) findings(rule *CompiledRule, fail func(event int, err error)) []Finding {
+// findings returns what the rule finds in the scanned events, asking the table for every step. A
+// step that could not be evaluated on an event is handed to fail, with the event's index in the
+// scan, once for each event, and is taken not to hold there: the rule goes on, and finds what it
+// can from the evaluations that did not fail, unless fail says to stop, which findings reports.
+func (t *stepTable) findings(rule *CompiledRule, fail func(event int, err error) bool) ([]Finding, bool) {
 	if t.sessions == nil {
 		at := map[string]int{}
 		for i := range t.events {
-			sid := sessionID(&t.events[i])
+			sid := sessionOf(&t.events[i])
 			k, seen := at[sid]
 			if !seen {
 				k = len(t.sessions)
@@ -259,10 +241,14 @@ func (t *stepTable) findings(rule *CompiledRule, fail func(event int, err error)
 	columns := t.of[rule]
 	var findings []Finding
 	var failed map[int]bool
+	stopped := false
 	for k := range t.sessions {
 		session := &t.sessions[k]
 		// The matcher returns no error: every failure becomes "does not hold" here.
 		seq, _ := rule.matchSession(session.events, func(step, event int) (bool, error) {
+			if stopped {
+				return false, nil
+			}
 			i := session.index[event]
 			held, err := t.holds(columns[step], i)
 			if err != nil {
@@ -271,15 +257,18 @@ func (t *stepTable) findings(rule *CompiledRule, fail func(event int, err error)
 						failed = map[int]bool{}
 					}
 					failed[i] = true
-					fail(i, err)
+					stopped = !fail(i, err)
 				}
 				return false, nil
 			}
 			return held, nil
 		})
+		if stopped {
+			return findings, false
+		}
 		if seq != nil {
 			findings = append(findings, rule.newFinding(seq))
 		}
 	}
-	return findings
+	return findings, true
 }

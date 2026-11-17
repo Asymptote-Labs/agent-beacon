@@ -84,7 +84,7 @@ func referenceRule(t testing.TB, rule *Rule) *CompiledRule {
 		t.Fatalf("%s: %v", rule.ID, err)
 	}
 	ref := func(expr string) matcher {
-		return matcher{prog: referenceProgram{nativeProgram(t, rule.lib, expr, cel.OptimizeRegex(referenceRegex))}}
+		return matcher{prog: referenceProgram{nativeProgram(t, rule.lib, expr, cel.OptimizeRegex(referenceRegex))}, derived: c.derived}
 	}
 	if rule.Correlation != nil {
 		for i, step := range rule.Correlation.Steps {
@@ -439,13 +439,13 @@ func correlationRules(rules []*CompiledRule) []*CompiledRule {
 	return out
 }
 
-// anyStepReference evaluates every step of every rule on the event as the correlation evaluator
-// does (CompiledRule.eval): true when one holds, otherwise the first failure in rule and step order.
+// anyStepReference evaluates every step of every rule on the event on its own, read as its rule
+// reads it: true when one holds, otherwise the first failure in rule and step order.
 func anyStepReference(rules []*CompiledRule, e asymptoteobserve.Event) (bool, error) {
 	var first error
 	for _, r := range rules {
 		for i, st := range r.steps {
-			matched, err := r.eval(st, e)
+			matched, err := evalAlone(st, e)
 			if err != nil {
 				if first == nil {
 					first = fmt.Errorf("rule %q step %q: %w", r.rule.ID, r.rule.Correlation.Steps[i].ID, err)
