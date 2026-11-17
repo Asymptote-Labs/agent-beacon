@@ -258,7 +258,7 @@ func (r *Rule) validateExpression(expr string) error {
 	}
 	_, ast, err := r.lib.compileMatch(expr)
 	if err != nil {
-		return r.lib.explain(err)
+		return r.lib.explain(expr, err)
 	}
 	// Already known to be parseable and supported (Validate checked it first). The newest field
 	// is checked first, so the error names the version the rule needs. A rule needs the spec of

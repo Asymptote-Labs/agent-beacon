@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 
+	celast "github.com/google/cel-go/common/ast"
+
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -219,7 +221,9 @@ func TestPackWritesOutNoPredicate(t *testing.T) {
 // unread_text binds) has to spell the senders inside a longer pattern, so it may, but then it
 // names every client egress_sender knows that sends what it reads (all but curl and wget, which
 // the pattern qualifies), as egress_sender_mention names all of them: a client added to
-// egress_sender and not to the text would be seen on a parsed line and missed in the text.
+// egress_sender and not to the text would be seen on a parsed line and missed in the text. The
+// rule is read as CatalogCopies reads it: the constant patterns of its matches() calls, as
+// written.
 func TestPackListsNoSenderOfItsOwn(t *testing.T) {
 	lib := corpusPack(t).Library
 	// The name as a whole alternative, not letters inside another (truncate).
@@ -245,27 +249,66 @@ func TestPackListsNoSenderOfItsOwn(t *testing.T) {
 		t.Errorf("egress_sender_mention names %q, egress_sender %q", got, all)
 	}
 	stdin := slices.DeleteFunc(slices.Clone(all), func(n string) bool { return n == "curl" || n == "wget" })
-	literal := regexp.MustCompile(`([\w.]+)\.matches\(("(?:[^"\\]|\\.)*")\)`)
 	bound := regexp.MustCompile(`unread_text\(\s*e\s*,\s*(\w+)\s*,`)
-	for _, r := range corpusRules(t) {
-		expr := strings.Join(ruleExpressions(r), " ")
-		texts := map[string]bool{"e.command.command": true}
-		for _, m := range bound.FindAllStringSubmatch(expr, -1) {
-			texts[m[1]] = true
+	// A text a rule may spell senders in: the command line, or a name unread_text binds.
+	text := func(e celast.Expr, texts map[string]bool) bool {
+		if e.Kind() == celast.IdentKind {
+			return texts[e.AsIdent()]
 		}
-		for _, m := range literal.FindAllStringSubmatch(expr, -1) {
-			receiver, list := m[1], m[2]
-			if !sender.MatchString(list) {
-				continue
+		if e.Kind() != celast.SelectKind || e.AsSelect().FieldName() != "command" {
+			return false
+		}
+		op := e.AsSelect().Operand()
+		return op.Kind() == celast.SelectKind && op.AsSelect().FieldName() == "command" &&
+			op.AsSelect().Operand().Kind() == celast.IdentKind && op.AsSelect().Operand().AsIdent() == eventVar
+	}
+	// senders returns the sender lists a rule asks of a parsed command, and the ones it asks of
+	// a text, as written.
+	senders := func(r *Rule) (own, texts []matchesLiteral) {
+		names := map[string]bool{}
+		for _, m := range bound.FindAllStringSubmatch(strings.Join(ruleExpressions(r), " "), -1) {
+			names[m[1]] = true
+		}
+		for _, e := range r.written() {
+			for _, literal := range matchesLiterals(e) {
+				if !sender.MatchString(literal.pattern) {
+					continue
+				}
+				if text(literal.subject, names) {
+					texts = append(texts, literal)
+				} else {
+					own = append(own, literal)
+				}
 			}
-			if !texts[receiver] {
-				t.Errorf("%s: %s.matches(%s) lists network senders; call egress_sender instead, so that every egress rule means the same senders", r.ID, receiver, list)
-				continue
-			}
-			names := senderGroup(list)
+		}
+		return own, texts
+	}
+	for _, r := range corpusRules(t) {
+		own, texts := senders(r)
+		for _, list := range own {
+			t.Errorf("%s: %s.matches(%q) lists network senders; call egress_sender instead, so that every egress rule means the same senders", r.ID, exprText(list.subject), list.pattern)
+		}
+		for _, list := range texts {
+			names := senderGroup(list.pattern)
 			if missing := slices.DeleteFunc(slices.Clone(stdin), func(n string) bool { return slices.Contains(names, n) }); len(missing) > 0 {
-				t.Errorf("%s: %s.matches(%s) names senders without %q, which egress_sender knows; name them all or call egress_sender_mention", r.ID, receiver, list, missing)
+				t.Errorf("%s: %s.matches(%q) names senders without %q, which egress_sender knows; name them all or call egress_sender_mention", r.ID, exprText(list.subject), list.pattern, missing)
 			}
+		}
+	}
+	// The detector sees a list of senders where a parsed command is asked, and lets a text
+	// spell them only in full.
+	for match, want := range map[string]bool{
+		`e.command.parsed_commands.exists(c, c.name.matches("^(curl|ncat|wget)$"))`: true,
+		`e.command.parsed_commands.exists(c, matches(c.name, "^(nc|netcat)$"))`:     true,
+		`e.command.command.matches("\\b(ncat|netcat)\\b")`:                          false,
+		`e.command.parsed_commands.exists(c, c.name.matches("^truncate$"))`:         false,
+	} {
+		rule, err := lib.DecodeRule([]byte("id: senders\nversion: 1\ntitle: t\nseverity: low\nmatch: >\n  " + match + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if own, _ := senders(rule); (len(own) > 0) != want {
+			t.Errorf("%s: found a sender list = %v, want %v", match, len(own) > 0, want)
 		}
 	}
 }

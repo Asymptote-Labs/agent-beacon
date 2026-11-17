@@ -37,43 +37,19 @@ func (c CatalogCopy) String() string {
 // same question: a path (e.file.path, the path of a file a command reads), a command line
 // (e.command.command) and a parsed command's args. A pattern matched against something else
 // (a tool description, one word of a command) is the rule's own business. It reads the rule as
-// written: what a predicate expands to is the catalog's own and is not looked at. A rule loaded
-// without definitions has nothing to copy.
+// written (asWritten): what a predicate expands to is the catalog's own and is not looked at. A
+// rule loaded without definitions has nothing to copy.
 func CatalogCopies(rule *Rule) []CatalogCopy {
 	if rule.lib == nil || len(rule.lib.catalogs) == 0 {
 		return nil
 	}
-	// Without the library's macros a predicate call stays a call, so only the rule's own
-	// literals are seen.
-	env, err := Env()
-	if err != nil {
-		return nil
-	}
 	var patterns []string
-	for _, expr := range ruleExpressions(rule) {
-		parsed, iss := env.Parse(expr)
-		if iss != nil && iss.Err() != nil {
-			continue
+	for _, e := range rule.written() {
+		for _, literal := range matchesLiterals(e) {
+			if catalogSubject(literal.subject) {
+				patterns = append(patterns, literal.pattern)
+			}
 		}
-		celast.PreOrderVisit(parsed.NativeRep().Expr(), celast.NewExprVisitor(func(e celast.Expr) {
-			if e.Kind() != celast.CallKind || e.AsCall().FunctionName() != "matches" {
-				return
-			}
-			call := e.AsCall()
-			args := call.Args()
-			var subject celast.Expr
-			switch {
-			case call.IsMemberFunction() && len(args) == 1:
-				subject = call.Target()
-			case !call.IsMemberFunction() && len(args) == 2:
-				subject = args[0]
-			default:
-				return
-			}
-			if pattern, ok := stringLiteral(args[len(args)-1]); ok && catalogSubject(subject) {
-				patterns = append(patterns, pattern)
-			}
-		}))
 	}
 	var copies []CatalogCopy
 	for _, catalog := range rule.lib.catalogs {
@@ -124,16 +100,4 @@ func catalogSubject(e celast.Expr) bool {
 		return op.Kind() == celast.SelectKind && op.AsSelect().FieldName() == "command"
 	}
 	return false
-}
-
-// ruleExpressions returns the expressions a rule is written with: its match, or its steps'.
-func ruleExpressions(r *Rule) []string {
-	if r.Correlation == nil {
-		return []string{r.Match}
-	}
-	var exprs []string
-	for _, s := range r.Correlation.Steps {
-		exprs = append(exprs, s.Match)
-	}
-	return exprs
 }

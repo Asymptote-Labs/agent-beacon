@@ -32,14 +32,16 @@ type predicate struct {
 	// file declares (v1.3 at least): what a rule that calls the predicate needs.
 	source string
 	spec   specVersion
-	// params and text are a definition's parameters and body as written; body is the body parsed,
-	// with its own variables renamed (see hygienic). binds are the parameters the body binds
-	// for its caller, and uses the predicates the body calls.
-	params []string
-	text   string
-	body   celast.Expr
-	binds  []string
-	uses   []string
+	// params and text are a definition's parameters and body as written, and written the body
+	// read as written (asWritten); body is the body parsed, with its own variables renamed (see
+	// hygienic). binds are the parameters the body binds for its caller, and uses the predicates
+	// the body calls.
+	params  []string
+	text    string
+	written celast.Expr
+	body    celast.Expr
+	binds   []string
+	uses    []string
 	// catalog and render are set for a catalog's predicate: render writes a selection of the
 	// catalog's stores as an expression over a subject.
 	catalog *concepts.Catalog

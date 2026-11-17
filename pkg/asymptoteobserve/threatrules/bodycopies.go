@@ -17,50 +17,27 @@ import (
 // means what the predicate means today and stops when the predicate changes, which is what a
 // predicate exists to prevent.
 //
-// The rule is read as written, so a call to a predicate is a call, and a rule that carries
-// `x.file_reads.exists(f, credential_file(f.path))` carries the body of the predicate defined
-// as exactly that. A body that is an operand of a longer `||` or `&&` in the rule counts: the
-// rule says the predicate and something more. A predicate a catalog provides has no written
-// body (see CatalogCopies). A rule loaded without definitions has nothing to copy.
+// The rule and the bodies are read as written (asWritten), so a call to a predicate is a call,
+// and a rule that carries `x.file_reads.exists(f, credential_file(f.path))` carries the body of
+// the predicate defined as exactly that. A body that is an operand of a longer `||` or `&&` in
+// the rule counts: the rule says the predicate and something more. A predicate a catalog
+// provides has no written body (see CatalogCopies). A rule loaded without definitions has
+// nothing to copy.
 func PredicateCopies(rule *Rule) []string {
 	if rule.lib == nil {
 		return nil
 	}
-	env, err := Env()
-	if err != nil {
-		return nil
-	}
-	type definition struct {
-		name   string
-		params []string
-		body   celast.Expr
-	}
-	var definitions []definition
-	for _, name := range rule.lib.order {
-		p := rule.lib.predicates[name]
-		if p.catalog != nil {
-			continue
-		}
-		parsed, iss := env.Parse(p.text)
-		if iss != nil && iss.Err() != nil {
-			continue
-		}
-		definitions = append(definitions, definition{name, p.params, parsed.NativeRep().Expr()})
-	}
 	copied := map[string]bool{}
-	for _, expr := range ruleExpressions(rule) {
-		parsed, iss := env.Parse(expr)
-		if iss != nil && iss.Err() != nil {
-			continue
-		}
-		celast.PreOrderVisit(parsed.NativeRep().Expr(), celast.NewExprVisitor(func(e celast.Expr) {
-			for _, d := range definitions {
-				if copied[d.name] {
+	for _, e := range rule.written() {
+		celast.PreOrderVisit(e, celast.NewExprVisitor(func(e celast.Expr) {
+			for _, name := range rule.lib.order {
+				p := rule.lib.predicates[name]
+				if p.written == nil || copied[name] {
 					continue
 				}
-				u := unifier{params: d.params, bound: map[string]string{}, args: map[string]celast.Expr{}}
-				if u.unify(d.body, e, true) && len(u.args) == len(d.params) {
-					copied[d.name] = true
+				u := unifier{params: p.params, bound: map[string]string{}, args: map[string]celast.Expr{}}
+				if u.unify(p.written, e, true) && len(u.args) == len(p.params) {
+					copied[name] = true
 				}
 			}
 		}))

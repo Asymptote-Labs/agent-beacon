@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -246,7 +245,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 	if err != nil {
 		return nil, nil, fmt.Errorf("build CEL env: %w", err)
 	}
-	if definitions, err = l.setAside(base, definitions); err != nil {
+	if definitions, err = l.setAside(definitions); err != nil {
 		return nil, nil, err
 	}
 	if len(l.predicates) == 0 && len(l.catalogs) == 0 && len(l.later) == 0 {
@@ -357,7 +356,7 @@ func declaredPredicates(data []byte) []string {
 // setAside finds the predicates each definition's body calls, and sets aside, with the files
 // this engine left out, every definition that calls a predicate of one of them: its body cannot
 // be expanded here. It returns the definitions that remain.
-func (l *Library) setAside(base *cel.Env, definitions []PredicateDefinition) ([]PredicateDefinition, error) {
+func (l *Library) setAside(definitions []PredicateDefinition) ([]PredicateDefinition, error) {
 	for name := range l.later {
 		if l.predicates[name] != nil {
 			delete(l.later, name) // a file this engine loads defines it
@@ -366,13 +365,14 @@ func (l *Library) setAside(base *cel.Env, definitions []PredicateDefinition) ([]
 	called := make(map[string][]string, len(definitions))
 	for _, d := range definitions {
 		p := l.predicates[d.Name]
-		// With the engine's environment alone a call to a predicate stays a call, which is how
-		// the ones a body uses are found.
-		parsed, iss := base.Parse(p.text)
-		if iss != nil && iss.Err() != nil {
-			return nil, fmt.Errorf("%s: predicate %s: body: %w", p.source, p.name, iss.Err())
+		// As written, a call to a predicate stays a call, which is how the ones a body uses
+		// are found.
+		written, err := asWritten(p.text)
+		if err != nil {
+			return nil, fmt.Errorf("%s: predicate %s: body: %w", p.source, p.name, err)
 		}
-		called[d.Name] = calls(parsed.NativeRep().Expr())
+		p.written = written
+		called[d.Name] = calls(written)
 	}
 	for more := len(l.later) > 0; more; {
 		more = false
@@ -487,17 +487,21 @@ func (l *Library) extend(env *cel.Env) (*cel.Env, error) {
 	return env.Extend(cel.Macros(macros...))
 }
 
-// undeclared finds the name in the checker's report of a call to a function it does not know.
-var undeclared = regexp.MustCompile(`undeclared reference to '(` + strings.Trim(concepts.PredicateNamePattern.String(), "^$") + `)'`)
-
-// explain adds, to the error of an expression that calls something the library does not define,
-// what is most likely wrong: the rule was loaded without its pack's definitions.
-func (l *Library) explain(err error) error {
-	m := undeclared.FindStringSubmatch(err.Error())
-	if m == nil || l != nil && l.predicates[m[1]] != nil {
+// explain adds, to the error of an expression that calls a function neither the engine nor the
+// library defines, what is most likely wrong: the rule was loaded without its pack's definitions.
+// The function is found in the expression as written, a name a predicate could have.
+func (l *Library) explain(expr string, err error) error {
+	written, perr := asWritten(expr)
+	env, eerr := Env()
+	if perr != nil || eerr != nil {
 		return err
 	}
-	return fmt.Errorf("%w\n%s is not a predicate of the definitions this rule was loaded with: a pack's definitions are its %s and %s files, found when the pack's directory is loaded", err, m[1], CatalogFileSuffix, PredicatesFileSuffix)
+	for _, name := range calls(written) {
+		if concepts.PredicateNamePattern.MatchString(name) && !env.HasFunction(name) && (l == nil || l.predicates[name] == nil) {
+			return fmt.Errorf("%w\n%s is not a predicate of the definitions this rule was loaded with: a pack's definitions are its %s and %s files, found when the pack's directory is loaded", err, name, CatalogFileSuffix, PredicatesFileSuffix)
+		}
+	}
+	return err
 }
 
 // CompileMatch is the package's CompileMatch for an expression that may call the library's
@@ -534,16 +538,12 @@ func (l *Library) uses(ruleID, expr string) ([]*predicate, error) {
 	if l == nil {
 		return nil, nil
 	}
-	base, err := Env()
+	written, err := asWritten(expr)
 	if err != nil {
 		return nil, nil
 	}
-	parsed, iss := base.Parse(expr)
-	if iss != nil && iss.Err() != nil {
-		return nil, nil
-	}
 	var used []*predicate
-	for _, name := range calls(parsed.NativeRep().Expr()) {
+	for _, name := range calls(written) {
 		if later, ok := l.later[name]; ok {
 			return nil, &UnsupportedSpecError{RuleID: ruleID, Required: later.required, Predicate: later.chain, Source: later.source}
 		}
