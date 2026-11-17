@@ -1,6 +1,6 @@
 id: env-dump-piped-to-network
 spec: threat-rules/v1.3  # needed for predicates
-version: 5
+version: 6
 title: Environment dump piped to an outbound network command
 description: >
   A single command sends the full process environment (env / printenv / `set` /
@@ -24,7 +24,9 @@ taxonomy:
 # Who sends, and whether a sender reads what is piped into it, are the egress rules' shared
 # predicates (rules/concepts/egress.predicates.yaml): a sender reads the pipe unless it is
 # curl or wget without a stdin body (@-, -T -, --post-file=-). `export -p` is not a
-# parsed command (bash reads it as a declaration), so its dump is found in the text.
+# parsed command (bash reads it as a declaration), so its dump is found in the text. The
+# dump is looked for among the earlier stages of the sender's own pipeline (earlier_stages,
+# indexes into parsed_commands), not among every command of the line.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(s,
@@ -32,10 +34,10 @@ match: >
         s.name == "gh" && s.argv.exists(a, a == "gist") && s.argv.exists(a, a == "create") && s.argv.exists(a, a == "-") ||
         s.name.matches("(?i)^(python[0-9.]*|node)$") && s.argv.exists(a, a in ["-c", "-e"]) &&
           s.argv.exists(a, a.matches("(?i)(requests\\.(post|put)\\(|urllib\\.request|urlopen\\(|fetch\\(|https?\\.request\\()"))) && (
-        e.command.parsed_commands.exists(d, d.pipeline == s.pipeline && d.stage < s.stage && (
-          d.name == "printenv" ||
-          d.name == "" && d.argv.exists(a, a.matches("(?i)(^|/)env$")) ||
-          d.name == "set" && size(d.argv) == 1)) ||
+        s.earlier_stages.exists(i,
+          e.command.parsed_commands[i].name == "printenv" ||
+          e.command.parsed_commands[i].name == "" && e.command.parsed_commands[i].argv.exists(a, a.matches("(?i)(^|/)env$")) ||
+          e.command.parsed_commands[i].name == "set" && size(e.command.parsed_commands[i].argv) == 1) ||
         s.stage > 0 && e.command.command.matches("(?i)(^|[;&|`(\\n]|\\$\\()\\s*export\\s+-p\\b")) ||
       egress_sender(s) &&
       s.argv_raw.exists(a, a.matches("(?i)(\\$\\(|`)\\s*(env|printenv|export\\s+-p)\\b"))) ||

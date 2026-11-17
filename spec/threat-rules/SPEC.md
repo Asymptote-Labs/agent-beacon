@@ -79,7 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`, `runs_read` and `span`, for `e.command.parsed_incomplete`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`, `runs_read`, `span`, `earlier_stages` and `later_stages`, for `e.command.parsed_incomplete`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -514,6 +514,20 @@ the steps in both orders still fires once. A single event never satisfies two st
   that comes from a command line another command hands on has the `span` of the entry of the
   line itself that it came from. The span over-approximates on purpose and always holds the
   command's own text. The reference derivation is `shellcmd.Spans`.
+- `earlier_stages` and `later_stages` (since v1.3; a rule that selects either MUST declare
+  `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` are lists of
+  integers: the 0-based indexes, in `e.command.parsed_commands` and in ascending order, of the
+  entries with the same `pipeline` and a lower `stage`, and of those with the same `pipeline`
+  and a higher `stage`. For `curl u | tee f | sh`, whose entries are `curl`, `tee` and `sh`,
+  `curl` has `later_stages` `[1, 2]`, `tee` has `earlier_stages` `[0]` and `later_stages`
+  `[2]`, and `sh` has `earlier_stages` `[0, 1]`. Entries at the same stage (the commands
+  inside one compound stage) are in neither list of each other, and both lists are empty for
+  an entry alone in its pipeline. They say nothing `pipeline` and `stage` do not; they exist
+  so that a rule about two stages of one pipeline (a download piped to a shell) asks the
+  commands of that pipeline,
+  `c.later_stages.exists(i, e.command.parsed_commands[i].name == "sh")`, where comparing
+  `pipeline` and `stage` of every pair of entries grows with the square of the line's
+  commands. The reference derivation is `threatrules.ParsedCommands`.
 - `e.system_context` is on the wire, not derived: on `session.context` it names what the
   runtime gave the model. `kind` is `skill_listing` for a skill index, `source` is where
   Beacon read it (`system_prompt`, `transcript`), and `skills` names each listed skill as
@@ -723,8 +737,8 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 ### Changelog
 
 - **v1.3**: `args`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`,
-  `runs_read` and `span` on each entry of `e.command.parsed_commands`, and
-  `e.command.parsed_incomplete`.
+  `runs_read`, `span`, `earlier_stages` and `later_stages` on each entry of
+  `e.command.parsed_commands`, and `e.command.parsed_incomplete`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
   `doas`, `torsocks`, `proxychains`, `caffeinate`, `setsid`, `chronic`, `uv run`,
   `poetry run`, `pipenv run`, `bundle exec` and `mise exec`, and behind a path whose

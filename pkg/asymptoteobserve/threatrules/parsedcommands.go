@@ -16,7 +16,7 @@ const ParsedCommandsPath = "command.parsed_commands"
 const ParsedIncompletePath = "command.parsed_incomplete"
 
 // v1_3Fields are the fields of a parsed command that spec v1.3 added.
-var v1_3Fields = []string{"args", "file_reads", "file_writes", "script_sends", "socket_redirects", "runs_read", "span"}
+var v1_3Fields = []string{"args", "file_reads", "file_writes", "script_sends", "socket_redirects", "runs_read", "span", "earlier_stages", "later_stages"}
 
 // ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
 // to the retained command line, so a longer value (from an in-process caller) is cut there too.
@@ -59,6 +59,8 @@ const maxShellDepth = 3
 //     like: shellcmd.Command.Carried).
 //   - runs_read says the command line a command hands on was read to its end, and span is
 //     shellcmd's span of the command.
+//   - earlier_stages and later_stages are the indexes, in this list, of the commands at
+//     earlier and at later stages of the command's pipeline (stageLists).
 //   - file_reads and socket_redirects follow the data across a script's boundary: the script's
 //     commands read what the shell gets on its standard input, and the shell writes what they
 //     write.
@@ -155,7 +157,53 @@ func parsedCommandLine(command string) (parsed []asymptoteobserve.ParsedCommand,
 	for i, span := range shellcmd.Spans(cmds, wrote) {
 		out[i].Span = span
 	}
+	stageLists(out)
 	return out, incomplete
+}
+
+// stageLists fills earlier_stages and later_stages: for each command, the indexes of the
+// commands at earlier and at later stages of its pipeline, in the order of the list.
+//
+// A rule about two stages of a pipeline (a download piped to a shell, an environment dump
+// piped to a sender) used to find the second by asking every command of the line whether it
+// is in the first one's pipeline, for each candidate first: the square of the line's commands,
+// and most of what the costliest lines cost. The relation is worked out here once, and such a
+// rule asks the few commands of the pipeline. One pipeline of n stages still has n(n-1)/2
+// pairs; maxParsedCommands bounds n.
+func stageLists(out []asymptoteobserve.ParsedCommand) {
+	if len(out) < 2 {
+		return
+	}
+	pipelines := map[int][]int{}
+	for i := range out {
+		pipelines[out[i].Pipeline] = append(pipelines[out[i].Pipeline], i)
+	}
+	for _, members := range pipelines {
+		if len(members) < 2 {
+			continue
+		}
+		for _, i := range members {
+			// One allocation holds both lists: the earlier stages, then the later ones.
+			both := make([]int, 0, len(members)-1)
+			for _, j := range members {
+				if out[j].Stage < out[i].Stage {
+					both = append(both, j)
+				}
+			}
+			earlier := len(both)
+			for _, j := range members {
+				if out[j].Stage > out[i].Stage {
+					both = append(both, j)
+				}
+			}
+			if earlier > 0 {
+				out[i].EarlierStages = both[:earlier:earlier]
+			}
+			if earlier < len(both) {
+				out[i].LaterStages = both[earlier:]
+			}
+		}
+	}
 }
 
 // writesContent reports whether a file write puts content in a file a later command of the
