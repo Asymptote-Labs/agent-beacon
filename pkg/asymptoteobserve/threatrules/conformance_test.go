@@ -402,23 +402,28 @@ func TestBaselineIsCorpusCopies(t *testing.T) {
 	}
 }
 
-// TestPackDefinitionsConformance runs the fixtures of the pack's definitions, as
-// TestPackConformance runs its rules': each predicate definition's own, and each catalog's
-// examples. Every predicate has to be shown at work by one.
+// TestPackDefinitionsConformance runs the checks of the pack's definitions, as
+// TestPackConformance runs its rules': each catalog's examples, once, and each predicate
+// definition's fixtures. Every predicate has to be shown at work: a definition by a fixture of
+// its own, a catalog's predicate by the catalog's examples.
 func TestPackDefinitionsConformance(t *testing.T) {
 	lib, skipped, err := LoadLibraryDir(rulesDir(t))
 	if err != nil || len(skipped) > 0 {
 		t.Fatalf("load the pack's definitions: %v, skipped %v", err, skipped)
 	}
-	tested := map[string]bool{}
+	type checked struct {
+		catalog bool
+		name    string
+	}
+	tested := map[checked]bool{}
 	for _, res := range lib.Check() {
-		tested[res.RuleID] = true
+		tested[checked{res.Catalog, res.Name}] = true
 		if !res.OK() {
-			t.Errorf("predicate %s", res.String())
+			t.Error(res)
 		}
 	}
 	for _, p := range lib.Predicates() {
-		if !tested[p.Name] {
+		if !tested[checked{false, p.Name}] && !(p.Catalog != "" && tested[checked{true, p.Catalog}]) {
 			t.Errorf("predicate %s (%s) has no fixture", p.Name, p.Source)
 		}
 	}

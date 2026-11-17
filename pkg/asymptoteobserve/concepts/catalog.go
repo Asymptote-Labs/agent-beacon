@@ -73,6 +73,32 @@ type Predicates struct {
 	Redacted string `yaml:"redacted,omitempty"`
 }
 
+// PredicateForm is one of the predicates a catalog can provide: the key it is named under in
+// predicates:, what it is asked about and true for, and how its body is generated.
+type PredicateForm struct {
+	// Key is the form's key under predicates:, and Name the name the catalog gives the
+	// predicate, "" when it provides none of this form.
+	Key, Name string
+	// Subject is what the reference calls what the predicate is asked about: p for a path, c
+	// for a parsed command, s for a text. About says what the predicate is true for.
+	Subject, About string
+	// Commands is set for a form about the catalog's stores of commands, and not of files.
+	Commands bool
+	// Render writes a selection of the catalog as the predicate's body over a subject.
+	Render func(Selection, string) string
+}
+
+// PredicateForms returns the four forms of predicate a catalog can provide, with the names this
+// one gives them.
+func (c *Catalog) PredicateForms() []PredicateForm {
+	return []PredicateForm{
+		{"path", c.Predicates.Path, "p", "a path that is a store of files", false, Selection.PathCEL},
+		{"command", c.Predicates.Command, "c", "a parsed command that reads a store of commands", true, Selection.CommandCEL},
+		{"mention", c.Predicates.Mention, "s", "a text that names a store of files", false, Selection.MentionCEL},
+		{"redacted", c.Predicates.Redacted, "s", "a command line in which redaction took the name of a command that reads a store of commands", true, Selection.RedactedCEL},
+	}
+}
+
 // The names threat rules and their definitions use. This package is the lowest that uses them,
 // so it holds them, and the rule engine and the JSON Schemas (spec/threat-rules) take them from
 // here; a test holds the schemas to them.
@@ -148,8 +174,11 @@ func Decode(data []byte) (*Catalog, error) {
 }
 
 // Check holds the catalog to its examples: every store matches its own examples, no store
-// matches a counterexample, and every pattern is shown at work by one. A catalog that passes
-// means what its examples say.
+// matches a counterexample, and every pattern is shown at work by one. Then it holds the
+// expressions generated from the catalog to the same examples and counterexamples, for every
+// selection a rule can ask for (each tier, of every kind and of each kind): a rule runs those,
+// not the catalog's matcher, so each must say of every example what the catalog says. A catalog
+// that passes means what its examples say, wherever it is used.
 func (c *Catalog) Check() error {
 	for i := range c.Stores {
 		s := &c.Stores[i]
@@ -159,6 +188,26 @@ func (c *Catalog) Check() error {
 		}
 		if err := check(s); err != nil {
 			return fmt.Errorf("store %s: %w", s.ID, err)
+		}
+	}
+	generated, err := c.expressions()
+	if err != nil {
+		return err
+	}
+	for i := range c.Stores {
+		s := &c.Stores[i]
+		check := generated.checkPath
+		if len(s.commands) > 0 {
+			check = generated.checkCommandLine
+		}
+		for k, text := range slices.Concat(s.Examples, s.Counterexamples) {
+			if err := check(c, text); err != nil {
+				what := "example"
+				if k >= len(s.Examples) {
+					what = "counterexample"
+				}
+				return fmt.Errorf("store %s: %s %q: %w", s.ID, what, text, err)
+			}
 		}
 	}
 	return nil
@@ -217,23 +266,19 @@ func (c *Catalog) compile() error {
 		}
 	}
 	seen := map[string]string{}
-	for _, p := range []struct {
-		form, name string
-		commands   bool
-	}{{"path", c.Predicates.Path, false}, {"command", c.Predicates.Command, true}, {"mention", c.Predicates.Mention, false}, {"redacted", c.Predicates.Redacted, true}} {
-		form, name := p.form, p.name
-		has := slices.ContainsFunc(c.Stores, func(s Store) bool { return p.commands == (len(s.commands) > 0) })
+	for _, form := range c.PredicateForms() {
+		has := slices.ContainsFunc(c.Stores, func(s Store) bool { return form.Commands == (len(s.commands) > 0) })
 		switch {
-		case name == "":
+		case form.Name == "":
 			continue
-		case !PredicateNamePattern.MatchString(name):
-			return fmt.Errorf("predicates.%s %q: want a name like credential_path", form, name)
+		case !PredicateNamePattern.MatchString(form.Name):
+			return fmt.Errorf("predicates.%s %q: want a name like credential_path", form.Key, form.Name)
 		case !has:
-			return fmt.Errorf("predicates.%s %q: the catalog has no store it would be about", form, name)
-		case seen[name] != "":
-			return fmt.Errorf("predicates: %s and %s are both %q", seen[name], form, name)
+			return fmt.Errorf("predicates.%s %q: the catalog has no store it would be about", form.Key, form.Name)
+		case seen[form.Name] != "":
+			return fmt.Errorf("predicates: %s and %s are both %q", seen[form.Name], form.Key, form.Name)
 		}
-		seen[name] = form
+		seen[form.Name] = form.Key
 	}
 	c.nameStores()
 	return nil
@@ -356,6 +401,12 @@ func (s *Store) matchesCommand(name string, args []string) bool {
 	return slices.ContainsFunc(s.commands, func(p commandPattern) bool { return p.matches(name, args) })
 }
 
+// selectedBy reports whether a selection of the stores of at least the tier min, of the given
+// kinds or of every kind with none given, takes the store in.
+func (s *Store) selectedBy(min Tier, kinds []string) bool {
+	return min.includes(s.Tier) && (len(kinds) == 0 || slices.Contains(kinds, s.Kind))
+}
+
 // Lookup returns the store of files path is: of the stores that match it, the definite one
 // before the likely one, and the one listed first before the others.
 func (c *Catalog) Lookup(path string) (*Store, bool) {
@@ -425,7 +476,7 @@ func (c *Catalog) Select(min Tier, kinds ...string) (Selection, error) {
 	for i := range c.Stores {
 		s := &c.Stores[i]
 		switch {
-		case !min.includes(s.Tier) || len(kinds) > 0 && !slices.Contains(kinds, s.Kind):
+		case !s.selectedBy(min, kinds):
 		case len(s.commands) > 0:
 			for k := range s.commands {
 				selection.Commands = append(selection.Commands, s.commands[k].term())

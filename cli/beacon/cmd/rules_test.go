@@ -598,7 +598,7 @@ func TestRulesLintRunsAPacksDefinitions(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ok   predicate prints_token(e) (2 fixtures)",
-		"ok   predicate token_command(subject[, tier[, kind...]]) (rules/concepts/tokens.catalog.yaml)",
+		"ok   catalog tokens (rules/concepts/tokens.catalog.yaml): token_command",
 		"ok   token-printed (1 fixtures)",
 		"1 rule(s), 2 predicate(s), 3 fixture(s), 0 failure(s)",
 	} {

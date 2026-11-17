@@ -546,35 +546,55 @@ func TestANewerDefinitionsFileSkipsTheRulesThatCallIt(t *testing.T) {
 	}
 }
 
-// Files that define no predicate make no library, and a rule is then compiled as it always was.
-func TestNoPredicatesIsNoLibrary(t *testing.T) {
-	lib, _, err := NewLibrary([]DefinitionFile{{"c.catalog.yaml", []byte(strings.Replace(testCatalog, "predicates: {path: credential_path, command: credential_command}\n", "", 1))}})
+// No definitions make no library, and a rule is then compiled as it always was. A catalog that
+// provides no predicate is still a pack's definitions: its library has the catalog, and Check
+// holds it to its examples.
+func TestNoDefinitionsIsNoLibrary(t *testing.T) {
+	lib, _, err := NewLibrary(nil)
 	if err != nil || lib != nil {
 		t.Fatalf("NewLibrary = %v, %v; want no library", lib, err)
 	}
-	if lib.Predicates() != nil || lib.Check() != nil {
-		t.Error("no library has predicates or fixtures")
+	if lib.Predicates() != nil || lib.Check() != nil || lib.Catalogs() != nil {
+		t.Error("no library has predicates, catalogs or fixtures")
+	}
+	if err := libraryRule(t, lib, "", `e.event.action == "file.read"`).Validate(); err != nil {
+		t.Error(err)
+	}
+
+	withoutPredicates := strings.Replace(testCatalog, "predicates: {path: credential_path, command: credential_command}\n", "", 1)
+	lib = testLibrary(t, DefinitionFile{"c.catalog.yaml", []byte(withoutPredicates)})
+	if len(lib.Predicates()) != 0 || len(lib.Catalogs()) != 1 {
+		t.Errorf("a catalog without predicates: %d predicates, %d catalogs; want none and one", len(lib.Predicates()), len(lib.Catalogs()))
+	}
+	if results := lib.Check(); len(results) != 1 || !results[0].Catalog || !results[0].OK() {
+		t.Errorf("Check = %v, want the catalog's examples, held", results)
+	}
+	broken := testLibrary(t, DefinitionFile{"c.catalog.yaml", []byte(strings.Replace(withoutPredicates, `examples: ["/home/u/.aws/credentials"]`, `examples: ["/home/u/.aws/config"]`, 1))})
+	if results := broken.Check(); len(results) != 1 || results[0].OK() {
+		t.Errorf("Check of a catalog without predicates whose example fails = %v, want its failure", results)
 	}
 	if err := libraryRule(t, lib, "", `e.event.action == "file.read"`).Validate(); err != nil {
 		t.Error(err)
 	}
 }
 
-// Check is the conformance run of a pack's definitions: every definition's fixtures and every
-// catalog's examples. What is wrong there is reported, fixture by fixture, and is not a reason
-// the pack does not load.
+// Check is the conformance run of a pack's definitions: each catalog's examples, once, and every
+// definition's fixtures. What is wrong there is reported, catalog by catalog and fixture by
+// fixture, and is not a reason the pack does not load.
 func TestLibraryCheckRunsTheDefinitionsFixtures(t *testing.T) {
 	results := testLibrary(t).Check()
 	var names []string
 	for _, res := range results {
-		names = append(names, res.RuleID+"/"+res.Fixture)
+		names = append(names, res.String())
 		if !res.OK() {
 			t.Errorf("%s", res)
 		}
 	}
-	if got, want := strings.Join(names, ", "), "command_reads_credential/cat, command_reads_credential/ls, credential_command/catalog examples, "+
-		"credential_path/catalog examples, credential_read/file, credential_read/token, credential_read/readme"; got != want {
-		t.Errorf("fixtures run: %s; want %s", got, want)
+	if got, want := strings.Join(names, ", "), "catalog credential-stores (c.catalog.yaml), "+
+		"predicate command_reads_credential/cat: expected match, got match, predicate command_reads_credential/ls: expected no_match, got no_match, "+
+		"predicate credential_read/file: expected match, got match, predicate credential_read/token: expected match, got match, "+
+		"predicate credential_read/readme: expected no_match, got no_match"; got != want {
+		t.Errorf("checks run: %s; want %s", got, want)
 	}
 
 	failures := func(lib *Library) []string {
@@ -592,17 +612,14 @@ func TestLibraryCheckRunsTheDefinitionsFixtures(t *testing.T) {
 	}{
 		"a fixture whose verdict is wrong": {
 			[]DefinitionFile{{"c.catalog.yaml", []byte(testCatalog)}, {"p.predicates.yaml", []byte(strings.Replace(testPredicates, "      - name: readme\n        verdict: no_match", "      - name: readme\n        verdict: match", 1))}},
-			[]string{"credential_read/readme: expected match, got no_match"}},
-		"a catalog whose example fails, under each predicate it provides": {
+			[]string{"predicate credential_read/readme: expected match, got no_match"}},
+		"a catalog whose example fails, once": {
 			[]DefinitionFile{{"c.catalog.yaml", []byte(strings.Replace(testCatalog, `examples: ["/home/u/.aws/credentials"]`, `examples: ["/home/u/.aws/config"]`, 1))}},
-			[]string{
-				`credential_command/catalog examples: error: store aws: example "/home/u/.aws/config": not matched`,
-				`credential_path/catalog examples: error: store aws: example "/home/u/.aws/config": not matched`,
-			}},
+			[]string{`catalog credential-stores (c.catalog.yaml): store aws: example "/home/u/.aws/config": not matched`}},
 		"a body the event schema does not type": {
 			[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(definition("named", "c", `c.nam == "x"`, `e.command.parsed_commands.exists(c, named(c))`)))}},
 			// Reported where the predicate is called: at its opening parenthesis.
-			[]string{"named/t: error: compile match: ERROR: <input>:1:42: undefined field 'nam'\n | e.command.parsed_commands.exists(c, named(c))\n | .........................................^"}},
+			[]string{"predicate named/t: error: compile match: ERROR: <input>:1:42: undefined field 'nam'\n | e.command.parsed_commands.exists(c, named(c))\n | .........................................^"}},
 	} {
 		got := failures(testLibrary(t, tc.files...))
 		if len(got) != len(tc.want) {

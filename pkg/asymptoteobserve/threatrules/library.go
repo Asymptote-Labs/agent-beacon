@@ -113,8 +113,9 @@ type Predicate struct {
 	// Signature is how it is called: credential_read(e), credential_path(subject[, tier[, kind...]]).
 	Signature   string
 	Description string
-	// Source is the definitions file it comes from.
-	Source string
+	// Source is the definitions file it comes from, and Catalog the catalog that provides it, ""
+	// for a predicate a *.predicates.yaml file defines.
+	Source, Catalog string
 }
 
 // Library is the predicates of one rule pack's definitions, and the CEL environment its rules
@@ -128,8 +129,9 @@ type Library struct {
 	env   *cel.Env
 	tests []predicateTest
 	info  []Predicate
-	// catalogs are the pack's catalogs, in the order of their files' names.
+	// catalogs are the pack's catalogs, in the order of their files' names, and sources the files.
 	catalogs []*concepts.Catalog
+	sources  []string
 	// later are the predicates that need a newer spec than this engine supports: those of a
 	// definitions file it set aside, and those whose body calls one. What calls one is set aside
 	// with it (Rule.Validate returns an *UnsupportedSpecError).
@@ -143,16 +145,42 @@ type laterPredicate struct {
 	chain, source, required string
 }
 
-// predicateTest is one fixture Check runs: a definition's, or a catalog's examples, which stand
-// for each predicate the catalog provides.
+// predicateTest is one fixture of a predicate definition, which Check runs.
 type predicateTest struct {
-	predicate string
-	test      PredicateTest
-	catalog   *concepts.Catalog
+	predicate, source string
+	test              PredicateTest
 }
 
-// CatalogExamples is the fixture name Check reports a catalog's examples under.
-const CatalogExamples = "catalog examples"
+// DefinitionResult is the outcome of one check Library.Check runs: a fixture of a predicate
+// definition, or a catalog held to its examples (concepts.Catalog.Check).
+type DefinitionResult struct {
+	// Catalog is set for a catalog's examples. Name is then the catalog's name, and otherwise
+	// the predicate's. Source is the definitions file.
+	Catalog      bool
+	Name, Source string
+	// Fixture is a predicate's fixture, and Expected and Actual its verdicts.
+	Fixture          string
+	Expected, Actual Verdict
+	Err              error
+}
+
+// OK reports whether the check passed: the catalog's examples hold, or the fixture produced its
+// declared verdict without error.
+func (r DefinitionResult) OK() bool {
+	return r.Err == nil && (r.Catalog || r.Actual == r.Expected)
+}
+
+func (r DefinitionResult) String() string {
+	switch {
+	case r.Catalog && r.Err != nil:
+		return fmt.Sprintf("catalog %s (%s): %v", r.Name, r.Source, r.Err)
+	case r.Catalog:
+		return fmt.Sprintf("catalog %s (%s)", r.Name, r.Source)
+	case r.Err != nil:
+		return fmt.Sprintf("predicate %s/%s: error: %v", r.Name, r.Fixture, r.Err)
+	}
+	return fmt.Sprintf("predicate %s/%s: expected %s, got %s", r.Name, r.Fixture, r.Expected, r.Actual)
+}
 
 // LoadLibraryDir builds the library of the definitions under root, searched recursively.
 func LoadLibraryDir(root string) (*Library, []SkippedRule, error) {
@@ -187,17 +215,18 @@ func LoadLibraryFS(fsys fs.FS) (*Library, []SkippedRule, error) {
 // defined twice, predicates that call each other in a circle. It does not run a catalog's
 // examples or a predicate's fixtures: Check does, as CheckRule runs a rule's. A file that
 // declares a spec newer than SupportedSpec is left out and returned in skipped, so that an older
-// engine keeps the rest of a newer pack; a rule that calls one of its predicates declares that
-// spec too and is skipped with it.
+// engine keeps the rest of a newer pack; a rule that calls one of its predicates is skipped with
+// it.
 //
-// It returns a nil Library, which is valid, when the files define no predicate.
+// It returns a nil Library, which is valid, when there are no definitions: no file, or none this
+// engine loads.
 func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, err error) {
 	files = slices.Clone(files)
 	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 
 	l := &Library{predicates: map[string]*predicate{}, later: map[string]laterPredicate{}}
 	var definitions []PredicateDefinition
-	add := func(p *predicate, description, signature string) error {
+	add := func(p *predicate, info Predicate) error {
 		switch {
 		case !concepts.PredicateNamePattern.MatchString(p.name):
 			return fmt.Errorf("%s: predicate %q: want a name like credential_read", p.source, p.name)
@@ -207,7 +236,8 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 			return fmt.Errorf("%s: predicate %s is already defined in %s", p.source, p.name, l.predicates[p.name].source)
 		}
 		l.predicates[p.name] = p
-		l.info = append(l.info, Predicate{Name: p.name, Signature: signature, Description: description, Source: p.source})
+		info.Name, info.Source = p.name, p.source
+		l.info = append(l.info, info)
 		return nil
 	}
 	// declared maps each catalog and each library of predicates to the file that declares it.
@@ -251,23 +281,18 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 				return nil, nil, err
 			}
 			l.catalogs = append(l.catalogs, catalog)
-			for _, p := range []struct {
-				name, about string
-				render      func(concepts.Selection, string) string
-			}{
-				{catalog.Predicates.Path, "a path that is one of the catalog's stores of files", concepts.Selection.PathCEL},
-				{catalog.Predicates.Command, "a parsed command that reads one of the catalog's stores of commands", concepts.Selection.CommandCEL},
-				{catalog.Predicates.Mention, "a text that names one of the catalog's stores of files", concepts.Selection.MentionCEL},
-				{catalog.Predicates.Redacted, "a command line in which redaction took the name of a command that reads one of the catalog's stores of commands", concepts.Selection.RedactedCEL},
-			} {
-				if p.name == "" {
+			l.sources = append(l.sources, file.Name)
+			for _, form := range catalog.PredicateForms() {
+				if form.Name == "" {
 					continue
 				}
-				description := fmt.Sprintf("True for %s (%s): of either tier, or of the tier and the kinds given after it.", p.about, catalog.Name)
-				if err := add(&predicate{name: p.name, source: file.Name, spec: spec, catalog: catalog, render: p.render}, description, p.name+"("+subjectParam+"[, tier[, kind...]])"); err != nil {
+				if err := add(&predicate{name: form.Name, source: file.Name, spec: spec, catalog: catalog, render: form.Render}, Predicate{
+					Signature:   form.Name + "(" + subjectParam + "[, tier[, kind...]])",
+					Description: fmt.Sprintf("True for %s (%s): of either tier, or of the tier and the kinds given after it.", form.About, catalog.Name),
+					Catalog:     catalog.Name,
+				}); err != nil {
 					return nil, nil, err
 				}
-				l.tests = append(l.tests, predicateTest{predicate: p.name, test: PredicateTest{Name: CatalogExamples, Verdict: VerdictMatch}, catalog: catalog})
 			}
 		case strings.HasSuffix(file.Name, PredicatesFileSuffix):
 			decoded, err := decodePredicatesFile(file.Data)
@@ -279,7 +304,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 			}
 			for _, d := range decoded.Definitions {
 				p := &predicate{name: d.Name, source: file.Name, spec: spec, params: d.Params, text: d.Body}
-				if err := add(p, strings.TrimSpace(d.Description), d.Name+"("+strings.Join(d.Params, ", ")+")"); err != nil {
+				if err := add(p, Predicate{Signature: d.Name + "(" + strings.Join(d.Params, ", ") + ")", Description: strings.TrimSpace(d.Description)}); err != nil {
 					return nil, nil, err
 				}
 				definitions = append(definitions, d)
@@ -295,7 +320,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 	if definitions, err = l.setAside(base, definitions); err != nil {
 		return nil, nil, err
 	}
-	if len(l.predicates) == 0 && len(l.later) == 0 {
+	if len(l.predicates) == 0 && len(l.catalogs) == 0 && len(l.later) == 0 {
 		return nil, skipped, nil
 	}
 	for name := range l.predicates {
@@ -315,7 +340,7 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 			if test.Match == "" {
 				test.Match = d.Name + "(" + eventVar + ")"
 			}
-			l.tests = append(l.tests, predicateTest{predicate: d.Name, test: test})
+			l.tests = append(l.tests, predicateTest{predicate: d.Name, source: l.predicates[d.Name].source, test: test})
 		}
 	}
 	return l, skipped, nil
@@ -627,30 +652,23 @@ func (l *Library) LoadRule(path string) (*Rule, error) {
 	return rule, nil
 }
 
-// Check runs the library's fixtures and returns one result per fixture, in the order of the
-// predicates' names: every fixture of every predicate definition, and for each predicate a
-// catalog provides, the catalog's examples (CatalogExamples). A fixture whose expression does
-// not compile against the event schema is an error of that fixture, which is how a definition's
-// body is held to the schema. It is to a pack's definitions what CheckRule is to a rule.
-func (l *Library) Check() []FixtureResult {
+// Check runs the library's checks and returns one result for each: first each catalog held to
+// its examples (concepts.Catalog.Check), whether or not it provides predicates, in the order of
+// their files; then every fixture of every predicate definition, in the order of the predicates'
+// names. A fixture whose expression does not compile against the event schema is an error of
+// that fixture, which is how a definition's body is held to the schema. It is to a pack's
+// definitions what CheckRule is to a rule.
+func (l *Library) Check() []DefinitionResult {
 	if l == nil {
 		return nil
 	}
-	results := make([]FixtureResult, 0, len(l.tests))
-	examples := map[*concepts.Catalog]error{}
+	results := make([]DefinitionResult, 0, len(l.catalogs)+len(l.tests))
+	for i, catalog := range l.catalogs {
+		results = append(results, DefinitionResult{Catalog: true, Name: catalog.Name, Source: l.sources[i], Err: catalog.Check()})
+	}
+	fixtures := make([]DefinitionResult, 0, len(l.tests))
 	for _, t := range l.tests {
-		res := FixtureResult{RuleID: t.predicate, Fixture: t.test.Name, Expected: t.test.Verdict, Actual: VerdictNoMatch}
-		if t.catalog != nil {
-			err, checked := examples[t.catalog]
-			if !checked {
-				err = t.catalog.Check()
-				examples[t.catalog] = err
-			}
-			res.Err = err
-			res.Actual = VerdictMatch
-			results = append(results, res)
-			continue
-		}
+		res := DefinitionResult{Name: t.predicate, Source: t.source, Fixture: t.test.Name, Expected: t.test.Verdict, Actual: VerdictNoMatch}
 		prog, _, err := l.compileMatch(t.test.Match)
 		if err != nil {
 			res.Err = err
@@ -669,8 +687,8 @@ func (l *Library) Check() []FixtureResult {
 				break
 			}
 		}
-		results = append(results, res)
+		fixtures = append(fixtures, res)
 	}
-	sort.SliceStable(results, func(i, j int) bool { return results[i].RuleID < results[j].RuleID })
-	return results
+	sort.SliceStable(fixtures, func(i, j int) bool { return fixtures[i].Name < fixtures[j].Name })
+	return append(results, fixtures...)
 }

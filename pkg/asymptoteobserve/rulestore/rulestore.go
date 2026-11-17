@@ -336,7 +336,7 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 	}
 	for _, res := range lib.Check() {
 		if !res.OK() {
-			return nil, fmt.Errorf("definitions: fixture %s", res.String())
+			return nil, fmt.Errorf("definitions: %s", res.String())
 		}
 	}
 	changesDefinitions := slices.ContainsFunc(todo, func(p pending) bool { return p.definitions })

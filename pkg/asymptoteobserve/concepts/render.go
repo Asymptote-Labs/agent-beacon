@@ -62,16 +62,11 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 		"one-letter options has no such form.\n")
 	if c.Predicates != (Predicates{}) {
 		b.WriteString("\nA rule of a pack that ships this catalog calls it by name instead of carrying the\nexpressions:\n\n")
-		for _, p := range []struct{ name, subject, about string }{
-			{c.Predicates.Path, "p", "a path that is a store of files"},
-			{c.Predicates.Command, "c", "a parsed command that reads a store of commands"},
-			{c.Predicates.Mention, "s", "a text that names a store of files"},
-			{c.Predicates.Redacted, "s", "a command line in which redaction took the name of a command that reads a store of commands"},
-		} {
-			if p.name != "" {
+		for _, form := range c.PredicateForms() {
+			if form.Name != "" {
 				fmt.Fprintf(&b, "- `%[1]s(%[2]s)` is true for %[3]s, of either tier. `%[1]s(%[2]s, \"definite\")` takes the\n"+
 					"  definite stores only, and kinds after the tier take those kinds only:\n"+
-					"  `%[1]s(%[2]s, \"likely\", \"%[4]s\")`.\n", p.name, p.subject, p.about, c.Kinds[0].ID)
+					"  `%[1]s(%[2]s, \"likely\", \"%[4]s\")`.\n", form.Name, form.Subject, form.About, c.Kinds[0].ID)
 			}
 		}
 	}

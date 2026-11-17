@@ -3,6 +3,7 @@ package cmd
 import (
 	"archive/tar"
 	"bytes"
+	"cmp"
 	"compress/gzip"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -529,7 +530,7 @@ func lintRulesPath(cmd *cobra.Command, path string) error {
 		}
 	}
 	predicates := lib.Predicates()
-	if len(rules) == 0 && len(skipped) == 0 && len(predicates) == 0 {
+	if len(rules) == 0 && len(skipped) == 0 && lib == nil {
 		return fmt.Errorf("no *.rule.yaml files found under %s", filepath.Clean(path))
 	}
 	// Lint cannot vouch for a rule it cannot evaluate, so a skip fails the run, but the
@@ -539,32 +540,43 @@ func lintRulesPath(cmd *cobra.Command, path string) error {
 	}
 
 	failures, fixtures := 0, 0
+	// A catalog is held to its examples once, whatever predicates it provides, which are listed
+	// with it. A definition's fixtures are its own, and are counted among the fixtures.
 	results := lib.Check()
+	for _, res := range results {
+		switch {
+		case !res.Catalog:
+		case !res.OK():
+			failures++
+			fmt.Fprintf(out, "FAIL %s\n", res)
+		default:
+			var provided []string
+			for _, p := range predicates {
+				if p.Catalog == res.Name {
+					provided = append(provided, p.Name)
+				}
+			}
+			fmt.Fprintf(out, "ok   %s: %s\n", res, cmp.Or(strings.Join(provided, ", "), "no predicates"))
+		}
+	}
 	for _, p := range predicates {
-		// A definition's fixtures are its own; a catalog's predicate is held to the catalog's
-		// examples, which are not counted among the fixtures.
-		ran, failed, catalog := 0, false, false
+		if p.Catalog != "" {
+			continue
+		}
+		ran, failed := 0, false
 		for _, res := range results {
-			if res.RuleID != p.Name {
+			if res.Catalog || res.Name != p.Name {
 				continue
 			}
-			if res.Fixture == threatrules.CatalogExamples {
-				catalog = true
-			} else {
-				ran++
-				fixtures++
-			}
+			ran++
+			fixtures++
 			if !res.OK() {
 				failed = true
 				failures++
-				fmt.Fprintf(out, "FAIL predicate %s\n", res.String())
+				fmt.Fprintf(out, "FAIL %s\n", res)
 			}
 		}
-		switch {
-		case failed:
-		case catalog:
-			fmt.Fprintf(out, "ok   predicate %s (%s)\n", p.Signature, p.Source)
-		default:
+		if !failed {
 			fmt.Fprintf(out, "ok   predicate %s (%d fixtures)\n", p.Signature, ran)
 		}
 	}

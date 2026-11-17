@@ -179,10 +179,10 @@ func TestInstallRejectsDefinitions(t *testing.T) {
 	}{
 		"a catalog whose example fails": {func(f map[string]string) {
 			f["concepts/tokens.catalog.yaml"] = strings.Replace(tokenCatalog, `examples: ["gh auth token"]`, `examples: ["gh auth status"]`, 1)
-		}, true, `definitions: fixture token_command/catalog examples: error: store gh-token: example "gh auth status": not matched`},
+		}, true, `definitions: catalog tokens (tokens.catalog.yaml): store gh-token: example "gh auth status": not matched`},
 		"a predicate whose fixture fails": {func(f map[string]string) {
 			f["concepts/anything.predicates.yaml"] = strings.Replace(tokenPredicates, "      - name: status\n        verdict: no_match", "      - name: status\n        verdict: match", 1)
-		}, true, "definitions: fixture prints_token/status: expected match, got no_match"},
+		}, true, "definitions: predicate prints_token/status: expected match, got no_match"},
 		"the same definitions twice": {func(f map[string]string) {
 			f["other/tokens.catalog.yaml"] = tokenCatalog
 		}, true, "are both the definitions tokens.catalog.yaml"},
