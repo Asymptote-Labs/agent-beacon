@@ -201,9 +201,6 @@ func TestFileEffects(t *testing.T) {
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("FileEffects(%q) = %q, want %q", tc.command, got, tc.want)
 		}
-		if all := FileEffects(commands); len(all) != len(got) {
-			t.Errorf("FileEffects(Parse(%q)) has %d effects, want %d", tc.command, len(all), len(got))
-		}
 		// Every effect is a write, in the same order: a write only adds the paths an effect
 		// leaves out.
 		for _, c := range commands {

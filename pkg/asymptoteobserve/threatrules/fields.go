@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shellcmd"
 )
 
 // Field describes one CEL-addressable event field: the dotted path a rule references
@@ -198,7 +199,7 @@ var derivedFieldDocs = map[string]string{
 	ParsedIncompletePath: "true when `command.command` was not read to its end:\n" +
 		"  it does not parse, it ends inside a quote, a here-document, a substitution or a compound\n" +
 		"  command (as a cut capture does), it is longer than the engine reads, or it names more\n" +
-		fmt.Sprintf("  than the engine reads (more than %d commands, or a brace expansion of thousands of\n", maxParsedCommands) +
+		fmt.Sprintf("  than the engine reads (more than %d commands, or a brace expansion of thousands of\n", shellcmd.MaxCommands) +
 		"  words; SPEC gives the bounds).\n" +
 		"  `e.command.parsed_commands` then lists the commands before that point only, so a rule\n" +
 		"  that concludes something from a command's absence asks this first.",

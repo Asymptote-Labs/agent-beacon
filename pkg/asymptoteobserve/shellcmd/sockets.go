@@ -23,7 +23,7 @@ const (
 	SocketReadWrite SocketOp = "readwrite"
 )
 
-// SocketRedirects returns, for each command of a parsed command line, its redirections to or
+// socketRedirects returns, for each command of a command line, its redirections to or
 // from a network pseudo-file. The result is parallel to commands, or nil when there is none.
 //
 // A command has one when a redirection of its own names the pseudo-file
@@ -33,7 +33,7 @@ const (
 // output or input the command does not redirect itself goes where it is sent from outside
 // (descriptorSocket): its output when it is the last stage of its pipeline, its input when it is
 // the first. A descriptor whose number is not written as a number is not followed.
-func SocketRedirects(commands []Command) [][]SocketRedirect {
+func socketRedirects(commands []Command) [][]SocketRedirect {
 	var out [][]SocketRedirect
 	// open are the descriptors bare execs redirected, in the order they ran.
 	var open []openDescriptor

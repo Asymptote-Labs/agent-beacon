@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shellcmd"
 	"github.com/google/cel-go/cel"
 )
 
@@ -27,7 +28,7 @@ func fixtureCommandLines(t testing.TB) []string {
 
 // FuzzParsedCommandLine reads fuzzed command lines as a scan does, starting from every command
 // line of the corpus's fixtures. The reading itself is called, not ParsedCommandLine, so a
-// panic fails. A line reads the same twice, gives no more words than maxParsedWords, and is
+// panic fails. A line reads the same twice, stays within shellcmd.Read's bounds, and is
 // incomplete whenever it is longer than the engine reads.
 func FuzzParsedCommandLine(f *testing.F) {
 	for _, line := range fixtureCommandLines(f) {
@@ -55,7 +56,7 @@ func FuzzParsedCommandLine(f *testing.F) {
 				t.Fatalf("%q: %d words and %d as written for %q", line, len(c.Argv), len(c.ArgvRaw), c.Name)
 			}
 		}
-		if words > maxParsedWords || len(parsed) > maxParsedCommands {
+		if words > shellcmd.MaxWords || len(parsed) > shellcmd.MaxCommands {
 			t.Fatalf("%q: %d commands, %d words", line, len(parsed), words)
 		}
 		if len(line) > ParsedCommandsLimit && !incomplete {
@@ -171,33 +172,6 @@ func TestCommandsInTheirOwnPipelinesCostInProportion(t *testing.T) {
 	}
 	if measured < 900 {
 		t.Fatalf("measured %d evaluations; the corpus did not load", measured)
-	}
-}
-
-// A line whose commands come to more words than maxParsedWords is not read: here a printf
-// whose format is reused for each of seven arguments prints a script of seven thousand words
-// from a line of two thousand bytes. Neither is one of more commands than maxParsedCommands.
-func TestLineOfTooMuchIsNotRead(t *testing.T) {
-	for name, line := range map[string]string{
-		"words":                "printf '" + strings.Repeat("x ", 1000) + "%s\\n' 1 2 3 4 5 6 7 | sh",
-		"commands":             strings.Repeat("ls;", maxParsedCommands+1),
-		"commands of a script": "sh -c '" + strings.Repeat("ls;", maxParsedCommands) + "'",
-	} {
-		if parsed, incomplete := ParsedCommandLine(line); parsed != nil || !incomplete {
-			t.Errorf("%s: %d commands, incomplete %v; want none, incomplete", name, len(parsed), incomplete)
-		}
-	}
-	// Within both bounds the line is read: three arguments print three thousand words, and
-	// the shell and its script are 256 commands.
-	for name, line := range map[string]string{
-		"words":                "printf '" + strings.Repeat("x ", 1000) + "%s\\n' 1 2 3 | sh",
-		"commands":             strings.Repeat("ls;", maxParsedCommands),
-		"commands of a script": "sh -c '" + strings.Repeat("ls;", maxParsedCommands-1) + "'",
-	} {
-		parsed, incomplete := ParsedCommandLine(line)
-		if incomplete || len(parsed) == 0 || len(parsed) > maxParsedCommands {
-			t.Errorf("%s: %d commands, incomplete %v; want the line read", name, len(parsed), incomplete)
-		}
 	}
 }
 

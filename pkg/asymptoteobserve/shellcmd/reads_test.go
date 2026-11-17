@@ -22,7 +22,7 @@ func checkFileReads(t *testing.T, cases []readCase) {
 			continue
 		}
 		var got []string
-		for _, reads := range FileReads(commands) {
+		for _, reads := range fileReads(commands) {
 			for _, r := range reads {
 				switch {
 				case r.Sent:
@@ -35,7 +35,7 @@ func checkFileReads(t *testing.T, cases []readCase) {
 			}
 		}
 		if !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("FileReads(%q) = %q, want %q", tc.command, got, tc.want)
+			t.Errorf("fileReads(%q) = %q, want %q", tc.command, got, tc.want)
 		}
 	}
 }
@@ -548,28 +548,24 @@ func TestFileReadsScriptSends(t *testing.T) {
 	})
 }
 
-// FileReads and FileEffects of one command line are separate lists: a file a command reads and one
-// it writes do not appear in each other's.
+// What a command line reads and what it writes are separate lists: a file a command reads and
+// one it writes do not appear in each other's.
 func TestFileReadsAreNotEffects(t *testing.T) {
-	commands, err := Parse("cp secret.txt copy.txt && cat copy.txt > out.txt && sed -i s/a/b/ out.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var reads []string
-	for _, command := range FileReads(commands) {
-		for _, r := range command {
+	line := Read("cp secret.txt copy.txt && cat copy.txt > out.txt && sed -i s/a/b/ out.txt")
+	var reads, effects []string
+	for i := range line.Commands {
+		for _, r := range line.Reads[i] {
 			reads = append(reads, r.Path)
+		}
+		for _, e := range line.Effects[i] {
+			effects = append(effects, string(e.Op)+" "+e.Path)
 		}
 	}
 	// copy.txt holds what secret.txt did, so reading it reads that too.
 	if want := []string{"secret.txt", "copy.txt", "secret.txt"}; !reflect.DeepEqual(reads, want) {
-		t.Errorf("FileReads = %q, want %q", reads, want)
-	}
-	var effects []string
-	for _, e := range FileEffects(commands) {
-		effects = append(effects, string(e.Op)+" "+e.Path)
+		t.Errorf("reads = %q, want %q", reads, want)
 	}
 	if want := []string{"write copy.txt", "write out.txt", "edit out.txt"}; !reflect.DeepEqual(effects, want) {
-		t.Errorf("FileEffects = %q, want %q", effects, want)
+		t.Errorf("effects = %q, want %q", effects, want)
 	}
 }

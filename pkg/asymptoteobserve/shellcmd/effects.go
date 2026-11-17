@@ -37,13 +37,14 @@ type FileEffect struct {
 	Op   Op
 }
 
-// FileEffects returns the file effects of every command, in order.
-func FileEffects(commands []Command) []FileEffect {
-	var effects []FileEffect
-	for _, c := range commands {
-		effects = append(effects, c.FileEffects()...)
+// writesContent reports whether the write puts content in a file a later command of the line
+// could read or run: not a deletion, an emptying or a touch, and not a device.
+func (e FileEffect) writesContent() bool {
+	switch e.Op {
+	case OpWrite, OpAppend, OpEdit, OpMoveTo, OpLink:
+		return !strings.HasPrefix(e.Path, "/dev/")
 	}
-	return effects
+	return false
 }
 
 // FileEffects returns the files the command evidently writes: the targets of its output

@@ -65,7 +65,7 @@ func TestSocketRedirects(t *testing.T) {
 			t.Fatalf("%s: %v", tc.command, err)
 		}
 		var got []string
-		for i, redirects := range SocketRedirects(commands) {
+		for i, redirects := range socketRedirects(commands) {
 			for _, r := range redirects {
 				name := "{}"
 				if len(commands[i].Argv) > 0 {

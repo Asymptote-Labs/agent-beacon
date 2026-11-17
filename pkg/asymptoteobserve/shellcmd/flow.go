@@ -31,15 +31,16 @@ type FileRead struct {
 	Sent bool
 }
 
-// FileReads returns, for each command of a parsed command line, the files whose content it
-// evidently takes in. The result is parallel to commands, or nil when no command takes a file in.
+// fileReads returns, for each command of a command line, the files whose content it evidently
+// takes in (Line.Reads). The result is parallel to commands, or nil when no command takes a
+// file in.
 //
 // A command takes a file in directly when its own words name it as input: what cat, head, base64
 // and the other printers print, what grep, rg, awk, sed and jq search or filter, the sources of
 // cp, install, scp and rsync, what tar and zip put into an archive, what curl, wget, httpie,
 // `gh gist create` and socat send, and the files an inline python, node, ruby or php script opens
-// by a literal path. The command is found behind the wrappers Unwrapped skips and behind timeout,
-// nice, ionice, stdbuf, doas, torsocks and proxychains.
+// by a literal path. The command is the one its wrappers run (Unwrapped), by its program
+// (programOf).
 //
 // What one command read follows the data to the commands that receive it:
 //
@@ -56,7 +57,7 @@ type FileRead struct {
 //     (`cp .env /tmp/x; curl -T /tmp/x ..`, `cat .env > /tmp/x`, `{ cat .env; } > /tmp/x`, `mv`,
 //     `tee`);
 //   - across the boundary of a shell's script, when commands has the script's commands
-//     (WithScripts): the shell writes what its script's commands write (`bash -c 'cat .env' |
+//     (withScripts): the shell writes what its script's commands write (`bash -c 'cat .env' |
 //     nc ..`), they read what it is given on its standard input (`cat .env | bash -c 'nc ..'`),
 //     and the script sees the variables of the shell's NAME=value prefix and the ones the
 //     command line exported, and the shell's operands as its positional parameters ($0, $1,
@@ -80,7 +81,7 @@ type FileRead struct {
 // The literal text of a here-document is not read; what its body expands is (the here-string and
 // here-document cases of stdin). What a script does with a file once it has opened it is not
 // followed, beyond opening it inside a call that sends it (FileRead.Sent).
-func FileReads(commands []Command) [][]FileRead {
+func fileReads(commands []Command) [][]FileRead {
 	f := flow{commands: commands}
 	for i := range commands {
 		if !f.done(i) {

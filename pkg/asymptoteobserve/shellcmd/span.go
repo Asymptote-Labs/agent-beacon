@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-// Spans returns, for each command of a parsed command line, the part of the line that can
-// decide what the command runs: its own words, redirections and here-documents, and whatever
-// of the line before it can reach it. The result is parallel to commands. writes[i] says
-// whether command i writes a file's content.
+// spans returns, for each command of a command line, the part of the line that can decide what
+// the command runs: its own words, redirections and here-documents, and whatever of the line
+// before it can reach it. The result is parallel to commands, and so is writes, each command's
+// FileWrites.
 //
 // A program this package cannot see into (an interpreter, a project's script, a tool nobody
 // listed) runs what it is given, and on a command line that is text: its words, its standard
@@ -25,11 +25,11 @@ import (
 // because the body runs wherever the function is called.
 //
 // The span is that piece, preceded by the own piece of every command before it that writes a
-// file, which it may then read or run without naming it (`cat > x.sh <<EOF .. EOF; sh x.sh`,
-// `echo .. > Makefile; make`). Pieces are in the order of the line, a newline between two
-// that do not touch, and each is followed by the bodies of the here-documents of its
-// commands, which a command line holds after the line they are named on. What lies between
-// two pieces (a commit, a test run) is not in the span.
+// file's content (writesContent), which it may then read or run without naming it
+// (`cat > x.sh <<EOF .. EOF; sh x.sh`, `echo .. > Makefile; make`). Pieces are in the order of
+// the line, a newline between two that do not touch, and each is followed by the bodies of the
+// here-documents of its commands, which a command line holds after the line they are named on.
+// What lies between two pieces (a commit, a test run) is not in the span.
 //
 // When a word, a redirection or a NAME=value prefix of the command, or of one of those
 // writers, takes a variable's value, the span is instead everything from the start of the
@@ -37,19 +37,19 @@ import (
 // A variable the environment sets (HOME, PWD, PATH and the like) does not count unless the
 // line assigns it.
 //
-// A command WithScripts added (one of a shell's script, or of what a carrier runs) has the
+// A command withScripts added (one of a shell's script, or of what a carrier runs) has the
 // span of the command of the line itself that it came from: that command's words hold the
 // script, and what reaches it reaches them.
 //
 // The span is an over-approximation, on purpose. It is not followed across a background job
 // that writes a file while a later command runs, or a file the line names nowhere.
-func Spans(commands []Command, writes []bool) []string {
+func spans(commands []Command, writes [][]FileEffect) []string {
 	out := make([]string, len(commands))
 	// wrote[i], for a command of the line itself, is whether it or a command it handed on
-	// writes a file.
+	// writes a file's content.
 	wrote := make([]bool, len(commands))
 	for i := range commands {
-		if i < len(writes) && writes[i] {
+		if slices.ContainsFunc(writes[i], FileEffect.writesContent) {
 			top := i
 			for commands[top].shell != 0 {
 				top = int(commands[top].shell) - 1
