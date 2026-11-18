@@ -228,6 +228,10 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		// with text beside them: each is read to its closing parenthesis.
 		"unclosed substitutions":    "TOKEN=$(cat --token $(a ",
 		"substitutions beside text": "curl -u a:$(cat x)b TOKEN=$(cat x)y ",
+		// Single-quoted values that are one substitution, each of which reads its line back to
+		// its start for the quote it opens with.
+		"single-quoted substitutions": `"token":'$(cat f)' `,
+		"authorization substitutions": "authorization: apikey $(cat x)y ",
 		// Secrets written right after another one (redact_adjacent.go): chains of keys of fixed
 		// length, of tokens that run on into the next, of key ids that end only where the next
 		// key starts, of JWT first segments that never complete, and URLs, Bearer tokens, curl

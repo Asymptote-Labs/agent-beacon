@@ -551,7 +551,8 @@ func TestCredentialStoresKindsAndTiersAreUsed(t *testing.T) {
 // before redaction kept the opening of a command substitution, in an assignment to TOKEN and in a
 // bearer header. What those logs keep is still found when the match has words to tell the command
 // by. No counterexample is. The sanitizer now keeps the substitution whole in all three, so a log
-// it writes names the command.
+// it writes names the command, unless a word of the command line could be a secret written out
+// (an echo's literal, a user@host, a key ID): then the substitution is replaced whole.
 func TestCredentialStoresRedactedExpression(t *testing.T) {
 	c := credentialStores(t)
 	all, err := c.Select(TierLikely)
@@ -560,7 +561,8 @@ func TestCredentialStoresRedactedExpression(t *testing.T) {
 	}
 	expression := regexp.MustCompile(all.Redacted)
 	// logged returns what older logs hold of a command line that runs command, whose name is
-	// name, for its output. It first checks that the sanitizer now keeps the command.
+	// name, for its output. It first checks that the sanitizer now keeps the command, or else
+	// leaves none of its words.
 	logged := func(command, name string) []string {
 		rest := strings.TrimPrefix(command, name)
 		for _, line := range []string{
@@ -569,8 +571,8 @@ func TestCredentialStoresRedactedExpression(t *testing.T) {
 			`curl -H "Authorization: Bearer $(` + command + `)" https://api.example`,
 		} {
 			event := asymptoteobserve.SanitizeEvent(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{Command: line}}, 64*1024)
-			if got := event.Command.Command; !strings.Contains(got, "$("+name+" ") {
-				t.Errorf("the sanitizer took the name of %q from %q: %q", name, line, got)
+			if got := event.Command.Command; !strings.Contains(got, "$("+name+" ") && strings.Contains(got, strings.TrimSpace(rest)) {
+				t.Errorf("the sanitizer neither kept the command of %q nor replaced it whole: %q", line, got)
 			}
 		}
 		return []string{
