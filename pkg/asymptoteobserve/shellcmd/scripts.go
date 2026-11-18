@@ -29,7 +29,10 @@ type language struct {
 	// sends are the calls that send what they are given over the network, matched as calls are.
 	// chain are the methods that do when called on what such a call returns: the end of
 	// https.request(..).end(data). quiet are the names in such a call after which an argument is
-	// not data: its headers, its credentials and its URL parameters, as for curl.
+	// a credential the call authenticates with, not data (auth=, CURLOPT_USERPWD); a header
+	// whose name says it holds a credential (Authorization, Cookie, X-Api-Key) is one too
+	// (isCredentialHeader). Other headers and URL parameters are data: what a script puts there
+	// is sent.
 	sends, chain, quiet []string
 	// then, for a call it is set for, is what must follow the call for it to read the file:
 	// Path("x") alone only names one.
@@ -55,7 +58,7 @@ var (
 		eval: "c", values: "WXQ", module: "m",
 		calls:    []string{"open", "Path"},
 		sends:    []string{"post", "put", "patch", "request", "urlopen", "Request", "send", "sendall", "sendto"},
-		quiet:    []string{"headers", "auth", "params", "cert"},
+		quiet:    []string{"auth", "cert"},
 		then:     map[string][]string{"Path": {".read_text", ".read_bytes", ".open"}},
 		modes:    true,
 		prefixes: "rbuRBU",
@@ -72,7 +75,7 @@ var (
 		},
 		sends:    []string{"fetch", "axios", "post", "put", "patch", "request", "send", "sendBeacon", "connect", "createConnection"},
 		chain:    []string{"end", "write"},
-		quiet:    []string{"headers", "auth", "params"},
+		quiet:    []string{"auth"},
 		backtick: true,
 		slashes:  true,
 		arrows:   true,
@@ -90,7 +93,7 @@ var (
 		},
 		sends:  []string{"post", "post_form", "put", "patch", "TCPSocket.new", "TCPSocket.open"},
 		chain:  []string{"write", "puts", "print", "send"},
-		quiet:  []string{"headers", "basic_auth", "query"},
+		quiet:  []string{"basic_auth"},
 		modes:  true,
 		bare:   true,
 		hash:   true,
@@ -100,7 +103,7 @@ var (
 		eval: "r", values: "dcz",
 		calls:   []string{"file_get_contents", "fopen", "readfile", "file"},
 		sends:   []string{"curl_setopt", "curl_setopt_array", "stream_context_create", "socket_write", "socket_send", "mail"},
-		quiet:   []string{"CURLOPT_HTTPHEADER", "CURLOPT_USERPWD", "CURLOPT_URL", "CURLOPT_XOAUTH2_BEARER"},
+		quiet:   []string{"CURLOPT_USERPWD", "CURLOPT_XOAUTH2_BEARER"},
 		modes:   true,
 		hash:    true,
 		slashes: true,
@@ -244,7 +247,13 @@ func scriptReads(l *language, script string) (files, sent []string) {
 		c := script[i]
 		switch {
 		case c == '\'' || c == '"' || c == '`' && l.backtick:
-			_, i = stringLiteral(l, script, i)
+			var text string
+			text, i = stringLiteral(l, script, i)
+			// A credential header's name as a key ('Authorization': ..), or as the start of the
+			// header's line ('Authorization: Bearer ' . ..): its value is no data.
+			if open.sends != 0 && quotedCredentialHeader(text, script, i) {
+				quiet = quietArgs{on: true, depth: open.depth, nest: nest}
+			}
 		case c == '#' && l.hash, c == '/' && l.slashes && strings.HasPrefix(script[i:], "//"):
 			if end := strings.IndexByte(script[i:], '\n'); end >= 0 {
 				i += end
@@ -351,13 +360,14 @@ func scriptReads(l *language, script string) (files, sent []string) {
 					i = end + length
 				}
 			case open.sends != 0 && slices.Contains(l.quiet, name):
-				// The call's headers, credentials or URL parameters: not what it sends as data,
-				// up to the next argument (headers=.., headers: ..), or to the end of the call
-				// for an option that says what the argument after it is (CURLOPT_HTTPHEADER, ..).
+				// The call's credentials: not what it sends as data, up to the next argument
+				// (auth=.., auth: ..), or to the end of the call for an option that says what
+				// the argument after it is (CURLOPT_USERPWD, ..). A shorthand property (auth,)
+				// is a name and holds no file this script opened by its own text.
 				switch {
 				case isAssignment(script, after), after < len(script) && script[after] == ':':
 					quiet = quietArgs{on: true, depth: open.depth, nest: nest}
-				case after < len(script) && script[after] == ',':
+				case after < len(script) && script[after] == ',' && strings.HasPrefix(name, "CURLOPT_"):
 					quiet = quietArgs{on: true, rest: true, depth: open.depth, nest: nest}
 				}
 			case isAssignment(script, after):
@@ -367,7 +377,11 @@ func scriptReads(l *language, script string) (files, sent []string) {
 					vars.target, vars.depth = name, open.depth
 				}
 			case after < len(script) && script[after] == ':' && !strings.HasPrefix(script[after:], "::"):
-				// A key (body: data) names what is sent; it is not the value.
+				// A key (body: data) names what is sent; it is not the value. A credential header
+				// written as a key (Authorization: ..) holds no data.
+				if open.sends != 0 && isCredentialHeader(name) {
+					quiet = quietArgs{on: true, depth: open.depth, nest: nest}
+				}
 			default:
 				for _, path := range vars.held(name) {
 					take(path)
@@ -386,6 +400,30 @@ func scriptReads(l *language, script string) (files, sent []string) {
 type quietArgs struct {
 	on, rest    bool
 	depth, nest int
+}
+
+// quotedCredentialHeader reports whether a string literal that ended at script[end] names a
+// header that holds a credential: as a key ('Authorization': ..), or at the start of the header's
+// line ('Authorization: Bearer ' . $token).
+func quotedCredentialHeader(text, script string, end int) bool {
+	if name, _, ok := strings.Cut(text, ":"); ok {
+		return isCredentialHeader(strings.TrimSpace(name))
+	}
+	after := skipSpaces(script, end)
+	return after < len(script) && script[after] == ':' && isCredentialHeader(text)
+}
+
+// isCredentialHeader reports whether an HTTP header's name says it holds a credential:
+// Authorization, Proxy-Authorization, Cookie, and a prefixed API key or token header
+// (X-Api-Key, X-Auth-Token), with - or _ between its words. A bare token or api_key is as often
+// a field of the data sent, and is data.
+func isCredentialHeader(name string) bool {
+	n := strings.ReplaceAll(strings.ToLower(name), "_", "-")
+	switch n {
+	case "authorization", "proxy-authorization", "cookie":
+		return true
+	}
+	return strings.HasSuffix(n, "-api-key") || strings.HasSuffix(n, "-apikey") || strings.HasSuffix(n, "-token")
 }
 
 // scriptVars are the names a script gives the content of the files it opens, as far as its text

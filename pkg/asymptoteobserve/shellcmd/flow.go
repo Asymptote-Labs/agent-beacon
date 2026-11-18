@@ -470,11 +470,13 @@ func (f *flow) lastStage(j int) bool {
 }
 
 // assign records the files whose content a variable of a shell holds, as a substitution or
-// another variable gave it. Assigning anything else clears it.
+// another variable gave it. Assigning anything else clears it; in a script it is then held
+// empty, so that the script's own value hides what the shell that started it exported under
+// the name (`export T=$(cat .env); bash -c 'T=ok; curl -d "$T" ..'` sends ok).
 func (f *flow) assign(shell int32, name string, value []string) {
 	key := varKey{shell, name}
 	switch {
-	case len(value) == 0:
+	case len(value) == 0 && shell == 0:
 		delete(f.vars, key)
 	case f.vars == nil:
 		f.vars = map[varKey][]string{key: value}

