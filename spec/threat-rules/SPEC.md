@@ -630,7 +630,11 @@ by its argument, wherever the parameter appears, so an argument is evaluated as 
 body uses it. Expansion is hygienic: a variable the body binds itself (the `f` of
 `x.exists(f, ..)`) never captures an argument, so `p(f)` called inside a rule's own
 `exists(f, ..)` still means the rule's `f`. A call with the wrong number of arguments is a
-load-time error. A predicate is called only as `name(..)`, never as a method.
+load-time error. A predicate is called only as `name(..)`, never as a method. Where
+substitution leaves two string literals joined by `+`, the expansion is the one literal they
+make, so a body MAY build a pattern from a fixed part and a parameter
+(`c.args.matches("\\A..." + rest)`) and a call that passes a literal gives the engine one
+constant pattern.
 
 A predicate MAY bind one of its parameters for its caller: it does when its body uses the
 parameter as the variable of a comprehension. The call then passes a name for that

@@ -329,6 +329,32 @@ func TestPredicateBindsAParameterForItsCaller(t *testing.T) {
 	}
 }
 
+// A body that joins a fixed pattern to a parameter gives the call's literal one pattern: the
+// expansion is the expression with the joined literal written out, so the engine compiles and
+// prefilters it as a constant. A non-literal argument is left as the join.
+func TestPredicateJoinsLiteralPatterns(t *testing.T) {
+	lib := testLibrary(t, DefinitionFile{"p.predicates.yaml", []byte(definitions(
+		definition("sub", "c, rest", `c.args.matches("\\A(?:-[a-z]\\n)*" + rest)`, `e.command.parsed_commands.exists(c, sub(c, "push"))`),
+	))})
+	for call, written := range map[string]string{
+		`e.command.parsed_commands.exists(c, sub(c, "push"))`:    `e.command.parsed_commands.exists(c, c.args.matches("\\A(?:-[a-z]\\n)*push"))`,
+		`e.command.parsed_commands.exists(c, sub(c, c.name))`:    `e.command.parsed_commands.exists(c, c.args.matches("\\A(?:-[a-z]\\n)*" + c.name))`,
+		`e.command.parsed_commands.exists(c, sub(c, "a" + "b"))`: `e.command.parsed_commands.exists(c, c.args.matches("\\A(?:-[a-z]\\n)*" + ("a" + "b")))`,
+	} {
+		_, called, err := lib.compileMatch(call)
+		if err != nil {
+			t.Fatalf("%s: %v", call, err)
+		}
+		_, want, err := compileMatch(written)
+		if err != nil {
+			t.Fatalf("%s: %v", written, err)
+		}
+		if got, want := shape(called), shape(want); got != want {
+			t.Errorf("%s compiles to\n%s\nwant\n%s", call, got, want)
+		}
+	}
+}
+
 func TestPredicateCallErrors(t *testing.T) {
 	lib := testLibrary(t)
 	for match, want := range map[string]string{
