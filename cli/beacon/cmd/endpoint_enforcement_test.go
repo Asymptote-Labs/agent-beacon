@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,10 +32,11 @@ type enforcementFakes struct {
 	locatedWith        []string
 	handedOff          []string
 	// User mode: what was installed where, which binary's enable ran, and what was forwarded.
-	userInstalled  []string
-	userHandedOff  []string
-	userForwarded  [][]string
-	userForwardErr error
+	userInstalled []string
+	userHandedOff []string
+	userForwarded [][]string
+	// A forward whose arguments include this one fails, as the enterprise binary's exit would.
+	userForwardFailsOn string
 }
 
 func stubEnforcement(t *testing.T) *enforcementFakes {
@@ -88,7 +90,10 @@ func stubEnforcement(t *testing.T) *enforcementFakes {
 		}),
 		swapEnforcementSeam(&runUserEnterpriseBeacon, func(_ context.Context, bin string, args ...string) error {
 			f.userForwarded = append(f.userForwarded, append([]string{bin}, args...))
-			return f.userForwardErr
+			if f.userForwardFailsOn != "" && slices.Contains(args, f.userForwardFailsOn) {
+				return errors.New("exit status 1")
+			}
+			return nil
 		}),
 		swapEnforcementSeam(&activateEnforcement, nil),
 	}
@@ -392,27 +397,85 @@ func TestEnforcementSubcommandsGoToTheKeptEnterpriseBinary(t *testing.T) {
 	}
 }
 
-func TestHookInstallGoesToTheKeptEnterpriseBinaryWhileUserEnforcementIsOn(t *testing.T) {
+func TestHookInstallsGoThroughTheKeptEnterpriseBinaryOnlyWhileUserEnforcementIsOn(t *testing.T) {
 	f := stubEnforcement(t)
 	f.root = false
 	user := endpointconfig.Config{UserMode: true, LogPath: "/u/runtime.jsonl"}
 
 	writeUserEnforcementFiles(t, false)
-	if handed, _ := handOffEnforcedHookInstall(context.Background(), []string{"claude"}, user); handed {
-		t.Fatal("handed off with enforcement off")
+	if _, ok := enforcedHookBeacon(user); ok {
+		t.Fatal("went through the enterprise binary with enforcement off")
 	}
-
 	bin := writeUserEnforcementFiles(t, true)
-	if handed, _ := handOffEnforcedHookInstall(context.Background(), []string{"claude"}, endpointconfig.Config{LogPath: "/var/log/beacon-agent/runtime.jsonl"}); handed {
-		t.Fatal("handed off a system-mode install")
+	if _, ok := enforcedHookBeacon(endpointconfig.Config{LogPath: "/var/log/beacon-agent/runtime.jsonl"}); ok {
+		t.Fatal("went through the enterprise binary for a system-mode install")
 	}
-	handed, err := handOffEnforcedHookInstall(context.Background(), []string{"claude", "codex"}, user)
-	if !handed || err != nil {
-		t.Fatalf("handed %v, err %v", handed, err)
+	if got, ok := enforcedHookBeacon(user); !ok || got != bin {
+		t.Fatalf("enforcedHookBeacon = %q, %v; want %s", got, ok, bin)
 	}
-	want := []string{bin, "endpoint", "hooks", "install", "--harness", "claude,codex", "--level", endpointOpts.hookLevel, "--log-path", "/u/runtime.jsonl"}
-	if len(f.userForwarded) != 1 || strings.Join(f.userForwarded[0], " ") != strings.Join(want, " ") {
+}
+
+// hooks install hands the enterprise binary the selection as given: a sweep stays a sweep (so a
+// DeepSeek Harness without its bridge is skipped, not fatal), named targets stay named.
+func TestHookInstallHandsTheEnterpriseBinaryTheSelectionAsGiven(t *testing.T) {
+	f := stubEnforcement(t)
+	f.root = false
+	bin := writeUserEnforcementFiles(t, true)
+	orig := endpointOpts
+	t.Cleanup(func() { endpointOpts = orig })
+	endpointOpts.userMode, endpointOpts.systemMode, endpointOpts.dryRun = true, false, false
+	endpointOpts.hookLevel, endpointOpts.logPath = "user", "/u/runtime.jsonl"
+	cmd := &cobra.Command{Use: "install"}
+	cmd.SetContext(context.Background())
+
+	endpointOpts.allTargets, endpointOpts.hookHarnesses = true, ""
+	if err := runEndpointHooksInstall(cmd, nil); err != nil {
+		t.Fatalf("--all: %v", err)
+	}
+	endpointOpts.allTargets, endpointOpts.hookHarnesses = false, "claude,codex"
+	if err := runEndpointHooksInstall(cmd, nil); err != nil {
+		t.Fatalf("--harness: %v", err)
+	}
+	want := []string{
+		bin + " endpoint hooks install --all --level user --log-path /u/runtime.jsonl",
+		bin + " endpoint hooks install --harness claude,codex --level user --log-path /u/runtime.jsonl",
+	}
+	if len(f.userForwarded) != len(want) {
 		t.Fatalf("forwarded %q, want %q", f.userForwarded, want)
+	}
+	for i, args := range f.userForwarded {
+		if got := strings.Join(args, " "); got != want[i] {
+			t.Fatalf("forward %d = %q, want %q", i, got, want[i])
+		}
+	}
+}
+
+// endpoint install still tries every target when they go through the enterprise binary, so one
+// runtime's settings file cannot stop the others' hooks.
+func TestEndpointInstallHandsOffEachHookTargetOnItsOwn(t *testing.T) {
+	f := stubEnforcement(t)
+	f.root = false
+	bin := writeUserEnforcementFiles(t, true)
+	orig := endpointOpts
+	t.Cleanup(func() { endpointOpts = orig })
+	endpointOpts.userMode, endpointOpts.systemMode = true, false
+	endpointOpts.hookLevel, endpointOpts.logPath = "user", "/u/runtime.jsonl"
+	f.userForwardFailsOn = "claude"
+
+	var out bytes.Buffer
+	installHookTargetsFromEndpointInstall(&bytes.Buffer{}, &out, []string{"claude", "cursor", "codex"})
+	var got []string
+	for _, args := range f.userForwarded {
+		if args[0] != bin {
+			t.Fatalf("forwarded to %q, want %s", args[0], bin)
+		}
+		got = append(got, args[5])
+	}
+	if strings.Join(got, ",") != "claude,cursor,codex" {
+		t.Fatalf("handed off %q, want every target on its own", got)
+	}
+	if !strings.Contains(out.String(), "Warning: claude hooks were not installed") || !strings.Contains(out.String(), "Retry with: beacon endpoint hooks install --harness claude\n") {
+		t.Fatalf("output = %q, want a warning and a retry for claude alone", out.String())
 	}
 }
 

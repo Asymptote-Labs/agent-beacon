@@ -436,20 +436,23 @@ func runEndpointEnforcement(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// handOffEnforcedHookInstall runs a user-mode hook install through the kept enterprise binary while
+// enforcedHookBeacon is the kept enterprise binary a user-mode hook install must go through while
 // enforcement is on for this user. This build's hooks carry no enforcement, so installing them
 // here would quietly take enforcement out of every agent; the enterprise binary writes the same
-// hooks plus its enforce entries. It reports whether it ran the install.
-func handOffEnforcedHookInstall(ctx context.Context, targets []string, cfg endpointconfig.Config) (bool, error) {
-	if !cfg.UserMode || len(targets) == 0 || !userEnforcementOn() {
-		return false, nil
+// hooks plus its enforce entries.
+func enforcedHookBeacon(cfg endpointconfig.Config) (string, bool) {
+	if !cfg.UserMode || !userEnforcementOn() {
+		return "", false
 	}
-	bin, ok := userEnterpriseBeacon()
-	if !ok {
-		return false, nil
-	}
-	args := []string{"endpoint", "hooks", "install", "--harness", strings.Join(targets, ","), "--level", endpointOpts.hookLevel, "--log-path", cfg.LogPath}
-	return true, runUserEnterpriseBeacon(ctx, bin, args...)
+	return userEnterpriseBeacon()
+}
+
+// installHooksWithEnterpriseBeacon runs `hooks install` through bin for selection: --all, or
+// --harness and its targets, which the enterprise binary treats exactly as this one would.
+func installHooksWithEnterpriseBeacon(ctx context.Context, bin string, cfg endpointconfig.Config, selection ...string) error {
+	args := append([]string{"endpoint", "hooks", "install"}, selection...)
+	args = append(args, "--level", endpointOpts.hookLevel, "--log-path", cfg.LogPath)
+	return runUserEnterpriseBeacon(ctx, bin, args...)
 }
 
 // removeUserEnforcement takes out what user-mode enforcement keeps in the user endpoint directory:

@@ -675,16 +675,15 @@ func installHookTargetsFromEndpointInstall(report, out io.Writer, targets []stri
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
 	}
-	if handed, err := handOffEnforcedHookInstall(context.Background(), targets, cfg); handed {
-		if err != nil {
-			fmt.Fprintf(out, "Warning: hooks were not installed: %v\n", err)
-			fmt.Fprintf(out, "The endpoint is installed without them. Retry with: beacon endpoint hooks install --harness %s\n", strings.Join(targets, ","))
+	install := func(target string) error { return installEndpointHookTargetTo(report, os.Stdout, target, cfg) }
+	if bin, ok := enforcedHookBeacon(cfg); ok {
+		install = func(target string) error {
+			return installHooksWithEnterpriseBeacon(context.Background(), bin, cfg, "--harness", target)
 		}
-		return
 	}
 	var failed []string
 	for _, target := range targets {
-		if err := installEndpointHookTargetTo(report, os.Stdout, target, cfg); err != nil {
+		if err := install(target); err != nil {
 			failed = append(failed, target)
 			fmt.Fprintf(out, "Warning: %s hooks were not installed: %v\n", target, err)
 		}
