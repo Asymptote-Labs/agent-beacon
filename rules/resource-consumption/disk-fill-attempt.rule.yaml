@@ -12,8 +12,10 @@ description: >
   legitimate agent action. The command is found by what the line runs, so dd in a
   commit message or a here-document does not fire and `sudo dd` or dd inside
   `bash -c` does; a line the parser cannot vouch for (see command_unread) is
-  matched on its text. A redirection to /tmp or /var is not by itself a disk
-  fill, and no longer fires: version 2 matched every `> /tmp/...`.
+  matched on its text. dd's output operand is read as written (argv_raw), since one
+  that holds a variable (`of=$HOME/fill`) has no known value. A redirection to /tmp or
+  /var is not by itself a disk fill, and no longer fires: version 2 matched every
+  `> /tmp/...`.
 severity: medium
 status: experimental
 posture: detect
@@ -24,7 +26,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
-      c.name == "dd" && c.args.matches("(?m)^if=/dev/(zero|urandom|random)$") && c.args.matches("(?m)^of=.") ||
+      c.name == "dd" && c.args.matches("(?m)^if=/dev/(zero|urandom|random)$") && c.argv_raw.exists(a, a.matches("^[\"']?of=.")) ||
       c.name.matches("^(fallocate|truncate)$") && c.args.matches("(?mi)^(-[ls]|--length|--size)\\n\\+?[0-9]+[KMGTP]|^(-[ls]|--length=|--size=)\\+?[0-9]+[KMGTP]") ||
       c.name == "yes" && e.command.command.matches("\\byes\\b[^;&|]*[^\\d]>>?\\s*[^\\s&]") &&
         !e.command.command.matches("\\byes\\b[^;&|]*>\\s*/dev/null\\b") ||
@@ -94,6 +96,24 @@ tests:
       - timestamp: "2026-06-23T10:05:00Z"
         event: { action: command.executed }
         command: { command: "dd if=/etc/passwd of=/tmp/passwd_copy" }
+        session: { id: s1 }
+  - name: dd_into_a_path_held_in_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "dd if=/dev/zero of=$HOME/fill bs=1M count=100000" }
+        session: { id: s1 }
+  - name: dd_into_a_quoted_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "dd if=/dev/zero of=\"$TARGET\" bs=1M count=100000" }
+        session: { id: s1 }
+  - name: dd_inside_a_network_namespace
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ip netns exec ns1 dd if=/dev/zero of=/var/big bs=1M" }
         session: { id: s1 }
   - name: dd_in_manpage_grep
     verdict: no_match

@@ -23,13 +23,15 @@ definitions:
       (mkfs), copies raw data with dd, pipes a download into a shell, asks sudo for a shell,
       or opens a tree to everyone (chmod -R 777); or its text defines the fork bomb or
       redirects onto a disk device, which are shell syntax the parsed commands do not list. A
-      line the parser cannot vouch for (command_unread) is matched on its text.
+      line the parser cannot vouch for (command_unread) is matched on its text. dd's input
+      operand is read as written (argv_raw): one that holds a variable (`if="$SRC"`) has no
+      known value.
     body: >
       e.command.parsed_commands.exists(c,
         (c.name == "rm" || c.name == "git" && c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n)*?rm(\\n|\\z)")) &&
           c.args.matches("(?mi)^-[a-z]*r[a-z]*$|^--recursive$") && c.args.matches("(?mi)^-[a-z]*f[a-z]*$|^--force$") ||
         c.name.matches("^mkfs(\\.[a-z0-9]+)?$") ||
-        c.name == "dd" && c.args.matches("(?m)^if=") ||
+        c.name == "dd" && c.argv_raw.exists(a, a.matches("^[\"']?if=")) ||
         c.name.matches("^(curl|wget)$") &&
           e.command.parsed_commands.exists(s, s.pipeline == c.pipeline && s.stage > c.stage && s.name.matches("^(ba|z|da|k)?sh$")) ||
         size(c.argv) > 1 && c.argv[0].matches("(^|/)sudo$") && c.argv[1].matches("^(-[A-Za-z]*s[A-Za-z]*|--shell)$") ||
@@ -79,6 +81,23 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "ssh build@host.example 'rm -rf /srv/app'" }
+      - name: dd_from_a_path_held_in_a_variable
+        verdict: match
+        events:
+          - event: { action: approval.denied }
+            command: { command: "dd if=\"$SRC\" of=/dev/sda" }
+      - name: dd_under_sudo_from_a_variable
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sudo dd if=$IMG of=/dev/disk2" }
+      - name: removal_from_a_codex_command_logged_space_joined
+        # Codex logs ["bash","-lc","rm -rf /var/data"] as `bash -lc rm -rf /var/data`: the
+        # shell's script reads as `rm` alone, so the line is matched on its text.
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "bash -lc rm -rf /var/data" }
       - name: removal_of_one_file
         verdict: no_match
         events:
