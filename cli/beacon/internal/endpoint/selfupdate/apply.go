@@ -189,6 +189,22 @@ func (a *Applier) InstallPackage(ctx context.Context, pkg Package) (ApplyResult,
 	return a.installPackage(ctx, pkg, result, message)
 }
 
+// FetchVerifiedPackage downloads pkg to dest and checks it as InstallPackage does on macOS -- the
+// checksum, the installer signature's team and Gatekeeper -- without installing it, for a caller
+// that only takes files out of the package. The caller removes dest.
+func (a *Applier) FetchVerifiedPackage(ctx context.Context, pkg Package, dest string) error {
+	if err := a.download(ctx, pkg.URL, dest); err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	if err := verifySHA256(dest, pkg.SHA256); err != nil {
+		return fmt.Errorf("verify checksum: %w", err)
+	}
+	if err := a.verifyGatekeeper(ctx, dest); err != nil {
+		return fmt.Errorf("verify signature/notarization: %w", err)
+	}
+	return nil
+}
+
 // installPackage is everything after discovery: download, verify, snapshot, install, restart,
 // health check, and rollback when any step after the install fails.
 func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyResult, success string) (ApplyResult, error) {
@@ -629,7 +645,7 @@ func (a *Applier) healthCheck(ctx context.Context, wantVersion, wantEdition stri
 	if err != nil {
 		return fmt.Errorf("run %s version: %s: %w", bin, strings.TrimSpace(out), err)
 	}
-	if !versionLineMatches(out, wantVersion) {
+	if !VersionLineMatches(out, wantVersion) {
 		return fmt.Errorf("installed binary reports %q, expected version %s", strings.TrimSpace(out), wantVersion)
 	}
 	if wantEdition != "" && VersionLineEdition(out) != wantEdition {
@@ -659,11 +675,11 @@ func (a *Applier) restartCollector() error {
 	return service.Manager{UserMode: false}.Restart()
 }
 
-// versionLineMatches reports whether `beacon version` output
+// VersionLineMatches reports whether `beacon version` output
 // ("beacon version <V> (<commit>) built on <date>") reports exactly wantVersion.
 // It matches the version token after "version" for equality rather than a
 // substring, so e.g. an installed 0.0.6 does not satisfy an expected 0.0.69.
-func versionLineMatches(out, want string) bool {
+func VersionLineMatches(out, want string) bool {
 	want = strings.TrimPrefix(strings.TrimSpace(want), "v")
 	fields := strings.Fields(out)
 	for i := 0; i+1 < len(fields); i++ {
@@ -672,6 +688,17 @@ func versionLineMatches(out, want string) bool {
 		}
 	}
 	return false
+}
+
+// VersionLineVersion returns the version `beacon version` output reports, without a "v", or "".
+func VersionLineVersion(out string) string {
+	fields := strings.Fields(out)
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] == "version" {
+			return strings.TrimPrefix(fields[i+1], "v")
+		}
+	}
+	return ""
 }
 
 // VersionLineEdition returns the edition `beacon version` output names ("…, <edition> edition"

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -426,7 +427,10 @@ func suggestMCPConnect(out io.Writer, chosenInWizard bool) {
 func runEndpointStatus(cmd *cobra.Command, args []string) error {
 	status := lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
 	if endpointOpts.jsonOutput {
-		return json.NewEncoder(os.Stdout).Encode(status)
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			lifecycle.Status
+			Enforcement bool `json:"enforcement"`
+		}{status, enforcementOn()})
 	}
 	fmt.Printf("Beacon Endpoint Agent %s\n", status.Version)
 	fmt.Printf("Config: %s\n", status.ConfigPath)
@@ -476,6 +480,9 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 	}
 	otherForwarders := len(status.ScriptForwarders) > 0 || status.SentinelForwarder != nil
 	if line := cloudStatusLine(status.ManagedIngest, endpointUserMode(), otherForwarders); line != "" {
+		fmt.Println(line)
+	}
+	if line := enforcementStatusLine(); line != "" {
 		fmt.Println(line)
 	}
 	fmt.Println(inventoryHeartbeatStatusLine(status.InventoryHeartbeat))
@@ -541,6 +548,12 @@ func runEndpointUninstall(cmd *cobra.Command, args []string) error {
 	}
 	if err := lifecycle.Uninstall(lifecycle.UninstallOptions{UserMode: endpointUserMode(), LogPath: endpointOpts.logPath, KeepLogs: endpointOpts.keepLogs, KeepConfig: endpointOpts.keepConfig}); err != nil {
 		return err
+	}
+	// Here rather than in lifecycle.Uninstall, which repair runs too: repairing must keep enforcement.
+	if endpointUserMode() {
+		if err := removeUserEnforcement(); err != nil {
+			return fmt.Errorf("removing user-mode enforcement: %w", err)
+		}
 	}
 	fmt.Println("Endpoint service, config, and managed files removed.")
 	return nil
@@ -668,9 +681,15 @@ func installHookTargetsFromEndpointInstall(report, out io.Writer, targets []stri
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
 	}
+	install := func(target string) error { return installEndpointHookTargetTo(report, os.Stdout, target, cfg) }
+	if bin, ok := enforcedHookBeacon(context.Background(), out, cfg); ok {
+		install = func(target string) error {
+			return installHooksWithEnterpriseBeacon(context.Background(), bin, cfg, "--harness", target)
+		}
+	}
 	var failed []string
 	for _, target := range targets {
-		if err := installEndpointHookTargetTo(report, os.Stdout, target, cfg); err != nil {
+		if err := install(target); err != nil {
 			failed = append(failed, target)
 			fmt.Fprintf(out, "Warning: %s hooks were not installed: %v\n", target, err)
 		}

@@ -7,9 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 )
 
 const testKey = "bcn_device_abcd1234_secretpart"
@@ -121,6 +125,71 @@ func TestLocateRejectsAnAnswerItCannotInstall(t *testing.T) {
 			_, err := Locate(context.Background(), nil, srv.URL, testKey, tc.version)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// stubUserInstall fakes the verified download and pkgutil: the expanded package holds a beacon
+// that reports line.
+func stubUserInstall(t *testing.T, line string, fetchErr error) {
+	t.Helper()
+	oldFetch, oldRun := fetchVerifiedPackage, runCommand
+	t.Cleanup(func() { fetchVerifiedPackage, runCommand = oldFetch, oldRun })
+	fetchVerifiedPackage = func(_ context.Context, _ selfupdate.Package, dest string) error {
+		if fetchErr != nil {
+			return fetchErr
+		}
+		return os.WriteFile(dest, []byte("pkg"), 0o644)
+	}
+	runCommand = func(_ context.Context, name string, args ...string) (string, error) {
+		if name == "pkgutil" {
+			bin := filepath.Join(args[len(args)-1], "Payload", "opt", "beacon", "bin", "beacon")
+			if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+				return "", err
+			}
+			return "", os.WriteFile(bin, []byte("enterprise beacon"), 0o644)
+		}
+		return line, nil // <bin> version
+	}
+}
+
+func TestInstallUserKeepsOnlyThePackagesBeacon(t *testing.T) {
+	stubUserInstall(t, "beacon version 1.3.41 (abc) built on today, enterprise edition\n", nil)
+	dest := filepath.Join(t.TempDir(), "enterprise", "beacon")
+	if err := InstallUser(context.Background(), Release{Version: "1.3.41", URL: "https://x/p", SHA256: testSHA}, dest); err != nil {
+		t.Fatalf("InstallUser: %v", err)
+	}
+	info, err := os.Stat(dest)
+	if err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("dest: %v, %v", info, err)
+	}
+	entries, _ := os.ReadDir(filepath.Dir(dest))
+	if len(entries) != 1 {
+		t.Fatalf("left behind %v, want only the binary", entries)
+	}
+}
+
+func TestInstallUserRefusesWhatItDidNotAskFor(t *testing.T) {
+	cases := map[string]struct {
+		line     string
+		fetchErr error
+		want     string
+	}{
+		"community edition": {"beacon version 1.3.41 (abc) built on today\n", nil, "enterprise edition"},
+		"other version":     {"beacon version 1.3.40 (abc) built on today, enterprise edition\n", nil, "want 1.3.41"},
+		"failed check":      {"", errors.New("verify checksum: sha256 mismatch"), "sha256 mismatch"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			stubUserInstall(t, tc.line, tc.fetchErr)
+			dest := filepath.Join(t.TempDir(), "enterprise", "beacon")
+			err := InstallUser(context.Background(), Release{Version: "1.3.41", URL: "https://x/p", SHA256: testSHA}, dest)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if _, err := os.Stat(dest); !os.IsNotExist(err) {
+				t.Fatalf("dest was written (%v)", err)
 			}
 		})
 	}

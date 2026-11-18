@@ -7,6 +7,9 @@
 // The platform can stop an install but never choose what gets installed: the package must match
 // the checksum, carry a Developer ID signature from the Apple team pinned here, pass Gatekeeper,
 // and report the expected version and edition once installed, or the install is rolled back.
+//
+// A user-mode install takes only the package's beacon binary instead (InstallUser), checked the
+// same way.
 package edition
 
 import (
@@ -19,6 +22,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -132,6 +138,66 @@ func Install(ctx context.Context, rel Release, currentVersion, logPath string) (
 		Version: rel.Version,
 		Edition: Enterprise,
 	})
+}
+
+// Seams, so tests reach neither the network nor pkgutil.
+var (
+	fetchVerifiedPackage = func(ctx context.Context, pkg selfupdate.Package, dest string) error {
+		return selfupdate.NewApplier("").FetchVerifiedPackage(ctx, pkg, dest)
+	}
+	runCommand = func(ctx context.Context, name string, args ...string) (string, error) {
+		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+		return string(out), err
+	}
+)
+
+// InstallUser puts rel's beacon at dest, for a user-mode install, which has no root to run the
+// package's installer with and must not let its postinstall set the machine up in system mode.
+// The package is checked as Install checks it (checksum, Beacon's pinned signing team,
+// Gatekeeper); its signature covers the payload, so the binary is then taken out of it with
+// pkgutil, and must report rel's version and the enterprise edition before it replaces dest.
+func InstallUser(ctx context.Context, rel Release, dest string) error {
+	dir := filepath.Dir(dest)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	stage, err := os.MkdirTemp(dir, ".install-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
+
+	pkgPath := filepath.Join(stage, "enterprise.pkg")
+	pkg := selfupdate.Package{URL: rel.URL, SHA256: rel.SHA256, Version: rel.Version, Edition: Enterprise}
+	if err := fetchVerifiedPackage(ctx, pkg, pkgPath); err != nil {
+		return err
+	}
+	expanded := filepath.Join(stage, "expanded")
+	if out, err := runCommand(ctx, "pkgutil", "--expand-full", pkgPath, expanded); err != nil {
+		return fmt.Errorf("pkgutil --expand-full: %s: %w", strings.TrimSpace(out), err)
+	}
+	// A component package (pkgbuild) expands to Payload/; a product archive to <component>/Payload/.
+	var found []string
+	for _, pattern := range []string{"Payload", filepath.Join("*", "Payload")} {
+		matches, _ := filepath.Glob(filepath.Join(expanded, pattern, "opt", "beacon", "bin", "beacon"))
+		found = append(found, matches...)
+	}
+	if len(found) != 1 {
+		return fmt.Errorf("the package holds %d copies of opt/beacon/bin/beacon, want 1", len(found))
+	}
+	bin := found[0]
+	if err := os.Chmod(bin, 0o755); err != nil {
+		return err
+	}
+	out, err := runCommand(ctx, bin, "version")
+	if err != nil {
+		return fmt.Errorf("the package's beacon did not run: %s: %w", strings.TrimSpace(out), err)
+	}
+	if !selfupdate.VersionLineMatches(out, rel.Version) || selfupdate.VersionLineEdition(out) != Enterprise {
+		line, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+		return fmt.Errorf("the package's beacon reports %q, want %s, %s edition", line, rel.Version, Enterprise)
+	}
+	return os.Rename(bin, dest)
 }
 
 // credentialURL joins base and path, and requires https (plain http only to a loopback host,

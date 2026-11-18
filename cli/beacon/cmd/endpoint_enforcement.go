@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,25 +12,34 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/edition"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/updatecheck"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
 // `beacon endpoint enforcement enable` turns on policy enforcement for the agents on this machine.
 // Enforcement is part of Beacon's enterprise edition, not this one, so here enable installs that
-// edition on a Mac connected to its organization in system mode, then runs the installed binary's
-// own enable. A build that carries enforcement sets activateEnforcement, which enable runs instead,
-// and adds its other subcommands to endpointEnforcementCmd.
+// edition, then runs the installed binary's own enable. A build that carries enforcement sets
+// activateEnforcement, which enable runs instead, and adds its other subcommands to
+// endpointEnforcementCmd.
+//
+// On a Mac connected to its organization in system mode, run as root, the edition's package is
+// installed into /opt/beacon. On a Mac connected to Beacon Cloud in user mode, run without root,
+// only the package's beacon is kept, in the user's endpoint directory (userEnterpriseBeaconPath);
+// this build then hands that binary the enforcement subcommands it lacks and, while enforcement is
+// on, its hook installs, whose enforce entries only the enterprise edition writes.
 
 // activateEnforcement turns enforcement on in a build that carries it. Nil in this repository.
 var activateEnforcement func(cmd *cobra.Command, dashboardURL string) error
@@ -43,6 +53,16 @@ const (
 	enforcementInstallTimeout = 15 * time.Minute
 )
 
+// Where enforcement lives under an endpoint directory (the user's or the system's), and where
+// user-mode enforcement keeps the enterprise binary. The enforcement directory and its config
+// file are the enterprise edition's enforcement.Dir and enforcement.ConfigFile, which its enable
+// writes; the config's presence is what says enforcement is on.
+const (
+	userEnterpriseDirName = "enterprise"
+	enforcementDirName    = "enforcement"
+	enforcementConfigName = "config.json"
+)
+
 var endpointEnforcementOpts struct {
 	dashboardURL string
 }
@@ -52,13 +72,22 @@ var endpointEnforcementCmd = &cobra.Command{
 	Short: "Policy enforcement for AI coding agents (enterprise edition)",
 	Long: `Policy enforcement for AI coding agents, part of Beacon's enterprise edition.
 
-enable installs the enterprise edition on a Mac that is connected to its organization in system
-mode (beacon endpoint connect --system), if the organization has enforcement, and turns it on.`,
+enable installs the enterprise edition, if the platform this machine is connected to offers it,
+and turns enforcement on:
+  - on a Mac connected to Beacon Cloud in user mode (beacon endpoint connect), run without sudo:
+    for this user, with the edition kept in ~/.beacon/endpoint/enterprise
+  - on a Mac connected to its organization in system mode (beacon endpoint connect --system),
+    run with sudo: for the machine, with the edition installed into /opt/beacon`,
+	// Unknown subcommands land here: status, update and disable come with the enterprise edition,
+	// so a user-mode install passes them, flags and all, to the one it keeps.
+	Args:               cobra.ArbitraryArgs,
+	DisableFlagParsing: true,
+	RunE:               runEndpointEnforcement,
 }
 
 var endpointEnforcementEnableCmd = &cobra.Command{
 	Use:          "enable",
-	Short:        "Turn on policy enforcement on this machine (needs sudo)",
+	Short:        "Turn on policy enforcement (sudo on a system-mode install)",
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runEndpointEnforcementEnable,
@@ -69,12 +98,19 @@ var (
 	enforcementPlatformSupported  = func() bool { return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" }
 	enforcementHasRoot            = lifecycle.HasSystemPrivileges
 	enforcementConnected          = func() bool { return asymptote.Connected(false) }
+	enforcementUserConnected      = func() bool { return asymptote.Connected(true) }
+	enforcementSystemBaseDir      = endpointconfig.SystemBaseDir
 	enforcementCredentials        = systemEnforcementCredentials
+	enforcementUserCredentials    = userEnforcementCredentials
 	enforcementUserModeProbe      = probeConsoleUserMode
 	installedBeaconVersionLine    = defaultInstalledBeaconVersionLine
+	userEnterpriseVersionLine     = defaultUserEnterpriseVersionLine
 	locateEnterpriseRelease       = edition.Locate
 	installEnterpriseRelease      = edition.Install
+	installUserEnterpriseRelease  = edition.InstallUser
 	runInstalledEnforcementEnable = defaultRunInstalledEnforcementEnable
+	runUserEnforcementEnable      = defaultRunUserEnforcementEnable
+	runUserEnterpriseBeacon       = defaultRunUserEnterpriseBeacon
 )
 
 func init() {
@@ -91,6 +127,13 @@ func runEndpointEnforcementEnable(cmd *cobra.Command, _ []string) error {
 	if os.Getenv(enforcementHandoffEnv) != "" {
 		return errors.New("the installed beacon does not carry policy enforcement")
 	}
+	userMode, err := enforcementMode()
+	if err != nil {
+		return err
+	}
+	if userMode {
+		return enableUserModeEnforcement(cmd)
+	}
 	if err := checkEnforcementPrerequisites(); err != nil {
 		return err
 	}
@@ -104,6 +147,68 @@ func runEndpointEnforcementEnable(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	return runInstalledEnforcementEnable(cmd.Context(), endpointEnforcementOpts.dashboardURL)
+}
+
+// enforcementMode says where enable turns enforcement on: system mode, run as root on a Mac
+// connected with --system, or user mode, run without root on a Mac connected in user mode. Any
+// other combination is refused with what to run instead.
+func enforcementMode() (userMode bool, err error) {
+	if !enforcementPlatformSupported() {
+		return false, errors.New("policy enforcement is available for macOS on Apple Silicon only")
+	}
+	root := enforcementHasRoot()
+	switch {
+	case root && enforcementConnected():
+		return false, nil
+	case !root && enforcementUserConnected():
+		return true, nil
+	case root:
+		return false, fmt.Errorf("this machine is not connected to an organization in system mode. If Beacon runs in user mode here, run this without sudo:\n  beacon endpoint enforcement enable\nTo connect it in system mode instead:\n  sudo %s endpoint connect --system --dashboard-url https://asymptotelabs.ai", selfupdate.SystemBeaconPath())
+	case enforcementConnected():
+		return false, fmt.Errorf("turning on enforcement installs Beacon's enterprise edition, which needs root:\n  sudo %s endpoint enforcement enable", runningBeaconPath())
+	default:
+		return false, errors.New("policy enforcement needs Beacon Cloud. Connect this machine first:\n  beacon login && beacon endpoint connect")
+	}
+}
+
+// enableUserModeEnforcement is enable on a Mac connected in user mode. There is no root to run the
+// package's installer, whose postinstall would set the machine up in system mode anyway, so only
+// the package's beacon is kept, beside this one, and its enable turns enforcement on for this
+// user. Running enable again replaces that binary when the platform has a newer release.
+func enableUserModeEnforcement(cmd *cobra.Command) error {
+	out := cmd.OutOrStdout()
+	dashboard, deviceKey, err := enforcementUserCredentials()
+	if err != nil {
+		return err
+	}
+	if flag := strings.TrimSpace(endpointEnforcementOpts.dashboardURL); flag != "" {
+		dashboard = flag
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), enforcementInstallTimeout)
+	defer cancel()
+	locateCtx, cancelLocate := context.WithTimeout(ctx, enforcementLocateTimeout)
+	rel, err := locateEnterpriseRelease(locateCtx, nil, dashboard, deviceKey, "")
+	cancelLocate()
+	if err != nil {
+		var refused *edition.HTTPError
+		if errors.As(err, &refused) && refused.Status == http.StatusUnauthorized {
+			return fmt.Errorf("%s did not accept this machine's device key (revoked or expired?). Reconnect with:\n  beacon endpoint connect", dashboard)
+		}
+		return explainEnterpriseRefusal(dashboard, err)
+	}
+
+	bin := userEnterpriseBeaconPath()
+	line := userEnterpriseVersionLine(ctx)
+	if selfupdate.VersionLineMatches(line, rel.Version) && selfupdate.VersionLineEdition(line) == edition.Enterprise {
+		fmt.Fprintf(out, "Beacon %s, enterprise edition, is already installed.\n", rel.Version)
+	} else {
+		fmt.Fprintf(out, "Installing Beacon %s, enterprise edition (%.0f MB download)…\n", rel.Version, float64(rel.Size)/1e6)
+		if err := installUserEnterpriseRelease(ctx, rel, bin); err != nil {
+			return fmt.Errorf("installing the enterprise edition: %w", err)
+		}
+		fmt.Fprintf(out, "Installed Beacon %s, enterprise edition, at %s.\n", rel.Version, bin)
+	}
+	return runUserEnforcementEnable(cmd.Context(), bin, endpointEnforcementOpts.dashboardURL)
 }
 
 // checkEnforcementPrerequisites refuses, before anything is downloaded, on a machine that cannot
@@ -155,14 +260,26 @@ func installEnterpriseEdition(ctx context.Context, out io.Writer) error {
 	return nil
 }
 
-// systemEnforcementCredentials reads the platform this machine connected to and its device key.
-// The key is read into memory for the one request that proves the device; it is never copied.
+// systemEnforcementCredentials reads the platform this machine connected to in system mode and its
+// device key.
 func systemEnforcementCredentials() (string, string, error) {
-	enrollment, err := asymptote.LoadEnrollment(false)
+	return enforcementCredentialsFor(false)
+}
+
+// userEnforcementCredentials reads the platform this user connected to in user mode and its device
+// key.
+func userEnforcementCredentials() (string, string, error) {
+	return enforcementCredentialsFor(true)
+}
+
+// enforcementCredentialsFor reads the platform a mode's connection enrolled with and its device
+// key. The key is read into memory for the requests that prove the device; it is never copied.
+func enforcementCredentialsFor(userMode bool) (string, string, error) {
+	enrollment, err := asymptote.LoadEnrollment(userMode)
 	if err != nil {
 		return "", "", fmt.Errorf("reading this machine's enrollment: %w", err)
 	}
-	key, err := asymptote.ReadDeviceKey(false)
+	key, err := asymptote.ReadDeviceKey(userMode)
 	if err != nil {
 		return "", "", fmt.Errorf("reading this machine's device key: %w", err)
 	}
@@ -225,9 +342,18 @@ func userModeActiveError(who string, found []string) error {
 }
 
 func defaultInstalledBeaconVersionLine(ctx context.Context) string {
+	return beaconVersionLine(ctx, selfupdate.SystemBeaconPath())
+}
+
+func defaultUserEnterpriseVersionLine(ctx context.Context) string {
+	return beaconVersionLine(ctx, userEnterpriseBeaconPath())
+}
+
+// beaconVersionLine is what `<bin> version` prints, or "" when it does not run.
+func beaconVersionLine(ctx context.Context, bin string) string {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, selfupdate.SystemBeaconPath(), "version").Output()
+	out, err := exec.CommandContext(ctx, bin, "version").Output()
 	if err != nil {
 		return ""
 	}
@@ -237,16 +363,182 @@ func defaultInstalledBeaconVersionLine(ctx context.Context) string {
 // defaultRunInstalledEnforcementEnable runs the installed binary's enable, which turns enforcement
 // on. It inherits this process's terminal.
 func defaultRunInstalledEnforcementEnable(ctx context.Context, dashboardURL string) error {
+	bin := selfupdate.SystemBeaconPath()
+	if err := runEnterpriseEnable(ctx, bin, dashboardURL); err != nil {
+		return fmt.Errorf("the enterprise edition is installed, but turning enforcement on did not finish (%v). Run it again with:\n  sudo %s endpoint enforcement enable", err, bin)
+	}
+	return nil
+}
+
+// defaultRunUserEnforcementEnable runs the kept enterprise binary's enable, which turns enforcement
+// on for this user.
+func defaultRunUserEnforcementEnable(ctx context.Context, bin, dashboardURL string) error {
+	if err := runEnterpriseEnable(ctx, bin, dashboardURL); err != nil {
+		return fmt.Errorf("the enterprise edition is installed, but turning enforcement on did not finish (%v). Run it again with:\n  beacon endpoint enforcement enable", err)
+	}
+	return nil
+}
+
+func runEnterpriseEnable(ctx context.Context, bin, dashboardURL string) error {
 	args := []string{"endpoint", "enforcement", "enable"}
 	if dashboardURL != "" {
 		args = append(args, "--dashboard-url", dashboardURL)
 	}
-	bin := selfupdate.SystemBeaconPath()
+	return defaultRunUserEnterpriseBeacon(ctx, bin, args...)
+}
+
+// defaultRunUserEnterpriseBeacon runs an enterprise binary with args, marked as handed off so a
+// binary without enforcement refuses rather than installing again. It inherits this process's
+// terminal.
+func defaultRunUserEnterpriseBeacon(ctx context.Context, bin string, args ...string) error {
 	child := exec.CommandContext(ctx, bin, args...)
 	child.Env = append(os.Environ(), enforcementHandoffEnv+"=1")
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := child.Run(); err != nil {
-		return fmt.Errorf("the enterprise edition is installed, but turning enforcement on did not finish (%v). Run it again with:\n  sudo %s endpoint enforcement enable", err, bin)
+	return child.Run()
+}
+
+func userEnterpriseBeaconPath() string {
+	return filepath.Join(endpointconfig.BaseDir(true), userEnterpriseDirName, "beacon")
+}
+
+func userEnforcementDir() string {
+	return filepath.Join(endpointconfig.BaseDir(true), enforcementDirName)
+}
+
+// userEnterpriseBeacon is the enterprise binary kept for user-mode enforcement, when this build
+// should hand it work: only a build without enforcement does, never one handed work itself, and
+// never as root, so nothing loops and a system install never runs a user's binary.
+func userEnterpriseBeacon() (string, bool) {
+	if activateEnforcement != nil || os.Getenv(enforcementHandoffEnv) != "" || enforcementHasRoot() {
+		return "", false
+	}
+	bin := userEnterpriseBeaconPath()
+	if info, err := os.Stat(bin); err != nil || info.IsDir() {
+		return "", false
+	}
+	return bin, true
+}
+
+// userEnforcementOn reports whether enforcement is on for this user (its enable wrote the config).
+func userEnforcementOn() bool {
+	_, err := os.Stat(filepath.Join(userEnforcementDir(), enforcementConfigName))
+	return err == nil
+}
+
+// enforcementOn reports whether enforcement is on here, for this user or for the whole machine.
+func enforcementOn() bool {
+	if userEnforcementOn() {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(enforcementSystemBaseDir(), enforcementDirName, enforcementConfigName))
+	return err == nil
+}
+
+// enforcementStatusLine is endpoint status's enforcement line: whether it is on, on the Macs that
+// can have it (and anywhere it is somehow on).
+func enforcementStatusLine() string {
+	switch {
+	case enforcementOn():
+		return "Enforcement: on"
+	case enforcementPlatformSupported():
+		return "Enforcement: off"
+	}
+	return ""
+}
+
+// runEndpointEnforcement forwards an enforcement subcommand this build lacks (status, update,
+// disable) to the enterprise binary kept for user-mode enforcement. Without one, status can still
+// say whether enforcement is on, and anything else shows help.
+func runEndpointEnforcement(cmd *cobra.Command, args []string) error {
+	bin, ok := userEnterpriseBeacon()
+	if !ok {
+		if len(args) > 0 && args[0] == "status" {
+			return printEnforcementOnOrOff(cmd.OutOrStdout(), slices.Contains(args[1:], "--json"))
+		}
+		return cmd.Help()
+	}
+	if err := runUserEnterpriseBeacon(cmd.Context(), bin, append([]string{"endpoint", "enforcement"}, args...)...); err != nil {
+		// The enterprise binary has already said what went wrong.
+		cmd.SilenceErrors = true
+		return err
+	}
+	return nil
+}
+
+// printEnforcementOnOrOff is enforcement status without the enterprise edition, which has the
+// rest: as its status puts it, or with jsonOut its "enabled" field.
+func printEnforcementOnOrOff(out io.Writer, jsonOut bool) error {
+	on := enforcementOn()
+	if jsonOut {
+		return json.NewEncoder(out).Encode(map[string]bool{"enabled": on})
+	}
+	state := "off"
+	if on {
+		state = "on"
+	}
+	_, err := fmt.Fprintf(out, "Enforcement:   %s\n", state)
+	return err
+}
+
+// enforcedHookBeacon is the kept enterprise binary a user-mode hook install must go through while
+// enforcement is on for this user. This build's hooks carry no enforcement, so installing them
+// here would quietly take enforcement out of every agent; the enterprise binary writes the same
+// hooks plus its enforce entries. It is first brought up to this build's version when older.
+func enforcedHookBeacon(ctx context.Context, warnings io.Writer, cfg endpointconfig.Config) (string, bool) {
+	if !cfg.UserMode || !userEnforcementOn() {
+		return "", false
+	}
+	bin, ok := userEnterpriseBeacon()
+	if ok {
+		refreshUserEnterpriseBeacon(ctx, warnings, bin)
+	}
+	return bin, ok
+}
+
+// refreshUserEnterpriseBeacon updates the kept enterprise binary at bin to this build's release
+// when it is older: after a community upgrade (brew upgrade) an older one would write older hooks
+// and refuse agents it does not know. When that release cannot be had (the enterprise one follows
+// the public release, or the machine is offline) it warns, and the kept binary does the install.
+func refreshUserEnterpriseBeacon(ctx context.Context, warnings io.Writer, bin string) {
+	want := version.GetVersion()
+	kept := selfupdate.VersionLineVersion(userEnterpriseVersionLine(ctx))
+	if !updatecheck.Older(kept, want) {
+		return
+	}
+	err := func() error {
+		dashboard, deviceKey, err := enforcementUserCredentials()
+		if err != nil {
+			return err
+		}
+		locateCtx, cancel := context.WithTimeout(ctx, enforcementLocateTimeout)
+		rel, err := locateEnterpriseRelease(locateCtx, nil, dashboard, deviceKey, want)
+		cancel()
+		if err != nil {
+			return err
+		}
+		return installUserEnterpriseRelease(ctx, rel, bin)
+	}()
+	if err != nil {
+		fmt.Fprintf(warnings, "Warning: enforcement's hooks come from Beacon %s, older than this one (%s), which could not be updated: %v. Retry later with: beacon endpoint enforcement enable\n", kept, want, err)
+	}
+}
+
+// installHooksWithEnterpriseBeacon runs `hooks install` through bin for selection: --all, or
+// --harness and its targets, which the enterprise binary treats exactly as this one would.
+func installHooksWithEnterpriseBeacon(ctx context.Context, bin string, cfg endpointconfig.Config, selection ...string) error {
+	args := append([]string{"endpoint", "hooks", "install"}, selection...)
+	args = append(args, "--level", endpointOpts.hookLevel, "--log-path", cfg.LogPath)
+	return runUserEnterpriseBeacon(ctx, bin, args...)
+}
+
+// removeUserEnforcement takes out what user-mode enforcement keeps in the user endpoint directory:
+// its token and config, and the enterprise binary. Left behind, a later install would hand its
+// hooks to that binary and turn enforcement back on.
+func removeUserEnforcement() error {
+	for _, dir := range []string{userEnforcementDir(), filepath.Dir(userEnterpriseBeaconPath())} {
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
 	}
 	return nil
 }
