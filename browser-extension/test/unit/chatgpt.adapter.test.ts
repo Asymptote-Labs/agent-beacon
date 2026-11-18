@@ -61,6 +61,18 @@ describe('chatgpt adapter — chunk-size invariance', () => {
   });
 });
 
+describe('chatgpt adapter — SSE line endings', () => {
+  it.each(['\r', '\r\n'])('assembles an answer with %j line endings split between chunks', (ending) => {
+    const parser = chatgptAdapter.createParser('req-line-endings');
+    parser.onRequest('https://chatgpt.com/backend-api/f/conversation', 'POST', reqBody('x', null));
+    for (const char of fixture('simple-turn').replaceAll('\n', ending)) parser.onChunk(char);
+    parser.onDone();
+    const turn = parser.getTurn()!;
+    expect(turn.responseText).toBe('Good evening! Hello to you as well. Hope your day is going well.');
+    expect(turn.completedAt).toBeTypeOf('number');
+  });
+});
+
 describe('chatgpt adapter — existing conversation', () => {
   it('uses the request-body conversation_id when present', () => {
     const turn = run('simple-turn', 'hi', 'body-conv-123')!.getTurn()!;
