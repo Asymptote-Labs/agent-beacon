@@ -232,6 +232,12 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		// its start for the quote it opens with.
 		"single-quoted substitutions": `"token":'$(cat f)' `,
 		"authorization substitutions": "authorization: apikey $(cat x)y ",
+		// Substitutions that literal text follows in quotes that never close, each of which reads
+		// that text and its line back for the quote it is in (valueTail, reopenedTail).
+		"substitutions before open quotes":        "TOKEN=$(cat x)'y TOKEN=$(cat x)\"y ",
+		"double-quoted substitutions before text": `TOKEN="$(cat x)"'y `,
+		"single-quoted substitutions before text": `"token":'$(cat f)' y`,
+		"escaped substitutions before text":       `token=\"$(cat f)\"y \"`,
 		// Secrets written right after another one (redact_adjacent.go): chains of keys of fixed
 		// length, of tokens that run on into the next, of key ids that end only where the next
 		// key starts, of JWT first segments that never complete, and URLs, Bearer tokens, curl

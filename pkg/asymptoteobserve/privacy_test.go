@@ -1111,6 +1111,27 @@ func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 		`Authorization: ApiKey $(cat $(ls x))hunter2 more`:                 `Authorization: [REDACTED] more`,
 		`Authorization: ApiKey $(cat x)hunter2 && echo $(cat x)hunter2`:    `Authorization: [REDACTED] && echo [REDACTED]`,
 		`Authorization: ApiKey $(cat x) && curl -H "Authorization: Bot y"`: `Authorization: [REDACTED] $(cat x) && curl -H "Authorization: [REDACTED]"`,
+		// Literal text after a substitution ends its shell word at a separator the value runs
+		// over (`;`): a copy of the value as the line writes it goes too, the substitution nested
+		// or not, after a label or an Authorization scheme.
+		`TOKEN=$(cat x)hunter2; echo $(cat x)hunter2`:                           `TOKEN=[REDACTED] echo [REDACTED]`,
+		`TOKEN=$(cat x)hunter2;echo $(cat x)hunter2`:                            `TOKEN=[REDACTED] [REDACTED]`,
+		`TOKEN=$(pwgen)hunter2; echo $(pwgen)hunter2`:                           `TOKEN=[REDACTED] echo [REDACTED]`,
+		`TOKEN=$(cat $(ls x))hunter2; echo $(cat $(ls x))hunter2`:               `TOKEN=[REDACTED] echo [REDACTED]`,
+		`Authorization: ApiKey $(cat x)hunter2; echo $(cat x)hunter2`:           `Authorization: [REDACTED] echo [REDACTED]`,
+		`curl -H "Authorization: ApiKey $(cat x)hunter2"; echo $(cat x)hunter2`: `curl -H "Authorization: [REDACTED]"; echo [REDACTED]`,
+		// Literal text in quotes after the substitution goes on with the value too; the quotes
+		// stay, so the rest of the line is quoted as it was. A quote that only closes the quoted
+		// text the value stands in is no literal text, nor is an empty pair.
+		`TOKEN=$(cat x)'hunter2' ./run`:                             `TOKEN=[REDACTED]'' ./run`,
+		`TOKEN=$(cat x)"hunter2" ./run`:                             `TOKEN=[REDACTED]"" ./run`,
+		`TOKEN=$(cat $(ls x))'hunter2'`:                             `TOKEN=[REDACTED]''`,
+		`curl -H "Authorization: Bearer $(cat x)"hunter2 https://x`: `curl -H "Authorization: Bearer [REDACTED]" https://x`,
+		`{"command": "API_KEY=$(cat ~/.key)\"hunter2\" ./run"}`:     `{"command": "API_KEY=[REDACTED]\"\" ./run"}`,
+		`bash -c "TOKEN=$(cat f)" && ./run`:                         `bash -c "TOKEN=$(cat f)" && ./run`,
+		`bash -c 'TOKEN=$(cat f)'`:                                  `bash -c 'TOKEN=$(cat f)'`,
+		`TOKEN=$(cat f)"" ./run`:                                    `TOKEN=$(cat f)"" ./run`,
+		`{"cmd": "TOKEN=$(cat f)"}`:                                 `{"cmd": "TOKEN=$(cat f)"}`,
 		// A substitution that does not close on its line is judged by its opening, as before. A
 		// variable is a value.
 		`TOKEN=$(cat x`:         `TOKEN=$(cat x`,
@@ -1192,6 +1213,15 @@ func TestRedactStringKeepsASubstitutionWhereverASecretWouldStand(t *testing.T) {
 		`curl -d '{"token":'hunter2'}' https://x`:                       `curl -d '{"token":'[REDACTED]'}' https://x`,
 		`curl -d '{"token":'$(a)hunter2'}' https://x`:                   `curl -d '{"token":'[REDACTED]'}' https://x`,
 		`curl -d '{"token":'x$(cmd)'}' https://x`:                       `curl -d '{"token":'[REDACTED]'}' https://x`,
+		// Literal text in the reopened quoted text goes on with the value, after blanks too, the
+		// substitution nested or not; the quote stays. Structure after it does not.
+		`curl -d '{"token":'$(cat f)'hunter2"}' https://x`:       `curl -d '{"token":'[REDACTED]'"}' https://x`,
+		`curl -d '{"token":'$(cat $(ls f))'hunter2"}' https://x`: `curl -d '{"token":'[REDACTED]'"}' https://x`,
+		`curl -d '{"token":'$(cat f)' hunter2"}' https://x`:      `curl -d '{"token":'[REDACTED]'"}' https://x`,
+		`curl -d '{"token":'$(cat f)'hunter2' https://x`:         `curl -d '{"token":'[REDACTED]'' https://x`,
+		`curl -d '{"token":'$(cat f)' }' https://x`:              `curl -d '{"token":'[REDACTED]' }' https://x`,
+		`curl 'https://x/?token='$(cat f)'&user=a'`:              `curl 'https://x/?token='[REDACTED]'&user=a'`,
+		`curl 'https://x/?token='$(cat f)'hunter2&user=a'`:       `curl 'https://x/?token='[REDACTED]'&user=a'`,
 		`TOKEN='$(cat f)'`:                           `TOKEN='[REDACTED]'`,
 		`curl -d "{\"token\":'$(cat f)'}" https://x`: `curl -d "{\"token\":'[REDACTED]'}" https://x`,
 		// A bare value after a quoted label.
