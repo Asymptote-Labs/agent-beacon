@@ -1,5 +1,5 @@
 id: imds-obfuscated-ip-fetch
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 3
 title: Cloud metadata IP fetched via obfuscated address encoding
 description: >

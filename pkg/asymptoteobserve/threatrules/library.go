@@ -192,8 +192,8 @@ func NewLibrary(files []DefinitionFile) (lib *Library, skipped []SkippedRule, er
 		if !ok || !kind.Definitions() {
 			return nil, nil, fmt.Errorf("%s: not a definitions file (want %s or %s)", file.Name, CatalogFileSuffix, PredicatesFileSuffix)
 		}
-		// Predicates exist since v1.3, so that is what a definitions file needs at least.
-		spec := specV1_3
+		// Predicates exist since v2.0, so that is what a definitions file needs at least.
+		spec := specV2_0
 		head := file.head
 		if head == nil {
 			if read, err := readHead(kind, file.Data); err == nil {

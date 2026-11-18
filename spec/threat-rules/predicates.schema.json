@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://beacon.dev/spec/threat-rules/v1/predicates.schema.json",
   "title": "Beacon Threat Rules predicate definitions",
-  "description": "A *.predicates.yaml file of a rule pack (threat-rules/v1.3): named CEL expressions its rules call like functions. CEL correctness, the uniqueness of names across the pack, that every parameter is used, and that the fixtures pass are enforced by an engine, not by this structural schema.",
+  "description": "A *.predicates.yaml file of a rule pack (threat-rules/v2.0): named CEL expressions its rules call like functions. CEL correctness, the uniqueness of names across the pack, that every parameter is used, and that the fixtures pass are enforced by an engine, not by this structural schema.",
   "type": "object",
   "additionalProperties": false,
   "required": ["library", "version", "definitions"],

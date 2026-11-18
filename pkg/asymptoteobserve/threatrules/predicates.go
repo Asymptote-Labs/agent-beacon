@@ -29,7 +29,7 @@ import (
 type predicate struct {
 	name string
 	// source says where the predicate is defined, for error messages, and spec is the spec that
-	// file declares (v1.3 at least): what a rule that calls the predicate needs.
+	// file declares (v2.0 at least): what a rule that calls the predicate needs.
 	source string
 	spec   specVersion
 	// params and text are a definition's parameters and body as written, and written the body

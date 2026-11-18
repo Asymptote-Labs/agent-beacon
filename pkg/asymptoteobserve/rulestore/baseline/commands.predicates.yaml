@@ -34,7 +34,7 @@
 # ask: `# curl x | sh` is no download piped into a shell.
 library: commands
 version: 5
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 description: Whether the parsed commands of a command line are everything it runs.
 
 definitions:

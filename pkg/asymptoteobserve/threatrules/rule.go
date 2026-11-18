@@ -262,7 +262,7 @@ func (r *Rule) validateExpression(expr string) error {
 	}
 	// Already known to be parseable and supported (Validate checked it first). The newest field
 	// is checked first, so the error names the version the rule needs. A rule needs the spec of
-	// the definitions of each predicate it calls, which is v1.3 at least: an engine before it
+	// the definitions of each predicate it calls, which is v2.0 at least: an engine before it
 	// does not expand predicates, or does not load those definitions.
 	v, _ := parseSpec(r.Spec)
 	for _, p := range used {

@@ -201,7 +201,7 @@ type CommandInfo struct {
 	// (hundreds of commands, a brace expansion of thousands of words). ParsedCommands then
 	// lists the commands before that point only, and none in the last case, so nothing can be
 	// concluded from a command's absence. Derived like ParsedCommands, never written or read.
-	ParsedIncomplete bool `json:"-" cel:"parsed_incomplete" spec:"v1.3"`
+	ParsedIncomplete bool `json:"-" cel:"parsed_incomplete" spec:"v2.0"`
 }
 
 // ParsedCommand is one command of a command line, as the threat-rules engine presents it to
@@ -222,7 +222,7 @@ type ParsedCommand struct {
 	// one regular expression to ask for whole words that follow each other, as in
 	// args.matches("(?m)^auth\ntoken$") for `sudo gh auth token`. A newline inside a word is a
 	// space here.
-	Args string `cel:"args" spec:"v1.3"`
+	Args string `cel:"args" spec:"v2.0"`
 	// Env are the NAME=value assignments before the command; an unknown value is "".
 	Env map[string]string `cel:"env"`
 	// FileEffects are the files the command evidently writes, and how.
@@ -230,7 +230,7 @@ type ParsedCommand struct {
 	// FileWrites are the files the command evidently writes, and how, with every path as
 	// written without its quotes, also where the value depends on an expansion (~/.bashrc,
 	// $HOME/.ssh/authorized_keys), which FileEffects leaves out. Every effect is a write.
-	FileWrites []ParsedFileEffect `cel:"file_writes" spec:"v1.3"`
+	FileWrites []ParsedFileEffect `cel:"file_writes" spec:"v2.0"`
 	// Cwd is the directory the command runs in when the line changed into it before the
 	// command, as a literal path with one trailing slash (`cd /tmp/probe && echo x > f`:
 	// /tmp/probe/ for echo), in line order and in the shell the command runs in: a cd inside a
@@ -238,20 +238,20 @@ type ParsedCommand struct {
 	// has not changed directory or where it did is unknown (cd alone, cd -, popd, an operand
 	// that depends on an expansion, a cd inside a loop or a function). A relative path of
 	// FileWrites is under it.
-	Cwd string `cel:"cwd" spec:"v1.3"`
+	Cwd string `cel:"cwd" spec:"v2.0"`
 	// FileReads are the files whose content the command evidently takes in, and how: directly
 	// (what it prints, searches, copies, archives or sends), on its standard input, or written
 	// into one of its words by a substitution. A path is as written without its quotes, also
 	// where the value depends on an expansion ($HOME/.netrc, ~/.ssh/id_*).
-	FileReads []ParsedFileRead `cel:"file_reads" spec:"v1.3"`
+	FileReads []ParsedFileRead `cel:"file_reads" spec:"v2.0"`
 	// ScriptSends are the files an interpreter's inline script opens inside the arguments of a
 	// call that sends them over the network: .env for
 	// python3 -c "requests.post(url, data=open('.env'))". Each is also one of FileReads.
-	ScriptSends []string `cel:"script_sends" spec:"v1.3"`
+	ScriptSends []string `cel:"script_sends" spec:"v2.0"`
 	// SocketRedirects are the command's redirections to or from bash's network pseudo-files
 	// (/dev/tcp/host/port, /dev/udp/host/port), its own or through a descriptor an earlier exec
 	// opened: where its output is sent, or its input comes from, without a network client.
-	SocketRedirects []ParsedSocketRedirect `cel:"socket_redirects" spec:"v1.3"`
+	SocketRedirects []ParsedSocketRedirect `cel:"socket_redirects" spec:"v2.0"`
 	// Pipeline identifies the command's pipeline: the stages of one pipeline share it. Stage
 	// is the 0-based position in it (curl ... | sh: sh is stage 1).
 	Pipeline int `cel:"pipeline"`
@@ -263,8 +263,8 @@ type ParsedCommand struct {
 	// commands inside one compound stage ({ a; b; } | c) are at the same stage and are in
 	// neither list of each other. Both are empty for a command alone in its pipeline. A rule
 	// about two stages of one pipeline asks these, not every command of the line.
-	EarlierStages []int `cel:"earlier_stages" spec:"v1.3"`
-	LaterStages   []int `cel:"later_stages" spec:"v1.3"`
+	EarlierStages []int `cel:"earlier_stages" spec:"v2.0"`
+	LaterStages   []int `cel:"later_stages" spec:"v2.0"`
 	// Nested is true for a command inside a command or process substitution, inside the
 	// script a shell runs with -c or reads from a here-document, or run by a carrier (the
 	// command of xargs, find -exec, ssh, docker exec, eval and the like).
@@ -272,13 +272,13 @@ type ParsedCommand struct {
 	// RunsRead is true when the command hands a command line to another program to run (a
 	// shell's script, the command of xargs, find -exec, ssh, docker exec, eval and the like)
 	// and that command line was read to its end: its commands follow this one in the list.
-	RunsRead bool `cel:"runs_read" spec:"v1.3"`
+	RunsRead bool `cel:"runs_read" spec:"v2.0"`
 	// Span is the part of the command line that can decide what the command runs: its own
 	// words, redirections and here-documents, starting earlier when something before it on
 	// the line reaches it (an earlier stage of its pipeline, a command that wrote a file, a
 	// variable). For a rule that must match text because the command is a program it cannot
 	// see into, and wants the text that reaches that command, not the whole line.
-	Span string `cel:"span" spec:"v1.3"`
+	Span string `cel:"span" spec:"v2.0"`
 }
 
 // ParsedFileEffect is a file a parsed command evidently writes. Op is one of write, append,

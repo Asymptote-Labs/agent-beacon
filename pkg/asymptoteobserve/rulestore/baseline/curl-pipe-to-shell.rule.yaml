@@ -1,5 +1,5 @@
 id: curl-pipe-to-shell
-spec: threat-rules/v1.3  # needed for the commands a carrier or a pipe hands a shell
+spec: threat-rules/v2.0  # needed for the commands a carrier or a pipe hands a shell
 version: 7
 title: Remote script piped directly into a shell
 description: >

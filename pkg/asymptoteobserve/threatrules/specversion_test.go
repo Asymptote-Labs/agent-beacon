@@ -57,7 +57,7 @@ func TestDecodeRuleAcceptsSupportedSpecs(t *testing.T) {
 }
 
 func TestDecodeRuleRejectsNewerSpecClearly(t *testing.T) {
-	for _, spec := range []string{futureSpec(), "threat-rules/v2"} {
+	for _, spec := range []string{futureSpec(), "threat-rules/v3"} {
 		// A future rule also carries the fields its version added; the spec check must
 		// come first so the error names the version rather than the unknown field.
 		_, err := DecodeRule([]byte(specRule("future-rule", "spec: "+spec, "future_field: true\n")))

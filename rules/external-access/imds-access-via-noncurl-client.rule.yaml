@@ -1,5 +1,5 @@
 id: imds-access-via-noncurl-client
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 5
 title: Cloud metadata endpoint accessed via non-curl HTTP client
 description: >

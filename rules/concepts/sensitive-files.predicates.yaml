@@ -25,7 +25,7 @@
 # such write (nearly every line) costs one prefiltered pattern.
 library: sensitive-files
 version: 5
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 description: Files whose change gives code execution, access or supply-chain reach, by path.
 
 definitions:

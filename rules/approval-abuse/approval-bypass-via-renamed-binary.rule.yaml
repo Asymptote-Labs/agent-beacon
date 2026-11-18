@@ -1,5 +1,5 @@
 id: approval-bypass-via-renamed-binary
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 8
 title: Denied dangerous command re-invoked via a renamed copy of the binary
 description: >

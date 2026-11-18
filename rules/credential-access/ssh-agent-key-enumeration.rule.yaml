@@ -1,5 +1,5 @@
 id: ssh-agent-key-enumeration
-spec: threat-rules/v1.3  # needed for predicates and args
+spec: threat-rules/v2.0  # needed for predicates and args
 version: 3
 title: SSH agent key enumeration
 description: >

@@ -1,5 +1,5 @@
 id: path-injection-into-login-file
-spec: threat-rules/v1.3  # needed for file_writes and predicates
+spec: threat-rules/v2.0  # needed for file_writes and predicates
 version: 8
 title: PATH shadowing entry written to a shell startup file
 description: >

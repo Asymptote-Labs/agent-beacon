@@ -257,7 +257,7 @@ func TestInstallFilesSkippingLeavesNewerDefinitionsOut(t *testing.T) {
 	src := pack(t, map[string]string{
 		"a.rule.yaml":                  ruleWithID("current-rule"),
 		"future.rule.yaml":             futureRule,
-		"concepts/tokens.catalog.yaml": "spec: threat-rules/v1.9\ncatalog: tokens\nversion: 1\nshape: unknown to this engine\n",
+		"concepts/tokens.catalog.yaml": "spec: threat-rules/v2.9\ncatalog: tokens\nversion: 1\nshape: unknown to this engine\n",
 	})
 	installed, skipped, err := InstallFilesSkipping(store, src, false)
 	if err != nil {
@@ -267,7 +267,7 @@ func TestInstallFilesSkippingLeavesNewerDefinitionsOut(t *testing.T) {
 		t.Errorf("installed %+v, want current-rule alone", installed)
 	}
 	if len(skipped) != 2 || !strings.HasSuffix(skipped[0].Path, "tokens.catalog.yaml") || skipped[1].Err.RuleID != "future-rule" {
-		t.Errorf("skipped %+v, want the catalog and the rule that need v1.9", skipped)
+		t.Errorf("skipped %+v, want the catalog and the rule that need v2.9", skipped)
 	}
 	if got := storeFiles(t, store); got != "current-rule.rule.yaml" {
 		t.Errorf("the store holds %q", got)
@@ -285,7 +285,7 @@ func TestInstallFilesSkippingKeepsTheStoresVersionOfNewerDefinitions(t *testing.
 	if _, err := InstallFiles(store, tokenPack(t), false); err != nil {
 		t.Fatal(err)
 	}
-	newer := "spec: threat-rules/v1.9\ncatalog: tokens\nversion: 2\nshape: unknown to this engine\npredicates: {command: token_command, path: token_file}\n"
+	newer := "spec: threat-rules/v2.9\ncatalog: tokens\nversion: 2\nshape: unknown to this engine\npredicates: {command: token_command, path: token_file}\n"
 	src := pack(t, map[string]string{
 		"again.rule.yaml":              strings.Replace(tokenRule, "id: token-printed", "id: token-printed-again", 1),
 		"file.rule.yaml":               strings.NewReplacer("id: token-printed", "id: token-file-read", "match: prints_token(e)", "match: token_file(e.file.path)").Replace(tokenRule),
@@ -302,7 +302,7 @@ func TestInstallFilesSkippingKeepsTheStoresVersionOfNewerDefinitions(t *testing.
 	for _, s := range skipped {
 		got = append(got, filepath.Base(s.Path)+" "+s.Err.Required)
 	}
-	if want := "tokens.catalog.yaml threat-rules/v1.9, file.rule.yaml threat-rules/v1.9"; strings.Join(got, ", ") != want {
+	if want := "tokens.catalog.yaml threat-rules/v2.9, file.rule.yaml threat-rules/v2.9"; strings.Join(got, ", ") != want {
 		t.Errorf("skipped %q, want %q", strings.Join(got, ", "), want)
 	}
 	if catalog, _ := os.ReadFile(filepath.Join(store, "tokens.catalog.yaml")); string(catalog) != tokenCatalog {

@@ -8,7 +8,7 @@
 # crontab_installs asked of a text the parser cannot see into (unread_text).
 library: scheduling
 version: 2
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 description: Installing a cron job, by the crontab command or by writing one of cron's files.
 
 definitions:

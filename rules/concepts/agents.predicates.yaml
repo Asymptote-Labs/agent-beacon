@@ -7,7 +7,7 @@
 # CLI is added here, to agent_cli and to its text twin agent_cli_mention alike.
 library: agents
 version: 2
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 description: A command that runs a coding agent's CLI.
 
 definitions:

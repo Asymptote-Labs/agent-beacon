@@ -561,7 +561,7 @@ definitions:
 `,
 	"rules/credential-access/token-printed.rule.yaml": `
 id: token-printed
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 version: 1
 title: T
 severity: low
@@ -687,7 +687,7 @@ stores:
 `,
 		"rules/credential-access/token-printed.rule.yaml": `
 id: token-printed
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 version: 1
 title: T
 severity: low

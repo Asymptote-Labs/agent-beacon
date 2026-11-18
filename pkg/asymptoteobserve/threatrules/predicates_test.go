@@ -377,22 +377,22 @@ func TestPredicateCallErrors(t *testing.T) {
 	}
 }
 
-// A rule that calls a predicate needs the spec its definitions file declares, v1.3 at least (the
+// A rule that calls a predicate needs the spec its definitions file declares, v2.0 at least (the
 // spec that has predicates), and is told which file sets it; and it needs the definitions that
 // define it.
-func TestPredicatesRequireSpecV1_3AndTheirDefinitions(t *testing.T) {
+func TestPredicatesRequireSpecV2_0AndTheirDefinitions(t *testing.T) {
 	lib := testLibrary(t)
 	for _, spec := range []string{"", "spec: threat-rules/v1.1", "spec: threat-rules/v1.2"} {
 		err := libraryRule(t, lib, spec, `credential_read(e)`).Validate()
-		if err == nil || !strings.Contains(err.Error(), "the predicate credential_read (p.predicates.yaml) requires spec: threat-rules/v1.3") {
+		if err == nil || !strings.Contains(err.Error(), "the predicate credential_read (p.predicates.yaml) requires spec: threat-rules/v2.0") {
 			t.Errorf("%q: want the predicate/spec error, got %v", spec, err)
 		}
 	}
-	if err := libraryRule(t, lib, "spec: threat-rules/v1.3", `credential_read(e)`).Validate(); err != nil {
-		t.Errorf("v1.3: %v", err)
+	if err := libraryRule(t, lib, "spec: threat-rules/v2.0", `credential_read(e)`).Validate(); err != nil {
+		t.Errorf("v2.0: %v", err)
 	}
 	// Decoded on its own, the rule has no definitions to call.
-	err := libraryRule(t, nil, "spec: threat-rules/v1.3", `credential_read(e)`).Validate()
+	err := libraryRule(t, nil, "spec: threat-rules/v2.0", `credential_read(e)`).Validate()
 	if err == nil || !strings.Contains(err.Error(), "credential_read is not a predicate of the definitions this rule was loaded with") {
 		t.Errorf("without its library: want the missing-definitions error, got %v", err)
 	}
@@ -469,14 +469,14 @@ func TestNewLibraryRefuses(t *testing.T) {
 func TestNewLibrarySkipsNewerDefinitions(t *testing.T) {
 	ok := definition("ok", "c", `c.name == "x"`, `e.command.parsed_commands.exists(c, ok(c))`)
 	lib, skipped, err := NewLibrary([]DefinitionFile{
-		{Name: "c.catalog.yaml", Data: []byte("spec: threat-rules/v1.9\ncatalog: later\nversion: 1\nshape: unknown to this engine\n")},
+		{Name: "c.catalog.yaml", Data: []byte("spec: threat-rules/v2.9\ncatalog: later\nversion: 1\nshape: unknown to this engine\n")},
 		{Name: "p.predicates.yaml", Data: []byte(definitions(ok))},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(skipped) != 1 || skipped[0].Path != "c.catalog.yaml" || skipped[0].Err.Required != "threat-rules/v1.9" {
-		t.Errorf("skipped = %v, want the catalog that needs v1.9", skipped)
+	if len(skipped) != 1 || skipped[0].Path != "c.catalog.yaml" || skipped[0].Err.Required != "threat-rules/v2.9" {
+		t.Errorf("skipped = %v, want the catalog that needs v2.9", skipped)
 	}
 	if got := lib.Predicates(); len(got) != 1 || got[0].Name != "ok" || got[0].Signature != "ok(c)" || got[0].Source != "p.predicates.yaml" {
 		t.Errorf("Predicates = %+v, want ok alone", got)
@@ -510,7 +510,7 @@ func callingRule(id, specLine, match string) string {
 // needing the spec of the file that defines it, so it is skipped with that file rather than
 // failing the whole pack on an older engine.
 func TestANewerDefinitionsFileSkipsTheRulesThatCallIt(t *testing.T) {
-	later := "spec: threat-rules/v1.9\nlibrary: later\nversion: 1\ndefinitions:\n" +
+	later := "spec: threat-rules/v2.9\nlibrary: later\nversion: 1\ndefinitions:\n" +
 		"  - name: later_name\n    params: [c]\n    description: d\n    body: c.name == \"x\"\n    weight: 3\n" +
 		"    tests: [{name: t, match: 'e.command.parsed_commands.exists(c, later_name(c))', verdict: no_match, events: [{event: {action: command.executed}}]}]\n"
 	dir := writePack(t, map[string]string{
@@ -534,10 +534,10 @@ func TestANewerDefinitionsFileSkipsTheRulesThatCallIt(t *testing.T) {
 	for _, s := range skipped {
 		got = append(got, filepath.Base(s.Path)+" "+s.Err.Required)
 	}
-	if want := "later.predicates.yaml threat-rules/v1.9, calls-later.rule.yaml threat-rules/v1.9, calls-through.rule.yaml threat-rules/v1.9"; strings.Join(got, ", ") != want {
+	if want := "later.predicates.yaml threat-rules/v2.9, calls-later.rule.yaml threat-rules/v2.9, calls-through.rule.yaml threat-rules/v2.9"; strings.Join(got, ", ") != want {
 		t.Errorf("skipped %q, want %q", strings.Join(got, ", "), want)
 	}
-	if !strings.Contains(filepath.ToSlash(skipped[0].String()), "concepts/later.predicates.yaml: the definitions (library later) require threat-rules/v1.9") {
+	if !strings.Contains(filepath.ToSlash(skipped[0].String()), "concepts/later.predicates.yaml: the definitions (library later) require threat-rules/v2.9") {
 		t.Errorf("the skipped definitions are not told as definitions: %s", skipped[0])
 	}
 	for _, s := range skipped[1:] {

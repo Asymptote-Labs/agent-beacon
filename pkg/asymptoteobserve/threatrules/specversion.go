@@ -8,15 +8,15 @@ import (
 
 // SupportedSpec is the newest Threat Rules spec version this engine implements. It must
 // equal spec/threat-rules/VERSION (a test pins the two together).
-const SupportedSpec = "threat-rules/v1.3"
+const SupportedSpec = "threat-rules/v2.0"
 
 // The versions that added a rule feature. A field an event gained carries its version in a spec
 // tag instead (specFields).
 var (
 	// specV1_1 is the version that added correlation.order.
 	specV1_1 = specVersion{major: 1, minor: 1}
-	// specV1_3 is the version that added predicates.
-	specV1_3 = specVersion{major: 1, minor: 3}
+	// specV2_0 is the version that added predicates.
+	specV2_0 = specVersion{major: 2, minor: 0}
 )
 
 // specPattern is the grammar of a spec version: threat-rules/v<major>[.<minor>].
@@ -32,7 +32,7 @@ func (v specVersion) newerThan(o specVersion) bool {
 	return v.minor > o.minor
 }
 
-// String is the version as a spec field writes it: threat-rules/v1.3.
+// String is the version as a spec field writes it: threat-rules/v2.0.
 func (v specVersion) String() string {
 	return fmt.Sprintf("threat-rules/v%d.%d", v.major, v.minor)
 }

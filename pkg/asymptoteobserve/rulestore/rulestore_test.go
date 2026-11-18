@@ -323,7 +323,7 @@ func srcOf(l []LoadedRule) []Source {
 // version might add, which a strict decode alone would report as unknown.
 const futureRule = `
 id: future-rule
-spec: threat-rules/v1.9
+spec: threat-rules/v2.9
 version: 1
 title: T
 severity: low
