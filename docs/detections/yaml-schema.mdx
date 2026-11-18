@@ -7,7 +7,7 @@ description: "Human-readable reference for Beacon threat-rule YAML files"
 
 Beacon detection rules are YAML documents ending in `.rule.yaml`. Each rule describes one security condition over Beacon endpoint events and includes enough metadata and tests for the rule to be validated before it runs.
 
-The structural schema is the `threat-rules/v1.2` JSON Schema in the Agent Beacon repository. The runtime engine also compiles CEL expressions and checks rule fixtures, because those checks cannot be fully represented by JSON Schema alone.
+The structural schema is the `threat-rules/v1.3` JSON Schema in the Agent Beacon repository. The runtime engine also compiles CEL expressions and checks rule fixtures, because those checks cannot be fully represented by JSON Schema alone.
 
 ## Minimal rule
 
@@ -45,7 +45,7 @@ tests:
 | `status` | Yes | One of `experimental`, `stable`, or `deprecated`. |
 | `posture` | Yes | `detect` for observe-only rules or `enforce-capable` for rules designed to support enforcement. |
 | `taxonomy` | No | External references such as OWASP, MITRE ATLAS, or CVEs. |
-| `spec` | No | Minimum spec version the rule needs, such as `threat-rules/v1.1`. Omit it unless the rule uses a newer feature. Required for `correlation.order` (v1.1) and `e.command.parsed_commands` (v1.2). |
+| `spec` | No | Minimum spec version the rule needs, such as `threat-rules/v1.1`. Omit it unless the rule uses a newer feature. Required for `correlation.order` (v1.1), `e.command.parsed_commands` (v1.2) and its `file_reads` and `script_sends` (v1.3). |
 | `match` | One of `match` or `correlation` | CEL boolean expression for a single event. |
 | `correlation` | One of `match` or `correlation` | Ordered multi-event sequence definition. |
 | `emit.reason` | Yes | Human-readable finding reason. |
@@ -142,7 +142,9 @@ CEL expressions use `e.<field>` paths that match the Beacon event schema. Common
 | --- | --- |
 | `e.event.action` | Match the normalized event action. |
 | `e.command.command` | Match shell or process command text. |
-| `e.command.parsed_commands` | Match the commands a command line runs rather than its text, so a pattern inside a quoted string or a here-document does not count: `e.command.parsed_commands.exists(c, c.name == "rm" && c.argv.exists(a, a == "/"))`. Each entry has `name`, `argv`, `argv_raw`, `env`, `file_effects`, `pipeline`, `stage` and `nested`. Derived by the engine from `command.command` read as bash; empty when it does not parse, so keep a `command.command` fallback. Requires `spec: threat-rules/v1.2`. |
+| `e.command.parsed_commands` | Match the commands a command line runs rather than its text, so a pattern inside a quoted string or a here-document does not count: `e.command.parsed_commands.exists(c, c.name == "rm" && c.argv.exists(a, a == "/"))`. Each entry has `name`, `argv`, `argv_raw`, `env`, `file_effects`, `file_reads`, `script_sends`, `pipeline`, `stage` and `nested`. `name` is the command behind `sudo`, `env`, `exec`, `nohup`, `time` and, on a v1.3 engine, `timeout`, `nice`, `ionice`, `stdbuf`, `doas`, `torsocks` and `proxychains`. The script a shell runs with `-c` is read too, and on a v1.3 engine so is the here-document a shell reads its script from (`bash <<'EOF'`). Derived by the engine from `command.command` read as bash; empty when it does not parse, so keep a `command.command` fallback. Requires `spec: threat-rules/v1.2`. |
+| `e.command.parsed_commands[].file_reads` | Match the files whose content a command takes in, each `{path, via}`: `e.command.parsed_commands.exists(c, c.file_reads.exists(f, f.path.endsWith(".aws/credentials")))`. `via` is `direct` for a file the command opens (what `cat`, `head` or `base64` prints, what `grep`, `rg` or `jq` searches, the sources of `cp`, `scp` and `rsync`, what `tar` and `zip` archive, what `curl`, `wget`, HTTPie, `gh gist create` and `socat` send, what an inline `python -c` or `node -e` script opens), `stdin` for one that reaches its standard input (`< file`, or the pipeline stage before it read it), and `argument` for one a substitution or a variable writes into its words (`curl -d "$(cat .env)"`). The data is followed down pipelines, out of substitutions, through variables and through files written earlier in the command line, so `cp .env /tmp/x; curl -T /tmp/x …` has curl taking in `.env`. A path is as written without its quotes, so `~/.aws/credentials` and `$HOME/.aws/credentials` both end that way. A search pattern, an archive exclusion, an identity file, a request header and the file being written are not reads. Requires `spec: threat-rules/v1.3`. |
+| `e.command.parsed_commands[].script_sends` | Match the files an inline `python`, `node`, `bun`, `deno`, `ruby` or `php` script opens inside a call that sends them over the network, such as `requests.post(url, data=open(".env").read())` or `fetch(url, {body: fs.readFileSync(".env")})`: `e.command.parsed_commands.exists(c, c.script_sends.exists(p, p.endsWith(".env")))`. Each is also in `file_reads`. A file the script reads into a variable and sends later is only in `file_reads`, and the list is empty for commands that are not interpreters: whether `curl` or `nc` sends a file is for the rule to say. Requires `spec: threat-rules/v1.3`. |
 | `e.file.path` | Match file paths. |
 | `e.prompt.text` | Match prompt text when retained. |
 | `e.gen_ai.tool.call.result_text` | Match what a file read, web fetch, or MCP tool returned, when retained. Derived by the engine, redacted, capped at 4 KB, and empty for other actions. |

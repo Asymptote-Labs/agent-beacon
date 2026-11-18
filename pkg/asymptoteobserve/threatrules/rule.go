@@ -234,8 +234,17 @@ func (r *Rule) validateExpression(expr string) error {
 	if err != nil {
 		return err
 	}
-	// Already known to be parseable and supported (Validate checked it first).
-	if v, _ := parseSpec(r.Spec); specV1_2.newerThan(v) && selectsField(ast, "parsed_commands") {
+	// Already known to be parseable and supported (Validate checked it first). The newest field
+	// is checked first, so the error names the version the rule needs.
+	v, _ := parseSpec(r.Spec)
+	if specV1_3.newerThan(v) {
+		for _, field := range v1_3Fields {
+			if selectsField(ast, field) {
+				return fmt.Errorf("e.%s[].%s requires spec: threat-rules/v1.3 or later (engines before v1.3 reject the field)", ParsedCommandsPath, field)
+			}
+		}
+	}
+	if specV1_2.newerThan(v) && selectsField(ast, "parsed_commands") {
 		return fmt.Errorf("e.%s requires spec: threat-rules/v1.2 or later (engines before v1.2 reject the field)", ParsedCommandsPath)
 	}
 	return nil

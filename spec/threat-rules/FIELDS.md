@@ -184,13 +184,21 @@ These are computed by the engine from the event just before evaluation. They are
 never written to or read from the log, so a fixture sets the source field, not these.
 
 - `e.command.parsed_commands`: `command.command` read as a bash command line (spec v1.2): one
-  entry per command it runs, each with `name` (base name after sudo/env/exec/... wrappers,
-  "" when unknown), `argv` and `argv_raw` (every word, wrappers included: as passed, ""
-  when it depends on an expansion, glob or `~`; and as written), `env` (NAME=value prefixes),
-  `file_effects` (`{path, op}`), `pipeline`, `stage` (0-based) and `nested` (inside `$(...)`,
-  `<(...)` or a shell's `-c` script, which is read too). Here-document bodies and other
-  strings are not commands. The first 4096 bytes are read; a cut capture yields the
-  commands before the cut, and one that does not parse yields an empty list.
+  entry per command it runs, each with `name` (base name after sudo/env/exec/timeout/...
+  wrappers, "" when unknown), `argv` and `argv_raw` (every word, wrappers included: as
+  passed, "" when it depends on an expansion, glob or `~`; and as written), `env`
+  (NAME=value prefixes),
+  `file_effects` (`{path, op}`), `file_reads` (spec v1.3, `{path, via}`: the files whose
+  content it takes in, each as written without its quotes, so `~/.aws/credentials` and
+  `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one
+  that reaches its standard input by a redirection or a pipe, `argument` for one a
+  substitution or a variable writes into its words), `script_sends` (spec v1.3: the paths
+  an inline python, node, ruby or php script opens inside a call that sends them over the
+  network), `pipeline`, `stage` (0-based) and `nested` (inside `$(...)`, `<(...)` or a
+  shell's script: its `-c` text, or the here-document it reads, which are read too).
+  Other here-document bodies and strings are not commands.
+  The first 4096 bytes are read; a cut capture yields the commands before the cut, and
+  one that does not parse yields an empty list.
 - `e.gen_ai.system_instructions_text`: `gen_ai.system_instructions` as text: the `content` of each
   `text` part, one per line (a bare string as is), when content was retained. These are
   runtime-provided instructions such as a skill index, never operator prompt text.
