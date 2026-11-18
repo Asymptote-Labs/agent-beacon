@@ -624,109 +624,286 @@ func isWholeSubstitution(value string) bool {
 // keptSubstitution reports whether a double-quoted value is a whole substitution
 // (isWholeSubstitution) that is kept: its text is the command, and the secret is what it prints.
 // Replacing it hid the command that read the credential and no secret of the line. One whose
-// command line holds the secret it prints (substitutionPrintsLiteral) is replaced.
+// command line may hold a secret written out (substitutionHoldsLiteral) is replaced whole, as
+// every such value was before.
 func keptSubstitution(value string) bool {
-	return isWholeSubstitution(value) && !substitutionPrintsLiteral(value[2:len(value)-1])
+	return isWholeSubstitution(value) && !substitutionHoldsLiteral(value[2:len(value)-1])
 }
 
-// substitutionPrintsLiteral reports whether the command line inside a substitution writes out a
-// literal it was given, which is then the secret its output is: a command that prints its words
-// (echo, printf, print) given one that is not an option or a variable (`$(echo hunter2)`,
-// `$(printf %s "$X")`), or a here-string (`$(base64 -d <<< aGk=)`). Any other command's words name
-// what it reads (a path, a service, a key's ID), and a secret-named flag's value is replaced by the
-// flag's own rule.
-func substitutionPrintsLiteral(inner string) bool {
-	command, prints := true, false
-	for _, word := range substitutionWords(inner) {
+// substitutionHoldsLiteral reports whether the command line inside a substitution may hold a
+// secret written out, which redaction would then leave in the log. It fails closed: the command
+// line holds none only when every word of it is one that cannot be a secret (safeSubstitutionWord)
+// or the value of a secret-named flag or of curl's -u, which their own rules replace, and no
+// command prints its words (echo, printf, print, also behind a wrapper: `env echo x`) except
+// options and variables. A here-string, a process substitution, a backtick, an ANSI-C string
+// ($'..') and arithmetic hold text this does not read, and so does any word quoted around
+// spaces or punctuation (`sh -c 'echo x'`, `-s 'My (old) Mac'`). `$(gh auth token)`,
+// `$(cat ~/.config/gh/token)`, `$(op read op://vault/item/password)` and
+// `$(security find-generic-password -s ci-deploy -w)` hold none; `$(echo hunter2)`,
+// `$(openssl enc -k hunter2 -in f)` and `$(gpg --export ABCDEF12)` may.
+func substitutionHoldsLiteral(inner string) bool {
+	for _, opaque := range [...]string{"<<<", "<(", ">(", "`", "$'", "$(("} {
+		if strings.Contains(inner, opaque) {
+			return true
+		}
+	}
+	words, ok := substitutionWords(inner)
+	if !ok {
+		return true
+	}
+	command, prints, covered := true, false, false
+	name := ""
+	for _, word := range words {
 		switch {
 		case word == "|" || word == ";" || word == "&":
-			command, prints = true, false
-		case word == "<<<":
-			return true
-		case command && strings.Contains(word, "="):
-			// An assignment before the command.
-		case command:
-			command = false
-			switch word[strings.LastIndexByte(word, '/')+1:] {
-			case "echo", "printf", "print":
-				prints = true
+			command, prints, covered = true, false, false
+		case covered:
+			covered = false // the value of a secret-named flag, which the flag's rule replaces
+		case isAssignmentWord(word):
+			// NAME=value, before the command or after env: a secret-named one's value is replaced
+			// by its rule.
+			label, value, _ := strings.Cut(word, "=")
+			if !labelEndsAt(label+"=") && !safeSubstitutionWord(value) {
+				return true
 			}
-		case prints && !strings.HasPrefix(word, "-") && !isVariableWord(word):
-			return true
+		default:
+			text, plain := unquotedWord(word)
+			if command {
+				if plain && strings.ContainsAny(text[:min(len(text), 3)], "<>") && safeSubstitutionText(text) {
+					continue // a redirection before the command, or alone: $(<~/.netrc)
+				}
+				command = false
+				if !plain || !isCommandName(text) {
+					return true
+				}
+				name = text[strings.LastIndexByte(text, '/')+1:]
+				prints = isPrinter(name)
+				continue
+			}
+			switch {
+			case plain && isPrinter(text):
+				prints = true // a wrapper's command: env echo, sudo printf, xargs echo
+			case prints:
+				if !(plain && isOptionName(text)) && !isLoneVariable(word) {
+					return true
+				}
+			case plain && (IsSecretFlag(text) || name == "curl" && (text == "-u" || text == "--user")):
+				covered = true
+			case plain && strings.HasPrefix(text, "-") && strings.Contains(text, "="):
+				option, value, _ := strings.Cut(text, "=")
+				if !IsSecretFlag(option) && (!isOptionName(option) || !safeSubstitutionText(value)) {
+					return true
+				}
+			case !safeSubstitutionWord(word):
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// isVariableWord reports whether a word is one variable's value and nothing else: $NAME, ${NAME}.
-func isVariableWord(word string) bool {
-	name, ok := strings.CutPrefix(word, "$")
-	if !ok {
-		return false
+// safeSubstitutionWord reports whether a word of a substitution's command line, as written, can
+// be no secret: a lone variable ($NAME, "${NAME}"), a substitution whose own command line holds
+// none, or a word that is all plain text and safeSubstitutionText.
+func safeSubstitutionWord(word string) bool {
+	if isLoneVariable(word) {
+		return true
 	}
-	if braced, ok := strings.CutPrefix(name, "{"); ok {
-		name, ok = strings.CutSuffix(braced, "}")
-		if !ok {
-			return false
+	if inner, ok := strings.CutPrefix(strings.Trim(word, `"`), "$("); ok && strings.HasSuffix(inner, ")") && strings.Count(word, `"`)%2 == 0 {
+		return !substitutionHoldsLiteral(inner[:len(inner)-1])
+	}
+	text, plain := unquotedWord(word)
+	return plain && safeSubstitutionText(text)
+}
+
+// safeSubstitutionText reports whether a word's text can be no secret: an option (-w, -rf,
+// --field), a redirection to or from a path or a descriptor (2>/dev/null, <~/.netrc, 2>&1), a
+// path (with a / in it, or starting with ~ or .), a number, or a plain word of lowercase letters
+// (auth, token, find-generic-password). A word with a capital or a digit in it besides those
+// (hunter2, ABCDEF12, GitHub) may be the secret.
+func safeSubstitutionText(text string) bool {
+	if rest := strings.TrimLeft(text, "0123456789"); rest != text || strings.HasPrefix(rest, "<") || strings.HasPrefix(rest, ">") || strings.HasPrefix(rest, "&>") {
+		if rest == "" {
+			return true // a number
 		}
-	}
-	if name == "" {
+		target := strings.TrimLeft(rest, "<>&")
+		if target != rest {
+			return target == "" || strings.Trim(target, "0123456789-") == "" || isSubstitutionPath(target)
+		}
 		return false
 	}
-	for i := 0; i < len(name); i++ {
-		if c := name[i]; !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9') {
+	switch {
+	case text == "":
+		return true
+	case strings.HasPrefix(text, "-"):
+		return isOptionName(text)
+	case isSubstitutionPath(text):
+		return true
+	}
+	for i := 0; i < len(text); i++ {
+		if c := text[i]; !(c >= 'a' && c <= 'z' || c == '-' || c == '_' || c == '.') {
 			return false
 		}
 	}
 	return true
 }
 
-// substitutionWords splits a substitution's command line into its words, without their quotes,
-// with |, ; and & as words of their own that start the next command.
-func substitutionWords(inner string) []string {
-	var words []string
-	var b strings.Builder
-	inWord := false
-	flush := func() {
-		if inWord {
-			words = append(words, b.String())
-			b.Reset()
-			inWord = false
+// isOptionName reports whether a word is an option's name and no more: a dash, then letters, and a
+// long option's digits and dashes (-w, -rf, --output, --sha256).
+func isOptionName(word string) bool {
+	name := strings.TrimLeft(word, "-")
+	if name == "" || name == word {
+		return false
+	}
+	long := strings.HasPrefix(word, "--")
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if !(c|0x20 >= 'a' && c|0x20 <= 'z' || long && (c >= '0' && c <= '9' || c == '-' || c == '_')) {
+			return false
 		}
 	}
+	return true
+}
+
+// isSubstitutionPath reports whether a word is a path: one with a / in it, or starting with ~ or
+// ., of the characters paths and URLs are written with, a glob's * and ? among them.
+func isSubstitutionPath(word string) bool {
+	if !strings.ContainsRune(word, '/') && !strings.HasPrefix(word, "~") && !strings.HasPrefix(word, ".") {
+		return false
+	}
+	for i := 0; i < len(word); i++ {
+		if c := word[i]; !(c|0x20 >= 'a' && c|0x20 <= 'z' || c >= '0' && c <= '9' || strings.IndexByte("_./~*?:@+%-", c) >= 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// isCommandName reports whether a word can name a command: a plain name or a path.
+func isCommandName(word string) bool {
+	if word == "" {
+		return false
+	}
+	for i := 0; i < len(word); i++ {
+		if c := word[i]; !(c|0x20 >= 'a' && c|0x20 <= 'z' || c >= '0' && c <= '9' || strings.IndexByte("_./~+-", c) >= 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// isPrinter reports whether a command prints the words it is given.
+func isPrinter(name string) bool {
+	return name == "echo" || name == "printf" || name == "print"
+}
+
+// isAssignmentWord reports whether a word, as written, assigns a variable: NAME=..
+func isAssignmentWord(word string) bool {
+	name, _, ok := strings.Cut(word, "=")
+	if !ok || name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if c := name[i]; !(c == '_' || c|0x20 >= 'a' && c|0x20 <= 'z' || i > 0 && c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// isLoneVariable reports whether a word, as written, is one variable's value and nothing else:
+// $NAME, ${NAME}, "$NAME", "${NAME}". `$USER'x'` and `$'x'` are not.
+func isLoneVariable(word string) bool {
+	if inner, ok := strings.CutPrefix(word, `"`); ok {
+		if word, ok = strings.CutSuffix(inner, `"`); !ok {
+			return false
+		}
+	}
+	name, ok := strings.CutPrefix(word, "$")
+	if !ok {
+		return false
+	}
+	if braced, ok := strings.CutPrefix(name, "{"); ok {
+		if name, ok = strings.CutSuffix(braced, "}"); !ok {
+			return false
+		}
+	}
+	return name != "" && isAssignmentWord(name+"=")
+}
+
+// unquotedWord returns a word's text when it is plain: written without quotes, or as one quoted
+// piece, and with no expansion or escape in it. plain is false otherwise.
+func unquotedWord(word string) (text string, plain bool) {
+	if len(word) >= 2 && (word[0] == '\'' || word[0] == '"') && word[len(word)-1] == word[0] {
+		word = word[1 : len(word)-1]
+	}
+	if strings.ContainsAny(word, "'\"$\\") {
+		return "", false
+	}
+	return word, true
+}
+
+// substitutionWords splits a substitution's command line into its words as written, quotes
+// and all, with |, ; and & as words of their own that start the next command. A substitution
+// inside a word stays in it. ok is false when a quote or a parenthesis does not close.
+func substitutionWords(inner string) (words []string, ok bool) {
+	start, depth := -1, 0
 	for i := 0; i < len(inner); i++ {
-		switch c := inner[i]; {
+		c := inner[i]
+		switch {
 		case c == '\'' || c == '"':
 			end := strings.IndexByte(inner[i+1:], c)
 			if end < 0 {
-				end = len(inner) - i - 1
+				return nil, false
 			}
-			b.WriteString(inner[i+1 : i+1+end])
-			inWord = true
+			if start < 0 {
+				start = i
+			}
 			i += end + 1
 		case c == '\\' && i+1 < len(inner):
-			b.WriteByte(inner[i+1])
-			inWord = true
-			i++
-		case c == ' ' || c == '\t' || c == '\n':
-			flush()
-		case c == '|' || c == ';' || c == '&':
-			flush()
-			words = append(words, string(c))
-			for i+1 < len(inner) && inner[i+1] == c {
-				i++ // || and &&
+			if start < 0 {
+				start = i
 			}
-		case c == '<' && strings.HasPrefix(inner[i:], "<<<"):
-			flush()
-			words = append(words, "<<<")
-			i += 2
+			i++
+		case c == '(':
+			depth++
+			if start < 0 {
+				start = i
+			}
+		case c == ')':
+			if depth--; depth < 0 {
+				return nil, false
+			}
+		case depth == 0 && (c == ' ' || c == '\t' || c == '\n' || c == '|' || c == ';' || c == '&'):
+			if start >= 0 && !(c == '&' && i > start && (inner[i-1] == '>' || inner[i-1] == '<')) {
+				words = append(words, inner[start:i])
+				start = -1
+			} else if start >= 0 {
+				continue // the & of 2>&1 or &>
+			}
+			if c == '|' || c == ';' || c == '&' {
+				if c == '&' && i+1 < len(inner) && inner[i+1] == '>' {
+					start = i // &> starts a redirection
+					continue
+				}
+				words = append(words, string(c))
+				for i+1 < len(inner) && inner[i+1] == c {
+					i++ // || and &&
+				}
+			}
 		default:
-			b.WriteByte(c)
-			inWord = true
+			if start < 0 {
+				start = i
+			}
 		}
 	}
-	flush()
-	return words
+	if depth != 0 {
+		return nil, false
+	}
+	if start >= 0 {
+		words = append(words, inner[start:])
+	}
+	return words, true
 }
 
 // isAuthSchemeOrSubstitution is what an unquoted labeled value keeps: isAuthScheme and
