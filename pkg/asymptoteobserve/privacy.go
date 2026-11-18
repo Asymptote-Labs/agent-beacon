@@ -89,11 +89,11 @@ func quotedRules(kind quotedKind, keep func(string) bool) []redactionRule {
 			return ok && strings.HasPrefix(rest, open)
 		}
 		// In double quotes the shell still runs a command substitution, so a value that is one
-		// holds the command and not the secret (isWholeSubstitution). In single quotes it is
-		// text, and a backtick-quoted value is as often a secret in prose as a command.
+		// holds the command and not the secret (keptSubstitution). In single quotes it is text,
+		// and a backtick-quoted value is as often a secret in prose as a command.
 		keeps := keep
 		if strings.HasSuffix(quoted[0], `"`) {
-			keeps = func(value string) bool { return keep != nil && keep(value) || isWholeSubstitution(value) }
+			keeps = func(value string) bool { return keep != nil && keep(value) || keptSubstitution(value) }
 		}
 		rules = append(rules, redactionRule{
 			expr: `(?i)(` + prefix + quoted[0] + `)(?P<value>` + quoted[1] + `)`, replacement: "${1}" + redactedValue,
@@ -587,13 +587,10 @@ func isSubstitutionOpening(value string) bool {
 }
 
 // isWholeSubstitution reports whether a double-quoted value is one command substitution and
-// nothing else, opening as isSubstitutionOpening says: `$(gh auth token)`,
-// `$(security find-generic-password -s 'GitHub' -w)`. As there, the text is the command and the
-// secret is what it prints. Replacing it hid the command that read the credential and no secret
-// of the line; what the command is given is redacted by the rules for it (a labeled argument, a
-// secret-named flag, curl's -u), as it is in a command line that assigns nothing. The
-// parenthesis `$(` opens must be the one that ends the value, so text beside the substitution
-// (`$(a)hunter2$(b)`) is replaced as before; a parenthesis inside single quotes is not counted.
+// nothing else, opening as isSubstitutionOpening says: `$(gh auth token)`, `$(cat
+// ~/.config/gh/token)`. The parenthesis `$(` opens must be the one that ends the value, so text
+// beside the substitution (`$(a)hunter2$(b)`) is not; a parenthesis inside single quotes is not
+// counted.
 func isWholeSubstitution(value string) bool {
 	if !strings.HasPrefix(value, "$(") || !strings.HasSuffix(value, ")") {
 		return false
@@ -622,6 +619,114 @@ func isWholeSubstitution(value string) bool {
 		}
 	}
 	return depth == 0 && !quoted
+}
+
+// keptSubstitution reports whether a double-quoted value is a whole substitution
+// (isWholeSubstitution) that is kept: its text is the command, and the secret is what it prints.
+// Replacing it hid the command that read the credential and no secret of the line. One whose
+// command line holds the secret it prints (substitutionPrintsLiteral) is replaced.
+func keptSubstitution(value string) bool {
+	return isWholeSubstitution(value) && !substitutionPrintsLiteral(value[2:len(value)-1])
+}
+
+// substitutionPrintsLiteral reports whether the command line inside a substitution writes out a
+// literal it was given, which is then the secret its output is: a command that prints its words
+// (echo, printf, print) given one that is not an option or a variable (`$(echo hunter2)`,
+// `$(printf %s "$X")`), or a here-string (`$(base64 -d <<< aGk=)`). Any other command's words name
+// what it reads (a path, a service, a key's ID), and a secret-named flag's value is replaced by the
+// flag's own rule.
+func substitutionPrintsLiteral(inner string) bool {
+	command, prints := true, false
+	for _, word := range substitutionWords(inner) {
+		switch {
+		case word == "|" || word == ";" || word == "&":
+			command, prints = true, false
+		case word == "<<<":
+			return true
+		case command && strings.Contains(word, "="):
+			// An assignment before the command.
+		case command:
+			command = false
+			switch word[strings.LastIndexByte(word, '/')+1:] {
+			case "echo", "printf", "print":
+				prints = true
+			}
+		case prints && !strings.HasPrefix(word, "-") && !isVariableWord(word):
+			return true
+		}
+	}
+	return false
+}
+
+// isVariableWord reports whether a word is one variable's value and nothing else: $NAME, ${NAME}.
+func isVariableWord(word string) bool {
+	name, ok := strings.CutPrefix(word, "$")
+	if !ok {
+		return false
+	}
+	if braced, ok := strings.CutPrefix(name, "{"); ok {
+		name, ok = strings.CutSuffix(braced, "}")
+		if !ok {
+			return false
+		}
+	}
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if c := name[i]; !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// substitutionWords splits a substitution's command line into its words, without their quotes,
+// with |, ; and & as words of their own that start the next command.
+func substitutionWords(inner string) []string {
+	var words []string
+	var b strings.Builder
+	inWord := false
+	flush := func() {
+		if inWord {
+			words = append(words, b.String())
+			b.Reset()
+			inWord = false
+		}
+	}
+	for i := 0; i < len(inner); i++ {
+		switch c := inner[i]; {
+		case c == '\'' || c == '"':
+			end := strings.IndexByte(inner[i+1:], c)
+			if end < 0 {
+				end = len(inner) - i - 1
+			}
+			b.WriteString(inner[i+1 : i+1+end])
+			inWord = true
+			i += end + 1
+		case c == '\\' && i+1 < len(inner):
+			b.WriteByte(inner[i+1])
+			inWord = true
+			i++
+		case c == ' ' || c == '\t' || c == '\n':
+			flush()
+		case c == '|' || c == ';' || c == '&':
+			flush()
+			words = append(words, string(c))
+			for i+1 < len(inner) && inner[i+1] == c {
+				i++ // || and &&
+			}
+		case c == '<' && strings.HasPrefix(inner[i:], "<<<"):
+			flush()
+			words = append(words, "<<<")
+			i += 2
+		default:
+			b.WriteByte(c)
+			inWord = true
+		}
+	}
+	flush()
+	return words
 }
 
 // isAuthSchemeOrSubstitution is what an unquoted labeled value keeps: isAuthScheme and
@@ -1318,9 +1423,9 @@ func keptLabel(t string, end int) bool {
 func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string]struct{}) (_ map[string]struct{}, kept bool) {
 	value := text.value
 	// A substitution, or its opening, is a command and not a value: its copies elsewhere in
-	// the text are other commands, and stay (isSubstitutionOpening, isWholeSubstitution).
+	// the text are other commands, and stay (isSubstitutionOpening, keptSubstitution).
 	add := func(s string) {
-		if len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) && !isSubstitutionOpening(s) && !isWholeSubstitution(s) {
+		if len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) && !isSubstitutionOpening(s) && !keptSubstitution(s) {
 			if assigned == nil {
 				assigned = map[string]struct{}{}
 			}

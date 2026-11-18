@@ -1100,6 +1100,14 @@ func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 		`{"command": "API_KEY=\"$(cat ~/.key)\" ./run"}`:                    `{"command": "API_KEY=\"$(cat ~/.key)\" ./run"}`,
 		`TOKEN="$(curl -u me:hunter2 https://x)"`:                           `TOKEN="$(curl -u me:[REDACTED] https://x)"`,
 		`TOKEN="$(env DB_PASSWORD=hunter2 ./gen)"`:                          `TOKEN="$(env DB_PASSWORD=[REDACTED] ./gen)"`,
+		`AUTH_TOKEN="$(echo -n $CREDENTIALS | base64)"`:                     `AUTH_TOKEN="$(echo -n $CREDENTIALS | base64)"`,
+		`AUTH_TOKEN="$(echo -n ${CI_USER}:s3cret | base64)"`:                `AUTH_TOKEN="[REDACTED]"`,
+		// A command that prints a literal it is given, or a here-string: what it prints is the
+		// literal, which may be the secret, so the substitution is replaced with it.
+		`export DB_PASSWORD="$(echo hunter2hunter2)"`:     `export DB_PASSWORD="[REDACTED]"`,
+		`deploy --password "$(printf %s hunter2hunter2)"`: `deploy --password "[REDACTED]"`,
+		`PASSWORD="$(echo -n admin:s3cret | base64)"`:     `PASSWORD="[REDACTED]"`,
+		`PASSWORD="$(base64 -d <<< aHVudGVyMg==)"`:        `PASSWORD="[REDACTED]"`,
 		// Text beside the substitution, another quote, or no plain command name.
 		`TOKEN="$(DB_PASSWORD=hunter2 ./gen)"`: `TOKEN="[REDACTED]"`,
 		`PASSWORD="$(echo a)hunter2$(echo b)"`: `PASSWORD="[REDACTED]"`,
