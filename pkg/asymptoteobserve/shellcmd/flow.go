@@ -43,15 +43,17 @@ type FileRead struct {
 // What one command read follows the data to the commands that receive it:
 //
 //   - down a pipeline, from each stage to the next, unless the stage sends its output somewhere
-//     else (`cat .env > out | nc ..`), the next stage takes its input from somewhere else
-//     (`cat .env | nc .. < other`), or the stage only reports a count or a digest (wc, sha256sum);
+//     else (`cat .env > out | nc ..`, also from a compound: `{ cat .env; } > out | nc ..`), the
+//     next stage takes its input from somewhere else (`cat .env | nc .. < other`), or the stage
+//     only reports a count or a digest (wc, sha256sum);
 //   - out of a command substitution or an input process substitution into the command whose word
 //     holds it (`curl -d "$(cat .env)"`, `diff <(cat a) b`), or onto its standard input when the
 //     word is a here-string or the target of `<`;
 //   - through a variable assigned from a substitution, to the commands that use it later in the
 //     line (`T=$(cat .env); curl -d "$T" ..`);
 //   - through a file written earlier in the line, to the commands that read it later
-//     (`cp .env /tmp/x; curl -T /tmp/x ..`, `cat .env > /tmp/x`, `mv`, `tee`).
+//     (`cp .env /tmp/x; curl -T /tmp/x ..`, `cat .env > /tmp/x`, `{ cat .env; } > /tmp/x`, `mv`,
+//     `tee`).
 //
 // curl, wget and httpie take a substitution in as data only where they send it as the request
 // body; a header, a URL or a credential option is not data. Any other command takes in every
@@ -168,7 +170,60 @@ func (f *flow) command(i int) {
 			f.assign(c.Env[k].Name, value)
 		}
 	}
-	f.writes(c, name, taken)
+	f.writes(c, name, f.withInner(i, taken))
+}
+
+// withInner adds to what compound statement i took in what the statements inside it write to
+// their standard output, which its redirections send on: in `{ cat .env; } > /tmp/x`, /tmp/x holds
+// .env. A statement inside is worked out here, where the compound runs, when it has not been.
+func (f *flow) withInner(i int, taken []string) []string {
+	c := &f.commands[i]
+	if len(c.Argv) > 0 || len(c.Redirects) == 0 {
+		return taken
+	}
+	for j := i + 1; j < len(f.commands); j++ {
+		inner := &f.commands[j]
+		if int(inner.outer) != i+1 {
+			continue
+		}
+		written := f.written(j)
+		// A statement of the compound itself writes to it, and so does the last stage of a
+		// pipeline inside it.
+		if inner.Pipeline != c.Pipeline && !f.lastStage(j) {
+			continue
+		}
+		for _, path := range written {
+			if !slices.Contains(taken, path) {
+				taken = append(slices.Clip(taken), path)
+			}
+		}
+	}
+	return taken
+}
+
+// reaches reports whether what command j writes to its standard output reaches command i, the
+// next stage of its pipeline, or a substitution when i is -1: no compound statement that j is
+// inside and i is not sends that output elsewhere.
+func (f *flow) reaches(j, i int) bool {
+	for k := f.commands[j].outer; k != 0; k = f.commands[k-1].outer {
+		if i >= 0 && f.inside(i, int(k)-1) {
+			return true
+		}
+		if f.commands[k-1].outputElsewhere() {
+			return false
+		}
+	}
+	return true
+}
+
+// inside reports whether command i is inside compound statement k.
+func (f *flow) inside(i, k int) bool {
+	for o := f.commands[i].outer; o != 0; o = f.commands[o-1].outer {
+		if int(o)-1 == k {
+			return true
+		}
+	}
+	return false
 }
 
 // read records that command i takes path in, and with it whatever was written into path earlier
@@ -259,7 +314,7 @@ func (f *flow) stdin(i int) {
 		return
 	}
 	for j := range f.commands {
-		if before := &f.commands[j]; before.Pipeline == c.Pipeline && before.Stage == c.Stage-1 {
+		if before := &f.commands[j]; before.Pipeline == c.Pipeline && before.Stage == c.Stage-1 && f.reaches(j, i) {
 			for _, path := range f.written(j) {
 				f.read(i, path, ViaStdin, false)
 			}
@@ -312,7 +367,7 @@ func (f *flow) value(ref wordRef) []string {
 			continue
 		}
 		written := f.written(j)
-		if !f.lastStage(j) {
+		if !f.lastStage(j) || !f.reaches(j, -1) {
 			continue
 		}
 		for _, path := range written {

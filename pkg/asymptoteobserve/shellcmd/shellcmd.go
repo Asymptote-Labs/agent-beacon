@@ -82,10 +82,13 @@ type Command struct {
 	// path no longer names the file it would at the start. The directory itself is not tracked.
 	AfterCD bool
 	// within identifies the command or process substitution the statement is directly inside, or
-	// is 0. refs are what its words take their value from, and the variables that export,
-	// declare, local, readonly or typeset assigned since the statement before it: those are no
-	// statements of their own here. FileReads follows both.
+	// is 0. outer is 1 + the index of the innermost compound statement around it that carries
+	// redirections of its own ({ ..; } > f, (..) > f, if ..; fi > f), or 0: that statement's
+	// redirections apply to this one's output too. refs are what its words take their value from,
+	// and the variables that export, declare, local, readonly or typeset assigned since the
+	// statement before it: those are no statements of their own here. FileReads follows all three.
 	within int32
+	outer  int32
 	refs   []wordRef
 }
 
@@ -166,12 +169,20 @@ type substitution struct {
 	id         int
 }
 
+// redirected is the byte range of a compound statement that carries redirections, and its
+// index in the commands.
+type redirected struct {
+	start, end uint
+	index      int
+}
+
 type parser struct {
 	source     string
 	commands   []Command
 	stages     map[*syntax.Stmt]stage
 	containers map[*syntax.Stmt]bool // statements that only join pipeline stages
 	compounds  []compound            // compound statements that are pipeline stages
+	redirected []redirected          // compound statements with redirections of their own
 	pipelines  int
 	nested     []substitution
 	substIDs   map[syntax.Node]int
@@ -262,6 +273,14 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			}
 		}
 	}
+	// The innermost redirected compound around the statement, unless a substitution inside it is
+	// closer: a substitution's output is not the compound's.
+	var around uint
+	for _, r := range p.redirected {
+		if offset > r.start && offset < r.end && r.start >= around && (!c.Nested || innermost < r.start) {
+			around, c.outer = r.start, int32(r.index+1)
+		}
+	}
 	// The statement carries the declarations that ended before it: not one it is inside.
 	pending, carried := p.declared[:0], 0
 	for _, d := range p.declared {
@@ -290,6 +309,9 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 		}
 	}
 	p.commands = append(p.commands, c)
+	if call == nil && stmt.Cmd != nil && len(stmt.Redirs) > 0 {
+		p.redirected = append(p.redirected, redirected{start: offset, end: stmt.End().Offset(), index: len(p.commands) - 1})
+	}
 	// After a cd, a relative path is relative to somewhere this parser does not track.
 	if words, _ := c.Unwrapped(); len(words) > 0 && words[0].Known {
 		switch words[0].Text {
