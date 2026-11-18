@@ -12,11 +12,15 @@ import (
 type language struct {
 	// eval are the short options whose value is the script (python -c, node -e), values the ones
 	// that take some other value, and module the ones that make the interpreter run something
-	// that is not an inline script (python -m). evalLong are the long forms of eval, and
-	// subcommand the word that takes the script instead (deno eval).
+	// that is not an inline script (python -m). evalLong are the long forms of eval, valuesLong
+	// the long options that take some other value in the next word (node --require x), and
+	// subcommand the word that takes the script instead (deno eval). wordValues is set when a
+	// short option's value is always the next word and never the rest of its cluster: node's -pe
+	// is -p and -e, and its script is the word after.
 	eval, values, module string
-	evalLong             []string
+	evalLong, valuesLong []string
 	subcommand           string
+	wordValues           bool
 	// calls are the functions that open a file for reading, as written before the parenthesis.
 	// A call written as a method (fs.readFileSync) matches by its last name, and a name with a
 	// dot in it (File.read) only in full.
@@ -51,7 +55,8 @@ var (
 		hash:     true,
 	}
 	javascript = language{
-		eval: "ep", values: "r", evalLong: []string{"--eval", "--print"},
+		eval: "ep", values: "r", evalLong: []string{"--eval", "--print"}, wordValues: true,
+		valuesLong: []string{"--require", "--import", "--loader", "--experimental-loader", "--input-type", "--conditions"},
 		calls: []string{
 			"readFileSync", "readFile", "createReadStream", "readTextFileSync", "readTextFile", "Bun.file",
 		},
@@ -124,6 +129,12 @@ func inlineScript(l *language, c *Command, args []Word) string {
 			return stdinScript(c)
 		case strings.HasPrefix(t, "--"):
 			name, value, attached := strings.Cut(t, "=")
+			if slices.Contains(l.valuesLong, name) {
+				if !attached {
+					i++ // the value is the next word
+				}
+				continue
+			}
 			if !slices.Contains(l.evalLong, name) {
 				continue
 			}
@@ -138,10 +149,13 @@ func inlineScript(l *language, c *Command, args []Word) string {
 		for j := 1; j < len(t); j++ {
 			switch {
 			case strings.IndexByte(l.eval, t[j]) >= 0:
-				if j+1 < len(t) {
+				if j+1 < len(t) && !l.wordValues {
 					return t[j+1:]
 				}
 				if i+1 < len(args) {
+					if l.wordValues && isOption(args[i+1]) {
+						break cluster // node -p -e '..': the -e that follows has the script
+					}
 					return args[i+1].Unquoted
 				}
 				return ""

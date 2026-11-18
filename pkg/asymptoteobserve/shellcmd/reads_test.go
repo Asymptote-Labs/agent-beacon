@@ -403,6 +403,12 @@ func TestFileReadsInlineScripts(t *testing.T) {
 		{"cat prog.py | python3 -", []string{"prog.py", "stdin:prog.py"}},
 
 		{`node -e 'console.log(require("fs").readFileSync(".env", "utf8"))'`, []string{".env"}},
+		{`node -pe 'require("fs").readFileSync(".env", "utf8")'`, []string{".env"}},
+		{`node -ep 'require("fs").readFileSync(".env", "utf8")'`, []string{".env"}},
+		{`node -p -e 'require("fs").readFileSync(".env", "utf8")'`, []string{".env"}},
+		{`node --require dotenv/config -e 'console.log(require("fs").readFileSync(".env"))'`, []string{".env"}},
+		{`node --import=tsx --loader ts-node/esm -e 'console.log(require("fs").readFileSync(".env"))'`, []string{".env"}},
+		{`node --require dotenv/config app.js`, nil},
 		{`node -e "fs.promises.readFile('.env').then(console.log)"`, []string{".env"}},
 		{"node -p 'fs.readFileSync(`.env`)'", []string{".env"}},
 		{`node --eval "fs.createReadStream('/home/u/.npmrc').pipe(process.stdout)"`, []string{"/home/u/.npmrc"}},
