@@ -46,6 +46,8 @@ To send the log on to a SIEM, add a forwarder after this guide; see [Log forward
 
 There is no Windows ARM package. Scope the device collection to x64 machines, or add an operating system requirement to the deployment type.
 
+Check the PowerShell execution policy on a pilot machine with `Get-ExecutionPolicy -List`. The MSI installs, upgrades and removes Beacon by running PowerShell scripts that are not signed yet, so it cannot run where Group Policy sets `MachinePolicy` to `AllSigned` or `Restricted`. On those machines the device application fails and nothing is installed, and a machine that already has Beacon keeps running it but cannot upgrade or remove it. Any other `MachinePolicy` value, including `Undefined`, is fine.
+
 ## 1. Prepare the content
 
 Download `BeaconEndpointAgent-<version>-x64.msi` and its `.sha256` from the [releases page](https://github.com/asymptote-labs/agent-beacon/releases) and check it. The package is not code-signed yet, so the checksum is the only integrity check it has:
@@ -216,6 +218,7 @@ The per-user application needs no change for an upgrade. If you change `--harnes
 | What you see | Likely cause |
 | --- | --- |
 | The device application fails with exit code 1603 | Beacon's own install step failed. Its log is `beacon-package-*.log` in `C:\Windows\Temp`, or `C:\Windows\SystemTemp` on newer Windows builds; `C:\Windows\Temp\beacon-msi-install.log` has what Windows Installer did. See [Windows install](/platforms/windows) to find them. |
+| The device application fails, and `Get-ExecutionPolicy -List` shows `AllSigned` or `Restricted` for `MachinePolicy` | Group Policy blocks unsigned PowerShell scripts, which the MSI needs. See [Before you start](#before-you-start). |
 | The device application fails with "No Beacon MSI" | The content folder has only the script. Put the MSI beside it and update the content on the distribution points. |
 | The MSI fails with "A newer version is already installed" | The machine already has a newer Beacon. Deploy the newer application, or uninstall it first to roll back. |
 | `log_access` is not `restricted` | The policy values were not there when the MSI ran, or the release is 1.3.57 or earlier. Check `HKLM\SOFTWARE\Policies\Beacon\Endpoint`, then run `beacon endpoint repair --system --log-access restricted` or redeploy. |
