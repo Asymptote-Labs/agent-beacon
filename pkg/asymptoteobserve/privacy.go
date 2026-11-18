@@ -631,16 +631,26 @@ func keptSubstitution(value string) bool {
 }
 
 // substitutionHoldsLiteral reports whether the command line inside a substitution may hold a
-// secret written out, which redaction would then leave in the log. It fails closed: the command
-// line holds none only when every word of it is one that cannot be a secret (safeSubstitutionWord)
-// or the value of a secret-named flag or of curl's -u, which their own rules replace, and no
-// command prints its words (echo, printf, print, also behind a wrapper: `env echo x`) except
-// options and variables. A here-string, a process substitution, a backtick, an ANSI-C string
-// ($'..') and arithmetic hold text this does not read, and so does any word quoted around
-// spaces or punctuation (`sh -c 'echo x'`, `-s 'My (old) Mac'`). `$(gh auth token)`,
-// `$(cat ~/.config/gh/token)`, `$(op read op://vault/item/password)` and
-// `$(security find-generic-password -s ci-deploy -w)` hold none; `$(echo hunter2)`,
-// `$(openssl enc -k hunter2 -in f)` and `$(gpg --export ABCDEF12)` may.
+// secret written out, which redaction would then leave in the log. It fails closed, and judges a
+// word by where it stands as well as by its shape:
+//   - a plain lowercase word is a subcommand or a name (gh auth token, op read, pass show ci,
+//     security find-generic-password), unless it comes right after an option, where it may be
+//     the option's value (`sshpass -p letmein`, `openssl -k correcthorse`, `-s ci-deploy`):
+//     there, and in an option's `=` value, only a path (safeSubstitutionValue), a lone $VAR or
+//     a safe nested substitution passes;
+//   - an option is a long name (--output) or one to three letters (-w, -rf); a short option
+//     with more glued on (`-pSwordfish`) may hold its value;
+//   - a secret-named flag's value is replaced by the flag's own rule, and curl's -u user:password
+//     by curl's, which keeps the user: the user must be a subcommand-shaped word and a password
+//     must follow (`-u MyApiKey123:` holds the key);
+//   - a command that prints its words (echo, printf, print, also behind a wrapper: `env echo
+//     x`) may be given options and variables only.
+//
+// A here-string, a process substitution, a backtick, an ANSI-C string ($'..') and arithmetic hold
+// text this does not read, and so does a word quoted around spaces or punctuation. `$(gh auth
+// token)`, `$(cat ~/.config/gh/token)`, `$(op read op://vault/item/password)` and `$(<~/.netrc)`
+// hold none; everything else, `$(security .. -s ci-deploy -w)` and `$(vault kv get
+// -field=password ..)` among it, is replaced whole as main always did.
 func substitutionHoldsLiteral(inner string) bool {
 	for _, opaque := range [...]string{"<<<", "<(", ">(", "`", "$'", "$(("} {
 		if strings.Contains(inner, opaque) {
@@ -651,61 +661,76 @@ func substitutionHoldsLiteral(inner string) bool {
 	if !ok {
 		return true
 	}
-	command, prints, covered := true, false, false
+	// value is set right after an option, where the next word may be the option's value.
+	command, value, prints, covered, curlUser := true, false, false, false, false
 	name := ""
 	for _, word := range words {
+		text, plain := unquotedWord(word)
+		afterOption := value
+		value = false
 		switch {
 		case word == "|" || word == ";" || word == "&":
-			command, prints, covered = true, false, false
+			command, prints, covered, curlUser = true, false, false, false
 		case covered:
 			covered = false // the value of a secret-named flag, which the flag's rule replaces
+		case curlUser:
+			// curl's rule replaces the password and keeps the user, which may itself be a key.
+			curlUser = false
+			user, password, ok := strings.Cut(text, ":")
+			if !plain || !ok || password == "" || !isSubcommandWord(user) {
+				return true
+			}
+		case plain && isRedirectionWord(text):
+			if !safeRedirection(text) {
+				return true
+			}
 		case isAssignmentWord(word):
 			// NAME=value, before the command or after env: a secret-named one's value is replaced
 			// by its rule.
 			label, value, _ := strings.Cut(word, "=")
-			if !labelEndsAt(label+"=") && !safeSubstitutionWord(value) {
+			if !labelEndsAt(label+"=") && !safeSubstitutionValue(value) {
 				return true
 			}
-		default:
-			text, plain := unquotedWord(word)
-			if command {
-				if plain && strings.ContainsAny(text[:min(len(text), 3)], "<>") && safeSubstitutionText(text) {
-					continue // a redirection before the command, or alone: $(<~/.netrc)
-				}
-				command = false
-				if !plain || !isCommandName(text) {
-					return true
-				}
-				name = text[strings.LastIndexByte(text, '/')+1:]
-				prints = isPrinter(name)
-				continue
+		case command:
+			command = false
+			if !plain || !isCommandName(text) {
+				return true
 			}
+			name = text[strings.LastIndexByte(text, '/')+1:]
+			prints = isPrinter(name)
+		case plain && isPrinter(text):
+			prints = true // a wrapper's command: env echo, sudo printf, xargs echo
+		case prints:
+			if !(plain && isOptionName(text)) && !isLoneVariable(word) {
+				return true
+			}
+		case plain && (IsSecretFlag(text) || name == "curl" && (text == "-u" || text == "--user")):
+			covered, curlUser = IsSecretFlag(text), !IsSecretFlag(text)
+		case plain && strings.HasPrefix(text, "-"):
+			option, optionValue, hasValue := strings.Cut(text, "=")
 			switch {
-			case plain && isPrinter(text):
-				prints = true // a wrapper's command: env echo, sudo printf, xargs echo
-			case prints:
-				if !(plain && isOptionName(text)) && !isLoneVariable(word) {
+			case hasValue && IsSecretFlag(option):
+			case hasValue:
+				if !isOptionName(option) && !isLongOptionName(option) || !safeSubstitutionValue(optionValue) {
 					return true
 				}
-			case plain && (IsSecretFlag(text) || name == "curl" && (text == "-u" || text == "--user")):
-				covered = true
-			case plain && strings.HasPrefix(text, "-") && strings.Contains(text, "="):
-				option, value, _ := strings.Cut(text, "=")
-				if !IsSecretFlag(option) && (!isOptionName(option) || !safeSubstitutionText(value)) {
-					return true
-				}
-			case !safeSubstitutionWord(word):
+			case !isOptionName(text):
 				return true
+			default:
+				value = true
 			}
+		case !afterOption && plain && isSubcommandWord(text):
+		case !safeSubstitutionValue(word):
+			return true
 		}
 	}
 	return false
 }
 
-// safeSubstitutionWord reports whether a word of a substitution's command line, as written, can
-// be no secret: a lone variable ($NAME, "${NAME}"), a substitution whose own command line holds
-// none, or a word that is all plain text and safeSubstitutionText.
-func safeSubstitutionWord(word string) bool {
+// safeSubstitutionValue reports whether a word that may be an option's value, as written, can be
+// no secret: a lone variable ($NAME, "${NAME}"), a substitution whose own command line holds
+// none, or a path (isSubstitutionPath).
+func safeSubstitutionValue(word string) bool {
 	if isLoneVariable(word) {
 		return true
 	}
@@ -713,63 +738,82 @@ func safeSubstitutionWord(word string) bool {
 		return !substitutionHoldsLiteral(inner[:len(inner)-1])
 	}
 	text, plain := unquotedWord(word)
-	return plain && safeSubstitutionText(text)
+	return plain && isSubstitutionPath(text)
 }
 
-// safeSubstitutionText reports whether a word's text can be no secret: an option (-w, -rf,
-// --field), a redirection to or from a path or a descriptor (2>/dev/null, <~/.netrc, 2>&1), a
-// path (with a / in it, or starting with ~ or .), a number, or a plain word of lowercase letters
-// (auth, token, find-generic-password). A word with a capital or a digit in it besides those
-// (hunter2, ABCDEF12, GitHub) may be the secret.
-func safeSubstitutionText(text string) bool {
-	if rest := strings.TrimLeft(text, "0123456789"); rest != text || strings.HasPrefix(rest, "<") || strings.HasPrefix(rest, ">") || strings.HasPrefix(rest, "&>") {
-		if rest == "" {
-			return true // a number
-		}
-		target := strings.TrimLeft(rest, "<>&")
-		if target != rest {
-			return target == "" || strings.Trim(target, "0123456789-") == "" || isSubstitutionPath(target)
-		}
+// isRedirectionWord reports whether a word is a redirection: an optional descriptor number, then
+// <, > or &>.
+func isRedirectionWord(text string) bool {
+	rest := strings.TrimLeft(text, "0123456789")
+	return strings.HasPrefix(rest, "<") || strings.HasPrefix(rest, ">") || strings.HasPrefix(rest, "&>")
+}
+
+// safeRedirection reports whether a redirection's target can be no secret: a descriptor
+// (2>&1, >&-) or a path.
+func safeRedirection(text string) bool {
+	target := strings.TrimLeft(strings.TrimLeft(text, "0123456789"), "<>&")
+	return target == "" || strings.Trim(target, "0123456789-") == "" || isSubstitutionPath(target)
+}
+
+// isSubcommandWord reports whether a word can be a subcommand, which stands before a command's
+// options: lowercase letters, with - _ and . between them (auth, find-generic-password).
+func isSubcommandWord(word string) bool {
+	if word == "" {
 		return false
 	}
-	switch {
-	case text == "":
-		return true
-	case strings.HasPrefix(text, "-"):
-		return isOptionName(text)
-	case isSubstitutionPath(text):
-		return true
-	}
-	for i := 0; i < len(text); i++ {
-		if c := text[i]; !(c >= 'a' && c <= 'z' || c == '-' || c == '_' || c == '.') {
+	for i := 0; i < len(word); i++ {
+		if c := word[i]; !(c >= 'a' && c <= 'z' || i > 0 && (c == '-' || c == '_' || c == '.')) {
 			return false
 		}
 	}
 	return true
 }
 
-// isOptionName reports whether a word is an option's name and no more: a dash, then letters, and a
-// long option's digits and dashes (-w, -rf, --output, --sha256).
+// isOptionName reports whether a word is an option and no more: a long option's name (--output,
+// --sha256), or a dash and one to three letters (-w, -rf, -xzf). More letters glued to a short
+// option (-pSwordfish) may be its value.
 func isOptionName(word string) bool {
-	name := strings.TrimLeft(word, "-")
-	if name == "" || name == word {
+	if strings.HasPrefix(word, "--") {
+		return isLongOptionName(word)
+	}
+	name, ok := strings.CutPrefix(word, "-")
+	if !ok || name == "" || len(name) > 3 {
 		return false
 	}
-	long := strings.HasPrefix(word, "--")
 	for i := 0; i < len(name); i++ {
-		c := name[i]
-		if !(c|0x20 >= 'a' && c|0x20 <= 'z' || long && (c >= '0' && c <= '9' || c == '-' || c == '_')) {
+		if c := name[i]; !(c|0x20 >= 'a' && c|0x20 <= 'z') {
 			return false
 		}
 	}
 	return true
 }
 
-// isSubstitutionPath reports whether a word is a path: one with a / in it, or starting with ~ or
-// ., of the characters paths and URLs are written with, a glob's * and ? among them.
-func isSubstitutionPath(word string) bool {
-	if !strings.ContainsRune(word, '/') && !strings.HasPrefix(word, "~") && !strings.HasPrefix(word, ".") {
+// isLongOptionName reports whether a word is a long option's name: two dashes, then letters,
+// digits, - and _ (--output, --sha256).
+func isLongOptionName(word string) bool {
+	name, ok := strings.CutPrefix(word, "--")
+	if !ok || name == "" {
 		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if c := name[i]; !(c|0x20 >= 'a' && c|0x20 <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// isSubstitutionPath reports whether a word is a path or a URL: starting with /, ~ or ., or with a
+// scheme (op://, https://), of the characters paths are written with, a glob's * and ? among
+// them; or a relative path of lowercase words (ci/deploy, secret/db). A word that merely has a /
+// in it (an AWS secret key may) is not.
+func isSubstitutionPath(word string) bool {
+	rooted := strings.HasPrefix(word, "/") || strings.HasPrefix(word, "~") || strings.HasPrefix(word, ".")
+	if scheme, _, ok := strings.Cut(word, "://"); ok && isSubcommandWord(scheme) {
+		rooted = true
+	}
+	if !rooted {
+		return strings.ContainsRune(word, '/') && isSubcommandWord(strings.ReplaceAll(word, "/", "-"))
 	}
 	for i := 0; i < len(word); i++ {
 		if c := word[i]; !(c|0x20 >= 'a' && c|0x20 <= 'z' || c >= '0' && c <= '9' || strings.IndexByte("_./~*?:@+%-", c) >= 0) {

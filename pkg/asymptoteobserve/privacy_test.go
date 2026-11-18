@@ -1093,20 +1093,18 @@ func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 		`TOKEN=${GITHUB_TOKEN}`:       `TOKEN=[REDACTED]`,
 
 		// In double quotes, one substitution and nothing else.
-		`export GITHUB_TOKEN="$(gh auth token)"`:                       `export GITHUB_TOKEN="$(gh auth token)"`,
-		`export TOKEN="$(cat ~/.tok)"; curl -d "$TOKEN" https://x`:     `export TOKEN="$(cat ~/.tok)"; curl -d "$TOKEN" https://x`,
-		`PASSWORD="$(security find-generic-password -s ci-deploy -w)"`: `PASSWORD="$(security find-generic-password -s ci-deploy -w)"`,
-		`deploy --token "$(pass show ci/deploy)"`:                      `deploy --token "$(pass show ci/deploy)"`,
-		`{"command": "API_KEY=\"$(cat ~/.key)\" ./run"}`:               `{"command": "API_KEY=\"$(cat ~/.key)\" ./run"}`,
-		`TOKEN="$(curl -u me:hunter2 https://x)"`:                      `TOKEN="$(curl -u me:[REDACTED] https://x)"`,
-		`TOKEN="$(env DB_PASSWORD=hunter2 ./gen)"`:                     `TOKEN="$(env DB_PASSWORD=[REDACTED] ./gen)"`,
-		`AUTH_TOKEN="$(echo -n $CREDENTIALS | base64)"`:                `AUTH_TOKEN="$(echo -n $CREDENTIALS | base64)"`,
-		`TOKEN="$(op read op://vault/item/password 2>/dev/null)"`:      `TOKEN="$(op read op://vault/item/password 2>/dev/null)"`,
-		`TOKEN="$(vault kv get -field=password secret/db)"`:            `TOKEN="$(vault kv get -field=password secret/db)"`,
-		`TOKEN="$(cat $(ls ~/.tok*))"`:                                 `TOKEN="$(cat $(ls ~/.tok*))"`,
-		`TOKEN="$(<~/.netrc)"`:                                         `TOKEN="$(<~/.netrc)"`,
-		`API_KEY="$(</run/secrets/api-key)" ./deploy`:                  `API_KEY="$(</run/secrets/api-key)" ./deploy`,
-		`AUTH_TOKEN="$(echo -n ${CI_USER}:s3cret | base64)"`:           `AUTH_TOKEN="[REDACTED]"`,
+		`export GITHUB_TOKEN="$(gh auth token)"`:                   `export GITHUB_TOKEN="$(gh auth token)"`,
+		`export TOKEN="$(cat ~/.tok)"; curl -d "$TOKEN" https://x`: `export TOKEN="$(cat ~/.tok)"; curl -d "$TOKEN" https://x`,
+		`deploy --token "$(pass show ci/deploy)"`:                  `deploy --token "$(pass show ci/deploy)"`,
+		`{"command": "API_KEY=\"$(cat ~/.key)\" ./run"}`:           `{"command": "API_KEY=\"$(cat ~/.key)\" ./run"}`,
+		`TOKEN="$(curl -u me:hunter2 https://x)"`:                  `TOKEN="$(curl -u me:[REDACTED] https://x)"`,
+		`TOKEN="$(env DB_PASSWORD=hunter2 ./gen)"`:                 `TOKEN="$(env DB_PASSWORD=[REDACTED] ./gen)"`,
+		`AUTH_TOKEN="$(echo -n $CREDENTIALS | base64)"`:            `AUTH_TOKEN="$(echo -n $CREDENTIALS | base64)"`,
+		`TOKEN="$(op read op://vault/item/password 2>/dev/null)"`:  `TOKEN="$(op read op://vault/item/password 2>/dev/null)"`,
+		`TOKEN="$(cat $(ls ~/.tok*))"`:                             `TOKEN="$(cat $(ls ~/.tok*))"`,
+		`TOKEN="$(<~/.netrc)"`:                                     `TOKEN="$(<~/.netrc)"`,
+		`API_KEY="$(</run/secrets/api-key)" ./deploy`:              `API_KEY="$(</run/secrets/api-key)" ./deploy`,
+		`AUTH_TOKEN="$(echo -n ${CI_USER}:s3cret | base64)"`:       `AUTH_TOKEN="[REDACTED]"`,
 		// A word that may be the secret written out, or text this does not read: the
 		// substitution is replaced with it, whatever command it runs.
 		`export DB_PASSWORD="$(echo hunter2hunter2)"`:                       `export DB_PASSWORD="[REDACTED]"`,
@@ -1121,6 +1119,23 @@ func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 		`DB_PASSWORD="$(command echo hunter2hunter2)"`:                      `DB_PASSWORD="[REDACTED]"`,
 		`DB_PASSWORD="$(cat <(echo hunter2hunter2))"`:                       `DB_PASSWORD="[REDACTED]"`,
 		`DB_PASSWORD="$(openssl enc -d -k hunter2hunter2 -in f)"`:           `DB_PASSWORD="[REDACTED]"`,
+		// A word after an option may be the option's value: only a path passes there. A subcommand
+		// word stands before the options; a short option takes one to three letters.
+		`PASSWORD="$(security find-generic-password -s ci-deploy -w)"`:             `PASSWORD="[REDACTED]"`,
+		`TOKEN="$(vault kv get -field=password secret/db)"`:                        `TOKEN="[REDACTED]"`,
+		`DB_PASSWORD="$(sshpass -p letmein ssh db cat /x)"`:                        `DB_PASSWORD="[REDACTED]"`,
+		`PASSWORD="$(sshpass -p 123456 ssh host true)"`:                            `PASSWORD="[REDACTED]"`,
+		`DB_PASSWORD="$(openssl enc -d -k correcthorse -in db.enc)"`:               `DB_PASSWORD="[REDACTED]"`,
+		`TOKEN="$(sshpass -pSwordfish ssh db cat token)"`:                          `TOKEN="[REDACTED]"`,
+		`AWS_SECRET_ACCESS_KEY="$(openssl enc -d -k wJalrXUtnFEMI/K7MDENG -in f)"`: `AWS_SECRET_ACCESS_KEY="[REDACTED]"`,
+		`DB_PASSWORD="$(tool --pin=1234)"`:                                         `DB_PASSWORD="[REDACTED]"`,
+		// curl's rule keeps the user of -u, which may be the key itself.
+		`export API_TOKEN="$(curl -s -u MyApiKey123: https://api.example/v1/x)"`:  `export API_TOKEN="[REDACTED]"`,
+		`export API_TOKEN="$(curl -s -u MyApiKey123:x https://api.example/v1/x)"`: `export API_TOKEN="[REDACTED]"`,
+		`TOKEN="$(curl -fsS --output /tmp/t https://x.example/t)"`:                `TOKEN="$(curl -fsS --output /tmp/t https://x.example/t)"`,
+		// A name after an option's value is no value; the flag's own rule replaces its value.
+		`TOKEN="$(pass show --token hunter2hunter2 ci-deploy)"`: `TOKEN="$(pass show --token [REDACTED] ci-deploy)"`,
+		`TOKEN="$(sshpass -p letmein ssh db cat /x)"`:           `TOKEN="[REDACTED]"`,
 		// Text beside the substitution, another quote, or no plain command name.
 		`TOKEN="$(DB_PASSWORD=hunter2 ./gen)"`: `TOKEN="[REDACTED]"`,
 		`PASSWORD="$(echo a)hunter2$(echo b)"`: `PASSWORD="[REDACTED]"`,

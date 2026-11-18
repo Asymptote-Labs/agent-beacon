@@ -274,6 +274,11 @@ func scriptReads(l *language, script string) (files, sent []string) {
 				vars.statement = nil
 				quiet.on = false
 			}
+			// A credential written as a statement of a function's body (`const h = "Authorization:
+			// " + k;`) ends with it, not with the body.
+			if quiet.on && open.depth == quiet.depth && nest == quiet.nest && statementEnds(l, script, i) {
+				quiet.on = false
+			}
 			i++
 		case c == '(':
 			open.push(nameSends && nameEnd >= 0 && skipSpaces(script, nameEnd) == i)
@@ -365,17 +370,13 @@ func scriptReads(l *language, script string) (files, sent []string) {
 					vars.bindAll(params)
 					i = end + length
 				}
-			case open.depth > 0 && slices.Contains(l.quiet, name):
-				// A call's credentials: not data, up to the next argument (auth=.., auth: ..), or to
-				// the end of the call for an option that says what the argument after it is
-				// (CURLOPT_USERPWD, ..). A shorthand property (auth,) is a name and holds no file
-				// this script opened by its own text.
-				switch {
-				case isAssignment(script, after), after < len(script) && script[after] == ':':
-					quiet = quietArgs{on: true, depth: open.depth, nest: nest}
-				case after < len(script) && script[after] == ',' && strings.HasPrefix(name, "CURLOPT_"):
-					quiet = quietArgs{on: true, rest: true, depth: open.depth, nest: nest}
-				}
+			case open.depth > 0 && slices.Contains(l.quiet, name) && quietName(l, script, name, after):
+				// A call's credentials: not data, up to the next argument (auth=.. where name=value
+				// in a call is an argument, auth: ..), or to the end of the call for an option that
+				// says what the argument after it is (CURLOPT_USERPWD, ..). A shorthand property
+				// (auth,) is a name and holds no file this script opened by its own text, and a
+				// JavaScript `const auth = ..` is a variable like any other.
+				quiet = quietArgs{on: true, rest: strings.HasPrefix(name, "CURLOPT_"), depth: open.depth, nest: nest}
 			case isAssignment(script, after):
 				// name = value. Inside a call's parentheses python means an argument by it.
 				if name[0] != '.' && (!l.keywords || open.depth == 0) {
@@ -402,10 +403,40 @@ func scriptReads(l *language, script string) (files, sent []string) {
 
 // quietArgs is the part of a script in which nothing is data, a credential: from one of the
 // language's quiet names or a credential header's name to the next comma at the same depth of
-// parentheses and of braces and brackets, or, with rest, to the end of the call.
+// parentheses and of braces and brackets, or the end of its statement, or, with rest, to the end
+// of the call.
 type quietArgs struct {
 	on, rest    bool
 	depth, nest int
+}
+
+// quietName reports whether one of the language's quiet names, ending at after's blanks, names
+// a credential argument there: auth=.. where name=value in a call is an argument (python),
+// auth: .. as a key, and a CURLOPT_ option followed by the argument it says the meaning of.
+func quietName(l *language, script, name string, after int) bool {
+	if strings.HasPrefix(name, "CURLOPT_") {
+		return after < len(script) && script[after] == ','
+	}
+	return l.keywords && isAssignment(script, after) ||
+		after < len(script) && script[after] == ':' && !strings.HasPrefix(script[after:], "::")
+}
+
+// statementEnds reports whether the ; or newline at script[i] ends a statement: a ; always, and a
+// newline where the language ends a statement at one (javascript, ruby; python and php not
+// inside brackets) and the line does not go on with an operator or a method on the next one.
+func statementEnds(l *language, script string, i int) bool {
+	if script[i] == ';' {
+		return true
+	}
+	if !l.arrows && !l.blocks {
+		return false
+	}
+	before := strings.TrimRight(script[:i], " \t\r")
+	if before == "" || strings.IndexByte("+-*/%&|,:([{=?.<>!", before[len(before)-1]) >= 0 {
+		return false
+	}
+	next := skipSpaces(script, i+1)
+	return next >= len(script) || script[next] != '.' && script[next] != '?'
 }
 
 // quotedCredentialHeader reports whether a string literal that ended at script[end] names a
