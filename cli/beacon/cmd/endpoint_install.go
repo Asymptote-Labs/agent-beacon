@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -542,6 +543,12 @@ func runEndpointUninstall(cmd *cobra.Command, args []string) error {
 	if err := lifecycle.Uninstall(lifecycle.UninstallOptions{UserMode: endpointUserMode(), LogPath: endpointOpts.logPath, KeepLogs: endpointOpts.keepLogs, KeepConfig: endpointOpts.keepConfig}); err != nil {
 		return err
 	}
+	// Here rather than in lifecycle.Uninstall, which repair runs too: repairing must keep enforcement.
+	if endpointUserMode() {
+		if err := removeUserEnforcement(); err != nil {
+			return fmt.Errorf("removing user-mode enforcement: %w", err)
+		}
+	}
 	fmt.Println("Endpoint service, config, and managed files removed.")
 	return nil
 }
@@ -667,6 +674,13 @@ func installHookTargetsFromEndpointInstall(report, out io.Writer, targets []stri
 	cfg := loadOrDefaultConfig()
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
+	}
+	if handed, err := handOffEnforcedHookInstall(context.Background(), targets, cfg); handed {
+		if err != nil {
+			fmt.Fprintf(out, "Warning: hooks were not installed: %v\n", err)
+			fmt.Fprintf(out, "The endpoint is installed without them. Retry with: beacon endpoint hooks install --harness %s\n", strings.Join(targets, ","))
+		}
+		return
 	}
 	var failed []string
 	for _, target := range targets {

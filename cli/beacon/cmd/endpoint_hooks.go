@@ -51,7 +51,15 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 		}
 		return printPlannedActions(actions)
 	}
-	return installEndpointHookTargets(os.Stderr, targets, loadOrDefaultConfig(), endpointOpts.allTargets)
+	cfg := loadOrDefaultConfig()
+	if handed, err := handOffEnforcedHookInstall(cmd.Context(), targets, cfg); handed {
+		if err != nil {
+			// The enterprise binary has already said what went wrong.
+			cmd.SilenceErrors = true
+		}
+		return err
+	}
+	return installEndpointHookTargets(os.Stderr, targets, cfg, endpointOpts.allTargets)
 }
 
 // installEndpointHookTargets installs each target in turn and stops at the first error, except

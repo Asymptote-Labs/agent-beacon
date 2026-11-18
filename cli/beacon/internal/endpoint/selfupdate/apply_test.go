@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -509,20 +510,20 @@ func TestRollbackReportsCollectorRestartFailure(t *testing.T) {
 
 func TestVersionLineMatches(t *testing.T) {
 	out := "beacon version 0.0.69 (abc1234) built on 2026-01-01"
-	if !versionLineMatches(out, "0.0.69") {
+	if !VersionLineMatches(out, "0.0.69") {
 		t.Error("exact version should match")
 	}
-	if !versionLineMatches(out, "v0.0.69") {
+	if !VersionLineMatches(out, "v0.0.69") {
 		t.Error("v-prefixed want should match")
 	}
 	// The substring bug: an expected 0.0.6 must NOT match a 0.0.69 binary.
-	if versionLineMatches(out, "0.0.6") {
+	if VersionLineMatches(out, "0.0.6") {
 		t.Error("0.0.6 must not match 0.0.69 (substring)")
 	}
-	if versionLineMatches("beacon version 0.0.10 (x) built on y", "0.0.101") {
+	if VersionLineMatches("beacon version 0.0.10 (x) built on y", "0.0.101") {
 		t.Error("0.0.101 must not match 0.0.10")
 	}
-	if versionLineMatches("garbage output", "0.0.1") {
+	if VersionLineMatches("garbage output", "0.0.1") {
 		t.Error("unparseable output should not match")
 	}
 }
@@ -724,5 +725,53 @@ func TestApplyRollbackRestoresScriptForwarders(t *testing.T) {
 	}
 	if restored != 1 {
 		t.Fatalf("rollback reloaded the forwarders %d times, want 1", restored)
+	}
+}
+
+// FetchVerifiedPackage runs every check an install would, and nothing after them.
+func TestFetchVerifiedPackageChecksWithoutInstalling(t *testing.T) {
+	body := []byte("a signed package")
+	sum := sha256.Sum256(body)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(body) }))
+	defer srv.Close()
+	signed := "Status: signed by a developer certificate issued by Apple for distribution\n   1. Developer ID Installer: Asymptote Labs, Inc. (" + AppleTeamID + ")\n"
+
+	cases := map[string]struct {
+		sha, signer string
+		want        string
+	}{
+		"verified":     {hex.EncodeToString(sum[:]), signed, ""},
+		"bad checksum": {strings.Repeat("0", 64), signed, "verify checksum"},
+		"other team":   {hex.EncodeToString(sum[:]), strings.ReplaceAll(signed, AppleTeamID, "OTHERTEAM1"), "verify signature"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var ran []string
+			a := NewApplier("")
+			a.run = func(_ context.Context, name string, _ ...string) (string, error) {
+				ran = append(ran, name)
+				if name == "pkgutil" {
+					return tc.signer, nil
+				}
+				return "", nil
+			}
+			dest := filepath.Join(t.TempDir(), "p.pkg")
+			err := a.FetchVerifiedPackage(context.Background(), Package{URL: srv.URL + "/p.pkg", SHA256: tc.sha}, dest)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("err = %v", err)
+				}
+				if got := strings.Join(ran, ","); got != "pkgutil,stapler,spctl" {
+					t.Fatalf("ran %q, want only the checks", got)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if slices.Contains(ran, "installer") {
+				t.Fatal("an install ran")
+			}
+		})
 	}
 }

@@ -5,11 +5,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/edition"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 )
@@ -18,14 +21,20 @@ import (
 // ran. The defaults describe a connected Mac in system mode with the community edition installed.
 type enforcementFakes struct {
 	supported, root, connected bool
+	userConnected              bool
 	userMode                   []string
-	installedLine              string
+	installedLine, userLine    string
 	locateErr, installErr      error
 	rolledBack                 bool
 
 	located, installed []edition.Release
 	locatedWith        []string
 	handedOff          []string
+	// User mode: what was installed where, which binary's enable ran, and what was forwarded.
+	userInstalled  []string
+	userHandedOff  []string
+	userForwarded  [][]string
+	userForwardErr error
 }
 
 func stubEnforcement(t *testing.T) *enforcementFakes {
@@ -64,6 +73,23 @@ func stubEnforcement(t *testing.T) *enforcementFakes {
 			f.handedOff = append(f.handedOff, dashboard)
 			return nil
 		}),
+		swapEnforcementSeam(&enforcementUserConnected, func() bool { return f.userConnected }),
+		swapEnforcementSeam(&enforcementUserCredentials, func() (string, string, error) {
+			return "https://cloud.example", "bcn_device_user", nil
+		}),
+		swapEnforcementSeam(&userEnterpriseVersionLine, func(context.Context) string { return f.userLine }),
+		swapEnforcementSeam(&installUserEnterpriseRelease, func(_ context.Context, r edition.Release, dest string) error {
+			f.userInstalled = append(f.userInstalled, r.Version+" "+dest)
+			return f.installErr
+		}),
+		swapEnforcementSeam(&runUserEnforcementEnable, func(_ context.Context, bin, dashboard string) error {
+			f.userHandedOff = append(f.userHandedOff, bin+" "+dashboard)
+			return nil
+		}),
+		swapEnforcementSeam(&runUserEnterpriseBeacon, func(_ context.Context, bin string, args ...string) error {
+			f.userForwarded = append(f.userForwarded, append([]string{bin}, args...))
+			return f.userForwardErr
+		}),
 		swapEnforcementSeam(&activateEnforcement, nil),
 	}
 	t.Cleanup(func() {
@@ -73,6 +99,10 @@ func stubEnforcement(t *testing.T) *enforcementFakes {
 		endpointEnforcementOpts.dashboardURL = ""
 	})
 	t.Setenv(enforcementHandoffEnv, "")
+	// The user endpoint directory, where user-mode enforcement keeps its files.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	return f
 }
 
@@ -217,5 +247,191 @@ func TestEnforcementEnableRefusesAHandoffToABuildWithoutEnforcement(t *testing.T
 	}
 	if len(f.locatedWith)+len(f.installed)+len(f.handedOff) != 0 {
 		t.Fatal("a handed-off enable must never install again")
+	}
+}
+
+// writeUserEnforcementFiles puts the kept enterprise binary (and, with on, enforcement's config)
+// where user-mode enforcement keeps them, under the test's HOME.
+func writeUserEnforcementFiles(t *testing.T, on bool) string {
+	t.Helper()
+	bin := userEnterpriseBeaconPath()
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if on {
+		if err := os.MkdirAll(userEnforcementDir(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(userEnforcementDir(), userEnforcementConfigName), []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return bin
+}
+
+func TestEnforcementEnableInUserModeKeepsTheEditionBesideThisOneThenHandsOff(t *testing.T) {
+	f := stubEnforcement(t)
+	f.root, f.connected, f.userConnected = false, false, true
+	out, err := runEnforcementEnableForTest(t)
+	if err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	bin := userEnterpriseBeaconPath()
+	if strings.Join(f.locatedWith, ",") != "https://cloud.example bcn_device_user " {
+		t.Fatalf("located with = %q", f.locatedWith)
+	}
+	if strings.Join(f.userInstalled, ",") != "1.3.41 "+bin {
+		t.Fatalf("user installed = %q, want 1.3.41 at %s", f.userInstalled, bin)
+	}
+	if strings.Join(f.userHandedOff, ",") != bin+" " {
+		t.Fatalf("user handed off = %q", f.userHandedOff)
+	}
+	if len(f.installed)+len(f.handedOff) != 0 {
+		t.Fatalf("the system flow ran: installed %v, handed off %v", f.installed, f.handedOff)
+	}
+	if strings.Contains(out, "bcn_device_user") {
+		t.Fatal("the device key reached the output")
+	}
+}
+
+func TestEnforcementEnableInUserModeSkipsTheDownloadWhenTheKeptEditionIsCurrent(t *testing.T) {
+	for line, wantInstall := range map[string]bool{
+		"beacon version 1.3.41 (abc) built on today, enterprise edition\n": false,
+		"beacon version 1.3.40 (abc) built on today, enterprise edition\n": true,
+		"beacon version 1.3.41 (abc) built on today\n":                     true,
+		"": true,
+	} {
+		f := stubEnforcement(t)
+		f.root, f.connected, f.userConnected = false, false, true
+		f.userLine = line
+		if _, err := runEnforcementEnableForTest(t); err != nil {
+			t.Fatalf("enable with %q: %v", line, err)
+		}
+		if got := len(f.userInstalled) == 1; got != wantInstall {
+			t.Fatalf("with %q installed %v, want install %v", line, f.userInstalled, wantInstall)
+		}
+		if len(f.userHandedOff) != 1 {
+			t.Fatalf("with %q handed off %v", line, f.userHandedOff)
+		}
+	}
+}
+
+func TestEnforcementEnableSaysWhatToRunForEachMode(t *testing.T) {
+	cases := map[string]struct {
+		root, connected, userConnected bool
+		want, notWant                  string
+	}{
+		"sudo on a user-mode Mac":  {true, false, true, "run this without sudo", ""},
+		"system mode without sudo": {false, true, false, "needs root", ""},
+		"connected nowhere":        {false, false, false, "beacon login && beacon endpoint connect", "--system"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := stubEnforcement(t)
+			f.root, f.connected, f.userConnected = tc.root, tc.connected, tc.userConnected
+			_, err := runEnforcementEnableForTest(t)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || (tc.notWant != "" && strings.Contains(err.Error(), tc.notWant)) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if len(f.locatedWith)+len(f.userInstalled)+len(f.userHandedOff) != 0 {
+				t.Fatalf("located %v, installed %v, handed off %v", f.locatedWith, f.userInstalled, f.userHandedOff)
+			}
+		})
+	}
+}
+
+func TestEnforcementEnableInUserModeSaysHowToReconnectARejectedKey(t *testing.T) {
+	f := stubEnforcement(t)
+	f.root, f.connected, f.userConnected = false, false, true
+	f.locateErr = &edition.HTTPError{Status: http.StatusUnauthorized}
+	_, err := runEnforcementEnableForTest(t)
+	if err == nil || !strings.Contains(err.Error(), "beacon endpoint connect") || strings.Contains(err.Error(), "sudo") {
+		t.Fatalf("err = %v, want a user-mode reconnect", err)
+	}
+	if len(f.userInstalled)+len(f.userHandedOff) != 0 {
+		t.Fatalf("installed %v, handed off %v", f.userInstalled, f.userHandedOff)
+	}
+}
+
+func TestEnforcementSubcommandsGoToTheKeptEnterpriseBinary(t *testing.T) {
+	f := stubEnforcement(t)
+	f.root = false
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "enforcement"}
+	cmd.SetOut(&out)
+	cmd.SetContext(context.Background())
+
+	// Nothing kept: help, nothing run.
+	if err := runEndpointEnforcement(cmd, []string{"status"}); err != nil || len(f.userForwarded) != 0 {
+		t.Fatalf("err %v, forwarded %v", err, f.userForwarded)
+	}
+
+	bin := writeUserEnforcementFiles(t, true)
+	if err := runEndpointEnforcement(cmd, []string{"status", "--json"}); err != nil {
+		t.Fatalf("forward: %v", err)
+	}
+	want := []string{bin, "endpoint", "enforcement", "status", "--json"}
+	if len(f.userForwarded) != 1 || strings.Join(f.userForwarded[0], " ") != strings.Join(want, " ") {
+		t.Fatalf("forwarded %q, want %q", f.userForwarded, want)
+	}
+
+	// Never as root, never from a build that has enforcement itself, never when handed work.
+	f.root = true
+	_ = runEndpointEnforcement(cmd, []string{"status"})
+	f.root = false
+	activateEnforcement = func(*cobra.Command, string) error { return nil }
+	_ = runEndpointEnforcement(cmd, []string{"status"})
+	activateEnforcement = nil
+	t.Setenv(enforcementHandoffEnv, "1")
+	_ = runEndpointEnforcement(cmd, []string{"status"})
+	if len(f.userForwarded) != 1 {
+		t.Fatalf("forwarded %v, want only the first", f.userForwarded)
+	}
+}
+
+func TestHookInstallGoesToTheKeptEnterpriseBinaryWhileUserEnforcementIsOn(t *testing.T) {
+	f := stubEnforcement(t)
+	f.root = false
+	user := endpointconfig.Config{UserMode: true, LogPath: "/u/runtime.jsonl"}
+
+	writeUserEnforcementFiles(t, false)
+	if handed, _ := handOffEnforcedHookInstall(context.Background(), []string{"claude"}, user); handed {
+		t.Fatal("handed off with enforcement off")
+	}
+
+	bin := writeUserEnforcementFiles(t, true)
+	if handed, _ := handOffEnforcedHookInstall(context.Background(), []string{"claude"}, endpointconfig.Config{LogPath: "/var/log/beacon-agent/runtime.jsonl"}); handed {
+		t.Fatal("handed off a system-mode install")
+	}
+	handed, err := handOffEnforcedHookInstall(context.Background(), []string{"claude", "codex"}, user)
+	if !handed || err != nil {
+		t.Fatalf("handed %v, err %v", handed, err)
+	}
+	want := []string{bin, "endpoint", "hooks", "install", "--harness", "claude,codex", "--level", endpointOpts.hookLevel, "--log-path", "/u/runtime.jsonl"}
+	if len(f.userForwarded) != 1 || strings.Join(f.userForwarded[0], " ") != strings.Join(want, " ") {
+		t.Fatalf("forwarded %q, want %q", f.userForwarded, want)
+	}
+}
+
+func TestRemoveUserEnforcementLeavesTheRestOfTheEndpoint(t *testing.T) {
+	stubEnforcement(t)
+	writeUserEnforcementFiles(t, true)
+	other := filepath.Join(endpointconfig.BaseDir(true), "config.json")
+	if err := os.WriteFile(other, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeUserEnforcement(); err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{userEnforcementDir(), filepath.Dir(userEnterpriseBeaconPath())} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Fatalf("%s is still there (%v)", gone, err)
+		}
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("the endpoint config went too: %v", err)
 	}
 }
