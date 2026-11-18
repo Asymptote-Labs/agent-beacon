@@ -188,7 +188,7 @@ type redactionRule struct {
 	// runsOn, when set, returns the replacement of a match whose replaced text runs on past the
 	// match's end, and where that text ends; an end below 0 means the match is replaced as usual.
 	// It is a plain function of the rule, not a closure, so building the rules allocates nothing
-	// for it (TestPackageInitStaysCheap).
+	// for it.
 	runsOn func(rule *redactionRule, t string, match []int) (replacement string, end int)
 }
 
