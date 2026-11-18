@@ -1,6 +1,6 @@
 id: approval-bypass-via-renamed-binary
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 7
+version: 8
 title: Denied dangerous command re-invoked via a renamed copy of the binary
 description: >
   An approval for a destructive or high-impact shell command was explicitly denied
@@ -64,7 +64,7 @@ correlation:
               c.argv.exists(a, a.matches("^/(var/)?tmp/") && a.endsWith("/" + c.name) && !("\n" + c.args + "\n").contains("\n" + a + "\n")) ||
             c.args.matches("(?m)^(if=|of=/dev/sd)") ||
             makes_filesystem(c) ||
-            c.stage > 0 && c.name.matches("^(ba|z|da|k)?sh$") ||
+            c.stage > 0 && shell_command(c) ||
             world_writable_tree(c) ||
             root_shell(c)
           ) ||

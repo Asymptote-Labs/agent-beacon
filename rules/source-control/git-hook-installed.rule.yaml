@@ -1,6 +1,6 @@
 id: git-hook-installed
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 4
+version: 5
 title: Git hook script installed or modified
 description: >
   The agent modified a script under .git/hooks/ (pre-commit, post-checkout,
@@ -18,17 +18,9 @@ taxonomy:
 
 # Which file is one definition (git_hook_file, rules/concepts/sensitive-files.predicates.yaml),
 # asked of a file event's path and of every path a shell command writes (c.file_writes: a
-# redirection, tee, cp, mv, install, ln).
+# redirection, tee, cp, mv, install, ln), through file_changed.
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    git_hook_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      git_hook_file(f.path)))
-  )
+  file_changed(e, p, git_hook_file(p))
 
 emit:
   reason: "Git hook script installed or modified — runs on the next matching git operation, durable code-execution persistence"

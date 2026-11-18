@@ -1,6 +1,6 @@
 id: container-or-iac-file-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 3
+version: 4
 title: Container or IaC file modified (Dockerfile / compose / Terraform / K8s / Helm)
 description: >
   The agent modified a container, orchestration, or infrastructure-as-code
@@ -26,15 +26,7 @@ taxonomy:
 # rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
 # path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv).
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    container_or_iac_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      container_or_iac_file(f.path)))
-  )
+  file_changed(e, p, container_or_iac_file(p))
 
 emit:
   reason: "Container or IaC file modified (Dockerfile / compose / Terraform / K8s manifest / Helm values)"

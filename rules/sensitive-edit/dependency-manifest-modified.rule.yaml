@@ -22,15 +22,9 @@ taxonomy:
 # a write of its own. A package manager rewriting its own manifest (npm install, go mod
 # tidy) is not a write the parser reports.
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    dependency_manifest_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    write_outside_scratch(e, f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      dependency_manifest_file(f.path))
-  )
+  file_edited(e) && dependency_manifest_file(e.file.path) ||
+  e.event.action == "command.executed" &&
+    write_outside_scratch(e, f, changing_write(f) && dependency_manifest_file(f.path))
 
 emit:
   reason: "Dependency manifest or lockfile modified (supply-chain edge change)"

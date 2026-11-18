@@ -1,6 +1,6 @@
 id: setuid-or-root-shell-escalation
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 7
+version: 8
 title: Setuid bit installed or interactive root shell requested
 description: >
   A command either installs the setuid bit on a file (chmod u+s or +s, chmod with a

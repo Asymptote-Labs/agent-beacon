@@ -1,6 +1,6 @@
 id: autostart-unit-file-installed
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 3
+version: 4
 title: Autostart unit / service / login-item file installed
 description: >
   The agent wrote an autostart definition that re-executes outside any sandbox at
@@ -23,15 +23,7 @@ taxonomy:
 # rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
 # path a shell command writes (c.file_writes: a redirection, tee, cp, mv, install, ln).
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    autostart_unit_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      autostart_unit_file(f.path)))
-  )
+  file_changed(e, p, autostart_unit_file(p))
 
 emit:
   reason: "Autostart unit/service/login-item file installed (systemd unit, launchd plist, XDG autostart, or environment.d) — re-executes at login/boot/schedule outside the sandbox"

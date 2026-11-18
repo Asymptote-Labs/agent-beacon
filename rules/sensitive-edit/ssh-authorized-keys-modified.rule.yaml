@@ -1,6 +1,6 @@
 id: ssh-authorized-keys-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 3
+version: 4
 title: SSH authorized_keys or sshd_config modified
 description: >
   The agent modified an SSH trust file: a user authorized_keys
@@ -26,15 +26,7 @@ taxonomy:
 # asked of a file event's path and of every path a shell command writes (c.file_writes: a
 # redirection, tee, sed -i, cp, mv), under `~` or a variable too.
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    ssh_trust_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      ssh_trust_file(f.path)))
-  )
+  file_changed(e, p, ssh_trust_file(p))
 
 emit:
   reason: "SSH authorized_keys, known_hosts, or sshd_config modified (persistence or auth bypass)"

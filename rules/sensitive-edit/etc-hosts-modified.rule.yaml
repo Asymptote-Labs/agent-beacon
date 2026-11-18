@@ -1,6 +1,6 @@
 id: etc-hosts-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 3
+version: 4
 title: /etc/hosts or hosts.allow/deny modified
 description: >
   The agent modified a system name resolution file: /etc/hosts (the
@@ -25,15 +25,7 @@ taxonomy:
 # asked of a file event's path and of every path a shell command writes (c.file_writes: a
 # redirection, tee, sed -i, cp, mv).
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    hosts_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      hosts_file(f.path)))
-  )
+  file_changed(e, p, hosts_file(p))
 
 emit:
   reason: "/etc/hosts or hosts.allow/deny modified (local DNS hijack or ACL change)"

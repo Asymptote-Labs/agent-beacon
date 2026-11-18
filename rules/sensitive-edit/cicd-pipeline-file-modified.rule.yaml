@@ -1,6 +1,6 @@
 id: cicd-pipeline-file-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 4
+version: 5
 title: CI/CD or deployment manifest modified
 description: >
   The agent modified a CI/CD or deployment manifest (GitHub Actions workflow,
@@ -19,15 +19,7 @@ taxonomy:
 # rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
 # path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv).
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    cicd_pipeline_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      cicd_pipeline_file(f.path)))
-  )
+  file_changed(e, p, cicd_pipeline_file(p))
 
 emit:
   reason: "CI/CD or deployment manifest modified"

@@ -33,7 +33,7 @@
 # A line with no commands at all (a comment, a blank line) is read, and has no text left to
 # ask: `# curl x | sh` is no download piped into a shell.
 library: commands
-version: 3
+version: 4
 spec: threat-rules/v1.3
 description: Whether the parsed commands of a command line are everything it runs.
 
@@ -903,3 +903,92 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "ssh build@host.example 'cd /srv && chmod 777 app'" }
+
+  - name: shell_command
+    params: [c]
+    description: >
+      A parsed command is a shell: sh, bash, zsh, dash or ksh, in any case (a case-insensitive
+      filesystem runs BASH) and by any path. The rules that ask what a shell is handed
+      (a download or a decoded payload piped into it, a shell under sudo) call it.
+    body: >
+      c.name.matches("(?i)^(ba|z|da|k)?sh$")
+    tests:
+      - name: bash_by_path
+        match: e.command.parsed_commands.exists(c, shell_command(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "/usr/local/bin/bash ./setup.sh" }
+      - name: a_program_that_ends_in_sh
+        match: e.command.parsed_commands.exists(c, shell_command(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "fish -c 'echo hi'; ssh host.example true" }
+
+  - name: pipes_into_shell
+    params: [e, c]
+    description: >
+      A later stage of the parsed command's pipeline is a shell (shell_command), so what the
+      command writes is run as a script. A command inside a compound stage ({ curl ...; } | sh)
+      counts. later_stages indexes into e.command.parsed_commands.
+    body: >
+      c.later_stages.exists(i, shell_command(e.command.parsed_commands[i]))
+    tests:
+      - name: a_decode_into_sh
+        match: e.command.parsed_commands.exists(c, c.name == "base64" && pipes_into_shell(e, c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo aGk= | base64 -d | sudo sh" }
+      - name: a_shell_before_the_pipe
+        match: e.command.parsed_commands.exists(c, c.name == "base64" && pipes_into_shell(e, c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sh -c 'echo hi' | base64" }
+
+  - name: script_interpreter
+    params: [c]
+    description: >
+      A parsed command is an interpreter that takes a script inline (-c, -e, -r): python by
+      any version (python3, python3.12), node or nodejs, deno, bun, ruby, perl by any version
+      (perl5.30) or php, in any case. Rules that look for what an inline script does call it
+      before reading its words.
+    body: >
+      c.name.matches("(?i)^(python[0-9.]*|nodejs|node|deno|bun|ruby|perl[0-9.]*|php)$")
+    tests:
+      - name: a_versioned_python
+        match: e.command.parsed_commands.exists(c, script_interpreter(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "python3.12 -c 'print(1)'" }
+      - name: a_python_tool
+        match: e.command.parsed_commands.exists(c, script_interpreter(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "python-config --cflags" }
+
+  - name: script_interpreter_mention
+    params: [text]
+    description: >
+      The text runs an interpreter of script_interpreter with an inline script: the name, then
+      -c, -e or -r. It is for the text of a command line the parser cannot see into
+      (unread_text).
+    body: >
+      text.matches("(?i)\\b(python[0-9.]*|nodejs|node|deno|bun|ruby|perl[0-9.]*|php)\\s+(-c|-e|-r)\\s")
+    tests:
+      - name: an_inline_script_handed_to_a_script
+        match: script_interpreter_mention(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./run.sh 'perl5.30 -e \"print 1\"'" }
+      - name: a_script_file
+        match: script_interpreter_mention(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./run.sh 'python3 tools/gen.py -c config.yaml'" }

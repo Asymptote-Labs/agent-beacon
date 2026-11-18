@@ -2,20 +2,17 @@
 #
 # A rule asks whether a path is one of these files of two kinds of event: the path of a file
 # event (an agent's edit tool), and a path a shell command writes (c.file_writes, which holds
-# every path as written, so `~/.bashrc` and "$HOME/.ssh/authorized_keys" are themselves):
+# every path as written, so `~/.bashrc` and "$HOME/.ssh/authorized_keys" are themselves).
+# file_changed asks both, with the rule's condition over the name p:
 #
-#   (e.event.action in ["file.modified", "file.created", "file.edited"] &&
-#     shell_startup_file(e.file.path)) ||
-#   (e.event.action == "command.executed" &&
-#     e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-#       f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-#       shell_startup_file(f.path))))
+#   file_changed(e, p, shell_startup_file(p))
 #
 # Without the second half `echo key >> ~/.ssh/authorized_keys` is not seen at all: a shell
 # command is no file event. What a command writes is the parser's to say (a redirection, tee,
 # sed -i, cp, mv, install, ln, dd, the file a download is saved to, the destination of scp
 # and rsync), so a file named in an argument, a commit message or a here-document is not a
-# write.
+# write. Which file events are edits (file_edited) and which writes change a file
+# (changing_write) are said once here; a rule that asks for fewer kinds of write says why.
 #
 # Each predicate answers for a path under any directory, a home directory or a variable
 # included.
@@ -511,3 +508,121 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "cd ~/proj && python3 -c \"import os; os.system('cd /tmp/x'); os.system('echo evil==1.0 >> requirements.txt')\"" }
+
+  - name: file_edited
+    params: [e]
+    description: >
+      The event is a file event that changes its file (e.file.path): modified, created or
+      edited by an agent's tool.
+    body: >
+      e.event.action in ["file.modified", "file.created", "file.edited"]
+    tests:
+      - name: a_created_file
+        match: file_edited(e)
+        verdict: match
+        events:
+          - event: { action: file.created }
+            file: { path: "/home/u/.bashrc" }
+      - name: a_read
+        match: file_edited(e)
+        verdict: no_match
+        events:
+          - event: { action: file.read }
+            file: { path: "/home/u/.bashrc" }
+
+  - name: changing_write
+    params: [f]
+    description: >
+      An entry of a command's file_writes changes the file at its path: a write, an append, a
+      truncation, an edit in place, a move onto it or a link made there. A delete is not one.
+    body: >
+      f.op in ["write", "append", "truncate", "edit", "move_to", "link"]
+    tests:
+      - name: a_move_onto_the_file
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, changing_write(f)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "mv /tmp/k ~/.ssh/authorized_keys" }
+      - name: a_delete
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, changing_write(f)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rm ~/.ssh/authorized_keys" }
+
+  - name: file_changed
+    params: [e, p, cond]
+    description: >
+      A file the event changes has a path that satisfies a condition, written over the name
+      p: file_changed(e, p, ssh_trust_file(p)). The file is the event's own when it is a file
+      event that changes it (file_edited), and each file a command changes (changing_write,
+      over c.file_writes) when it is a command event. The rules about sensitive files call
+      it, so the two kinds of event and the kinds of write have one home.
+    body: >
+      file_edited(e) && [e.file.path].exists(p, cond) ||
+      e.event.action == "command.executed" &&
+        e.command.parsed_commands.exists(c, c.file_writes.exists(f, changing_write(f) && [f.path].exists(p, cond)))
+    tests:
+      - name: an_edit_tool
+        match: file_changed(e, p, ssh_trust_file(p))
+        verdict: match
+        events:
+          - event: { action: file.edited }
+            file: { path: "/home/u/.ssh/authorized_keys" }
+      - name: an_append_by_a_command
+        match: file_changed(e, p, ssh_trust_file(p))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo 'ssh-ed25519 AAAA' >> ~/.ssh/authorized_keys" }
+      - name: a_read_by_a_command
+        match: file_changed(e, p, ssh_trust_file(p))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat ~/.ssh/authorized_keys" }
+
+  - name: shell_history_file
+    params: [path]
+    description: >
+      The path is a shell's history file: .bash_history, .zsh_history, .sh_history (ksh),
+      fish_history or .history, under any directory, or $HISTFILE as written.
+      shell-history-secret-scan asks it of what a command reads, and
+      telemetry-or-history-tampering of what a command deletes or empties.
+    body: >
+      path.matches("(?i)(^|/)(\\.(bash|zsh|sh)_history|fish_history|\\.history)$|^\\$\\{?HISTFILE\\}?$")
+    tests:
+      - name: fish_history
+        match: shell_history_file(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.read }
+            file: { path: "/home/u/.local/share/fish/fish_history" }
+      - name: a_history_of_something_else
+        match: shell_history_file(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.read }
+            file: { path: "/home/u/.python_history.md" }
+
+  - name: shell_history_mention
+    params: [text]
+    description: >
+      The text names a shell history file (shell_history_file). It is for the text of a
+      command line the parser cannot see into (unread_text).
+    body: >
+      text.matches("(?i)(\\.(bash|zsh|sh)_history|fish_history|(^|/|\\s)\\.history)\\b|\\$\\{?HISTFILE\\b")
+    tests:
+      - name: ksh_history_handed_to_a_script
+        match: shell_history_mention(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./scan.sh 'grep -i token ~/.sh_history'" }
+      - name: no_history
+        match: shell_history_mention(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./scan.sh 'grep -i token notes/history.md'" }

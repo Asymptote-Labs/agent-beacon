@@ -23,15 +23,9 @@ taxonomy:
 # that lands in a temporary directory is left out (write_outside_scratch): agents stage
 # copies there all the time, and moving one back into the project is a write of its own.
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    auth_security_code_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    write_outside_scratch(e, f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      auth_security_code_file(f.path))
-  )
+  file_edited(e) && auth_security_code_file(e.file.path) ||
+  e.event.action == "command.executed" &&
+    write_outside_scratch(e, f, changing_write(f) && auth_security_code_file(f.path))
 
 emit:
   reason: "Authentication, payment, or security source file modified"

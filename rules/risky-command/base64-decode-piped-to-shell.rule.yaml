@@ -1,6 +1,6 @@
 id: base64-decode-piped-to-shell
 spec: threat-rules/v1.3  # needed for the commands a carrier or a pipe hands a shell
-version: 7
+version: 8
 title: Base64-decoded payload piped into a shell
 description: >
   A command base64-decodes content and pipes it straight into a shell — the classic
@@ -22,14 +22,14 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 # The decoder is any command with a base64 word and a decode flag (openssl base64 -d counts);
-# the shell is a command at a later stage of the same pipeline (later_stages, indexes into
-# parsed_commands).
+# the shell is a command at a later stage of the same pipeline (pipes_into_shell,
+# rules/concepts/commands.predicates.yaml).
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(d,
       d.argv.exists(a, a.matches("(?i)(^|/)base64$")) &&
       d.argv.exists(a, a.matches("(?i)^(-d|--decode)$")) &&
-      d.later_stages.exists(i, e.command.parsed_commands[i].name.matches("(?i)^(ba|z|da|k)?sh$"))) ||
+      pipes_into_shell(e, d)) ||
     unread_text(e, t,
       t.matches("(?i)\\bbase64\\b\\s+(-d|-D|--decode)\\b[^;&\\n]*\\|\\s*(sudo(\\s+-\\S+)*\\s+)?(\\S*/)?(env\\s+)?(ba|z|da|k)?sh\\b"))
   )

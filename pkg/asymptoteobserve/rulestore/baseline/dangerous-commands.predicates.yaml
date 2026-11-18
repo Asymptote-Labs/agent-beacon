@@ -18,7 +18,7 @@
 # command of a command.executed event: parsed_commands is derived for both. The baseline embeds
 # this file, since curl-pipe-to-shell calls it.
 library: dangerous-commands
-version: 5
+version: 6
 spec: threat-rules/v1.3
 description: A command that destroys data or hands over the machine in one step, and its parts.
 
@@ -203,12 +203,11 @@ definitions:
       A parsed command downloads with curl or wget and a later stage of its pipeline is a
       shell, so what was downloaded runs with no review. The downloader is any word of the
       command, in any case and by any path (so a timeout or nice wrapper the parser keeps
-      counts); the shell is a command at a later stage of the same pipeline (later_stages,
-      indexes into e.command.parsed_commands), a command inside a compound stage
-      ({ curl ...; } | sh) included. curl-pipe-to-shell is this; dangerous_command asks it.
+      counts); the shell is a command at a later stage of the same pipeline
+      (pipes_into_shell), a command inside a compound stage ({ curl ...; } | sh) included.
+      curl-pipe-to-shell is this; dangerous_command asks it.
     body: >
-      c.argv.exists(a, a.matches("(?i)(^|/)(curl|wget)$")) &&
-      c.later_stages.exists(i, e.command.parsed_commands[i].name.matches("(?i)^(ba|z|da|k)?sh$"))
+      c.argv.exists(a, a.matches("(?i)(^|/)(curl|wget)$")) && pipes_into_shell(e, c)
     tests:
       - name: a_download_into_bash
         match: e.command.parsed_commands.exists(c, download_piped_to_shell(e, c))
@@ -262,7 +261,7 @@ definitions:
       size(c.argv) > 1 && c.argv[0].matches("(^|/)(sudo|doas)$") && !c.runs_read && (
         c.name == "" && c.stage == 0 && size(c.file_reads) == 0 && !c.argv.exists(a, a == "") &&
           c.argv.exists(a, a.matches("^(-[A-Za-z]*[is][A-Za-z]*|--login|--shell)$")) ||
-        c.name.matches("^(ba|z|da|k)?sh$") && c.args == "" && c.stage == 0 && size(c.file_reads) == 0)
+        shell_command(c) && c.args == "" && c.stage == 0 && size(c.file_reads) == 0)
     tests:
       - name: sudo_s_with_options
         match: e.command.parsed_commands.exists(c, root_shell(c))

@@ -25,7 +25,9 @@ taxonomy:
 
 # An account given by a variable is an empty word of args, so the account word may be empty.
 # A command that writes /etc/group or /etc/gshadow itself (c.file_writes) is matched whatever
-# it writes: the line it adds is text the rule does not parse.
+# it writes: the line it adds is text the rule does not parse. Its kinds of write are the ones
+# that can add a member (a write, an append, an edit, a move onto the file), not every
+# changing_write: a truncation or a link adds no one.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,

@@ -1,6 +1,6 @@
 id: imds-access-via-noncurl-client
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+version: 5
 title: Cloud metadata endpoint accessed via non-curl HTTP client
 description: >
   A command reaches a cloud instance metadata endpoint (AWS IMDS
@@ -31,7 +31,8 @@ taxonomy:
 # A socket redirection is a parsed fact, and curl or wget elsewhere on the line does not
 # take it back: version 1 let any mention of curl silence it. A path with a variable
 # (`/dev/tcp/$H/80`) may stand for the target, so there the text decides.
-# An interpreter the line runs with the target among its words is a parsed fact. Every
+# An interpreter (script_interpreter, rules/concepts/commands.predicates.yaml) the line runs
+# with the target among its words is a parsed fact. Every
 # interpreter is a command the parser cannot see into, so the text alternative below
 # (unread_text) would match these too; the parsed one says it without leaning on that.
 # Library and cmdlet names are code inside a script, which is content: they stay text and
@@ -47,10 +48,10 @@ match: >
     cloud_metadata_target(e.command.command) &&
     !e.command.command.matches("(?i)\\b(curl|wget)\\b") && (
       e.command.parsed_commands.exists(c,
-        c.name.matches("^(python(3(\\.[0-9]+)?)?|ruby|perl|php|node|deno|bun)$") &&
+        script_interpreter(c) &&
         c.argv_raw.exists(a, cloud_metadata_target(a))) ||
       e.command.command.matches("(?i)(invoke-webrequest|invoke-restmethod|\\biwr\\b|urllib|requests\\.get|net/http|httpx|Net::HTTP|file_get_contents)") ||
-      unread_text(e, t, t.matches("(?i)(\\b(python(3(\\.[0-9]+)?)?|ruby|perl|php|node|deno|bun)\\b|\\bcurl\\.exe\\b|/dev/tcp/)"))
+      unread_text(e, t, t.matches("(?i)(\\b(python[0-9.]*|nodejs|node|deno|bun|ruby|perl[0-9.]*|php)\\b|\\bcurl\\.exe\\b|/dev/tcp/)"))
     )
   )
 

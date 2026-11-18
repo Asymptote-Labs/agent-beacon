@@ -27,7 +27,9 @@ taxonomy:
 
 # Which file is a startup file is one definition (shell_startup_file,
 # rules/concepts/sensitive-files.predicates.yaml), and so is a redirection into one written
-# in text (shell_startup_file_redirect).
+# in text (shell_startup_file_redirect). The writes are the ones that put the line's text into
+# the file (a write, an append, an edit), not every changing_write: a move or a link puts
+# another file there, whose text the line does not hold.
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)\\bPATH\\s*\\+?=\\s*[\"']?([^\\s;&|\"']*:)?(/tmp|/var/tmp|/dev/shm)(/[^\\s:;&|\"']*)?(:|[\"'\\s]|$)") ||

@@ -14,7 +14,7 @@
 # Where the parser cannot see into a command, a rule asks the text that reaches it
 # (unread_text, commands.predicates.yaml), and egress_sender_mention is who sends there.
 library: egress
-version: 3
+version: 4
 spec: threat-rules/v1.3
 description: A command that sends data over the network.
 
@@ -220,7 +220,8 @@ definitions:
       (egress_sender), a remote copy (egress_remote_copy), a /dev/tcp or /dev/udp redirection
       (egress_dev_tcp), gh gist create, a cloud storage upload (aws s3, gsutil, gcloud
       storage, az storage blob upload), an inline python, node, deno, bun, ruby, perl or php
-      script that makes a request, or PowerShell's web cmdlets. It asks who could send, not
+      script (script_interpreter, script_interpreter_mention) that makes a request, or
+      PowerShell's web cmdlets. It asks who could send, not
       what is sent: a rule that pairs it with a read says the two happened in one session.
       Where the parser cannot see into a command, the text that reaches it is matched
       (unread_text).
@@ -230,7 +231,7 @@ definitions:
           egress_sender(s) ||
           egress_remote_copy(s) ||
           s.name == "gh" && s.argv.exists(a, a == "gist") && s.argv.exists(a, a == "create") ||
-          s.name.matches("(?i)^(python[0-9.]*|node|deno|bun|ruby|perl|php)$") &&
+          script_interpreter(s) &&
             s.argv.exists(a, a in ["-c", "-e", "-r"]) &&
             s.argv.exists(a, a.matches("(?i)(requests\\.(post|put|get|patch|request)\\(|urllib\\.request|urlopen\\(|http\\.client\\.|socket\\.create_connection\\(|\\.connect\\(\\(|fetch\\(|https?\\.(request|get)\\(|net::http\\.(get|post|start)|lwp::|fsockopen\\()")) ||
           s.name == "aws" && s.argv.exists(a, a == "s3") && s.argv.exists(a, a in ["cp", "sync", "mv"]) ||
@@ -245,7 +246,7 @@ definitions:
           t.matches("(?i)/dev/(tcp|udp)/|\\bgh\\s+gist\\s+create\\b|\\b(aws\\s+s3\\s+(cp|sync|mv)|gsutil\\s+(-m\\s+)?(cp|rsync|mv)|gcloud\\s+storage\\s+(cp|rsync|mv)|az\\s+storage\\s+blob\\s+upload)\\b") ||
           t.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(scp|sftp|rsync)\\s([^;&|\\n]*\\s)?[\\w.@-]+:") ||
           t.matches("(?i)requests\\.(post|put|get|patch|request)\\(|urllib\\.request|urlopen\\(|http\\.client\\.|socket\\.create_connection\\(|\\.connect\\(\\(|fetch\\(|https?\\.(request|get)\\(|net::http\\.(get|post|start)|lwp::|fsockopen\\(") &&
-            t.matches("(?i)\\b(python[0-9.]*|node|deno|bun|ruby|perl|php)\\s+(-c|-e|-r)\\s") ||
+            script_interpreter_mention(t) ||
           t.matches("(?i)\\b(invoke-webrequest|invoke-restmethod|iwr|irm)\\b[^\\n]*https?://"))
       )
     tests:

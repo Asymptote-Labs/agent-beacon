@@ -1,6 +1,6 @@
 id: direnv-envrc-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 3
+version: 4
 title: direnv .envrc modified (auto-exec on directory entry)
 description: >
   The agent modified a direnv .envrc file. When direnv is installed and the
@@ -20,15 +20,7 @@ taxonomy:
 # asked of a file event's path and of every path a shell command writes (c.file_writes: a
 # redirection, tee, sed -i, cp, mv).
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    direnv_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      direnv_file(f.path)))
-  )
+  file_changed(e, p, direnv_file(p))
 
 emit:
   reason: "direnv .envrc modified — sourced automatically on directory entry outside the sandbox, durable ambient code execution"
