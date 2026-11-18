@@ -1,6 +1,6 @@
 id: auth-security-code-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 8
+version: 10
 title: Authentication, payment, or security source modified
 description: >
   The agent modified a source file in the auth / payment / security surface (basename
@@ -22,10 +22,17 @@ taxonomy:
 # path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv). A write
 # that lands in a temporary directory is left out (write_outside_scratch): agents stage
 # copies there all the time, and moving one back into the project is a write of its own.
+# Where the parser cannot see into a command, the text that reaches it counts when it
+# redirects or tees into such a file (auth_security_code_file_redirect), unless every such
+# command runs in a temporary directory (opaque_commands_in_scratch) or the text writes into
+# one: a text does not say which directory a relative path is in.
 match: >
   file_edited(e) && auth_security_code_file(e.file.path) ||
-  e.event.action == "command.executed" &&
-    write_outside_scratch(e, f, changing_write(f) && auth_security_code_file(f.path))
+  e.event.action == "command.executed" && (
+    write_outside_scratch(e, f, changing_write(f) && auth_security_code_file(f.path)) ||
+    auth_security_code_file_redirect(e.command.command) && !opaque_commands_in_scratch(e) &&
+      unread_text(e, t, auth_security_code_file_redirect(t) &&
+      !t.matches("(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(/private)?/(tmp|var/tmp|var/folders)/")))
 
 emit:
   reason: "Authentication, payment, or security source file modified"
@@ -120,4 +127,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: "src/auth/login.ts" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh \"echo 'return true' >> src/auth/session.go\"" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never echo 'return true' >> src/auth/session.go\" && ./run-tests.sh" }
         session: { id: s1 }

@@ -1,6 +1,6 @@
 id: git-hook-installed
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 5
+version: 6
 title: Git hook script installed or modified
 description: >
   The agent modified a script under .git/hooks/ (pre-commit, post-checkout,
@@ -20,7 +20,9 @@ taxonomy:
 # asked of a file event's path and of every path a shell command writes (c.file_writes: a
 # redirection, tee, cp, mv, install, ln), through file_changed.
 match: >
-  file_changed(e, p, git_hook_file(p))
+  file_changed(e, p, git_hook_file(p)) ||
+  e.event.action == "command.executed" && git_hook_file_redirect(e.command.command) &&
+    unread_text(e, t, git_hook_file_redirect(t))
 
 emit:
   reason: "Git hook script installed or modified — runs on the next matching git operation, durable code-execution persistence"
@@ -85,4 +87,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: ".git/hooks/pre-commit" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh 'cat /tmp/h > .git/hooks/pre-commit'" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never cat /tmp/h > .git/hooks/pre-commit\" && ./run-tests.sh" }
         session: { id: s1 }

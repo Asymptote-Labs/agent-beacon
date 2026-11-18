@@ -24,7 +24,7 @@
 # unread_text asks first anyway, asked without building a list, so the line that names no
 # such write (nearly every line) costs one prefiltered pattern.
 library: sensitive-files
-version: 4
+version: 5
 spec: threat-rules/v1.3
 description: Files whose change gives code execution, access or supply-chain reach, by path.
 
@@ -631,6 +631,38 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "cp pyproject.toml tmp/pyproject.toml" }
+
+  - name: opaque_commands_in_scratch
+    params: [e]
+    description: >
+      Every command of the line the parser cannot see into (command_opaque) runs in a
+      temporary directory (c.cwd, worked out in line order), and there is one. A rule's text
+      half asks it before counting a relative write in the text that reaches such a command:
+      the text does not say which directory its paths are in, but the command's directory
+      does. A line the parser cannot answer for as a whole (command_line_unread: cut, not
+      parsed, or past a bound) is never in scratch by this test.
+    body: >
+      !command_line_unread(e) && e.command.parsed_commands.exists(c, command_opaque(c)) &&
+      e.command.parsed_commands.all(c, !command_opaque(c) || c.cwd != "" && scratch_path(c.cwd))
+    tests:
+      - name: a_script_run_after_a_cd_into_tmp
+        match: opaque_commands_in_scratch(e)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp/probe && ./setup.sh \"echo '{}' > package.json\"" }
+      - name: a_script_run_before_the_cd
+        match: opaque_commands_in_scratch(e)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"echo '{}' > package.json\"; cd /tmp/probe" }
+      - name: a_line_that_does_not_parse
+        match: opaque_commands_in_scratch(e)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp/probe && ./setup.sh \"echo '{}' > package.json" }
 
   - name: write_outside_scratch
     params: [e, f, cond]

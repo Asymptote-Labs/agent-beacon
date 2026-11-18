@@ -1,6 +1,6 @@
 id: autostart-unit-file-installed
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 4
+version: 5
 title: Autostart unit / service / login-item file installed
 description: >
   The agent wrote an autostart definition that re-executes outside any sandbox at
@@ -23,7 +23,9 @@ taxonomy:
 # rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
 # path a shell command writes (c.file_writes: a redirection, tee, cp, mv, install, ln).
 match: >
-  file_changed(e, p, autostart_unit_file(p))
+  file_changed(e, p, autostart_unit_file(p)) ||
+  e.event.action == "command.executed" && autostart_unit_file_redirect(e.command.command) &&
+    unread_text(e, t, autostart_unit_file_redirect(t))
 
 emit:
   reason: "Autostart unit/service/login-item file installed (systemd unit, launchd plist, XDG autostart, or environment.d) — re-executes at login/boot/schedule outside the sandbox"
@@ -94,4 +96,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: "/home/dev/.config/systemd/user/evil.service" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh 'cat /tmp/u | tee ~/.config/systemd/user/sync.service'" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never cat /tmp/u | tee ~/.config/systemd/user/sync.service\" && ./run-tests.sh" }
         session: { id: s1 }

