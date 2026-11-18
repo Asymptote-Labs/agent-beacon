@@ -682,7 +682,7 @@ func installHookTargetsFromEndpointInstall(report, out io.Writer, targets []stri
 		cfg.LogPath = endpointOpts.logPath
 	}
 	install := func(target string) error { return installEndpointHookTargetTo(report, os.Stdout, target, cfg) }
-	if bin, ok := enforcedHookBeacon(cfg); ok {
+	if bin, ok := enforcedHookBeacon(context.Background(), out, cfg); ok {
 		install = func(target string) error {
 			return installHooksWithEnterpriseBeacon(context.Background(), bin, cfg, "--harness", target)
 		}

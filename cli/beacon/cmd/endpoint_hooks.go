@@ -52,7 +52,7 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 		return printPlannedActions(actions)
 	}
 	cfg := loadOrDefaultConfig()
-	if bin, ok := enforcedHookBeacon(cfg); ok {
+	if bin, ok := enforcedHookBeacon(cmd.Context(), os.Stderr, cfg); ok {
 		selection := []string{"--harness", strings.Join(targets, ",")}
 		if endpointOpts.allTargets {
 			// A sweep, so the enterprise binary skips what a sweep skips.

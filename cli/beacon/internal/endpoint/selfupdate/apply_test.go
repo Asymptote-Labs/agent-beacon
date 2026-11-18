@@ -508,6 +508,18 @@ func TestRollbackReportsCollectorRestartFailure(t *testing.T) {
 	}
 }
 
+func TestVersionLineVersion(t *testing.T) {
+	for out, want := range map[string]string{
+		"beacon version 1.3.63 (565aae94) built on today, enterprise edition\n": "1.3.63",
+		"beacon version v0.0.69 (abc) built on today":                           "0.0.69",
+		"garbage": "",
+	} {
+		if got := VersionLineVersion(out); got != want {
+			t.Errorf("VersionLineVersion(%q) = %q, want %q", out, got, want)
+		}
+	}
+}
+
 func TestVersionLineMatches(t *testing.T) {
 	out := "beacon version 0.0.69 (abc1234) built on 2026-01-01"
 	if !VersionLineMatches(out, "0.0.69") {

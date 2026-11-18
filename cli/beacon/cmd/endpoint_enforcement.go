@@ -25,6 +25,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/updatecheck"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
@@ -482,12 +483,44 @@ func printEnforcementOnOrOff(out io.Writer, jsonOut bool) error {
 // enforcedHookBeacon is the kept enterprise binary a user-mode hook install must go through while
 // enforcement is on for this user. This build's hooks carry no enforcement, so installing them
 // here would quietly take enforcement out of every agent; the enterprise binary writes the same
-// hooks plus its enforce entries.
-func enforcedHookBeacon(cfg endpointconfig.Config) (string, bool) {
+// hooks plus its enforce entries. It is first brought up to this build's version when older.
+func enforcedHookBeacon(ctx context.Context, warnings io.Writer, cfg endpointconfig.Config) (string, bool) {
 	if !cfg.UserMode || !userEnforcementOn() {
 		return "", false
 	}
-	return userEnterpriseBeacon()
+	bin, ok := userEnterpriseBeacon()
+	if ok {
+		refreshUserEnterpriseBeacon(ctx, warnings, bin)
+	}
+	return bin, ok
+}
+
+// refreshUserEnterpriseBeacon updates the kept enterprise binary at bin to this build's release
+// when it is older: after a community upgrade (brew upgrade) an older one would write older hooks
+// and refuse agents it does not know. When that release cannot be had (the enterprise one follows
+// the public release, or the machine is offline) it warns, and the kept binary does the install.
+func refreshUserEnterpriseBeacon(ctx context.Context, warnings io.Writer, bin string) {
+	want := version.GetVersion()
+	kept := selfupdate.VersionLineVersion(userEnterpriseVersionLine(ctx))
+	if !updatecheck.Older(kept, want) {
+		return
+	}
+	err := func() error {
+		dashboard, deviceKey, err := enforcementUserCredentials()
+		if err != nil {
+			return err
+		}
+		locateCtx, cancel := context.WithTimeout(ctx, enforcementLocateTimeout)
+		rel, err := locateEnterpriseRelease(locateCtx, nil, dashboard, deviceKey, want)
+		cancel()
+		if err != nil {
+			return err
+		}
+		return installUserEnterpriseRelease(ctx, rel, bin)
+	}()
+	if err != nil {
+		fmt.Fprintf(warnings, "Warning: enforcement's hooks come from Beacon %s, older than this one (%s), which could not be updated: %v. Retry later with: beacon endpoint enforcement enable\n", kept, want, err)
+	}
 }
 
 // installHooksWithEnterpriseBeacon runs `hooks install` through bin for selection: --all, or

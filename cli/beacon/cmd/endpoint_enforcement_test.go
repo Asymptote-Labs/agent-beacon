@@ -16,6 +16,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/edition"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
 // enforcementFakes replaces every seam the public enable reaches with a fake that records what
@@ -407,14 +408,14 @@ func TestHookInstallsGoThroughTheKeptEnterpriseBinaryOnlyWhileUserEnforcementIsO
 	user := endpointconfig.Config{UserMode: true, LogPath: "/u/runtime.jsonl"}
 
 	writeUserEnforcementFiles(t, false)
-	if _, ok := enforcedHookBeacon(user); ok {
+	if _, ok := enforcedHookBeacon(context.Background(), &bytes.Buffer{}, user); ok {
 		t.Fatal("went through the enterprise binary with enforcement off")
 	}
 	bin := writeUserEnforcementFiles(t, true)
-	if _, ok := enforcedHookBeacon(endpointconfig.Config{LogPath: "/var/log/beacon-agent/runtime.jsonl"}); ok {
+	if _, ok := enforcedHookBeacon(context.Background(), &bytes.Buffer{}, endpointconfig.Config{LogPath: "/var/log/beacon-agent/runtime.jsonl"}); ok {
 		t.Fatal("went through the enterprise binary for a system-mode install")
 	}
-	if got, ok := enforcedHookBeacon(user); !ok || got != bin {
+	if got, ok := enforcedHookBeacon(context.Background(), &bytes.Buffer{}, user); !ok || got != bin {
 		t.Fatalf("enforcedHookBeacon = %q, %v; want %s", got, ok, bin)
 	}
 }
@@ -547,5 +548,49 @@ func TestEnforcementStatusWithoutTheEnterpriseBinarySaysWhetherItIsOn(t *testing
 	}
 	if len(f.userForwarded) != 0 {
 		t.Fatalf("forwarded %v", f.userForwarded)
+	}
+}
+
+// After a community upgrade, the kept enterprise binary is brought up to this build's release
+// before it is handed a hook install; never down to it, and when the release cannot be had the
+// install goes ahead with the kept binary and a warning.
+func TestHookInstallsUpdateAnOlderKeptEnterpriseBinaryFirst(t *testing.T) {
+	f := stubEnforcement(t)
+	f.root = false
+	bin := writeUserEnforcementFiles(t, true)
+	user := endpointconfig.Config{UserMode: true, LogPath: "/u/runtime.jsonl"}
+	orig := version.Version
+	t.Cleanup(func() { version.Version = orig })
+	version.Version = "1.3.70"
+
+	for line, wantInstall := range map[string]bool{
+		"beacon version 1.3.69 (abc) built on today, enterprise edition\n": true,
+		"beacon version 1.3.70 (abc) built on today, enterprise edition\n": false,
+		"beacon version 1.3.71 (abc) built on today, enterprise edition\n": false,
+	} {
+		f.userLine, f.userInstalled, f.locatedWith = line, nil, nil
+		var warnings bytes.Buffer
+		if got, ok := enforcedHookBeacon(context.Background(), &warnings, user); !ok || got != bin {
+			t.Fatalf("with %q: %q, %v", line, got, ok)
+		}
+		if got := len(f.userInstalled) == 1; got != wantInstall {
+			t.Fatalf("with %q installed %v, want install %v", line, f.userInstalled, wantInstall)
+		}
+		if wantInstall && !strings.HasSuffix(f.locatedWith[0], " 1.3.70") {
+			t.Fatalf("located %q, want this build's release", f.locatedWith)
+		}
+		if warnings.Len() != 0 {
+			t.Fatalf("with %q warned %q", line, warnings.String())
+		}
+	}
+
+	f.userLine, f.userInstalled = "beacon version 1.3.69 (abc) built on today, enterprise edition\n", nil
+	f.locateErr = &edition.HTTPError{Status: http.StatusNotFound}
+	var warnings bytes.Buffer
+	if _, ok := enforcedHookBeacon(context.Background(), &warnings, user); !ok {
+		t.Fatal("no hand-off when the update failed")
+	}
+	if len(f.userInstalled) != 0 || !strings.Contains(warnings.String(), "Retry later with: beacon endpoint enforcement enable") {
+		t.Fatalf("installed %v, warnings %q", f.userInstalled, warnings.String())
 	}
 }

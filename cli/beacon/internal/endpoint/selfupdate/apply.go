@@ -690,6 +690,17 @@ func VersionLineMatches(out, want string) bool {
 	return false
 }
 
+// VersionLineVersion returns the version `beacon version` output reports, without a "v", or "".
+func VersionLineVersion(out string) string {
+	fields := strings.Fields(out)
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] == "version" {
+			return strings.TrimPrefix(fields[i+1], "v")
+		}
+	}
+	return ""
+}
+
 // VersionLineEdition returns the edition `beacon version` output names ("…, <edition> edition"
 // at the end of the line), or "" for a build that reports none, which is the default edition.
 func VersionLineEdition(out string) string {
