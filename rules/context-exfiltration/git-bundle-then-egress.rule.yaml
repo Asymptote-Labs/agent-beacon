@@ -1,6 +1,6 @@
 id: git-bundle-then-egress
 spec: threat-rules/v1.3  # needed for predicates
-version: 4
+version: 5
 title: Git history bundled then sent off-host
 description: >
   A session packs repository history into a single git bundle (git bundle create)
@@ -30,7 +30,7 @@ correlation:
       match: >
         e.event.action == "command.executed" && (
           e.command.parsed_commands.exists(c, c.name == "git" &&
-            c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*bundle\\ncreate(\\n|\\z)")) ||
+            git_subcommand(c, "bundle\\ncreate(\\n|\\z)")) ||
           unread_text(e, t, t.matches("(?i)\\bgit\\b.*\\bbundle\\b\\s+create\\b")))
     # Who sends, a remote copy and a /dev/tcp redirect are the egress rules' shared
     # predicates (rules/concepts/egress.predicates.yaml). curl and wget count only with a

@@ -1,6 +1,6 @@
 id: git-history-rewrite
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+version: 6
 title: Git history rewritten (filter-branch / filter-repo / interactive rebase)
 description: >
   A history-rewriting git subcommand was invoked: filter-branch,
@@ -27,15 +27,14 @@ taxonomy:
   beacon_category: source-control
   owasp_llm: LLM03
 
-# The subcommand is the first word after git's own options, of which -C, -c, --git-dir,
-# --work-tree and --namespace take the next word as their value; a word whose value is
-# unknown (`git $OPTS commit`) is passed over as an option. filter-repo is also installed
-# as a program of its own, git-filter-repo. The text named a replace option git does not have
-# (--convert-forkpoint) until version 5; both halves now name --convert-graft-file.
+# The subcommand is the first word after git's own options (git_subcommand). filter-repo
+# is also installed as a program of its own, git-filter-repo. The text named a replace
+# option git does not have (--convert-forkpoint) until version 5; both halves now name
+# --convert-graft-file.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
-      c.name == "git" && c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*(?:filter-(?:branch|repo)|rebase\\n(?:[^\\n]*\\n)*?(?:-[rqvnfmp]*i[rqvnfmp]*|--interactive)|commit\\n(?:[^\\n]*\\n)*?--amend|replace\\n(?:--?[A-Za-z][^\\n]*\\n)*?(?:--edit|--graft|--convert-graft-file))(?:\\n|\\z)") ||
+      c.name == "git" && git_subcommand(c, "(?:filter-(?:branch|repo)|rebase\\n(?:[^\\n]*\\n)*?(?:-[rqvnfmp]*i[rqvnfmp]*|--interactive)|commit\\n(?:[^\\n]*\\n)*?--amend|replace\\n(?:--?[A-Za-z][^\\n]*\\n)*?(?:--edit|--graft|--convert-graft-file))(?:\\n|\\z)") ||
       c.name.matches("^git-filter-(branch|repo)$")
     ) ||
     unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bfilter-(branch|repo)\\b") ||

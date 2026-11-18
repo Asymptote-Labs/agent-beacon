@@ -1,6 +1,6 @@
 id: git-local-work-discarded
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+version: 5
 title: Local Git work discarded
 description: >
   An agent hard-resets Git, force-cleans directories or ignored files, restores
@@ -19,11 +19,10 @@ taxonomy:
   beacon_category: source-control
   owasp_llm: LLM06
 
-# Parsed: the subcommand is the first word after git's own options, of which -C, -c,
-# --git-dir, --work-tree and --namespace take the next word as their value; a word whose
-# value is unknown (`git $OPTS reset`) is passed over as an option. clean matches when every
-# option is one of -d -f -x -X -q (so -n, --dry-run, -i and -e are out), one forces and one
-# names directories or ignored files. checkout and restore match when the only path is the
+# Parsed: the subcommand is the first word after git's own options (git_subcommand). clean
+# matches when every option is one of -d -f -x -X -q (so -n, --dry-run, -i and -e are out),
+# one forces and one names directories or ignored files. checkout and restore match when the
+# only path is the
 # whole tree (`.` or `:/`), and restore when the working tree is among what it restores;
 # -q beside them changes nothing.
 #
@@ -38,11 +37,11 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c, c.name == "git" && (
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*(?:reset\\n(?:[^\\n]*\\n)*?--hard|stash\\nclear|checkout\\n(?:(?:[^\\n-][^\\n]*|--?[A-Za-z0-9][^\\n]*)?\\n)*?(?:-[qmtdl]*f[qmtdl]*|--force))(?:\\n|\\z)") ||
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*checkout\\n(?:(?:-q|--quiet)\\n)*(?:HEAD\\n)?(?:--\\n)?(?:\\.|:/)\\z") ||
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*clean(?:\\n(?:-[dfxXq]+|--force|--quiet|[^\\n-][^\\n]*)?)*(?:\\n--(?:\\n[^\\n]*)*)?\\z") &&
+      git_subcommand(c, "(?:reset\\n(?:[^\\n]*\\n)*?--hard|stash\\nclear|checkout\\n(?:(?:[^\\n-][^\\n]*|--?[A-Za-z0-9][^\\n]*)?\\n)*?(?:-[qmtdl]*f[qmtdl]*|--force))(?:\\n|\\z)") ||
+      git_subcommand(c, "checkout\\n(?:(?:-q|--quiet)\\n)*(?:HEAD\\n)?(?:--\\n)?(?:\\.|:/)\\z") ||
+      git_subcommand(c, "clean(?:\\n(?:-[dfxXq]+|--force|--quiet|[^\\n-][^\\n]*)?)*(?:\\n--(?:\\n[^\\n]*)*)?\\z") &&
         c.args.matches("(?m)^(-[dfxXq]*f[dfxXq]*|--force)$") && c.args.matches("(?m)^-[dfxXq]*[dxX][dfxXq]*$") ||
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*restore\\n(?:(?:--source|-s)\\n[^\\n]*\\n|(?:--source=[^\\n]*|--worktree|--staged|--quiet|-[SWq]+)?\\n)*(?:--\\n)?(?:\\.|:/)\\z") &&
+      git_subcommand(c, "restore\\n(?:(?:--source|-s)\\n[^\\n]*\\n|(?:--source=[^\\n]*|--worktree|--staged|--quiet|-[SWq]+)?\\n)*(?:--\\n)?(?:\\.|:/)\\z") &&
         (c.args.matches("(?m)^(--worktree|-[SWq]*W[SWq]*)$") || !c.args.matches("(?m)^(--staged|-[SWq]*S[SWq]*)$"))
     )) ||
     unread_text(e, t,

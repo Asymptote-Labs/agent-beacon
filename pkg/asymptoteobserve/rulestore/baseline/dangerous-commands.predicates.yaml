@@ -18,7 +18,7 @@
 # command of a command.executed event: parsed_commands is derived for both. The baseline embeds
 # this file, since curl-pipe-to-shell calls it.
 library: dangerous-commands
-version: 6
+version: 7
 spec: threat-rules/v1.3
 description: A command that destroys data or hands over the machine in one step, and its parts.
 
@@ -38,7 +38,7 @@ definitions:
       has no known value.
     body: >
       e.command.parsed_commands.exists(c,
-        (c.name == "rm" || c.name == "git" && c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n)*?rm(\\n|\\z)")) &&
+        (c.name == "rm" || c.name == "git" && git_subcommand(c, "rm(\\n|\\z)")) &&
           c.args.matches("(?mi)^-[a-z]*r[a-z]*$|^--recursive$") && c.args.matches("(?mi)^-[a-z]*f[a-z]*$|^--force$") ||
         makes_filesystem(c) ||
         c.name == "dd" && c.argv_raw.exists(a, a.matches("^[\"']?if=")) ||
