@@ -1,6 +1,6 @@
 id: curl-pipe-to-shell
 spec: threat-rules/v1.3  # needed for the commands a carrier or a pipe hands a shell
-version: 6
+version: 7
 title: Remote script piped directly into a shell
 description: >
   A command downloads content with curl/wget and pipes it straight into a shell
@@ -18,16 +18,16 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM08
 
-# The downloader is any word of a command (so timeout/nice wrappers still count); the shell
-# is a command at a later stage of the same pipeline (later_stages, indexes into
-# parsed_commands), a command inside a compound stage ({ curl ...; } | sh) included. The text
-# half names the same shells, by any path, under sudo or env with their options.
+# The parsed half is download_piped_to_shell (rules/concepts/dangerous-commands.predicates.yaml),
+# which the approval rules ask too: the downloader is any word of a command (so timeout/nice
+# wrappers still count); the shell is a command at a later stage of the same pipeline, a
+# command inside a compound stage ({ curl ...; } | sh) included. The text half is its twin,
+# download_piped_to_shell_mention, which names the same shells, by any path, under sudo or env
+# with their options.
 match: >
   e.event.action == "command.executed" && (
-    e.command.parsed_commands.exists(d,
-      d.argv.exists(a, a.matches("(?i)(^|/)(curl|wget)$")) &&
-      d.later_stages.exists(i, e.command.parsed_commands[i].name.matches("(?i)^(ba|z|da|k)?sh$"))) ||
-    unread_text(e, t, t.matches("(?i)\\b(curl|wget)\\b.*\\|\\s*(sudo(\\s+-\\S+(\\s+\\w+)?)*\\s+)?(\\S*/)?(env(\\s+-\\S+|\\s+\\w+=\\S*)*\\s+)?(\\S*/)?(ba|z|da|k)?sh\\b"))
+    e.command.parsed_commands.exists(d, download_piped_to_shell(e, d)) ||
+    unread_text(e, t, download_piped_to_shell_mention(t))
   )
 
 emit:

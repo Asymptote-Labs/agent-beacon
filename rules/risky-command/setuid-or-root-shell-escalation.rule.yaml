@@ -1,6 +1,6 @@
 id: setuid-or-root-shell-escalation
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 6
+version: 7
 title: Setuid bit installed or interactive root shell requested
 description: >
   A command either installs the setuid bit on a file (chmod u+s or +s, chmod with a
@@ -31,27 +31,21 @@ taxonomy:
   mitre_atlas: AML.T0050
 
 # The mode is the first word of chmod that is not an option (an unknown word, such as a
-# variable, is skipped), so a file named 2024 is not a mode. A shell to type into is su with
-# no command, `sudo -i` or `sudo -s` with no command (an entry with no name whose command the
-# parser did not read, because there is none), and a shell run through sudo or doas with no
-# words, no script and nothing on its standard input.
+# variable, is skipped), so a file named 2024 is not a mode. A shell to type into is
+# root_shell (rules/concepts/dangerous-commands.predicates.yaml), which the approval rules ask
+# too: su with no command, `sudo -i` or `sudo -s` with no command (an entry with no name whose
+# command the parser did not read, because there is none), a shell run through sudo or doas
+# with no words, no script and nothing on its standard input, and pkexec. Its text twin,
+# root_shell_mention, also takes a command right after a quote, as in a script handed it.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
       c.name == "chmod" &&
         c.args.matches("\\A(-[^\\n]*\\n|\\n)*(0?[2-7][0-7]{3}|[ugoa,+=rwxXst-]*[+=][rwxXt]*s[ugoa,+=rwxXst-]*)(\\n|\\z)") ||
-      c.name == "su" && c.args.matches("(?m)^root$|\\A(-|-l|--login)?\\z") ||
-      c.name == "pkexec" ||
-      size(c.argv) > 1 && c.argv[0].matches("(^|/)(sudo|doas)$") && !c.runs_read && (
-        c.name == "" && c.stage == 0 && size(c.file_reads) == 0 && !c.argv.exists(a, a == "") &&
-          c.argv.exists(a, a.matches("^(-[A-Za-z]*[is][A-Za-z]*|--login|--shell)$")) ||
-        c.name.matches("^(ba|z|da|k)?sh$") && c.args == "" && c.stage == 0 && size(c.file_reads) == 0)
+      root_shell(c)
     ) ||
-    unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
-      t.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
-      t.matches("(?i)(^|[;&|]\\s*)(?:(su)[ \\t]|(su)\\n|(su)[\\f\\r])\\s*-\\s*$") ||
-      t.matches("(?i)(^|[;&|]\\s*)sudo\\s+(-[is]|--login|--shell|su)\\s*($|[;&|])") ||
-      t.matches("(?i)(^|[;&|]\\s*)pkexec\\b")))
+    unread_text(e, t, t.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
+      root_shell_mention(t))
   )
 
 emit:
