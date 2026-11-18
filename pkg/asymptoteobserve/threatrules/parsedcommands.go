@@ -157,11 +157,14 @@ scan:
 		}
 		w := words[i]
 		if !w.Known {
+			if stdin && !command {
+				break // with -s, the script's first argument
+			}
 			return "", false
 		}
 		t := w.Text
 		switch {
-		case t == "--":
+		case t == "--" || t == "-": // a lone - ends the options as -- does
 			if command && i+1 < len(words) && words[i+1].Known {
 				return words[i+1].Text, true
 			}

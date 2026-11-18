@@ -175,22 +175,40 @@ func (f *flow) command(i int) {
 // in the line.
 func (f *flow) read(i int, path string, via Via, sent bool) {
 	// Standard input, a device, and a process substitution, whose commands are followed instead.
-	if path == "" || path == "-" || strings.HasPrefix(path, "/dev/") || strings.HasPrefix(path, "<(") {
+	if path == "" || path == "-" || isDevice(path) || strings.HasPrefix(path, "<(") {
 		return
 	}
+	if !f.take(i, path, via, sent) {
+		return
+	}
+	// f.files holds every file that went into path, through any number of copies, as it was when
+	// path was written. Following those files' own sources again would read what they hold now:
+	// in `cat a > y; cp y x; cat b > y; curl -T x`, x holds a, not b.
+	for _, source := range f.files[path] {
+		f.take(i, source, via, sent)
+	}
+}
+
+// take adds path to what command i reads by via, and reports whether it was not there yet.
+func (f *flow) take(i int, path string, via Via, sent bool) bool {
 	if f.reads == nil {
 		f.reads = make([][]FileRead, len(f.commands))
 	}
 	for k := range f.reads[i] {
 		if r := &f.reads[i][k]; r.Path == path && r.Via == via {
 			r.Sent = r.Sent || sent
-			return
+			return false
 		}
 	}
 	f.reads[i] = append(f.reads[i], FileRead{Path: path, Via: via, Sent: sent})
-	for _, source := range f.files[path] {
-		f.read(i, source, via, sent)
-	}
+	return true
+}
+
+// isDevice reports whether path names a device or a descriptor rather than a file: /dev/null,
+// /dev/stdin, /dev/fd/3. /dev/shm is a directory of ordinary files, which a line can stage a
+// file in as it can in /tmp.
+func isDevice(path string) bool {
+	return strings.HasPrefix(path, "/dev/") && !strings.HasPrefix(path, "/dev/shm/")
 }
 
 // taken are the files command i takes in, by any way, each once.

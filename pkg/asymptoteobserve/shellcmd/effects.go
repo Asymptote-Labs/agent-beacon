@@ -84,7 +84,7 @@ func redirectTarget(r Redirect) (string, Op, bool) {
 		return "", "", false
 	}
 	t := r.Target
-	if !t.Known || t.Text == "" || strings.HasPrefix(t.Text, "/dev/") {
+	if !t.Known || t.Text == "" || isDevice(t.Text) {
 		return "", "", false
 	}
 	return t.Text, op, true

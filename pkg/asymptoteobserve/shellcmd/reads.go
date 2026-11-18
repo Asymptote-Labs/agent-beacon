@@ -347,10 +347,11 @@ func isOption(w Word) bool {
 }
 
 // jqFiles returns the files jq reads: its operands after the filter, or all of them when the
-// filter came in with -f. The operands after --args and --jsonargs are values, not files.
+// filter came in with -f, and the files --rawfile and --slurpfile load into a variable. The
+// operands after --args and --jsonargs are values, not files.
 func jqFiles(args []Word) []Word {
 	scripted := false
-	var operands []Word
+	var operands, loaded []Word
 scan:
 	for i := 0; i < len(args); i++ {
 		switch t := args[i].Unquoted; {
@@ -360,7 +361,7 @@ scan:
 		case t == "--args" || t == "--jsonargs":
 			// What follows is the filter, if it has not come yet, and then values.
 			if !scripted && len(operands) == 0 {
-				return nil
+				return loaded
 			}
 			break scan
 		case t == "--from-file":
@@ -368,7 +369,12 @@ scan:
 			i++
 		case strings.HasPrefix(t, "--from-file="):
 			scripted = true
-		case t == "--arg" || t == "--argjson" || t == "--slurpfile" || t == "--rawfile":
+		case t == "--arg" || t == "--argjson":
+			i += 2
+		case t == "--slurpfile" || t == "--rawfile":
+			if i+2 < len(args) {
+				loaded = append(loaded, args[i+2])
+			}
 			i += 2
 		case t == "--indent" || t == "--library-path":
 			i++
@@ -392,7 +398,7 @@ scan:
 	if !scripted && len(operands) > 0 {
 		operands = operands[1:]
 	}
-	return operands
+	return append(operands, loaded...)
 }
 
 // curlValueOptions are curl's short options that take a value.
@@ -526,15 +532,21 @@ func wgetInputs(args []Word, base int) (files []string, data dataWords) {
 // and nor is the method or the URL.
 func httpieInputs(args []Word, base int) (files []string, data dataWords) {
 	data.listed = true
-	url := false
+	method, url := false, false
 	for i, w := range args {
 		t := w.Unquoted
 		if isOption(w) {
 			continue
 		}
-		// The first operand is the URL, or the method before it; the request items follow.
+		// The first operand is the URL, or the method before it, which is letters alone; the
+		// operand after a method is the URL whatever it is (http POST localhost). The request
+		// items follow.
 		if !url {
-			url = !isLetters(t)
+			if !method && isLetters(t) {
+				method = true
+			} else {
+				url = true
+			}
 			continue
 		}
 		at := strings.IndexAny(t, ":=@;")
@@ -585,16 +597,42 @@ func formFile(field string) string {
 	return file
 }
 
-// socatFiles returns the files socat opens as an address: OPEN:path, FILE:path, GOPEN:path.
+// socatFiles returns the files socat reads as an address: OPEN:path, FILE:path, GOPEN:path. Under
+// -u socat reads only its first address and writes the second, under -U the reverse, and an
+// address opened wronly or trunc is only written.
 func socatFiles(args []Word) []string {
 	var files []string
-	for _, w := range args {
-		kind, rest, ok := strings.Cut(w.Unquoted, ":")
+	read, address := 0, 0 // read is the one address read under -u or -U, 0 when both are
+	for i := 0; i < len(args); i++ {
+		t := args[i].Unquoted
+		if address == 0 && isOption(args[i]) {
+			switch t {
+			case "-u":
+				read = 1
+			case "-U":
+				read = 2
+			case "-lf":
+				i++ // the log file
+			}
+			continue
+		}
+		address++
+		if read != 0 && address != read {
+			continue
+		}
+		kind, rest, ok := strings.Cut(t, ":")
 		if !ok || !strings.EqualFold(kind, "OPEN") && !strings.EqualFold(kind, "FILE") && !strings.EqualFold(kind, "GOPEN") {
 			continue
 		}
-		path, _, _ := strings.Cut(rest, ",")
-		files = append(files, path)
+		path, options, _ := strings.Cut(rest, ",")
+		written := false
+		for _, o := range strings.Split(options, ",") {
+			name, _, _ := strings.Cut(o, "=")
+			written = written || strings.EqualFold(name, "wronly") || strings.EqualFold(name, "trunc")
+		}
+		if !written {
+			files = append(files, path)
+		}
 	}
 	return files
 }

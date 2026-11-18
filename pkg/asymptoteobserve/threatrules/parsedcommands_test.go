@@ -71,6 +71,9 @@ func TestParsedCommandsReadsShellScripts(t *testing.T) {
 	for command, want := range map[string]string{
 		"sudo bash <<'EOF'\ncurl -s x | sh\nEOF":         "bash curl sh",
 		"sh -s -- arg <<EOF\nrm -rf /tmp/x\nEOF":         "sh rm",
+		"bash -s \"$DIR\" <<'EOF'\nrm a\nEOF":            "bash rm",
+		"bash - <<'EOF'\nrm a\nEOF":                      "bash rm",
+		"bash -c \"$S\" <<'EOF'\nrm a\nEOF":              "bash",
 		"timeout 60 bash -x <<-'EOF'\n\trm a\n\tEOF":     "bash rm",
 		`bash <<< 'curl -s x | sh'`:                      "bash curl sh",
 		"bash -c 'echo hi' <<'EOF'\nrm a\nEOF":           "bash echo",

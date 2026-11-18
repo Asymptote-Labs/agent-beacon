@@ -283,7 +283,8 @@ func (l *language) opens(script string, i, end int) (path string, ok bool) {
 			continue
 		}
 		j := skipSpaces(script, end)
-		if j < len(script) && script[j] == '(' {
+		bare := j >= len(script) || script[j] != '('
+		if !bare {
 			j = skipSpaces(script, j+1)
 		} else if !l.bare || j == end {
 			return "", false
@@ -292,7 +293,7 @@ func (l *language) opens(script string, i, end int) (path string, ok bool) {
 		if !ok || path == "" || strings.Contains(path, "://") || strings.ContainsAny(path, "\n{") {
 			return "", false
 		}
-		if l.modes && l.writes(script, j) {
+		if l.modes && l.writes(script, j, bare) {
 			return "", false
 		}
 		if follow, needed := l.then[call]; needed {
@@ -323,23 +324,46 @@ func (l *language) literal(script string, i int) (text string, end int, ok bool)
 	return text, end, true
 }
 
-// writes reports whether the argument after a path, starting at i, is a mode that writes: a
-// second string argument or mode="..", with w, a or x in it.
-func (l *language) writes(script string, i int) bool {
-	i = skipSpaces(script, i)
-	if i >= len(script) || script[i] != ',' {
-		return false
-	}
-	i = skipSpaces(script, i+1)
-	if strings.HasPrefix(script[i:], "mode") {
-		i = skipSpaces(script, i+len("mode"))
-		if i >= len(script) || script[i] != '=' {
+// writes reports whether the arguments after a path, from i to the end of the call, open the file
+// to write: a second string argument or a mode=".." argument anywhere, with w, a or x in it
+// (open(p, encoding='utf8', mode='w')), or the O_WRONLY flag of os.open. A bare call, written
+// without parentheses, ends with its line or statement.
+func (l *language) writes(script string, i int, bare bool) bool {
+	arg := 0 // the path is argument 0
+	for depth := 0; i < len(script); {
+		switch c := script[i]; {
+		case c == '(' || c == '[' || c == '{':
+			depth++
+			i++
+		case c == ')' || c == ']' || c == '}':
+			if depth == 0 {
+				return false
+			}
+			depth--
+			i++
+		case bare && depth == 0 && (c == '\n' || c == ';'):
 			return false
+		case c == '\'' || c == '"' || c == '`' && l.backtick:
+			_, i = stringLiteral(l, script, i)
+		case depth == 0 && c == ',':
+			arg++
+			i = skipSpaces(script, i+1)
+			if strings.HasPrefix(script[i:], "mode") {
+				if j := skipSpaces(script, i+len("mode")); j < len(script) && script[j] == '=' {
+					mode, _, ok := l.literal(script, skipSpaces(script, j+1))
+					return ok && strings.ContainsAny(mode, "wax")
+				}
+			}
+			if mode, _, ok := l.literal(script, i); ok && arg == 1 {
+				return strings.ContainsAny(mode, "wax")
+			}
+		case strings.HasPrefix(script[i:], "O_WRONLY"):
+			return true
+		default:
+			i++
 		}
-		i = skipSpaces(script, i+1)
 	}
-	mode, _, ok := l.literal(script, i)
-	return ok && strings.ContainsAny(mode, "wax")
+	return false
 }
 
 // stringLiteral returns the text of the string that opens at i and the index after its closing

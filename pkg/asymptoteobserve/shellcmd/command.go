@@ -129,7 +129,7 @@ var (
 		blockingLong: []string{"--pid", "--pgid", "--uid"},
 	}
 	wrapperStdbuf      = wrapperSpec{optionSpec: optionSpec{short: "ioe", long: []string{"--input", "--output", "--error"}}}
-	wrapperDoas        = wrapperSpec{optionSpec: optionSpec{short: "uC"}, blocking: "s"}
+	wrapperDoas        = wrapperSpec{optionSpec: optionSpec{short: "au"}, blocking: "sC"} // -s runs a shell, -C only checks the config
 	wrapperTorsocks    = wrapperSpec{optionSpec: optionSpec{short: "aPup", long: []string{"--address", "--port", "--user", "--pass"}}}
 	wrapperProxychains = wrapperSpec{optionSpec: optionSpec{short: "f"}}
 )
