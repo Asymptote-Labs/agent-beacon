@@ -14,6 +14,14 @@ import (
 // runs a file or what a pipe sends it, or the script is not a known word. A PowerShell in the
 // command runs the script of its -Command option (powershellScript).
 func (c Command) Script() (script string, ok bool) {
+	script, _, ok = c.script()
+	return script, ok
+}
+
+// script is Script, with zero, the index in Argv of the word that is the script's $0: the one
+// after the script with -c, and the one before the first operand with -s, so that each word after
+// it is $1, $2 and so on. zero is -1 where the operands are not the script's (PowerShell).
+func (c Command) script() (script string, zero int, ok bool) {
 	words := c.Argv
 	start := -1
 	for i, w := range words {
@@ -23,10 +31,12 @@ func (c Command) Script() (script string, ok bool) {
 		}
 	}
 	if start < 0 {
-		return c.powershellScript()
+		script, ok = c.powershellScript()
+		return script, -1, ok
 	}
 	// command is set by -c, and stdin by -s: the operands are then the script's arguments.
 	command, stdin := false, false
+	zero = len(words) - 1
 scan:
 	for i := start + 1; ; i++ {
 		if i >= len(words) {
@@ -36,17 +46,19 @@ scan:
 		w := words[i]
 		if !w.Known {
 			if stdin && !command {
+				zero = i - 1
 				break // with -s, the script's first argument
 			}
-			return "", false
+			return "", -1, false
 		}
 		t := w.Text
 		switch {
 		case t == "--" || t == "-": // a lone - ends the options as -- does
 			if command && i+1 < len(words) && words[i+1].Known {
-				return words[i+1].Text, true
+				return words[i+1].Text, i + 2, true
 			}
 			stdin = !command && (stdin || i+1 == len(words))
+			zero = i
 			break scan
 		case t == "--rcfile" || t == "--init-file":
 			i++ // takes a file
@@ -63,18 +75,20 @@ scan:
 			}
 		default:
 			if command {
-				return t, true
+				return t, i + 1, true
 			}
+			zero = i - 1
 			break scan // with -s an argument of the script, without it a script file
 		}
 	}
 	if !stdin {
-		return "", false
+		return "", -1, false
 	}
 	if unwrapped, ok := c.Unwrapped(); !ok || len(c.Argv)-len(unwrapped) != start {
-		return "", false
+		return "", -1, false
 	}
-	return c.HereInput()
+	script, ok = c.HereInput()
+	return script, zero, ok
 }
 
 func isShell(word string) bool {
@@ -164,16 +178,16 @@ func isPowerShell(word string) bool {
 
 type expander struct {
 	out []Command
-	// pipelines, substs and subshells are the highest of each number given out so far: a
-	// script is parsed on its own and its numbers start again, so they are moved past these.
-	pipelines        int
-	substs, subshell int32
+	// pipelines and substs are the highest of each number given out so far: a script is parsed
+	// on its own and its numbers start again, so they are moved past these.
+	pipelines int
+	substs    int32
 }
 
 // add appends commands, the commands of one parse, as the script of the shell at index
 // shell-1 of the result, or as the command line itself when shell is 0.
 func (x *expander) add(commands []Command, shell int32, depth int) {
-	pipelines, substs, subshell := x.pipelines, x.substs, x.subshell
+	pipelines, substs := x.pipelines, x.substs
 	for i := range commands {
 		c := &commands[i]
 		x.pipelines = max(x.pipelines, pipelines+c.Pipeline)
@@ -181,7 +195,6 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		for _, ref := range c.refs {
 			x.substs = max(x.substs, substs+int32(ref.subst))
 		}
-		x.subshell = max(x.subshell, subshell+c.subshell)
 	}
 	// outer names a compound of the same parse by its index there, which a script spliced in
 	// before it moves: at holds where each of these commands landed, 1-based like outer.
@@ -199,9 +212,6 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 			if c.within != 0 {
 				c.within += substs
 			}
-			if c.subshell != 0 {
-				c.subshell += subshell
-			}
 			if slices.ContainsFunc(c.refs, func(ref wordRef) bool { return ref.subst != 0 }) {
 				c.refs = slices.Clone(c.refs)
 				for k := range c.refs {
@@ -218,10 +228,11 @@ func (x *expander) add(commands []Command, shell int32, depth int) {
 		if depth <= 0 {
 			continue
 		}
-		if script, ok := c.Script(); ok {
+		if script, zero, ok := c.script(); ok {
 			if sub, _ := Parse(script); len(sub) > 0 {
 				at := len(x.out)
 				x.out[at-1].scripted = true
+				x.out[at-1].scriptZero = int32(zero + 1)
 				// A script read from the shell's standard input leaves none for its commands.
 				if here, ok := c.HereInput(); ok && here == script {
 					x.out[at-1].scriptOnStdin = true

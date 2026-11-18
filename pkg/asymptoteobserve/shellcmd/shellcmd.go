@@ -93,14 +93,17 @@ type Command struct {
 	within int32
 	outer  int32
 	refs   []wordRef
-	// subshell identifies the innermost ( .. ) the statement is inside, or is 0: what an exec
-	// there leaves open is closed when the subshell ends.
-	subshell int32
+	// execEnd is the byte offset at which the innermost ( .. ) subshell or substitution around
+	// the statement ends, or 0 outside any: what an exec of the statement leaves open is open up
+	// to there (SocketRedirects).
+	execEnd int
 	// shell is, for a command WithScripts added, one more than the index of the shell whose
 	// script it is in, and 0 for a command of the command line itself. scripted is set on a
 	// shell whose script's commands follow it, and scriptOnStdin when it read that script from
-	// its standard input.
+	// its standard input. scriptZero is one more than the index in Argv of the word that is
+	// the script's $0, or 0 where its operands are not the script's.
 	shell         int32
+	scriptZero    int32
 	scripted      bool
 	scriptOnStdin bool
 }
@@ -296,6 +299,7 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			c.Nested = true
 			if s.start >= innermost {
 				innermost, c.within = s.start, int32(s.id)
+				c.execEnd = int(s.end)
 			}
 		}
 	}
@@ -307,9 +311,10 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			around, c.outer = r.start, int32(r.index+1)
 		}
 	}
+	// A subshell's range nests in any around it, so the innermost one ends first.
 	for _, s := range p.subshells {
-		if offset > s.start && offset < s.end && int32(s.id) > c.subshell {
-			c.subshell = int32(s.id)
+		if offset > s.start && offset < s.end && (c.execEnd == 0 || int(s.end) < c.execEnd) {
+			c.execEnd = int(s.end)
 		}
 	}
 	// The statement carries the declarations that ended before it: not one it is inside.

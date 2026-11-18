@@ -56,8 +56,12 @@ type language struct {
 var (
 	python = language{
 		eval: "c", values: "WXQ", module: "m",
-		calls:    []string{"open", "Path"},
-		sends:    []string{"post", "put", "patch", "request", "urlopen", "Request", "send", "sendall", "sendto"},
+		calls: []string{"open", "Path"},
+		// get, head, delete and options send their headers and URL parameters too, but only
+		// requests' and httpx's are told apart from a dict's .get by name.
+		sends: []string{"post", "put", "patch", "request", "urlopen", "Request", "send", "sendall", "sendto",
+			"requests.get", "requests.head", "requests.delete", "requests.options",
+			"httpx.get", "httpx.head", "httpx.delete", "httpx.options"},
 		quiet:    []string{"auth", "cert"},
 		then:     map[string][]string{"Path": {".read_text", ".read_bytes", ".open"}},
 		modes:    true,
@@ -233,13 +237,18 @@ func scriptReads(l *language, script string) (files, sent []string) {
 		nest      int // the braces and brackets open
 		quiet     quietArgs
 	)
-	// take records that the script has a file's content in hand at this point.
+	// take records that the script has a file's content in hand at this point. A credential
+	// a call that sends authenticates with (quiet) is neither sent nor in what the call returns:
+	// in `r = requests.get(url, headers={'Authorization': k})`, r holds the response.
 	take := func(path string) {
+		if open.sends != 0 && quiet.on {
+			return
+		}
 		vars.statement = addPath(vars.statement, path)
 		if vars.target != "" {
 			vars.assigned = addPath(vars.assigned, path)
 		}
-		if open.sends != 0 && !quiet.on {
+		if open.sends != 0 {
 			sent = addPath(sent, path)
 		}
 	}

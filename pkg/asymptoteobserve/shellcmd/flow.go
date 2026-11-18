@@ -2,6 +2,7 @@ package shellcmd
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -58,7 +59,8 @@ type FileRead struct {
 //     (WithScripts): the shell writes what its script's commands write (`bash -c 'cat .env' |
 //     nc ..`), they read what it is given on its standard input (`cat .env | bash -c 'nc ..'`),
 //     and the script sees the variables of the shell's NAME=value prefix and the ones the
-//     command line exported, and keeps its own to itself.
+//     command line exported, and the shell's operands as its positional parameters ($0, $1,
+//     $@), and keeps its own to itself.
 //
 // curl, wget and httpie take a substitution in as data only where they send it as the request
 // body; a header, a URL or a credential option is not data. Any other command takes in every
@@ -182,13 +184,14 @@ func (f *flow) command(i int) {
 	}
 	// What the command writes to its standard output is what it took in. A shell whose script
 	// was read writes what the script's commands write, and the script runs with the shell's
-	// NAME=value prefix as its variables.
+	// NAME=value prefix as its variables and its operands as its positional parameters.
 	taken := f.taken(i)
 	if c.scripted {
 		for k := range c.Env {
 			value, _ := f.wordValue(c, refEnv, k)
 			f.assign(int32(i+1), c.Env[k].Name, value)
 		}
+		f.positional(i)
 		taken = f.scriptOutput(i)
 	}
 	if len(taken) > 0 && !slices.Contains(digests, name) && !c.outputElsewhere() {
@@ -206,6 +209,41 @@ func (f *flow) command(i int) {
 		}
 	}
 	f.writes(c, name, f.withInner(i, taken))
+}
+
+// positional gives the script of the shell at i its positional parameters: each operand of the
+// shell from the script's $0 on (Command.scriptZero) is $0, $1 and so on, and $@ and $* are all
+// of them from $1. Only an operand that holds a substitution or a variable can carry a file, so
+// only those are assigned (`bash -c 'echo "$1"' _ "$(cat .env)"`).
+func (f *flow) positional(i int) {
+	c := &f.commands[i]
+	zero := int(c.scriptZero) - 1
+	if zero < 0 {
+		return
+	}
+	var all []string
+	last := -1
+	for _, ref := range c.refs {
+		if ref.place != refArg || ref.index < zero || ref.index == last {
+			continue
+		}
+		last = ref.index
+		value, _ := f.wordValue(c, refArg, ref.index)
+		n := ref.index - zero
+		f.assign(int32(i+1), strconv.Itoa(n), value)
+		if n == 0 {
+			continue
+		}
+		for _, path := range value {
+			if !slices.Contains(all, path) {
+				all = append(all, path)
+			}
+		}
+	}
+	if len(all) > 0 {
+		f.assign(int32(i+1), "@", all)
+		f.assign(int32(i+1), "*", all)
+	}
 }
 
 // withInner adds to what compound statement i took in what the statements inside it write to
