@@ -196,6 +196,7 @@ func TestEndpointInstallSendsStartedAndCompleted(t *testing.T) {
 	}
 	want := map[string]any{
 		telemetry.PropDestination:          telemetry.DestinationLocal,
+		telemetry.PropCloudConnect:         telemetry.CloudConnectNone,
 		telemetry.PropHarnessesConfigured:  []string{"claude", "codex"},
 		telemetry.PropBackfillSessionCount: 3,
 		telemetry.PropDurationMS:           int64(1500),
@@ -203,6 +204,39 @@ func TestEndpointInstallSendsStartedAndCompleted(t *testing.T) {
 	}
 	if !reflect.DeepEqual(completed[0].props, want) {
 		t.Errorf("completed = %+v, want %+v", completed[0].props, want)
+	}
+}
+
+// A reinstall on an endpoint an earlier run connected forwards to Beacon Cloud but reports no
+// history there, so cloud_connect tells it apart from an install that connected.
+func TestInstallCompletedSaysWhetherItConnected(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		askable     bool
+		connected   bool
+		destination string
+		connect     string
+	}{
+		{"local", true, false, telemetry.DestinationLocal, telemetry.CloudConnectNone},
+		{"connected now", false, true, telemetry.DestinationCloud, telemetry.CloudConnectNew},
+		{"connected before", false, false, telemetry.DestinationCloud, telemetry.CloudConnectExisting},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := recordTelemetry(t)
+			oldAskable := destinationAskable
+			destinationAskable = func() bool { return tc.askable }
+			t.Cleanup(func() { destinationAskable = oldAskable })
+
+			installTelemetry{start: time.Now()}.completed(endpointTargetSelection{}, nil, tc.connected)
+			completed := eventsNamed(*events, telemetry.EventInstallCompleted)
+			if len(completed) != 1 {
+				t.Fatalf("events = %+v", *events)
+			}
+			props := completed[0].props
+			if props[telemetry.PropDestination] != tc.destination || props[telemetry.PropCloudConnect] != tc.connect {
+				t.Fatalf("destination = %v, cloud_connect = %v, want %s, %s", props[telemetry.PropDestination], props[telemetry.PropCloudConnect], tc.destination, tc.connect)
+			}
+		})
 	}
 }
 

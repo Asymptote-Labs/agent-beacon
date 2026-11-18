@@ -314,14 +314,14 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	} else {
 		recordSkippedBackfill(cmd.ErrOrStderr(), endpointUserMode())
 	}
-	finishCloudSetup(cmd, onboarded, connectAfterInstall, summary, func() error {
+	connected := finishCloudSetup(cmd, onboarded, connectAfterInstall, summary, func() error {
 		return connectEndpointFor(cmd, endpointUserMode(), result.LogPath, backfill != nil, summary)
 	})
 	if backfill != nil {
 		// After the connect, which decides whether these sessions stay local.
 		recordLocalTraces(telemetry.TraceSourceBackfill, endpointUserMode(), *backfill)
 	}
-	installEvents.completed(selection, backfill)
+	installEvents.completed(selection, backfill, connected)
 	return nil
 }
 
@@ -352,15 +352,16 @@ var onboardingOpenDashboard = auth.OpenBrowser
 // finishCloudSetup connects the endpoint when the wizard or --connect asked for it, and then
 // registers Beacon Cloud MCP when the wizard kept it selected. MCP is registered only once the
 // endpoint forwards to Beacon Cloud, since there is nothing for it to search otherwise. summary is
-// non-nil when the install closes on the wizard's short summary; connect fills it in.
-func finishCloudSetup(cmd *cobra.Command, onboarded onboardingOutcome, connectAfterInstall bool, summary *cloudSummary, connect func() error) {
+// non-nil when the install closes on the wizard's short summary; connect fills it in. It reports
+// whether connect ran and succeeded.
+func finishCloudSetup(cmd *cobra.Command, onboarded onboardingOutcome, connectAfterInstall bool, summary *cloudSummary, connect func() error) bool {
 	if !connectAfterInstall {
 		if onboarded.ConnectCloudMCP {
 			// An endpoint that was already connected keeps its device key and is not
 			// re-enrolled, but the person still asked for Beacon Cloud MCP.
 			connectCloudMCPFromOnboarding(cmd, false)
 		}
-		return
+		return false
 	}
 	// The install is complete and stands on its own; a failed connect is reported with the
 	// retry command rather than turning a working install into an error.
@@ -375,7 +376,7 @@ func finishCloudSetup(cmd *cobra.Command, onboarded onboardingOutcome, connectAf
 		if onboarded.ConnectCloudMCP {
 			fmt.Fprintln(cmd.ErrOrStderr(), "beacon: Beacon Cloud MCP was not registered either; run `beacon mcp connect` once the endpoint is connected.")
 		}
-		return
+		return false
 	}
 	recordDestinationAsymptote(cmd)
 	if summary != nil {
@@ -383,9 +384,10 @@ func finishCloudSetup(cmd *cobra.Command, onboarded onboardingOutcome, connectAf
 	}
 	if onboarded.ConnectCloudMCP {
 		connectCloudMCPFromOnboarding(cmd, summary != nil)
-		return
+		return true
 	}
 	suggestMCPConnect(out, onboarded.Connect)
+	return true
 }
 
 // showDashboard names the hosted dashboard and opens it, since that is where someone who just
