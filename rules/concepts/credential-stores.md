@@ -147,8 +147,9 @@ text names: a command line that does not parse, a prompt handed to another progr
 is named by the characters a name is written with, a word that is also a file name
 (`credentials`) counts only after a directory, and a store that excludes some names is not
 named by a text that also holds one of those. And the commands as a log holds them when
-redaction took the command's name: `TOKEN=$(gh auth token)` is logged as
-`TOKEN=[REDACTED] auth token)`. A command told only by its name, by one plain word or by
+redaction took the command's name: `curl -u "ci:$(gh auth token)"` is logged as
+`curl -u "ci:[REDACTED] auth token)"`, and an older log holds `TOKEN=[REDACTED] auth token)`
+for `TOKEN=$(gh auth token)`. A command told only by its name, by one plain word or by
 one-letter options has no such form.
 
 A rule of a pack that ships this catalog calls it by name instead of carrying the

@@ -289,6 +289,7 @@ func TestParse(t *testing.T) {
 			Nested:   true,
 			AfterCD:  true,
 			within:   1,
+			execEnd:  97,
 		},
 	}
 	if !reflect.DeepEqual(commands, want) {

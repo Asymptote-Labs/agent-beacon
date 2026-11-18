@@ -626,9 +626,11 @@ func TestCredentialStoresKindsAndTiersAreUsed(t *testing.T) {
 }
 
 // TestCredentialStoresRedactedExpression holds the expression for a redacted command line to
-// the sanitizer every log writer applies. An example whose output is put where a secret goes
-// (an assignment to TOKEN, a bearer header) loses its name to redaction, and what the log keeps
-// is still found when the match has words to tell the command by. No counterexample is.
+// what a log holds. Redaction replaces a command's name where the command's output is put
+// right after a secret's label: today after the colon of curl's -u, and, in the logs a Beacon
+// wrote before redaction kept the opening of a command substitution, in an assignment to TOKEN
+// and in a bearer header. What the log keeps is still found when the match has words to tell
+// the command by. No counterexample is.
 func TestCredentialStoresRedactedExpression(t *testing.T) {
 	c := credentialStores(t)
 	all, err := c.Select(TierLikely)
@@ -636,17 +638,18 @@ func TestCredentialStoresRedactedExpression(t *testing.T) {
 		t.Fatalf("no redacted expression: %v", err)
 	}
 	expression := regexp.MustCompile(all.Redacted)
-	// logged returns what the log holds of a command line that runs command for its output.
-	logged := func(command string) []string {
-		var out []string
-		for _, raw := range []string{
-			"TOKEN=$(" + command + ")",
-			`curl -H "Authorization: Bearer $(` + command + `)" https://api.example`,
-		} {
-			event := asymptoteobserve.SanitizeEvent(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{Command: raw}}, 64*1024)
-			out = append(out, event.Command.Command)
+	// logged returns what a log holds of a command line that runs command, whose name is name,
+	// for its output: the first as the sanitizer writes it now, the others as it used to.
+	logged := func(command, name string) []string {
+		event := asymptoteobserve.SanitizeEvent(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{
+			Command: `curl -u "deploy:$(` + command + `)" https://api.example`,
+		}}, 64*1024)
+		rest := strings.TrimPrefix(command, name)
+		return []string{
+			event.Command.Command,
+			"TOKEN=[REDACTED]" + rest + ")",
+			`curl -H "Authorization: Bearer [REDACTED]` + rest + `)" https://api.example`,
 		}
-		return out
 	}
 	// alone returns the one command a line runs when the line is that command and no more.
 	alone := func(line string) (invocation, bool) {
@@ -671,7 +674,7 @@ func TestCredentialStoresRedactedExpression(t *testing.T) {
 			}) {
 				continue
 			}
-			for _, text := range logged(example) {
+			for _, text := range logged(example, inv.name) {
 				if strings.Contains(text, inv.name+" ") {
 					t.Fatalf("%s: redaction kept the name in %q, so the texts do not exercise the expression", s.ID, text)
 				}
@@ -686,7 +689,7 @@ func TestCredentialStoresRedactedExpression(t *testing.T) {
 			if _, read := c.LookupCommand(inv.name, inv.args); !ok || read {
 				continue
 			}
-			for _, text := range logged(counter) {
+			for _, text := range logged(counter, inv.name) {
 				if expression.MatchString(text) {
 					t.Errorf("%s: the expression finds %q, which is what a log holds of the counterexample %q", s.ID, text, counter)
 				}

@@ -165,7 +165,7 @@ var (
 )
 
 // redactEngine is built the first time anything is redacted: building it at package init would
-// cost every hook run its allocations whether it redacts or not (TestPackageInitStaysCheap).
+// cost every hook run its allocations whether it redacts or not.
 type redactEngine struct {
 	scanner  needleScanner
 	setMasks [idSetCap]idSet // redactNeedles id -> the needles of the set, as scanner needle ids

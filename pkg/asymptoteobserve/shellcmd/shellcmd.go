@@ -78,6 +78,9 @@ type Command struct {
 	Stage    int
 	// Nested is true inside a command substitution ($(...), `...`) or a process substitution.
 	Nested bool
+	// InScript is true for a command of the script a shell of the command line runs (its -c
+	// text, or the here-document it reads): WithScripts adds those after the shell.
+	InScript bool
 	// AfterCD is true when a cd, pushd or popd comes earlier in the command line, so a relative
 	// path no longer names the file it would at the start. The directory itself is not tracked.
 	AfterCD bool
@@ -90,6 +93,19 @@ type Command struct {
 	within int32
 	outer  int32
 	refs   []wordRef
+	// execEnd is the byte offset at which the innermost ( .. ) subshell or substitution around
+	// the statement ends, or 0 outside any: what an exec of the statement leaves open is open up
+	// to there (SocketRedirects).
+	execEnd int
+	// shell is, for a command WithScripts added, one more than the index of the shell whose
+	// script it is in, and 0 for a command of the command line itself. scripted is set on a
+	// shell whose script's commands follow it, and scriptOnStdin when it read that script from
+	// its standard input. scriptZero is one more than the index in Argv of the word that is
+	// the script's $0, or 0 where its operands are not the script's.
+	shell         int32
+	scriptZero    int32
+	scripted      bool
+	scriptOnStdin bool
 }
 
 // wordRef is one thing a word of a command takes its value from: a command substitution or an
@@ -101,6 +117,9 @@ type wordRef struct {
 	index int // of the word in Argv, Redirects or Env, or of the declaration
 	subst int
 	name  string
+	// For refDeclares: exported is set when the declaration is an export, and bare when it
+	// gives the variable no value (export T), so that the variable keeps the one it has.
+	exported, bare bool
 }
 
 // refPlace is where the word of a wordRef is.
@@ -185,17 +204,19 @@ type parser struct {
 	redirected []redirected          // compound statements with redirections of their own
 	pipelines  int
 	nested     []substitution
+	subshells  []substitution // id is the subshell's start offset + 1
 	substIDs   map[syntax.Node]int
 	declared   []declaration // not yet carried by a statement
 	moved      bool
 }
 
 // declaration is an assignment by export, declare, local, readonly or typeset, and where its
-// statement ends.
+// statement ends. value is nil for an export that names a variable without assigning it.
 type declaration struct {
-	end   uint
-	name  string
-	value []syntax.WordPart
+	end      uint
+	name     string
+	value    []syntax.WordPart
+	exported bool
 }
 
 func (p *parser) visit(node syntax.Node) bool {
@@ -204,6 +225,8 @@ func (p *parser) visit(node syntax.Node) bool {
 		p.nested = append(p.nested, substitution{n.Left.Offset(), n.Right.Offset(), p.substID(n)})
 	case *syntax.ProcSubst:
 		p.nested = append(p.nested, substitution{n.OpPos.Offset(), n.Rparen.Offset(), p.substID(n)})
+	case *syntax.Subshell:
+		p.subshells = append(p.subshells, substitution{n.Lparen.Offset(), n.Rparen.Offset(), int(n.Lparen.Offset()) + 1})
 	case *syntax.Stmt:
 		p.stmt(n)
 	}
@@ -241,9 +264,15 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 		p.compounds = append(p.compounds, compound{start: stmt.Pos().Offset(), end: stmt.End().Offset(), stage: st})
 	}
 	if decl, ok := stmt.Cmd.(*syntax.DeclClause); ok {
+		exported := decl.Variant != nil && decl.Variant.Value == "export"
 		for _, as := range decl.Args {
-			if as.Name != nil && as.Value != nil {
-				p.declared = append(p.declared, declaration{end: stmt.End().Offset(), name: as.Name.Value, value: as.Value.Parts})
+			switch {
+			case as.Name == nil:
+			case as.Value != nil:
+				p.declared = append(p.declared, declaration{end: stmt.End().Offset(), name: as.Name.Value, value: as.Value.Parts, exported: exported})
+			case exported && as.Naked:
+				// export T: the variable keeps its value and the commands it runs get it.
+				p.declared = append(p.declared, declaration{end: stmt.End().Offset(), name: as.Name.Value, exported: true})
 			}
 		}
 	}
@@ -270,6 +299,7 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			c.Nested = true
 			if s.start >= innermost {
 				innermost, c.within = s.start, int32(s.id)
+				c.execEnd = int(s.end)
 			}
 		}
 	}
@@ -281,6 +311,12 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			around, c.outer = r.start, int32(r.index+1)
 		}
 	}
+	// A subshell's range nests in any around it, so the innermost one ends first.
+	for _, s := range p.subshells {
+		if offset > s.start && offset < s.end && (c.execEnd == 0 || int(s.end) < c.execEnd) {
+			c.execEnd = int(s.end)
+		}
+	}
 	// The statement carries the declarations that ended before it: not one it is inside.
 	pending, carried := p.declared[:0], 0
 	for _, d := range p.declared {
@@ -288,7 +324,7 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			pending = append(pending, d)
 			continue
 		}
-		c.refs = append(c.refs, wordRef{place: refDeclares, index: carried, name: d.name})
+		c.refs = append(c.refs, wordRef{place: refDeclares, index: carried, name: d.name, exported: d.exported, bare: d.value == nil})
 		c.refs = p.refs(c.refs, d.value, refDeclared, carried)
 		carried++
 	}
@@ -306,6 +342,11 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 		c.Redirects = append(c.Redirects, p.redirect(r))
 		if r.Word != nil {
 			c.refs = p.refs(c.refs, r.Word.Parts, refRedirect, i)
+		}
+		// What a here-document's body expands (unless its delimiter is quoted, which makes the
+		// body literal) is written onto the command's standard input.
+		if r.Hdoc != nil {
+			c.refs = p.refs(c.refs, r.Hdoc.Parts, refRedirect, i)
 		}
 	}
 	p.commands = append(p.commands, c)

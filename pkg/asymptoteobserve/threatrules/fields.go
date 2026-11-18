@@ -148,9 +148,13 @@ var derivedFieldDocs = map[string]string{
 		"  `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one\n" +
 		"  that reaches its standard input by a redirection or a pipe, `argument` for one a\n" +
 		"  substitution or a variable writes into its words), `script_sends` (spec v1.3: the paths\n" +
-		"  an inline python, node, ruby or php script opens inside a call that sends them over the\n" +
-		"  network), `pipeline`, `stage` (0-based) and `nested` (inside `$(...)`, `<(...)` or a\n" +
-		"  shell's script: its `-c` text, or the here-document it reads, which are read too).\n" +
+		"  an inline python, node, ruby or php script sends over the network, opened inside a call\n" +
+		"  that sends or held by a variable used there; headers, credentials and URL parameters\n" +
+		"  are not data), `socket_redirects` (spec v1.3, `{path, op}`: its redirections to or from\n" +
+		"  bash's `/dev/tcp/host/port` and `/dev/udp/host/port`, also through a descriptor an\n" +
+		"  earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`\n" +
+		"  (0-based) and `nested` (inside `$(...)`, `<(...)` or a shell's script: its `-c` text, or\n" +
+		"  the here-document it reads, which are read too).\n" +
 		"  Other here-document bodies and strings are not commands.\n" +
 		fmt.Sprintf("  The first %d bytes are read; a cut capture yields the commands before the cut, and\n", ParsedCommandsLimit) +
 		"  one that does not parse yields an empty list.",

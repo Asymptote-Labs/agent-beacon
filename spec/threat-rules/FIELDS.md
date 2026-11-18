@@ -194,9 +194,13 @@ never written to or read from the log, so a fixture sets the source field, not t
   `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one
   that reaches its standard input by a redirection or a pipe, `argument` for one a
   substitution or a variable writes into its words), `script_sends` (spec v1.3: the paths
-  an inline python, node, ruby or php script opens inside a call that sends them over the
-  network), `pipeline`, `stage` (0-based) and `nested` (inside `$(...)`, `<(...)` or a
-  shell's script: its `-c` text, or the here-document it reads, which are read too).
+  an inline python, node, ruby or php script sends over the network, opened inside a call
+  that sends or held by a variable used there; headers, credentials and URL parameters
+  are not data), `socket_redirects` (spec v1.3, `{path, op}`: its redirections to or from
+  bash's `/dev/tcp/host/port` and `/dev/udp/host/port`, also through a descriptor an
+  earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`
+  (0-based) and `nested` (inside `$(...)`, `<(...)` or a shell's script: its `-c` text, or
+  the here-document it reads, which are read too).
   Other here-document bodies and strings are not commands.
   The first 4096 bytes are read; a cut capture yields the commands before the cut, and
   one that does not parse yields an empty list.

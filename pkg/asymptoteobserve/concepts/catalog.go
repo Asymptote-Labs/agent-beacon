@@ -463,8 +463,8 @@ func (s Selection) MentionCEL(subject string) string {
 
 // RedactedCEL returns a CEL boolean expression over subject, a string expression for a command
 // line (e.command.command), that is true when the text holds one of the selection's commands
-// with its name redacted: "TOKEN=[REDACTED] auth token)", which is what a log keeps of
-// TOKEN=$(gh auth token). A command told only by its name, or by its name and one-letter
+// with its name redacted: "ci:[REDACTED] auth token)", which is what a log keeps of
+// curl -u "ci:$(gh auth token)". A command told only by its name, or by its name and one-letter
 // options, has no such form. It is false for a selection without one.
 func (s Selection) RedactedCEL(subject string) string {
 	if s.Redacted == "" {

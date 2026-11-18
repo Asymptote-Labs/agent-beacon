@@ -225,6 +225,10 @@ type ParsedCommand struct {
 	// call that sends them over the network: .env for
 	// python3 -c "requests.post(url, data=open('.env'))". Each is also one of FileReads.
 	ScriptSends []string `cel:"script_sends"`
+	// SocketRedirects are the command's redirections to or from bash's network pseudo-files
+	// (/dev/tcp/host/port, /dev/udp/host/port), its own or through a descriptor an earlier exec
+	// opened: where its output is sent, or its input comes from, without a network client.
+	SocketRedirects []ParsedSocketRedirect `cel:"socket_redirects"`
 	// Pipeline identifies the command's pipeline: the stages of one pipeline share it. Stage
 	// is the 0-based position in it (curl ... | sh: sh is stage 1).
 	Pipeline int `cel:"pipeline"`
@@ -246,6 +250,14 @@ type ParsedFileEffect struct {
 type ParsedFileRead struct {
 	Path string `cel:"path"`
 	Via  string `cel:"via"`
+}
+
+// ParsedSocketRedirect is a redirection of a parsed command to or from a network pseudo-file.
+// Path is the pseudo-file as written (/dev/tcp/host.example/4444). Op is write, read or
+// readwrite.
+type ParsedSocketRedirect struct {
+	Path string `cel:"path"`
+	Op   string `cel:"op"`
 }
 
 type MCPMethodInfo struct {

@@ -2,6 +2,7 @@ package shellcmd
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -53,7 +54,13 @@ type FileRead struct {
 //     line (`T=$(cat .env); curl -d "$T" ..`);
 //   - through a file written earlier in the line, to the commands that read it later
 //     (`cp .env /tmp/x; curl -T /tmp/x ..`, `cat .env > /tmp/x`, `{ cat .env; } > /tmp/x`, `mv`,
-//     `tee`).
+//     `tee`);
+//   - across the boundary of a shell's script, when commands has the script's commands
+//     (WithScripts): the shell writes what its script's commands write (`bash -c 'cat .env' |
+//     nc ..`), they read what it is given on its standard input (`cat .env | bash -c 'nc ..'`),
+//     and the script sees the variables of the shell's NAME=value prefix and the ones the
+//     command line exported, and the shell's operands as its positional parameters ($0, $1,
+//     $@), and keeps its own to itself.
 //
 // curl, wget and httpie take a substitution in as data only where they send it as the request
 // body; a header, a URL or a credential option is not data. Any other command takes in every
@@ -70,8 +77,9 @@ type FileRead struct {
 // Standard input (-), a device (/dev/stdin), a file on another host (scp host:path), a file a
 // command edits in place (sed -i, which FileEffects reports) and a file a command names without
 // taking it as input (a search pattern, an archive's exclusions, an identity file) are not reads.
-// The body of a here-document is not followed, and neither is what a script does with a file once
-// it has opened it, beyond opening it inside a call that sends it (FileRead.Sent).
+// The literal text of a here-document is not read; what its body expands is (the here-string and
+// here-document cases of stdin). What a script does with a file once it has opened it is not
+// followed, beyond opening it inside a call that sends it (FileRead.Sent).
 func FileReads(commands []Command) [][]FileRead {
 	f := flow{commands: commands}
 	for i := range commands {
@@ -96,9 +104,19 @@ type flow struct {
 	next  int
 	early []bool
 	// vars are the variables assigned from a substitution so far, and files the files written so
-	// far, each with the files whose content went into it.
-	vars  map[string][]string
-	files map[string][]string
+	// far, each with the files whose content went into it. A variable belongs to the shell that
+	// assigned it: the command line's, or a script's (WithScripts). exported are the ones the
+	// shell's commands, a script among them, are given.
+	vars     map[varKey][]string
+	exported map[varKey]bool
+	files    map[string][]string
+}
+
+// varKey is a variable of one shell: shell is 0 for the command line, or one more than the index
+// of the shell command whose script assigned it.
+type varKey struct {
+	shell int32
+	name  string
 }
 
 // digests report a count or a digest of their input and pass none of it on.
@@ -129,9 +147,18 @@ func (f *flow) command(i int) {
 	c := &f.commands[i]
 	// What export, declare and the like assigned since the statement before this one.
 	for _, ref := range c.refs {
-		if ref.place == refDeclares {
+		if ref.place != refDeclares {
+			continue
+		}
+		if !ref.bare {
 			value, _ := f.wordValue(c, refDeclared, ref.index)
-			f.assign(ref.name, value)
+			f.assign(c.shell, ref.name, value)
+		}
+		if ref.exported {
+			if f.exported == nil {
+				f.exported = map[varKey]bool{}
+			}
+			f.exported[varKey{c.shell, ref.name}] = true
 		}
 	}
 	name, args := c.run()
@@ -150,12 +177,23 @@ func (f *flow) command(i int) {
 	f.stdin(i)
 	for _, ref := range c.refs {
 		if ref.place == refArg && data.holds(ref.index) {
-			for _, path := range f.value(ref) {
+			for _, path := range f.value(c, ref) {
 				f.read(i, path, ViaArgument, false)
 			}
 		}
 	}
+	// What the command writes to its standard output is what it took in. A shell whose script
+	// was read writes what the script's commands write, and the script runs with the shell's
+	// NAME=value prefix as its variables and its operands as its positional parameters.
 	taken := f.taken(i)
+	if c.scripted {
+		for k := range c.Env {
+			value, _ := f.wordValue(c, refEnv, k)
+			f.assign(int32(i+1), c.Env[k].Name, value)
+		}
+		f.positional(i)
+		taken = f.scriptOutput(i)
+	}
 	if len(taken) > 0 && !slices.Contains(digests, name) && !c.outputElsewhere() {
 		if f.out == nil {
 			f.out = make([][]string, len(f.commands))
@@ -167,10 +205,45 @@ func (f *flow) command(i int) {
 	if len(c.Argv) == 0 {
 		for k := range c.Env {
 			value, _ := f.wordValue(c, refEnv, k)
-			f.assign(c.Env[k].Name, value)
+			f.assign(c.shell, c.Env[k].Name, value)
 		}
 	}
 	f.writes(c, name, f.withInner(i, taken))
+}
+
+// positional gives the script of the shell at i its positional parameters: each operand of the
+// shell from the script's $0 on (Command.scriptZero) is $0, $1 and so on, and $@ and $* are all
+// of them from $1. Only an operand that holds a substitution or a variable can carry a file, so
+// only those are assigned (`bash -c 'echo "$1"' _ "$(cat .env)"`).
+func (f *flow) positional(i int) {
+	c := &f.commands[i]
+	zero := int(c.scriptZero) - 1
+	if zero < 0 {
+		return
+	}
+	var all []string
+	last := -1
+	for _, ref := range c.refs {
+		if ref.place != refArg || ref.index < zero || ref.index == last {
+			continue
+		}
+		last = ref.index
+		value, _ := f.wordValue(c, refArg, ref.index)
+		n := ref.index - zero
+		f.assign(int32(i+1), strconv.Itoa(n), value)
+		if n == 0 {
+			continue
+		}
+		for _, path := range value {
+			if !slices.Contains(all, path) {
+				all = append(all, path)
+			}
+		}
+	}
+	if len(all) > 0 {
+		f.assign(int32(i+1), "@", all)
+		f.assign(int32(i+1), "*", all)
+	}
 }
 
 // withInner adds to what compound statement i took in what the statements inside it write to
@@ -300,17 +373,29 @@ func (f *flow) stdin(i int) {
 				f.read(i, r.Target.Unquoted, ViaStdin, false)
 			}
 			return
-		case "<<<":
+		case "<<<", "<<", "<<-":
+			// A here-string, or a here-document: what the substitutions and variables in it
+			// write is what the command reads.
 			value, _ := f.wordValue(c, refRedirect, k)
 			for _, path := range value {
 				f.read(i, path, ViaStdin, false)
 			}
 			return
-		case "<<", "<<-", "<&":
+		case "<&":
 			return
 		}
 	}
 	if c.Stage == 0 {
+		// A command of a script reads the standard input of the shell that runs the script,
+		// unless the shell read the script from it, or the command is inside a substitution,
+		// which has none of its own to read.
+		if c.shell != 0 && c.within == 0 && f.reads != nil && !f.commands[c.shell-1].scriptOnStdin {
+			for _, r := range f.reads[c.shell-1] {
+				if r.Via == ViaStdin {
+					f.read(i, r.Path, ViaStdin, false)
+				}
+			}
+		}
 		return
 	}
 	for j := range f.commands {
@@ -346,7 +431,7 @@ func (f *flow) wordValue(c *Command, place refPlace, index int) (value []string,
 			continue
 		}
 		substituted = substituted || ref.subst != 0
-		for _, path := range f.value(ref) {
+		for _, path := range f.value(c, ref) {
 			if !slices.Contains(value, path) {
 				value = append(value, path)
 			}
@@ -355,11 +440,22 @@ func (f *flow) wordValue(c *Command, place refPlace, index int) (value []string,
 	return value, substituted
 }
 
-// value returns the files whose content a variable holds or a substitution writes: for a
-// substitution, what the last stage of each pipeline directly inside it writes.
-func (f *flow) value(ref wordRef) []string {
+// value returns the files whose content a variable holds or a substitution writes, for a word
+// of c: for a substitution, what the last stage of each pipeline directly inside it writes. A
+// variable is the one of c's own shell, or else one a shell that started it exported.
+func (f *flow) value(c *Command, ref wordRef) []string {
 	if ref.subst == 0 {
-		return f.vars[ref.name]
+		shell := c.shell
+		if value, ok := f.vars[varKey{shell, ref.name}]; ok || shell == 0 {
+			return value
+		}
+		for shell != 0 {
+			shell = f.commands[shell-1].shell
+			if f.exported[varKey{shell, ref.name}] {
+				return f.vars[varKey{shell, ref.name}]
+			}
+		}
+		return nil
 	}
 	var value []string
 	for j := range f.commands {
@@ -379,6 +475,27 @@ func (f *flow) value(ref wordRef) []string {
 	return value
 }
 
+// scriptOutput returns what the script of the shell at i writes to the shell's standard output:
+// what the last stage of each pipeline directly in the script writes.
+func (f *flow) scriptOutput(i int) []string {
+	var out []string
+	for k := i + 1; k < len(f.commands); k++ {
+		if child := &f.commands[k]; int(child.shell) != i+1 || child.within != 0 {
+			continue
+		}
+		written := f.written(k)
+		if !f.lastStage(k) {
+			continue
+		}
+		for _, path := range written {
+			if !slices.Contains(out, path) {
+				out = append(out, path)
+			}
+		}
+	}
+	return out
+}
+
 // lastStage reports whether no later stage of command j's pipeline takes its output.
 func (f *flow) lastStage(j int) bool {
 	c := &f.commands[j]
@@ -390,16 +507,19 @@ func (f *flow) lastStage(j int) bool {
 	return true
 }
 
-// assign records the files whose content a variable holds, as a substitution or another variable
-// gave it. Assigning anything else clears it.
-func (f *flow) assign(name string, value []string) {
+// assign records the files whose content a variable of a shell holds, as a substitution or
+// another variable gave it. Assigning anything else clears it; in a script it is then held
+// empty, so that the script's own value hides what the shell that started it exported under
+// the name (`export T=$(cat .env); bash -c 'T=ok; curl -d "$T" ..'` sends ok).
+func (f *flow) assign(shell int32, name string, value []string) {
+	key := varKey{shell, name}
 	switch {
-	case len(value) == 0:
-		delete(f.vars, name)
+	case len(value) == 0 && shell == 0:
+		delete(f.vars, key)
 	case f.vars == nil:
-		f.vars = map[string][]string{name: value}
+		f.vars = map[varKey][]string{key: value}
 	default:
-		f.vars[name] = value
+		f.vars[key] = value
 	}
 }
 

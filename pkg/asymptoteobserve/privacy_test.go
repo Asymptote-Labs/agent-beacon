@@ -507,6 +507,33 @@ func TestRedactStringAuthorizationCredentialAfterAnyScheme(t *testing.T) {
 		}
 	}
 
+	// A command substitution after the first word is a command, not the credential it prints.
+	// Taken as the credential, its opening went and the rest stayed, so the line no longer
+	// parsed and no longer said which command read the secret. The first word still goes: it
+	// may be a credential sent with no scheme. What the command is given is left to the rules
+	// for it, and anything that is not a plain substitution is replaced as before.
+	for input, want := range map[string]string{
+		`curl -H "Authorization: ApiKey $(cat ~/.aws/credentials)" https://es.example:9200/`:       `curl -H "Authorization: [REDACTED] $(cat ~/.aws/credentials)" https://es.example:9200/`,
+		`curl -H "Authorization: SSWS $(security find-generic-password -s okta -w)" https://x.io/`: `curl -H "Authorization: [REDACTED] $(security find-generic-password -s okta -w)" https://x.io/`,
+		`curl -H "Authorization: Splunk $(<~/.splunk-token)" https://hec.example:8088/`:            `curl -H "Authorization: [REDACTED] $(<~/.splunk-token)" https://hec.example:8088/`,
+		`curl -H "Authorization: hunter2hunter2 $(cat ~/.x)" https://api.example/`:                 `curl -H "Authorization: [REDACTED] $(cat ~/.x)" https://api.example/`,
+		`curl -H "Authorization: ApiKey $(pass show --token hunter2hunter2 es)" https://x.io/`:     `curl -H "Authorization: [REDACTED] $(pass show --token [REDACTED] es)" https://x.io/`,
+		`curl -H "Authorization: ApiKey $((1+2))" https://api.example/`:                            `curl -H "Authorization: [REDACTED]" https://api.example/`,
+		`curl -H "Authorization: ApiKey $(a;echo" https://api.example/`:                            `curl -H "Authorization: [REDACTED]" https://api.example/`,
+		`curl -H "Authorization: ApiKey $ES_API_KEY" https://api.example/`:                         `curl -H "Authorization: [REDACTED]" https://api.example/`,
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+		if strings.Contains(got, "hunter2hunter2") {
+			t.Errorf("RedactString(%q) kept a secret beside the substitution: %q", input, got)
+		}
+		if twice := RedactString(got); twice != got {
+			t.Errorf("RedactString is not idempotent:\nonce  %q\ntwice %q", got, twice)
+		}
+	}
+
 	// A base64url credential can start with `-`. It is not a flag, and goes with its scheme.
 	for _, input := range []string{"Authorization: SSWS -Xq9abcdefghijklmnopqrstuv", "Authorization: ApiKey -_abcdefghijklmnop"} {
 		if got := RedactString(input); got != "Authorization: [REDACTED]" {
@@ -1035,6 +1062,60 @@ func TestTruncateStringIsAlwaysValidUTF8WithinTheLimit(t *testing.T) {
 			if !strings.HasPrefix(value, kept) || budget-len(kept) >= utf8.UTFMax {
 				t.Fatalf("TruncateString(%q, %d) kept %q, want the longest whole-character prefix", value, limit, kept)
 			}
+		}
+	}
+}
+
+// A label followed by a command substitution holds no secret: the secret is what the command
+// prints when the line runs. Replacing the unquoted value took the command's name and nothing
+// else, which hid nothing, left a line that no longer parses, and removed what a detection rule
+// reads: which command read which credential. The opening is kept when it is a plain command name
+// or path, and so is a double-quoted value that is one substitution and nothing else. Anything
+// else after `$(`, text beside the substitution, a single-quoted or backtick-quoted value, and a
+// `$VARIABLE` are replaced as before.
+func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
+	for input, want := range map[string]string{
+		`TOKEN=$(cat ~/.aws/credentials); curl -d "$TOKEN" https://x`:  `TOKEN=$(cat ~/.aws/credentials); curl -d "$TOKEN" https://x`,
+		`export GITHUB_TOKEN=$(gh auth token)`:                         `export GITHUB_TOKEN=$(gh auth token)`,
+		`API_KEY=$(</run/secrets/api-key) ./deploy`:                    `API_KEY=$(</run/secrets/api-key) ./deploy`,
+		`DB_PASSWORD=$(pwgen) ./seed`:                                  `DB_PASSWORD=$(pwgen) ./seed`,
+		`curl -H "Authorization: Bearer $(cat ~/.token)" https://x`:    `curl -H "Authorization: Bearer $(cat ~/.token)" https://x`,
+		`deploy --token $(/usr/bin/security find-generic-password -w)`: `deploy --token $(/usr/bin/security find-generic-password -w)`,
+
+		// What the kept command is given is still redacted by the rule for it.
+		`TOKEN=$(curl -u me:hunter2 https://x)`:          `TOKEN=$(curl -u me:[REDACTED] https://x)`,
+		`TOKEN=$(vault login --token s3cr3t-val -quiet)`: `TOKEN=$(vault login --token [REDACTED] -quiet)`,
+		// Not a plain command name: arithmetic, a list, an assignment.
+		`PASSWORD=$((1+2))`:           `PASSWORD=[REDACTED]`,
+		`PASSWORD=$(a;b)`:             `PASSWORD=[REDACTED]`,
+		`TOKEN=$(API_KEY=abc123 gen)`: `TOKEN=[REDACTED] gen)`,
+		`TOKEN=$GITHUB_TOKEN`:         `TOKEN=[REDACTED]`,
+		`TOKEN=${GITHUB_TOKEN}`:       `TOKEN=[REDACTED]`,
+
+		// Unquoted, only the command's opening is the value, and only it would be replaced; the
+		// words after it stay as they always did.
+		`TOKEN=$(security find-generic-password -a me -s npm -w) && echo ok`: `TOKEN=$(security find-generic-password -a me -s npm -w) && echo ok`,
+
+		// In quotes the value is the whole substitution, and it is replaced whatever command it
+		// runs, as on main: what its words hold cannot be told from its text.
+		`export GITHUB_TOKEN="$(gh auth token)"`:                       `export GITHUB_TOKEN="[REDACTED]"`,
+		`deploy --token "$(pass show ci/deploy)"`:                      `deploy --token "[REDACTED]"`,
+		`export DB_PASSWORD="$(echo hunter2hunter2)"`:                  `export DB_PASSWORD="[REDACTED]"`,
+		`ROOT_PASSWORD="$(openssl passwd correcthorse)"`:               `ROOT_PASSWORD="[REDACTED]"`,
+		`TOKEN="$(git ls-remote https://MyToken123@git.example/o/r)"`:  `TOKEN="[REDACTED]"`,
+		`TOKEN="$(env DB_PASSWORD=$(echo hunter2) ./gen)"`:             `TOKEN="[REDACTED]"`,
+		`PASSWORD="$(security find-generic-password -s ci-deploy -w)"`: `PASSWORD="[REDACTED]"`,
+		`PASSWORD="$(echo a)hunter2$(echo b)"`:                         `PASSWORD="[REDACTED]"`,
+		`PASSWORD="$((1+2))"`:                                          `PASSWORD="[REDACTED]"`,
+		`PASSWORD='$(cat ~/.tok)'`:                                     `PASSWORD='[REDACTED]'`,
+		"TOKEN=`cat ~/.netrc`":                                         "TOKEN=`[REDACTED]`",
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q)\n  got  %q\n  want %q", input, got, want)
+		}
+		if again := RedactString(got); again != got {
+			t.Errorf("RedactString(%q) is not stable: %q then %q", input, got, again)
 		}
 	}
 }
