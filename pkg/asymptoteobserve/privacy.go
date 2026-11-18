@@ -640,6 +640,9 @@ func keptSubstitution(value string) bool {
 //     a safe nested substitution passes;
 //   - an option is a long name (--output) or one to three letters (-w, -rf); a short option
 //     with more glued on (`-pSwordfish`) may hold its value;
+//   - an option that names a credential store's item (nameOptions: security's -a, -s and -l) is
+//     given a name, which may be a plain lowercase word (`security find-generic-password -a me
+//     -s npm -w`), so that a log still says which keychain item was read;
 //   - a secret-named flag's value is replaced by the flag's own rule, and curl's -u user:password
 //     by curl's, which keeps the user: the user must be a subcommand-shaped word and a password
 //     must follow (`-u MyApiKey123:` holds the key);
@@ -649,8 +652,8 @@ func keptSubstitution(value string) bool {
 // A here-string, a process substitution, a backtick, an ANSI-C string ($'..') and arithmetic hold
 // text this does not read, and so does a word quoted around spaces or punctuation. `$(gh auth
 // token)`, `$(cat ~/.config/gh/token)`, `$(op read op://vault/item/password)` and `$(<~/.netrc)`
-// hold none; everything else, `$(security .. -s ci-deploy -w)` and `$(vault kv get
-// -field=password ..)` among it, is replaced whole as main always did.
+// hold none; everything else, `$(security .. -s 'GitHub' -w)`, `$(security .. -w hunter2)` and
+// `$(vault kv get -field=password ..)` among it, is replaced whole as main always did.
 func substitutionHoldsLiteral(inner string) bool {
 	for _, opaque := range [...]string{"<<<", "<(", ">(", "`", "$'", "$(("} {
 		if strings.Contains(inner, opaque) {
@@ -661,13 +664,14 @@ func substitutionHoldsLiteral(inner string) bool {
 	if !ok {
 		return true
 	}
-	// value is set right after an option, where the next word may be the option's value.
-	command, value, prints, covered, curlUser := true, false, false, false, false
+	// value is set right after an option, where the next word may be the option's value, and
+	// named when that option names an item (nameOptions).
+	command, value, named, prints, covered, curlUser := true, false, false, false, false, false
 	name := ""
 	for _, word := range words {
 		text, plain := unquotedWord(word)
-		afterOption := value
-		value = false
+		afterOption, afterName := value, named
+		value, named = false, false
 		switch {
 		case word == "|" || word == ";" || word == "&":
 			command, prints, covered, curlUser = true, false, false, false
@@ -717,9 +721,9 @@ func substitutionHoldsLiteral(inner string) bool {
 			case !isOptionName(text):
 				return true
 			default:
-				value = true
+				value, named = true, slices.Contains(nameOptions[name], text)
 			}
-		case !afterOption && plain && isSubcommandWord(text):
+		case (!afterOption || afterName) && plain && isSubcommandWord(text):
 		case !safeSubstitutionValue(word):
 			return true
 		}
@@ -839,6 +843,14 @@ func isCommandName(word string) bool {
 // isPrinter reports whether a command prints the words it is given.
 func isPrinter(name string) bool {
 	return name == "echo" || name == "printf" || name == "print"
+}
+
+// nameOptions are, by command, the options of a credential store whose value names the item to
+// read: the macOS keychain's account (-a), service (-s) and label (-l). A plain lowercase name
+// there is kept (substitutionHoldsLiteral), so that a log still says which item was read and the
+// keychain rules find it; any other option's value, -w's above all, is not.
+var nameOptions = map[string][]string{
+	"security": {"-a", "-s", "-l"},
 }
 
 // isAssignmentWord reports whether a word, as written, assigns a variable: NAME=..

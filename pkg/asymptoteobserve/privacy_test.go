@@ -1119,9 +1119,13 @@ func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 		`DB_PASSWORD="$(command echo hunter2hunter2)"`:                      `DB_PASSWORD="[REDACTED]"`,
 		`DB_PASSWORD="$(cat <(echo hunter2hunter2))"`:                       `DB_PASSWORD="[REDACTED]"`,
 		`DB_PASSWORD="$(openssl enc -d -k hunter2hunter2 -in f)"`:           `DB_PASSWORD="[REDACTED]"`,
-		// A word after an option may be the option's value: only a path passes there. A subcommand
-		// word stands before the options; a short option takes one to three letters.
-		`PASSWORD="$(security find-generic-password -s ci-deploy -w)"`:             `PASSWORD="[REDACTED]"`,
+		// A word right after an option may be the option's value: only a path passes there, or a
+		// name where the option names a credential store's item (security -a, -s, -l). A short
+		// option takes one to three letters.
+		`PASSWORD="$(security find-generic-password -s ci-deploy -w)"`:             `PASSWORD="$(security find-generic-password -s ci-deploy -w)"`,
+		`TOKEN=$(security find-generic-password -a me -s npm -w) && echo ok`:       `TOKEN=$(security find-generic-password -a me -s npm -w) && echo ok`,
+		`PASSWORD="$(security add-generic-password -a me -s npm -w hunter)"`:       `PASSWORD="[REDACTED]"`,
+		`PASSWORD="$(security find-generic-password -s ci -D hunter -w)"`:          `PASSWORD="[REDACTED]"`,
 		`TOKEN="$(vault kv get -field=password secret/db)"`:                        `TOKEN="[REDACTED]"`,
 		`DB_PASSWORD="$(sshpass -p letmein ssh db cat /x)"`:                        `DB_PASSWORD="[REDACTED]"`,
 		`PASSWORD="$(sshpass -p 123456 ssh host true)"`:                            `PASSWORD="[REDACTED]"`,
