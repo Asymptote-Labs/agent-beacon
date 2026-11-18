@@ -1,6 +1,6 @@
 id: browser-session-read-then-egress
 spec: threat-rules/v1.3  # needed for predicates and file_reads
-version: 8
+version: 9
 title: Browser session store read followed by network egress
 description: >
   Within one session, the agent read a browser cookie/login store and then issued an
@@ -11,13 +11,14 @@ description: >
   logins.json by name, or the ambiguous basenames cookies / "login data" only inside
   a known browser profile directory (Chrome/Chromium/Brave/Edge/Firefox/Safari,
   including their real on-disk dir names) so a project file named "cookies" does not
-  trip it, read with a file tool or by a shell command that takes the file in. The
-  egress command is read as bash: a network client
-  the egress rules share (curl, wget, httpie, xh, nc, ncat, netcat, socat, by any
-  path, under sudo, timeout or torsocks, or inside bash -c), a /dev/tcp redirect, a
-  remote copy, a gist, a cloud storage upload or an inline script request; the same
-  words inside a quoted string or a here-document are not egress. A command line
-  that does not parse falls back to matching its text.
+  trip it, read with a file tool or by a shell command that takes the file in, or
+  named in the text that reaches a command the parser cannot see into beside a
+  program that reads files (browser_store_read). The egress command is read as bash:
+  a network client the egress rules share (curl, wget, httpie, xh, nc, ncat, netcat,
+  socat, by any path, under sudo, timeout or torsocks, or inside bash -c), a /dev/tcp
+  redirect, a remote copy, a gist, a cloud storage upload or an inline script
+  request; the same words inside a quoted string or a here-document are not egress.
+  A command line that does not parse falls back to matching its text.
 severity: high
 status: stable
 posture: detect
@@ -31,10 +32,7 @@ correlation:
   window: 300s
   steps:
     - id: read_browser_store
-      match: >
-        (e.event.action == "file.read" && credential_path(e.file.path, "likely", "browser")) ||
-        (e.event.action == "command.executed" && e.command.parsed_commands.exists(c,
-          c.file_reads.exists(f, credential_path(f.path, "likely", "browser"))))
+      match: browser_store_read(e)
     # Any outbound command: the egress rules' shared definition
     # (egress_command, rules/concepts/egress.predicates.yaml).
     - id: egress

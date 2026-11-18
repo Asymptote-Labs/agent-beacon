@@ -16,7 +16,7 @@
 # fetches (`H=169.254.169.254; curl http://$H/`), and a rule that looked only at the words
 # would stop seeing those lines; for such a client the rule asks the text of the line.
 library: cloud-metadata
-version: 1
+version: 2
 spec: threat-rules/v1.3
 description: A text that names a cloud instance metadata service.
 
@@ -240,3 +240,58 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "curl -s https://example.com/health; echo \"$?\"" }
+
+  - name: client_fetch
+    params: [e, x, cond]
+    description: >
+      A command event runs curl or wget at a target that satisfies cond, written over the
+      name x: one of the client's words as written, the text of the line when the client's
+      words do not show its target (client_target_unseen), or, where the parser cannot see
+      into a command (unread_text), the text that reaches it when that text names curl or
+      wget. cloud-metadata-endpoint-access, the read step of cloud-metadata-then-egress and
+      link-local-internal-target-fetch call it, each with its own target.
+    body: >
+      e.event.action == "command.executed" && (
+        e.command.parsed_commands.exists(c, c.name.matches("^(curl|wget)$") && (
+          c.argv_raw.exists(x, cond) ||
+          client_target_unseen(c) && [e.command.command].exists(x, cond))) ||
+        unread_text(e, x, x.matches("(?i)\\b(curl|wget)\\b") && cond))
+    tests:
+      - name: a_word_of_the_client
+        match: client_fetch(e, x, x.contains("10.0.0.9"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://10.0.0.9/status" }
+      - name: a_target_in_a_variable
+        match: client_fetch(e, x, x.contains("10.0.0.9"))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "H=10.0.0.9; wget -qO- \"http://$H/status\"" }
+      - name: a_target_named_beside_another_client
+        match: client_fetch(e, x, x.contains("10.0.0.9"))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s https://example.com/ && echo 10.0.0.9" }
+
+  - name: cloud_metadata_fetch
+    params: [e]
+    description: >
+      A command event fetches a cloud metadata target (cloud_metadata_target) with curl or
+      wget (client_fetch). cloud-metadata-endpoint-access is this, and so is the read step of
+      cloud-metadata-then-egress.
+    body: >
+      client_fetch(e, x, cloud_metadata_target(x))
+    tests:
+      - name: the_aws_token_endpoint
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -sX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60'" }
+      - name: the_address_in_a_commit_message
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s https://example.com/health && git commit -m 'block 169.254.169.254 in the proxy'" }

@@ -1,6 +1,6 @@
 id: link-local-internal-target-fetch
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: HTTP client fetch of a link-local or internal-only address
 description: >
   A command uses curl/wget to fetch an explicit link-local (169.254.0.0/16) or
@@ -24,15 +24,9 @@ taxonomy:
 # The target is looked for in the words as written (argv_raw): a word with brackets or a
 # variable has no known value. Where the words of the client do not show what it fetches
 # (see client_target_unseen: `U=http://[fd00:ec2::254]; curl $U/latest/`) and the target is
-# elsewhere on the line, the text decides.
-match: >
-  e.event.action == "command.executed" && (
-    e.command.parsed_commands.exists(c, c.name.matches("^(curl|wget)$") && (
-      c.argv_raw.exists(a, cloud_metadata_link_local_target(a)) ||
-      client_target_unseen(c) && cloud_metadata_link_local_target(e.command.command))) ||
-    unread_text(e, t, t.matches("(?i)\\b(curl|wget)\\b") &&
-      cloud_metadata_link_local_target(t))
-  )
+# elsewhere on the line, the text decides. The client and where its target is looked for
+# are cloud-metadata-endpoint-access's (client_fetch), with this rule's target.
+match: client_fetch(e, x, cloud_metadata_link_local_target(x))
 
 emit:
   reason: "HTTP client request to a link-local / internal-only metadata target"
