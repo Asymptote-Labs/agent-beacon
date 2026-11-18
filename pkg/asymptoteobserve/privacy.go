@@ -499,33 +499,35 @@ func keepAuthorizationValue(value string) bool {
 	return false
 }
 
-// authorizationCredentialCopy is the credential after scheme, the first word of an Authorization
-// header's value, which ends at t[end], for its bare copies elsewhere in the text to be removed as
-// an assigned value's are; or "". The capture of assigned values reads a label's value only up to
-// the blank after the scheme, so without this a copy of the credential (`… ; echo <key>`) stayed.
-// A match the header rules would not make is not taken: a first word that is no scheme-shaped
-// word, such as a marker an earlier pass left, or a match the any-scheme rule keeps. Nor is a list
-// of auth-params, whose labeled values the capture already takes, nor a word of letters alone,
-// which is more likely the next word of prose than a credential.
-func authorizationCredentialCopy(t, scheme string, end int) string {
+// authorizationCredentialCopy returns where the credential after scheme starts and ends: the first
+// word of an Authorization header's value, which ends at t[end], for its bare copies elsewhere in
+// the text to be removed as an assigned value's are; or -1, -1. The capture of assigned values
+// reads a label's value only up to the blank after the scheme, so without this a copy of the
+// credential (`… ; echo <key>`) stayed. A match the header rules would not make is not taken: a
+// first word that is no scheme-shaped word, such as a marker an earlier pass left, or a match the
+// any-scheme rule keeps. Nor is a list of auth-params, whose labeled values the capture already
+// takes, nor a word of letters alone, which is more likely the next word of prose than a
+// credential.
+func authorizationCredentialCopy(t, scheme string, end int) (int, int) {
 	if !isAuthSchemeWord(scheme) {
-		return ""
+		return -1, -1
 	}
 	from := end
 	for from < len(t) && (t[from] == ' ' || t[from] == '\t') {
 		from++
 	}
 	if from == end {
-		return ""
+		return -1, -1
 	}
-	credential := t[from:redactUnquotedEnd(t, from, redactValueStops)]
+	to := redactUnquotedEnd(t, from, redactValueStops)
+	credential := t[from:to]
 	if strings.Contains(strings.TrimRight(credential, "="), "=") || onlyASCIILetters(credential) {
-		return ""
+		return -1, -1
 	}
 	if !isAuthSchemeName(scheme) && keepAuthorizationValue(scheme+" "+credential) {
-		return ""
+		return -1, -1
 	}
-	return credential
+	return from, to
 }
 
 // isAuthSchemeWord reports whether word has the shape the any-scheme rule reads as a scheme,
@@ -605,9 +607,9 @@ const (
 	// valueUnquoted is a value that ends at a blank: kept where it opens a substitution with a
 	// plain command name (isSubstitutionOpening).
 	valueUnquoted
-	// valueDoubleQuoted is a value that runs to its closing double quote, escaped or not: never
-	// kept, a substitution or not, as on main, since what its words hold cannot be told from its
-	// text.
+	// valueDoubleQuoted is a value that runs to its closing quote, escaped or not, or to the end of
+	// its line: never kept, a substitution or not, as on main, since what its words hold cannot be
+	// told from its text.
 	valueDoubleQuoted
 )
 
@@ -664,8 +666,8 @@ var redactionRules = concatRules([]redactionRule{
 	// and nested objects or arrays are left for their own fields' rules.
 	{
 		expr:        `(?i)(\b` + redactLabel + `(?P<q>` + redactOpenQuote + `)\s*[:=]\s*)(?P<value>` + redactBare + `)`,
-		replacement: "${1}${q}" + redactedValue + "${q}", keep: isLiteralOrAuthScheme, needles: redactQuotedLabelNeedles, start: startLabel,
-		runsOn: awsPairRunsOn,
+		replacement: "${1}${q}" + redactedValue + "${q}", keep: isLiteralOrAuthScheme, value: valueUnquoted, needles: redactQuotedLabelNeedles,
+		start: startLabel, runsOn: awsPairRunsOn,
 	},
 	// An unquoted value. A label opened by `?` or `&` is a URL query parameter, whose value ends
 	// at the `&` of the next one or the `#` of the fragment: `?api_key=x&user=alice` keeps
@@ -688,26 +690,28 @@ var redactionRules = concatRules([]redactionRule{
 	// are written in JSON, TOML and YAML: `"args": ["--api-key", "x"]`.
 	{
 		expr:        `(?i)(["']` + redactFlagName + `["']\s*,\s*["'])(?P<value>(?:[^"'\n\\]|\\[^\n])+)`,
-		replacement: "${1}" + redactedValue, keep: isRedactedValue, needles: redactListedFlagNeedles, start: startListedFlag,
-		runsOn: awsPairRunsOn,
+		replacement: "${1}" + redactedValue, keep: isRedactedValue, value: valueDoubleQuoted, needles: redactListedFlagNeedles,
+		start: startListedFlag, runsOn: awsPairRunsOn,
 	},
 	// curl's basic-auth credentials: `-u user:pass`, `-uuser:pass`, `--user user:pass` and
-	// `--proxy-user user:pass`. The user name and the colon stay. A bare `-u user` (curl prompts for
-	// the password) has nothing to redact, and the rule is limited to curl lines so `docker run -u
-	// 1000:1000` is left alone.
-	curlRule(`(?i)(\bcurl\b[^\n]*?\s(?:-[a-z]*u\s*|(?:--user|--proxy-user)(?:=|\s+))["']?[^:\s"']*:)([^\s"']+)`, "${1}"+redactedValue),
+	// `--proxy-user user:pass`. The user name and the colon stay, and so does a password that is a
+	// command substitution (`-u "ci:$(gh auth token)"`), which the rule reads up to its first blank,
+	// as an unquoted value. A bare `-u user` (curl prompts for the password) has nothing to redact,
+	// and the rule is limited to curl lines so `docker run -u 1000:1000` is left alone.
+	curlRule(`(?i)(\bcurl\b[^\n]*?\s(?:-[a-z]*u\s*|(?:--user|--proxy-user)(?:=|\s+))["']?[^:\s"']*:)([^\s"']+)`, "${1}"+redactedValue).withValue(valueUnquoted),
 	// curl's cookie flag with a cookie string: `-b 'sid=x; csrf=y'`, `--cookie sid=x`. Only a value
 	// holding `=` is cookies; anything else names a cookie file, which stays. The quotes stay.
 	curlRule(`(?i)(\bcurl\b[^\n]*?\s(?:-[a-z]*b\s*|--cookie(?:=|\s+)))(?:(')[^'\n]*=[^'\n]*(')|(")[^"\n]*=[^"\n]*(")|[^\s"'=]+=[^\s"']*)`, "${1}${2}${4}"+redactedValue+"${3}${5}"),
 	// A Cookie or Set-Cookie header: the whole value is a session credential, as the field-name rule
-	// in SanitizeMap already treats a structured `cookie` field. Only where a header or key can
-	// start (a line, a quote, curl's -H), so prose that says "cookie:" keeps its sentence.
-	foldedRule(`(?im)((?:^\s*|["']\s*|(?:-H|--header)(?:=|\s+)["']?)(?:set-)?cookie["']?\s*:\s*["']?)([^\n"'\\]+)`, "${1}"+redactedValue, isRedactedValue, "cookie").from(startLine),
+	// in SanitizeMap already treats a structured `cookie` field, unless it is one command
+	// substitution (`-H "Cookie: $(cat ~/.cookie)"`). Only where a header or key can start (a line,
+	// a quote, curl's -H), so prose that says "cookie:" keeps its sentence.
+	foldedRule(`(?im)((?:^\s*|["']\s*|(?:-H|--header)(?:=|\s+)["']?)(?:set-)?cookie["']?\s*:\s*["']?)([^\n"'\\]+)`, "${1}"+redactedValue, isRedactedValue, "cookie").from(startLine).withValue(valueDoubleQuoted),
 	// The password in a URL's userinfo: `postgres://user:pw@host`, `https://x-access-token:t@github.com`,
 	// and with no user name, the way Redis URLs carry a password: `redis://:pw@host`. The word the
 	// scheme ends can hold an `_`, which no scheme does: of `lsv2_sk_mysql://user:pw@host` the scheme
 	// is `mysql`, and the match starts with the word.
-	foldedRule(`(?i)(\b[a-z0-9_+.-]*?[a-z][a-z0-9+.-]*://[^/\s:@"'<>]*:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://").from(startScheme).runningOn(urlRunningOn),
+	foldedRule(`(?i)(\b[a-z0-9_+.-]*?[a-z][a-z0-9+.-]*://[^/\s:@"'<>]*:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://").from(startScheme).runningOn(urlRunningOn).withValue(valueUnquoted),
 	// Credentials recognizable by their own shape, wherever they appear. The type prefix is public
 	// and stays (`ghp_[REDACTED]`, `AKIA[REDACTED]`), the way secret scanners report a finding: the
 	// line still says a GitHub token or an AWS key was there, which is what detection rules match on
@@ -810,6 +814,14 @@ func (rule redactionRule) apply(text *redactGate, slot *redactSlot) string {
 		}
 		if use.rule.keeps(value, use.pattern, match) {
 			text.hidden = text.hidden || keptLabel(value, match[2*valueGroup(use.pattern, match)+1])
+			// A kept flag of a whole-line rule is still the first of its line: the flags
+			// after it are redacted as they are after a replaced one.
+			if use.rule.wholeLine {
+				if more, end := use.rule.restOfLine(nil, value, match[0], match[1]); more != nil {
+					out = append(append(out, value[last:match[1]]...), more...)
+					last = end
+				}
+			}
 			continue
 		}
 		out = append(out, value[last:match[0]]...)
@@ -837,7 +849,8 @@ func (rule redactionRule) apply(text *redactGate, slot *redactSlot) string {
 // ended: one search over the line, however many flags it holds. A flag must start on the line, or
 // at the newline ending it, as the rule's lazy run requires; its value can reach the next lines
 // (commandLineEnd). The rule itself cannot find the next flag: its match opens with the command
-// word, which lies before the end of the last match.
+// word, which lies before the end of the last match. A flag the rule keeps stays (keeps). It
+// returns out as it was where it replaced nothing.
 func (rule *redactionRule) restOfLine(out []byte, t string, start, last int) ([]byte, int) {
 	nl := len(t)
 	if i := strings.IndexByte(t[start:], '\n'); i >= 0 {
@@ -858,6 +871,9 @@ func (rule *redactionRule) restOfLine(out []byte, t string, start, last int) ([]
 		}
 		if m[0] > nl {
 			break
+		}
+		if rule.keeps(t, re, m) {
+			continue
 		}
 		out = append(out, t[last:m[0]]...)
 		out = re.ExpandString(out, rule.replacement, t, m)
@@ -1322,10 +1338,12 @@ func keptLabel(t string, end int) bool {
 // that a later rule can change it, or make it long enough to remove.
 func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string]struct{}) (_ map[string]struct{}, kept bool) {
 	value := text.value
-	// The opening of a substitution is a command and not a value: its copies elsewhere in the
-	// text are other commands, and stay (isSubstitutionOpening).
-	add := func(s string) {
-		if len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) && !isSubstitutionOpening(s) {
+	// A substitution the rules keep is a command and not a value: its copies elsewhere in the
+	// text are other commands, and stay. Whether it is one is decided as the rule for the way
+	// the value is written decides it (valueKind).
+	add := func(kind valueKind, start, end int) {
+		s := value[start:end]
+		if len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) && !kind.keepsSubstitution(value, start, end) {
 			if assigned == nil {
 				assigned = map[string]struct{}{}
 			}
@@ -1342,14 +1360,21 @@ func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string
 			continue
 		}
 		unquoted := g+2 == len(match)
+		// The URL parameter (the first group) and the unquoted value (the last) are unquoted; the
+		// others are quotedValues in order.
+		kind := valueUnquoted
+		if i := g/2 - 2; i >= 0 && i < len(quotedValues) {
+			kind = quotedValueKind(quotedValues[i][0])
+		}
 		kept = kept || unquoted && strings.ContainsAny(value[match[0]:match[g]], redactQuotes)
 		// A value that is itself a label hides the assignment it begins from the capture, as a kept
 		// one does from the label rules.
 		text.hidden = text.hidden || keptLabel(value, match[g+1])
-		s := value[match[g]:match[g+1]]
-		add(s)
+		add(kind, match[g], match[g+1])
 		if unquoted && containsFold(value[match[0]:match[g]], "authorization") {
-			add(authorizationCredentialCopy(value, s, match[g+1]))
+			if from, to := authorizationCredentialCopy(value, value[match[g]:match[g+1]], match[g+1]); from >= 0 {
+				add(valueUnquoted, from, to)
+			}
 		}
 	}
 	return assigned, kept

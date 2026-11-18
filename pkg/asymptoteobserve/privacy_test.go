@@ -1119,3 +1119,63 @@ func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
 		}
 	}
 }
+
+// Every rule whose unquoted value a command substitution can stand in keeps its opening as the
+// label rules do: curl's -u, a URL's password and a bare value after a quoted label. curl's -u is a
+// whole-line rule: a kept password is still the first flag of its line, and a credential after it
+// on the line is still redacted. A quoted value (a Cookie header, a flag's value in an argument
+// list) is replaced whole, a substitution or not, as on main; so are a real secret in the same
+// place and text beside a substitution.
+func TestRedactStringKeepsASubstitutionWhereverASecretWouldStand(t *testing.T) {
+	for input, want := range map[string]string{
+		// curl's -u.
+		`curl -u "ci:$(gh auth token)" https://x`:                        `curl -u "ci:$(gh auth token)" https://x`,
+		`curl -u ci:$(gh auth token) https://x`:                          `curl -u ci:$(gh auth token) https://x`,
+		`curl --user ci:$(pwgen) https://x`:                              `curl --user ci:$(pwgen) https://x`,
+		`curl -u ci:hunter2 https://x`:                                   `curl -u ci:[REDACTED] https://x`,
+		`curl -u ci:$(gh auth token) -u other:hunter2 https://x`:         `curl -u ci:$(gh auth token) -u other:[REDACTED] https://x`,
+		`curl -u "ci:$(gh auth token)" --proxy-user p:hunter2 https://x`: `curl -u "ci:$(gh auth token)" --proxy-user p:[REDACTED] https://x`,
+		`curl -u ci:hunter2 -u other:$(gh auth token) https://x`:         `curl -u ci:[REDACTED] -u other:$(gh auth token) https://x`,
+		`curl -u ci:$(a)hunter2 https://x`:                               `curl -u ci:[REDACTED] https://x`,
+		`curl -u "ci:x$(cmd)" https://x`:                                 `curl -u "ci:[REDACTED]" https://x`,
+		// A Cookie header.
+		`curl -H "Cookie: $(cat ~/.cookie)" https://x`:                          `curl -H "Cookie: [REDACTED]" https://x`,
+		`curl -H "Set-Cookie: $(cat ~/.cookie)" https://x`:                      `curl -H "Set-Cookie: [REDACTED]" https://x`,
+		`curl -H "Cookie: sid=hunter2" https://x`:                               `curl -H "Cookie: [REDACTED]" https://x`,
+		`curl -H "Cookie: $(cat ~/.cookie)" -u ci:hunter2 https://x`:            `curl -H "Cookie: [REDACTED]" -u ci:[REDACTED] https://x`,
+		`curl -H "Cookie: $(cat ~/.cookie)" -H "Cookie: sid=hunter2" https://x`: `curl -H "Cookie: [REDACTED]" -H "Cookie: [REDACTED]" https://x`,
+		`curl -H "Cookie: $(a)hunter2" https://x`:                               `curl -H "Cookie: [REDACTED]" https://x`,
+		`curl -H "Cookie: x$(cmd)" https://x`:                                   `curl -H "Cookie: [REDACTED]" https://x`,
+		`curl -H 'Cookie: $(cat ~/.cookie)' https://x`:                          `curl -H 'Cookie: [REDACTED]' https://x`,
+		// A URL's password.
+		`git clone https://ci:$(pwgen)@github.com/o/r`:    `git clone https://ci:$(pwgen)@github.com/o/r`,
+		`git clone https://ci:hunter2@github.com/o/r`:     `git clone https://ci:[REDACTED]@github.com/o/r`,
+		`curl https://u:$(pwgen)@h/x -u ci:hunter2`:       `curl https://u:$(pwgen)@h/x -u ci:[REDACTED]`,
+		`git clone https://ci:$(a)hunter2@github.com/o/r`: `git clone https://ci:[REDACTED]@github.com/o/r`,
+		`git clone https://ci:x$(pwgen)@github.com/o/r`:   `git clone https://ci:[REDACTED]@github.com/o/r`,
+		// A flag and its value in an argument list.
+		`"args": ["--api-key", "$(cat f)"]`:                       `"args": ["--api-key", "[REDACTED]"]`,
+		`"args": ["--api-key", "hunter2"]`:                        `"args": ["--api-key", "[REDACTED]"]`,
+		`"args": ["--api-key", "$(cat f)", "--token", "hunter2"]`: `"args": ["--api-key", "[REDACTED]", "--token", "[REDACTED]"]`,
+		`"args": ["--api-key", "$(a)hunter2"]`:                    `"args": ["--api-key", "[REDACTED]"]`,
+		`"args": ["--api-key", "x$(cmd)"]`:                        `"args": ["--api-key", "[REDACTED]"]`,
+		`['--api-key', '$(cat f)']`:                               `['--api-key', '[REDACTED]']`,
+		// A bare value after a quoted label.
+		`{"token": $(cat f)}`:                      `{"token": $(cat f)}`,
+		`{"token": hunter2}`:                       `{"token": "[REDACTED]"}`,
+		`{"token": $(pwgen), "password": hunter2}`: `{"token": $(pwgen), "password": "[REDACTED]"}`,
+		`{"token": $(a)hunter2}`:                   `{"token": "[REDACTED]"}`,
+		`{"token": x$(cmd)}`:                       `{"token": "[REDACTED]"}`,
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q)\n  got  %q\n  want %q", input, got, want)
+		}
+		if strings.Contains(got, "hunter2") {
+			t.Errorf("RedactString(%q) kept a secret: %q", input, got)
+		}
+		if again := RedactString(got); again != got {
+			t.Errorf("RedactString(%q) is not stable: %q then %q", input, got, again)
+		}
+	}
+}

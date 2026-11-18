@@ -626,11 +626,12 @@ func TestCredentialStoresKindsAndTiersAreUsed(t *testing.T) {
 }
 
 // TestCredentialStoresRedactedExpression holds the expression for a redacted command line to
-// what a log holds. Redaction replaces a command's name where the command's output is put
-// right after a secret's label: today after the colon of curl's -u, and, in the logs a Beacon
-// wrote before redaction kept the opening of a command substitution, in an assignment to TOKEN
-// and in a bearer header. What the log keeps is still found when the match has words to tell
-// the command by. No counterexample is.
+// what a log holds. Redaction used to replace a command's name where the command's output is put
+// right after a secret's label: after the colon of curl's -u, and, in the logs a Beacon wrote
+// before redaction kept the opening of a command substitution, in an assignment to TOKEN and in a
+// bearer header. What those logs keep is still found when the match has words to tell the command
+// by. No counterexample is. The sanitizer now keeps the substitution whole in all three, so a log
+// it writes names the command.
 func TestCredentialStoresRedactedExpression(t *testing.T) {
 	c := credentialStores(t)
 	all, err := c.Select(TierLikely)
@@ -638,15 +639,22 @@ func TestCredentialStoresRedactedExpression(t *testing.T) {
 		t.Fatalf("no redacted expression: %v", err)
 	}
 	expression := regexp.MustCompile(all.Redacted)
-	// logged returns what a log holds of a command line that runs command, whose name is name,
-	// for its output: the first as the sanitizer writes it now, the others as it used to.
+	// logged returns what older logs hold of a command line that runs command, whose name is
+	// name, for its output. It first checks that the sanitizer now keeps the command.
 	logged := func(command, name string) []string {
-		event := asymptoteobserve.SanitizeEvent(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{
-			Command: `curl -u "deploy:$(` + command + `)" https://api.example`,
-		}}, 64*1024)
 		rest := strings.TrimPrefix(command, name)
+		for _, line := range []string{
+			`curl -u "deploy:$(` + command + `)" https://api.example`,
+			`TOKEN=$(` + command + `)`,
+			`curl -H "Authorization: Bearer $(` + command + `)" https://api.example`,
+		} {
+			event := asymptoteobserve.SanitizeEvent(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{Command: line}}, 64*1024)
+			if got := event.Command.Command; !strings.Contains(got, "$("+name+" ") {
+				t.Errorf("the sanitizer took the name of %q from %q: %q", name, line, got)
+			}
+		}
 		return []string{
-			event.Command.Command,
+			`curl -u "deploy:[REDACTED]` + rest + `)" https://api.example`,
 			"TOKEN=[REDACTED]" + rest + ")",
 			`curl -H "Authorization: Bearer [REDACTED]` + rest + `)" https://api.example`,
 		}
