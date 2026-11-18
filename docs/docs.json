@@ -582,6 +582,13 @@
                 "pages": [
                   "guides/kandji-otlp-forward-mdm"
                 ]
+              },
+              {
+                "group": "Microsoft Configuration Manager",
+                "expanded": true,
+                "pages": [
+                  "guides/configmgr-windows-mdm"
+                ]
               }
             ]
           }
