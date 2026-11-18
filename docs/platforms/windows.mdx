@@ -272,6 +272,7 @@ beacon endpoint uninstall --system
 | Gap | Status |
 |---|---|
 | The installer is unsigned | SmartScreen warns. Verify the published `.sha256`. Authenticode signing is planned |
+| The package's PowerShell scripts are unsigned | The MSI installs, upgrades and removes Beacon with them, so it fails with exit code 1603 where Group Policy sets the PowerShell execution policy to `AllSigned` or `Restricted`. Waiting on signing |
 | `beacon endpoint update --apply` | Not supported on Windows. It refuses rather than pretending. Waiting on signing |
 | `beacon ci exec` | Captures intermittently on Windows ([#320](https://github.com/asymptote-labs/agent-beacon/issues/320)). The installed-hook path on this page is unaffected |
 | User-mode collectors | Do not restart and do not survive sign-out, because Windows has no per-user service manager |

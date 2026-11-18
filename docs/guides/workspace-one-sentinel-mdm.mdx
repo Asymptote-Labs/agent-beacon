@@ -118,6 +118,8 @@ The installer and its programs are not code-signed yet. If you run AppLocker or 
 - the copy of the hook program agents run from each profile, `%USERPROFILE%\.beacon\endpoint\hooks\beacon-hooks.exe`;
 - the two scripts in this guide.
 
+The PowerShell execution policy matters for the same reason. The MSI installs, upgrades and removes Beacon by running PowerShell scripts that are not signed yet, so it cannot run where Group Policy sets the execution policy to `AllSigned` or `Restricted`: the install fails with exit code 1603 and is rolled back, and a machine that already has Beacon keeps running it but cannot upgrade or remove it. Check with `Get-ExecutionPolicy -List` on a pilot machine; any other `MachinePolicy` value is fine.
+
 **Success looks like:** `sc.exe query BeaconCollector` reports `RUNNING`. With restricted log access turned on, `beacon.exe endpoint status --system --json` also reports `"log_access": "restricted"`.
 
 ### Script: forward to Sentinel
@@ -223,6 +225,7 @@ See [Who ran each session](/log-forwarding/microsoft-sentinel#who-ran-each-sessi
 | `status` reports `Retrying after response` with 403 | The role assignment has not applied yet. Wait up to 30 minutes; nothing is lost meanwhile. |
 | `status` reports an `AADSTS` error | Entra ID refused the credential: a wrong tenant or client ID, or a certificate that was not uploaded to the app, has expired or was removed. Vector drops what it cannot send while this lasts, so renew certificates before they expire and rerun the forwarder script with the new one. |
 | Events arrive under the machine account (`COMPUTERNAME$`) | Agents' own OpenTelemetry events did with collectors from earlier releases; repair the endpoint (`beacon endpoint repair --system`) so the collector config names the sender, and attribute older events with the join in step 3. If a session has no hook events at all, the person's agent-tools script has not run yet (check its Login trigger). |
+| The app fails with exit code 1603, and `Get-ExecutionPolicy -List` shows `AllSigned` or `Restricted` for `MachinePolicy` | Group Policy blocks unsigned PowerShell scripts, which the MSI needs. See the note under the app above. |
 | An app, script or hook is blocked | AppLocker or WDAC; allow everything listed under the app above. |
 
 ## Related
