@@ -35,6 +35,24 @@ emit:
   reason: "Signed-in CLI printed a live access token (gcloud/gh/aws/az/vault/heroku/doctl/kubectl) \u2014 a credential now in the agent's context"
 
 tests:
+  - name: powershell_assignment_az_token
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "$t = az account get-access-token" }
+        session: { id: s1 }
+  - name: windows_az_cmd_token
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az.cmd account get-access-token --query accessToken -o tsv" }
+        session: { id: s1 }
+  - name: pwsh_command_gcloud_token
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pwsh -c \"gcloud auth print-access-token\"" }
+        session: { id: s1 }
   - name: gcloud_access_token
     verdict: match
     events:

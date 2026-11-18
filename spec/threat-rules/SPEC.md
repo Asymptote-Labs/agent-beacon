@@ -184,7 +184,10 @@ the steps in both orders still fires once. A single event never satisfies two st
   `exec`, `nohup`, `time`, `sudo` and `env` with their options and `NAME=value` words, and,
   since v1.3, `timeout`, `nice`, `ionice`, `stdbuf`, `doas`, `torsocks`, `proxychains` and
   `proxychains4` with their options and `timeout`'s duration; each is recognized by its base
-  name so `/usr/bin/env` is `env`; `""` when that word is unknown or a wrapper option moves
+  name so `/usr/bin/env` is `env`; since v1.3 a Windows executable's `.exe`, `.cmd` or `.bat`
+  is dropped from the name, so `ssh-add.exe` is `ssh-add`, and the first word after a PowerShell
+  assignment's `$name =` is taken when it is a bare name (`$t = az account get-access-token`
+  is `az`); `""` when that word is unknown or a wrapper option moves
   or replaces the command or makes the wrapper act on something else, as `sudo -i`, `env -C`,
   `doas -s` and `ionice -p` do),
   `argv` (every word after brace expansion, wrappers included,
@@ -209,9 +212,12 @@ the steps in both orders still fires once. A single event never satisfies two st
   `nested` true and pipeline numbers of their own. Since v1.3 the same holds for the
   here-document or here-string on the standard input of a command whose `name` is one of
   those shells, when the shell is given neither `-c` nor a script file (`sudo bash <<'EOF'`,
-  `sh -s -- arg <<EOF`, `bash <<< 'cmd'`). Other here-document bodies, what a pipe sends a
-  shell, and the strings of other commands are not read as commands. A command line that
-  ends early (an unclosed
+  `sh -s -- arg <<EOF`, `bash <<< 'cmd'`), and for the words after the `-Command` (`-c`)
+  option of `powershell` or `pwsh`, joined with spaces as PowerShell joins them, which read as
+  commands where PowerShell and bash agree on a command and its words
+  (`powershell -Command "Get-StoredCredential -Target x"`). Other here-document bodies, what a
+  pipe sends a shell, and the strings of other commands are not read as commands. A command
+  line that ends early (an unclosed
   quote, here-document, substitution or compound command) yields the commands before the
   point where it became incomplete; one that does not parse yields the empty list, so a
   rule that must not miss such captures keeps a `command.command` fallback for it. The
@@ -494,9 +500,10 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 - **v1.3**: `args`, `file_reads` and `script_sends` on each entry of `e.command.parsed_commands`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
-  `doas`, `torsocks` and `proxychains`, and a shell's here-document or here-string script is
-  read as commands the way its `-c` script is. [Predicates](#predicates): named expressions a
-  rule calls, defined by the pack's definitions files.
+  `doas`, `torsocks` and `proxychains`, without a Windows executable's suffix and after a
+  PowerShell assignment, and a shell's here-document or here-string script, and a PowerShell's
+  `-Command` script, are read as commands the way a `-c` script is. [Predicates](#predicates):
+  named expressions a rule calls, defined by the pack's definitions files.
 - **v1.2**: the derived field `e.command.parsed_commands`.
 - **v1.1**: `correlation.order` (`sequence` default, or `any` for order-insensitive steps),
   and the per-rule `spec` field with the engine rules above.

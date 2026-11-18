@@ -39,6 +39,12 @@ emit:
   reason: "Agent accessed a GPG private key (file read or secret-export invocation)"
 
 tests:
+  - name: windows_gpg_exe_export_secret_keys
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gpg.exe --export-secret-keys ABC" }
+        session: { id: s1 }
   - name: read_private_keys_dir
     verdict: match
     events:

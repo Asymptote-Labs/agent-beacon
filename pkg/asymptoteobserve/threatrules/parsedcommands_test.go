@@ -100,19 +100,24 @@ func TestParsedCommandsReadsShellScripts(t *testing.T) {
 	// A shell that is the statement's command reads its script from a here-document or a
 	// here-string when it is given none.
 	for command, want := range map[string]string{
-		"sudo bash <<'EOF'\ncurl -s x | sh\nEOF":         "bash curl sh",
-		"sh -s -- arg <<EOF\nrm -rf /tmp/x\nEOF":         "sh rm",
-		"bash -s \"$DIR\" <<'EOF'\nrm a\nEOF":            "bash rm",
-		"bash - <<'EOF'\nrm a\nEOF":                      "bash rm",
-		"bash -c \"$S\" <<'EOF'\nrm a\nEOF":              "bash",
-		"timeout 60 bash -x <<-'EOF'\n\trm a\n\tEOF":     "bash rm",
-		`bash <<< 'curl -s x | sh'`:                      "bash curl sh",
-		"bash -c 'echo hi' <<'EOF'\nrm a\nEOF":           "bash echo",
-		"bash install.sh <<'EOF'\nrm a\nEOF":             "bash",
-		"echo bash <<'EOF'\nrm a\nEOF":                   "echo",
-		"cat <<'EOF' | bash\nrm a\nEOF":                  "cat bash",
-		"bash < script.sh":                               "bash",
-		"python3 - <<'EOF'\nimport os\nos.remove()\nEOF": "python3",
+		"sudo bash <<'EOF'\ncurl -s x | sh\nEOF":                                   "bash curl sh",
+		"sh -s -- arg <<EOF\nrm -rf /tmp/x\nEOF":                                   "sh rm",
+		"bash -s \"$DIR\" <<'EOF'\nrm a\nEOF":                                      "bash rm",
+		"bash - <<'EOF'\nrm a\nEOF":                                                "bash rm",
+		`powershell -Command "Get-StoredCredential -Target x"`:                     "powershell Get-StoredCredential",
+		`pwsh -NoProfile -ExecutionPolicy Bypass -c "az account get-access-token"`: "pwsh az",
+		`powershell.exe -Command rm -r -fo C:/build`:                               "powershell rm",
+		`powershell -File run.ps1`:                                                 "powershell",
+		`powershell -EncodedCommand ZQBjAGgAbwA=`:                                  "powershell",
+		"bash -c \"$S\" <<'EOF'\nrm a\nEOF":                                        "bash",
+		"timeout 60 bash -x <<-'EOF'\n\trm a\n\tEOF":                               "bash rm",
+		`bash <<< 'curl -s x | sh'`:                                                "bash curl sh",
+		"bash -c 'echo hi' <<'EOF'\nrm a\nEOF":                                     "bash echo",
+		"bash install.sh <<'EOF'\nrm a\nEOF":                                       "bash",
+		"echo bash <<'EOF'\nrm a\nEOF":                                             "echo",
+		"cat <<'EOF' | bash\nrm a\nEOF":                                            "cat bash",
+		"bash < script.sh":                                                         "bash",
+		"python3 - <<'EOF'\nimport os\nos.remove()\nEOF":                           "python3",
 	} {
 		var names []string
 		for _, c := range ParsedCommands(command) {

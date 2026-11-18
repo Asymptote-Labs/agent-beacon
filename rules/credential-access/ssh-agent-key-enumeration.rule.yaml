@@ -26,6 +26,12 @@ emit:
   reason: "SSH agent private-key list enumerated (ssh-add -l/-L)"
 
 tests:
+  - name: windows_ssh_add_exe_list
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh-add.exe -l" }
+        session: { id: s1 }
   - name: ssh_add_list
     verdict: match
     events:
