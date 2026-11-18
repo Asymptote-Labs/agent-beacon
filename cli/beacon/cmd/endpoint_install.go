@@ -427,7 +427,10 @@ func suggestMCPConnect(out io.Writer, chosenInWizard bool) {
 func runEndpointStatus(cmd *cobra.Command, args []string) error {
 	status := lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
 	if endpointOpts.jsonOutput {
-		return json.NewEncoder(os.Stdout).Encode(status)
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			lifecycle.Status
+			Enforcement bool `json:"enforcement"`
+		}{status, enforcementOn()})
 	}
 	fmt.Printf("Beacon Endpoint Agent %s\n", status.Version)
 	fmt.Printf("Config: %s\n", status.ConfigPath)
@@ -477,6 +480,9 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 	}
 	otherForwarders := len(status.ScriptForwarders) > 0 || status.SentinelForwarder != nil
 	if line := cloudStatusLine(status.ManagedIngest, endpointUserMode(), otherForwarders); line != "" {
+		fmt.Println(line)
+	}
+	if line := enforcementStatusLine(); line != "" {
 		fmt.Println(line)
 	}
 	fmt.Println(inventoryHeartbeatStatusLine(status.InventoryHeartbeat))

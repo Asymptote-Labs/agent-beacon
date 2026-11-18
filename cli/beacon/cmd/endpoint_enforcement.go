@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,13 +52,14 @@ const (
 	enforcementInstallTimeout = 15 * time.Minute
 )
 
-// Where user-mode enforcement lives under the user endpoint directory. The enforcement directory
-// and its config file are the enterprise edition's enforcement.Dir and enforcement.ConfigFile,
-// which its enable writes; the config's presence is what says enforcement is on.
+// Where enforcement lives under an endpoint directory (the user's or the system's), and where
+// user-mode enforcement keeps the enterprise binary. The enforcement directory and its config
+// file are the enterprise edition's enforcement.Dir and enforcement.ConfigFile, which its enable
+// writes; the config's presence is what says enforcement is on.
 const (
-	userEnterpriseDirName     = "enterprise"
-	userEnforcementDirName    = "enforcement"
-	userEnforcementConfigName = "config.json"
+	userEnterpriseDirName = "enterprise"
+	enforcementDirName    = "enforcement"
+	enforcementConfigName = "config.json"
 )
 
 var endpointEnforcementOpts struct {
@@ -95,6 +98,7 @@ var (
 	enforcementHasRoot            = lifecycle.HasSystemPrivileges
 	enforcementConnected          = func() bool { return asymptote.Connected(false) }
 	enforcementUserConnected      = func() bool { return asymptote.Connected(true) }
+	enforcementSystemBaseDir      = endpointconfig.SystemBaseDir
 	enforcementCredentials        = systemEnforcementCredentials
 	enforcementUserCredentials    = userEnforcementCredentials
 	enforcementUserModeProbe      = probeConsoleUserMode
@@ -397,7 +401,7 @@ func userEnterpriseBeaconPath() string {
 }
 
 func userEnforcementDir() string {
-	return filepath.Join(endpointconfig.BaseDir(true), userEnforcementDirName)
+	return filepath.Join(endpointconfig.BaseDir(true), enforcementDirName)
 }
 
 // userEnterpriseBeacon is the enterprise binary kept for user-mode enforcement, when this build
@@ -416,16 +420,40 @@ func userEnterpriseBeacon() (string, bool) {
 
 // userEnforcementOn reports whether enforcement is on for this user (its enable wrote the config).
 func userEnforcementOn() bool {
-	_, err := os.Stat(filepath.Join(userEnforcementDir(), userEnforcementConfigName))
+	_, err := os.Stat(filepath.Join(userEnforcementDir(), enforcementConfigName))
 	return err == nil
 }
 
+// enforcementOn reports whether enforcement is on here, for this user or for the whole machine.
+func enforcementOn() bool {
+	if userEnforcementOn() {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(enforcementSystemBaseDir(), enforcementDirName, enforcementConfigName))
+	return err == nil
+}
+
+// enforcementStatusLine is endpoint status's enforcement line: whether it is on, on the Macs that
+// can have it (and anywhere it is somehow on).
+func enforcementStatusLine() string {
+	switch {
+	case enforcementOn():
+		return "Enforcement: on"
+	case enforcementPlatformSupported():
+		return "Enforcement: off"
+	}
+	return ""
+}
+
 // runEndpointEnforcement forwards an enforcement subcommand this build lacks (status, update,
-// disable) to the enterprise binary kept for user-mode enforcement. Without one there is nothing
-// to run, so it shows help.
+// disable) to the enterprise binary kept for user-mode enforcement. Without one, status can still
+// say whether enforcement is on, and anything else shows help.
 func runEndpointEnforcement(cmd *cobra.Command, args []string) error {
 	bin, ok := userEnterpriseBeacon()
 	if !ok {
+		if len(args) > 0 && args[0] == "status" {
+			return printEnforcementOnOrOff(cmd.OutOrStdout(), slices.Contains(args[1:], "--json"))
+		}
 		return cmd.Help()
 	}
 	if err := runUserEnterpriseBeacon(cmd.Context(), bin, append([]string{"endpoint", "enforcement"}, args...)...); err != nil {
@@ -434,6 +462,21 @@ func runEndpointEnforcement(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return nil
+}
+
+// printEnforcementOnOrOff is enforcement status without the enterprise edition, which has the
+// rest: as its status puts it, or with jsonOut its "enabled" field.
+func printEnforcementOnOrOff(out io.Writer, jsonOut bool) error {
+	on := enforcementOn()
+	if jsonOut {
+		return json.NewEncoder(out).Encode(map[string]bool{"enabled": on})
+	}
+	state := "off"
+	if on {
+		state = "on"
+	}
+	_, err := fmt.Fprintf(out, "Enforcement:   %s\n", state)
+	return err
 }
 
 // enforcedHookBeacon is the kept enterprise binary a user-mode hook install must go through while

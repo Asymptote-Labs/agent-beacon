@@ -104,6 +104,10 @@ func stubEnforcement(t *testing.T) *enforcementFakes {
 		endpointEnforcementOpts.dashboardURL = ""
 	})
 	t.Setenv(enforcementHandoffEnv, "")
+	system := t.TempDir()
+	orig := enforcementSystemBaseDir
+	enforcementSystemBaseDir = func() string { return system }
+	t.Cleanup(func() { enforcementSystemBaseDir = orig })
 	// The user endpoint directory, where user-mode enforcement keeps its files.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -270,7 +274,7 @@ func writeUserEnforcementFiles(t *testing.T, on bool) string {
 		if err := os.MkdirAll(userEnforcementDir(), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(userEnforcementDir(), userEnforcementConfigName), []byte("{}\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(userEnforcementDir(), enforcementConfigName), []byte("{}\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -496,5 +500,52 @@ func TestRemoveUserEnforcementLeavesTheRestOfTheEndpoint(t *testing.T) {
 	}
 	if _, err := os.Stat(other); err != nil {
 		t.Fatalf("the endpoint config went too: %v", err)
+	}
+}
+
+// Without the enterprise binary, enforcement status still says whether enforcement is on (for the
+// user or the machine), and endpoint status says so on a Mac that can have it.
+func TestEnforcementStatusWithoutTheEnterpriseBinarySaysWhetherItIsOn(t *testing.T) {
+	f := stubEnforcement(t)
+	f.root = false
+	status := func(args ...string) string {
+		var out bytes.Buffer
+		cmd := &cobra.Command{Use: "enforcement"}
+		cmd.SetOut(&out)
+		cmd.SetContext(context.Background())
+		if err := runEndpointEnforcement(cmd, append([]string{"status"}, args...)); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if got := status(); got != "Enforcement:   off\n" {
+		t.Fatalf("status = %q", got)
+	}
+	if got := enforcementStatusLine(); got != "Enforcement: off" {
+		t.Fatalf("endpoint status line = %q", got)
+	}
+	f.supported = false
+	if got := enforcementStatusLine(); got != "" {
+		t.Fatalf("endpoint status line where enforcement cannot run = %q", got)
+	}
+
+	systemDir := filepath.Join(enforcementSystemBaseDir(), enforcementDirName)
+	if err := os.MkdirAll(systemDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(systemDir, enforcementConfigName), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := status(); got != "Enforcement:   on\n" {
+		t.Fatalf("status with system enforcement = %q", got)
+	}
+	if got := status("--json"); got != "{\"enabled\":true}\n" {
+		t.Fatalf("status --json = %q", got)
+	}
+	if got := enforcementStatusLine(); got != "Enforcement: on" {
+		t.Fatalf("endpoint status line = %q", got)
+	}
+	if len(f.userForwarded) != 0 {
+		t.Fatalf("forwarded %v", f.userForwarded)
 	}
 }
