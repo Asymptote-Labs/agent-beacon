@@ -2,9 +2,12 @@ package threatrules
 
 import (
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/google/cel-go/cel"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -65,15 +68,10 @@ var derivedFieldNames = sync.OnceValue(func() []string {
 	return names
 })
 
-// referencesDerivedField reports whether a match expression names an engine-derived field.
-// A textual check is enough: a false positive (the name inside a string literal) only costs
-// the derivation, and a false negative cannot happen because CEL has no other way to reach
-// the field.
-func referencesDerivedField(expr string) bool {
-	for _, name := range derivedFieldNames() {
-		if strings.Contains(expr, name) {
-			return true
-		}
-	}
-	return false
+// selectsDerivedField reports whether a checked expression selects an engine-derived field. It
+// reads the expression the engine evaluates rather than the rule's text, so it holds for
+// whatever the text stands for once it is compiled, and a field's name inside a string literal
+// does not count.
+func selectsDerivedField(ast *cel.Ast) bool {
+	return slices.ContainsFunc(derivedFieldNames(), func(name string) bool { return selectsField(ast, name) })
 }

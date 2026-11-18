@@ -61,6 +61,10 @@ type Rule struct {
 	Correlation *Correlation              `yaml:"correlation,omitempty"`
 	Emit        Emit                      `yaml:"emit"`
 	Tests       []Fixture                 `yaml:"tests"`
+
+	// lib is the library of the pack the rule was loaded from: the predicates its expressions
+	// may call. Nil for a rule decoded on its own.
+	lib *Library
 }
 
 // Order says whether a correlation's steps must occur in the order they are listed.
@@ -230,13 +234,16 @@ func (r *Rule) validateExpressions() error {
 }
 
 func (r *Rule) validateExpression(expr string) error {
-	_, ast, err := compileMatch(expr)
+	_, ast, err := r.lib.compileMatch(expr)
 	if err != nil {
-		return err
+		return r.lib.explain(err)
 	}
 	// Already known to be parseable and supported (Validate checked it first). The newest field
 	// is checked first, so the error names the version the rule needs.
 	v, _ := parseSpec(r.Spec)
+	if used := r.lib.uses(expr); len(used) > 0 && specV1_3.newerThan(v) {
+		return fmt.Errorf("the predicate %s requires spec: threat-rules/v1.3 or later (engines before v1.3 do not expand predicates)", used[0])
+	}
 	if specV1_3.newerThan(v) {
 		for _, field := range v1_3Fields {
 			if selectsField(ast, field) {

@@ -4,20 +4,28 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // Unwrapped returns the command's words after the wrappers that run the real command in the same
 // directory: command, builtin, exec, nohup and time; sudo and env with their options and
 // NAME=value words; and timeout, nice, ionice, stdbuf, doas, torsocks and proxychains with their
-// options (and timeout's duration). A wrapper is recognized by its base name, so /usr/bin/env and
-// /usr/bin/sudo unwrap like env and sudo. ok is false, with no words, when a wrapper option moves
-// or replaces the command, or makes the wrapper act on something else (sudo -i/-D/-R, env -C/-S,
-// doas -s, ionice -p, and their long forms). It stops at the first unknown word.
+// options (and timeout's duration). A wrapper is recognized by its program name (ProgramName),
+// so /usr/bin/env and /usr/bin/sudo unwrap like env and sudo. ok is false, with no words, when a
+// wrapper option moves or replaces the command, or makes the wrapper act on something else
+// (sudo -i/-D/-R, env -C/-S, doas -s, ionice -p, and their long forms). It stops at the first
+// unknown word, past a PowerShell assignment's `$name =` when a bare name follows it ($t = az
+// account get-access-token), which bash would read as running the variable's value and no
+// command line means. A quoted string or a number there is a value, not a command.
 func (c Command) Unwrapped() (words []Word, ok bool) {
 	words = c.Argv
+	if len(words) > 2 && isPowerShellVariable(words[0]) && words[1].Known && words[1].Text == "=" &&
+		words[2].Known && words[2].Raw == words[2].Text && words[2].Text != "" && !unicode.IsDigit(rune(words[2].Text[0])) {
+		words = words[2:]
+	}
 	for len(words) > 0 && words[0].Known {
 		var spec *wrapperSpec
-		switch filepath.Base(words[0].Text) {
+		switch ProgramName(words[0].Text) {
 		case "command", "builtin", "exec", "nohup", "time":
 			words = words[1:]
 			continue
@@ -56,21 +64,78 @@ func (c Command) Unwrapped() (words []Word, ok bool) {
 	return words, true
 }
 
-// run returns the base name of the unwrapped command and the words after it: cat and [.env] for
-// `sudo timeout 5 cat .env`. The name is "" when there is none or it is unknown.
+// isPowerShellVariable reports whether w is a PowerShell variable alone: $t, $env:TOKEN.
+func isPowerShellVariable(w Word) bool {
+	name, ok := strings.CutPrefix(w.Unquoted, "$")
+	if w.Known || !ok || name == "" || name[0] >= '0' && name[0] <= '9' {
+		return false
+	}
+	for _, r := range name {
+		if r != '_' && r != ':' && !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// ProgramName is the name a word runs a program by: its base name, as filepath.Base reads it on
+// this host, without the .exe, .cmd or .bat of a Windows executable, so ssh-add.exe and
+// C:\Windows\System32\curl.exe are ssh-add and curl.
+func ProgramName(word string) string {
+	base := filepath.Base(word)
+	if dot := strings.LastIndexByte(base, '.'); dot > 0 {
+		switch strings.ToLower(base[dot:]) {
+		case ".exe", ".cmd", ".bat":
+			return base[:dot]
+		}
+	}
+	return base
+}
+
+// run returns the program name of the unwrapped command and the words after it: cat and [.env]
+// for `sudo timeout 5 cat .env`. The name is "" when there is none or it is unknown.
 func (c Command) run() (name string, args []Word) {
 	words, _ := c.Unwrapped()
 	if len(words) == 0 || !words[0].Known || words[0].Text == "" {
 		return "", nil
 	}
-	return filepath.Base(words[0].Text), words[1:]
+	return ProgramName(words[0].Text), words[1:]
 }
 
-// Name is the base name of the unwrapped command (rm for /bin/rm), or "" when there is none or
-// it is unknown. The base name is the host's, as filepath.Base reads it.
+// Name is the program name of the unwrapped command (rm for /bin/rm, ssh-add for ssh-add.exe),
+// or "" when there is none or it is unknown (ProgramName).
 func (c Command) Name() string {
 	name, _ := c.run()
 	return name
+}
+
+// ArgsText returns the words after the unwrapped command's name as text, one word per line, so
+// that one regular expression can ask for whole words that follow each other: "auth\ntoken" for
+// `sudo gh auth token`. A word whose value is unknown is an empty line, and a newline inside a
+// word is written as a space, so a line is always one whole word. It is "" when the command has
+// no known name or nothing follows it.
+func (c Command) ArgsText() string {
+	_, args := c.run()
+	if len(args) == 0 {
+		return ""
+	}
+	size := len(args) - 1
+	for _, w := range args {
+		size += len(w.Text)
+	}
+	var b strings.Builder
+	b.Grow(size)
+	for i, w := range args {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if strings.IndexByte(w.Text, '\n') < 0 {
+			b.WriteString(w.Text)
+		} else {
+			b.WriteString(strings.ReplaceAll(w.Text, "\n", " "))
+		}
+	}
+	return b.String()
 }
 
 // Is reports whether the unwrapped command is name, followed by the known words sub

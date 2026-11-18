@@ -1,16 +1,21 @@
 id: gpg-keyring-access
-version: 2
+spec: threat-rules/v1.3  # needed for predicates, file_reads and args
+version: 3
 title: Agent read a GPG private key or exported a secret key
 description: >
-  The agent either read a file under the GnuPG private-key directory
-  (private-keys-v1.d/, secring.gpg, .gnupg/openpgp-revocs.d/ certificate
-  revocation, .gnupg/trustdb.gpg trust database, .gnupg/gpg-control files) OR
-  invoked gpg or gpg2 with --export-secret-key(s), --export-secret-subkey(s),
-  or --gen-key. Private GPG keys sign commits and decrypt sensitive mail; an
-  agent touching a private keyring is a high-value exfil signal. The rule
-  is anchored on the path or on a gpg subcommand, and explicitly excludes
-  the public keyring (pubring.gpg, *.asc public keys) since reading public
-  keys is a routine signature-verification operation.
+  The agent either read GnuPG private key material (a file under
+  private-keys-v1.d/, secring.gpg, a revocation certificate under
+  .gnupg/openpgp-revocs.d/, a .key file in .gnupg/), with a file tool or a
+  shell command that takes the file in, OR invoked gpg or gpg2 with
+  --export-secret-key(s), --export-secret-subkey(s), --gen-key, or
+  --card-status --with-keygrip. Private GPG keys sign commits and decrypt
+  sensitive mail; an agent touching a private keyring is a high-value exfil
+  signal. The files and the export are the GnuPG stores of the pack's
+  credential catalog (rules/concepts/credential-stores.catalog.yaml). The
+  public keyring (pubring.gpg, *.asc public keys) and the trust database
+  (trustdb.gpg) hold no secret and do not match: reading public keys is a
+  routine signature-verification operation. The command is read as bash, so
+  the words in a quoted string or after echo are not an invocation.
 severity: high
 status: experimental
 posture: detect
@@ -20,23 +25,26 @@ taxonomy:
   mitre_atlas: AML.T0024
 
 match: >
-  (e.event.action == "file.read" && (
-    e.file.path.matches("(?i)(^|/)\\.gnupg/private-keys-v1\\.d/") ||
-    e.file.path.matches("(?i)(^|/)secring\\.gpg$") ||
-    e.file.path.matches("(?i)(^|/)\\.gnupg/(openpgp-revocs\\.d/|trustdb\\.gpg$)") ||
-    e.file.path.matches("(?i)(^|/)\\.gnupg/[^/]+\\.key$")
-  )) || (
-    e.event.action == "command.executed" && (
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*gpg2?\\b[^;&|]*--export-secret-(k|sub)\\w*\\b") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*gpg2?\\b[^;&|]*--gen-key\\b") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*gpg2?\\b[^;&|]*--card-status\\b[^;&|]*--with-keygrip\\b")
-    )
-  )
+  (e.event.action == "file.read" && credential_path(e.file.path, "likely", "gpg")) ||
+  (e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c,
+      c.file_reads.exists(f, credential_path(f.path, "likely", "gpg")) ||
+      credential_command(c, "likely", "gpg") ||
+      c.name.matches("(?i)^gpg2?$") && (
+        c.args.matches("(?im)^--gen-key$") ||
+        c.args.matches("(?im)^--card-status$") && c.args.matches("(?im)^--with-keygrip$"))) ||
+    credential_command_redacted(e.command.command, "likely", "gpg")))
 
 emit:
   reason: "Agent accessed a GPG private key (file read or secret-export invocation)"
 
 tests:
+  - name: windows_gpg_exe_export_secret_keys
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gpg.exe --export-secret-keys ABC" }
+        session: { id: s1 }
   - name: read_private_keys_dir
     verdict: match
     events:
@@ -49,8 +57,8 @@ tests:
       - event: { action: file.read }
         file: { path: "/home/u/.gnupg/secring.gpg" }
         session: { id: s1 }
-  - name: read_trustdb
-    verdict: match
+  - name: read_trustdb_holds_no_secret
+    verdict: no_match
     events:
       - event: { action: file.read }
         file: { path: "/home/u/.gnupg/trustdb.gpg" }
@@ -114,4 +122,22 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "gpg --verify release.tar.gz.asc" }
+        session: { id: s1 }
+  - name: private_key_file_read_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tar czf /tmp/k.tgz ~/.gnupg/private-keys-v1.d/" }
+        session: { id: s1 }
+  - name: export_secret_keys_named_in_a_string
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'run gpg --export-secret-keys to back up'" }
+        session: { id: s1 }
+  - name: export_whose_name_redaction_took
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "SIGNING_KEY=$(gpg --armor --export-secret-keys 0xDEADBEEF) ./release.sh" }
         session: { id: s1 }

@@ -13,6 +13,8 @@ beacon rules add <path> [flags]
 
 Beacon validates rules before installing them. Installed rules become active for future [`beacon scan`](/cli/scan) runs.
 
+A directory is installed as a pack: the definitions found beside the rules (`*.catalog.yaml` and `*.predicates.yaml`, which say what the [predicates](/detections/yaml-schema#predicates) the rules call mean) are installed with them, and the rules are validated against them. A rule that calls a predicate needs those definitions, so add the pack's directory rather than one of its rule files, unless the store already has them. Definitions that differ from the ones the store already has under the same name are refused without `--force`, and with it only if every rule already installed still validates against them.
+
 ## Examples
 
 Install all rules from a local directory:
@@ -45,7 +47,7 @@ sudo beacon rules add ./rules --system
 |------|-------------|
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths |
-| `--force` | Overwrite an existing rule with the same id |
+| `--force` | Overwrite an existing rule with the same id, or definitions with the same name |
 
 ## Related
 

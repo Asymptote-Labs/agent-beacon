@@ -135,10 +135,16 @@ func CompileMatch(expr string) (cel.Program, error) {
 
 // compileMatch is CompileMatch, also returning the checked expression.
 func compileMatch(expr string) (cel.Program, *cel.Ast, error) {
+	return (*Library)(nil).compileMatch(expr)
+}
+
+// compileMatch compiles expr against the library's environment: the engine's, with the
+// library's predicates expanded where expr calls them.
+func (l *Library) compileMatch(expr string) (cel.Program, *cel.Ast, error) {
 	if strings.TrimSpace(expr) == "" {
 		return nil, nil, fmt.Errorf("empty match expression")
 	}
-	env, err := Env()
+	env, err := l.environment()
 	if err != nil {
 		return nil, nil, fmt.Errorf("build CEL env: %w", err)
 	}

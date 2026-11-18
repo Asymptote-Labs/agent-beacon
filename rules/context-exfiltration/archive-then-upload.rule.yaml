@@ -1,6 +1,6 @@
 id: archive-then-upload
-spec: threat-rules/v1.2  # needed for e.command.parsed_commands
-version: 3
+spec: threat-rules/v1.3  # needed for predicates
+version: 4
 title: Archive piped to a network upload (archive-then-egress)
 description: >
   A tar / zip / 7z archive is created and piped into a network upload, or
@@ -23,23 +23,15 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
-# The sender check (s) and the /dev/tcp check are the egress rules' shared definition;
-# TestPackSharedEgressSender keeps every copy identical. A sender reads the pipe unless it
-# is curl or wget without a stdin body (@-, -T -, --post-file=-).
+# Who sends, and whether a sender reads what is piped into it, are the egress rules' shared
+# predicates (rules/concepts/egress.predicates.yaml): a sender reads the pipe unless it is
+# curl or wget without a stdin body (@-, -T -, --post-file=-).
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(t, t.name.matches("(?i)^(tar|zip|7z|7za|p7zip)$") && (
       e.command.parsed_commands.exists(s, s.pipeline == t.pipeline && s.stage > t.stage &&
-        (s.name.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$") ||
-          s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") &&
-          s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"))) &&
-        (!s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget)$")) ||
-          s.argv.exists(a, a.matches("^.*[=@<](-|/dev/stdin)$")) ||
-          s.argv.exists(a, a.matches("^(-[a-zA-Z]*T|--upload-file|--post-file|--body-file)$")) &&
-          s.argv.exists(a, a in ["-", "/dev/stdin"]))) ||
-      (e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/") &&
-        !e.command.parsed_commands.exists(w, !w.name.matches("(?i)^(ba|z|da|k)?sh$") &&
-          w.argv_raw.exists(a, a.matches("/dev/(tcp|udp)/")))))) ||
+        egress_sender(s) && egress_reads_stdin(s)) ||
+      egress_dev_tcp(e))) ||
     (size(e.command.parsed_commands) == 0 &&
       e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(tar|zip|7z|7za|p7zip)\\b[^;&|]*\\|\\s*(curl|wget)\\b[^;&|]*([@<](-|/dev/stdin)(['\"\\s]|$)|\\s(-[a-zA-Z]*T|--upload-file)(\\s+|=)?['\"]?(-|/dev/stdin)(['\"\\s]|$)|--upload-file\\s+[^;&|\\s]+|\\s--post-file(\\s+|=)[^;&|\\s]+|\\s--body-file(\\s+|=)[^;&|\\s]+)"))
   )

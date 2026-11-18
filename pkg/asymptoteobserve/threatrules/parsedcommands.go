@@ -1,7 +1,6 @@
 package threatrules
 
 import (
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -13,7 +12,7 @@ import (
 const ParsedCommandsPath = "command.parsed_commands"
 
 // v1_3Fields are the fields of a parsed command that spec v1.3 added.
-var v1_3Fields = []string{"file_reads", "script_sends"}
+var v1_3Fields = []string{"args", "file_reads", "script_sends"}
 
 // ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
 // to the retained command line, so a longer value (from an in-process caller) is cut there too.
@@ -34,6 +33,7 @@ const maxShellDepth = 2
 //     or a wrapper option hides it (sudo -i, env -C).
 //   - argv and argv_raw are every word, wrappers included: argv as the shell passes it on, ""
 //     for a word whose value depends on an expansion, glob or leading tilde; argv_raw as written.
+//   - args is shellcmd's ArgsText: the words of argv after name, one per line.
 //   - env maps each NAME=value assignment before the command to its value ("" when unknown).
 //   - file_effects are shellcmd's file effects of the command: {path, op}.
 //   - file_reads are shellcmd's file reads of the command: {path, via}, each path as written.
@@ -96,6 +96,7 @@ func (p *parsedCommands) add(cmds []shellcmd.Command, nested bool, depth int) {
 func parsedCommand(c shellcmd.Command, reads []shellcmd.FileRead, pipelineBase int, nested bool) asymptoteobserve.ParsedCommand {
 	pc := asymptoteobserve.ParsedCommand{
 		Name:     c.Name(),
+		Args:     c.ArgsText(),
 		Argv:     make([]string, len(c.Argv)),
 		ArgvRaw:  make([]string, len(c.Argv)),
 		Pipeline: pipelineBase + c.Pipeline,
@@ -134,7 +135,8 @@ func parsedCommand(c shellcmd.Command, reads []shellcmd.FileRead, pipelineBase i
 // option cluster containing c, of the first shell word in c's words. Without -c and without a
 // script file, it is the here-document or here-string on c's standard input, when the shell is
 // the command c runs after its wrappers. ok is false when there is no such shell, the shell runs
-// a file or what a pipe sends it, or the script is not a known word.
+// a file or what a pipe sends it, or the script is not a known word. A PowerShell in c runs the
+// script of its -Command option (powershellScript).
 func shellScript(c shellcmd.Command) (script string, ok bool) {
 	words := c.Argv
 	start := -1
@@ -145,7 +147,7 @@ func shellScript(c shellcmd.Command) (script string, ok bool) {
 		}
 	}
 	if start < 0 {
-		return "", false
+		return powershellScript(c)
 	}
 	// command is set by -c, and stdin by -s: the operands are then the script's arguments.
 	command, stdin := false, false
@@ -200,9 +202,62 @@ scan:
 }
 
 func isShell(word string) bool {
-	switch filepath.Base(word) {
+	switch shellcmd.ProgramName(word) {
 	case "sh", "bash", "zsh", "dash", "ksh":
 		return true
 	}
 	return false
+}
+
+// powershellScript returns the script a PowerShell (powershell, pwsh) in c runs from its
+// -Command option: the words after it, joined with spaces as PowerShell joins them. PowerShell is
+// not bash, but a command and its words read the same in both (Get-StoredCredential -Target x,
+// az account get-access-token), and Unwrapped reads past an assignment's `$name =`. ok is false
+// without -Command, with -File or -EncodedCommand, or when a word is not known. An option is
+// matched as PowerShell matches it, in any case and by the prefixes it takes.
+func powershellScript(c shellcmd.Command) (script string, ok bool) {
+	words := c.Argv
+	start := slices.IndexFunc(words, func(w shellcmd.Word) bool {
+		if !w.Known {
+			return false
+		}
+		name := strings.ToLower(shellcmd.ProgramName(w.Text))
+		return name == "powershell" || name == "pwsh"
+	})
+	if start < 0 {
+		return "", false
+	}
+	for i := start + 1; i < len(words); i++ {
+		if !words[i].Known {
+			return "", false
+		}
+		option, ok := strings.CutPrefix(strings.ToLower(words[i].Text), "-")
+		if !ok {
+			return "", false // a script file
+		}
+		switch {
+		case option == "c" || len(option) >= 3 && strings.HasPrefix("command", option):
+			parts := make([]string, 0, len(words)-i-1)
+			for _, w := range words[i+1:] {
+				if !w.Known {
+					return "", false
+				}
+				parts = append(parts, w.Text)
+			}
+			script = strings.Join(parts, " ")
+			return script, script != ""
+		case option == "f" || strings.HasPrefix(option, "fi") || option == "e" || option == "ec" || strings.HasPrefix(option, "enc"):
+			return "", false // -File, -EncodedCommand
+		case slices.Contains(powershellValueOptions, option):
+			i++
+		}
+	}
+	return "", false
+}
+
+// powershellValueOptions are the PowerShell options, as they are commonly written, that take the
+// next word as their value.
+var powershellValueOptions = []string{
+	"ep", "ex", "exec", "executionpolicy", "w", "windowstyle", "wd", "workingdirectory",
+	"if", "inputformat", "of", "outputformat", "config", "configurationname", "settingsfile", "v", "version",
 }

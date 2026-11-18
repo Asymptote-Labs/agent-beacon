@@ -120,8 +120,9 @@ func TestParsedCommandsRequiresSpecV1_2(t *testing.T) {
 	}
 }
 
-func TestParsedCommandReadFieldsRequireSpecV1_3(t *testing.T) {
+func TestNewerParsedCommandFieldsRequireSpecV1_3(t *testing.T) {
 	for field, uses := range map[string]string{
+		"args":         "match: 'e.command.parsed_commands.exists(c, c.args.matches(\"^-rf$\"))'\n",
 		"file_reads":   "match: 'e.command.parsed_commands.exists(c, c.file_reads.exists(f, f.path == \".env\"))'\n",
 		"script_sends": "match: 'e.command.parsed_commands.exists(c, c.script_sends.exists(p, p == \".env\"))'\n",
 	} {

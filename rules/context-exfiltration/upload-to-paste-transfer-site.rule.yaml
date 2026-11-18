@@ -1,6 +1,6 @@
 id: upload-to-paste-transfer-site
-spec: threat-rules/v1.2  # needed for e.command.parsed_commands
-version: 3
+spec: threat-rules/v1.3  # needed for predicates
+version: 4
 title: Upload to an anonymous paste/transfer/tunnel host or a gist
 description: >
   A command POSTs or uploads file content to a well-known anonymous file-drop,
@@ -23,19 +23,15 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
-# The sender check (s) and the /dev/tcp check are the egress rules' shared definition;
-# TestPackSharedEgressSender keeps every copy identical.
+# Who sends and a /dev/tcp redirect are the egress rules' shared predicates
+# (rules/concepts/egress.predicates.yaml).
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(s,
-      (s.name.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$") ||
-        s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") &&
-        s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"))) &&
+      egress_sender(s) &&
       s.argv_raw.exists(a, a.matches("(?i)(^|[/@.:=\\x27\"])(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)([/:,?\\x27\"]|$)")) ||
       s.name == "gh" && s.argv.exists(a, a == "gist") && s.argv.exists(a, a == "create")) ||
-    (e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/") &&
-      !e.command.parsed_commands.exists(w, !w.name.matches("(?i)^(ba|z|da|k)?sh$") &&
-        w.argv_raw.exists(a, a.matches("/dev/(tcp|udp)/")))) &&
+    egress_dev_tcp(e) &&
       e.command.command.matches("(?i)/dev/(tcp|udp)/(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)/") ||
     (size(e.command.parsed_commands) == 0 && (
       e.command.command.matches("(?i)\\b(curl|wget|http|httpie)\\b") &&

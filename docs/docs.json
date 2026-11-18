@@ -396,6 +396,8 @@
                   "cli/rules-remove",
                   "cli/rules-pull",
                   "cli/rules-lint",
+                  "cli/rules-diff",
+                  "cli/rules-candidates",
                   "cli/rules-fields"
                 ]
               },

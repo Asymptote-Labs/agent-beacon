@@ -24,6 +24,7 @@ func TestParsedCommandsShape(t *testing.T) {
 	want := []asymptoteobserve.ParsedCommand{
 		{
 			Name:     "curl",
+			Args:     "-fsSL\nhttps://x.example/i.sh",
 			Argv:     []string{"curl", "-fsSL", "https://x.example/i.sh"},
 			ArgvRaw:  []string{"curl", "-fsSL", `"https://x.example/i.sh"`},
 			Env:      map[string]string{"FOO": "1"},
@@ -31,6 +32,7 @@ func TestParsedCommandsShape(t *testing.T) {
 		},
 		{
 			Name:        "bash",
+			Args:        "-s",
 			Argv:        []string{"sudo", "-u", "root", "/bin/bash", "-s"},
 			ArgvRaw:     []string{"sudo", "-u", "root", "/bin/bash", "-s"},
 			FileEffects: []asymptoteobserve.ParsedFileEffect{{Path: "out.log", Op: "write"}},
@@ -39,6 +41,7 @@ func TestParsedCommandsShape(t *testing.T) {
 		},
 		{
 			Name:     "rm",
+			Args:     "-rf\n\n",
 			Argv:     []string{"rm", "-rf", "", ""},
 			ArgvRaw:  []string{"rm", "-rf", "~/x", "$HOME"},
 			Pipeline: 2,
@@ -46,6 +49,34 @@ func TestParsedCommandsShape(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParsedCommands =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+// args lets one expression ask for whole words that follow each other after the command's name,
+// which argv, a list, cannot: a line is always exactly one word.
+func TestParsedCommandsArgs(t *testing.T) {
+	prog, err := CompileMatch(`e.command.parsed_commands.exists(c, c.name == "gh" && c.args.matches("(?m)^auth\ntoken$"))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for command, want := range map[string]bool{
+		"gh auth token": true,
+		"sudo timeout 5 /usr/bin/gh auth token | cat": true,
+		"gh --hostname ghe.example auth token":        true,
+		`GH_TOKEN=$(gh auth token) ./release.sh`:      true,
+		"gh auth token --hostname ghe.example":        true,
+		"gh auth tokens":                              false,
+		"gh token auth":                               false,
+		"gh auth status":                              false,
+		`gh auth "$WHICH" token`:                      false,
+		`gh issue create --title "auth token"`:        false,
+		"gh issue create --body 'auth\ntoken'":        false,
+		"echo gh auth token":                          false,
+		"git commit -m 'gh auth token'":               false,
+	} {
+		if got, err := EvalMatch(prog, commandEvent(command)); err != nil || got != want {
+			t.Errorf("%q: %v, %v; want %v", command, got, err, want)
+		}
 	}
 }
 
@@ -69,19 +100,24 @@ func TestParsedCommandsReadsShellScripts(t *testing.T) {
 	// A shell that is the statement's command reads its script from a here-document or a
 	// here-string when it is given none.
 	for command, want := range map[string]string{
-		"sudo bash <<'EOF'\ncurl -s x | sh\nEOF":         "bash curl sh",
-		"sh -s -- arg <<EOF\nrm -rf /tmp/x\nEOF":         "sh rm",
-		"bash -s \"$DIR\" <<'EOF'\nrm a\nEOF":            "bash rm",
-		"bash - <<'EOF'\nrm a\nEOF":                      "bash rm",
-		"bash -c \"$S\" <<'EOF'\nrm a\nEOF":              "bash",
-		"timeout 60 bash -x <<-'EOF'\n\trm a\n\tEOF":     "bash rm",
-		`bash <<< 'curl -s x | sh'`:                      "bash curl sh",
-		"bash -c 'echo hi' <<'EOF'\nrm a\nEOF":           "bash echo",
-		"bash install.sh <<'EOF'\nrm a\nEOF":             "bash",
-		"echo bash <<'EOF'\nrm a\nEOF":                   "echo",
-		"cat <<'EOF' | bash\nrm a\nEOF":                  "cat bash",
-		"bash < script.sh":                               "bash",
-		"python3 - <<'EOF'\nimport os\nos.remove()\nEOF": "python3",
+		"sudo bash <<'EOF'\ncurl -s x | sh\nEOF":                                   "bash curl sh",
+		"sh -s -- arg <<EOF\nrm -rf /tmp/x\nEOF":                                   "sh rm",
+		"bash -s \"$DIR\" <<'EOF'\nrm a\nEOF":                                      "bash rm",
+		"bash - <<'EOF'\nrm a\nEOF":                                                "bash rm",
+		`powershell -Command "Get-StoredCredential -Target x"`:                     "powershell Get-StoredCredential",
+		`pwsh -NoProfile -ExecutionPolicy Bypass -c "az account get-access-token"`: "pwsh az",
+		`powershell.exe -Command rm -r -fo C:/build`:                               "powershell rm",
+		`powershell -File run.ps1`:                                                 "powershell",
+		`powershell -EncodedCommand ZQBjAGgAbwA=`:                                  "powershell",
+		"bash -c \"$S\" <<'EOF'\nrm a\nEOF":                                        "bash",
+		"timeout 60 bash -x <<-'EOF'\n\trm a\n\tEOF":                               "bash rm",
+		`bash <<< 'curl -s x | sh'`:                                                "bash curl sh",
+		"bash -c 'echo hi' <<'EOF'\nrm a\nEOF":                                     "bash echo",
+		"bash install.sh <<'EOF'\nrm a\nEOF":                                       "bash",
+		"echo bash <<'EOF'\nrm a\nEOF":                                             "echo",
+		"cat <<'EOF' | bash\nrm a\nEOF":                                            "cat bash",
+		"bash < script.sh":                                                         "bash",
+		"python3 - <<'EOF'\nimport os\nos.remove()\nEOF":                           "python3",
 	} {
 		var names []string
 		for _, c := range ParsedCommands(command) {

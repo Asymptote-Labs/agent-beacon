@@ -6,6 +6,12 @@
 // frozen baseline below is embedded, so a growing corpus loaded into the store
 // never enlarges the binary.
 //
+// A pack's definitions (the catalogs and predicate definitions its rules call, see
+// threatrules.Library) are part of the corpus: they are installed into the store with
+// the rules, kept beside them, and embedded with the baseline. The store's rules compile
+// against the store's definitions and the baseline's against the baseline's, so a rule
+// always means what the pack it came from says.
+//
 // Unlike the cli/beacon `detect` adapter that wraps it, this package takes an
 // explicit store directory rather than resolving one from endpoint config, so it
 // can be imported from any module (beacon-hooks, an external policy provider, the
@@ -13,19 +19,21 @@
 package rulestore
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
 
-//go:embed baseline/*.rule.yaml
+//go:embed baseline/*.yaml
 var baselineFS embed.FS
 
 // RuleFileSuffix is the extension every rule corpus file must use.
@@ -45,10 +53,13 @@ type LoadedRule struct {
 	Source Source
 }
 
-// Installed reports a rule written into the store.
+// Installed reports a file written into the store: a rule, or one of a pack's definitions.
 type Installed struct {
+	// ID is the rule's id, or the name the definitions declare.
 	ID   string
 	Path string
+	// Definitions is set for a definitions file rather than a rule.
+	Definitions bool
 }
 
 // EnsureStore creates the store directory if needed and returns its path.
@@ -59,7 +70,8 @@ func EnsureStore(storeDir string) (string, error) {
 	return storeDir, nil
 }
 
-// Baseline returns the embedded frozen baseline rules, validated.
+// Baseline returns the embedded frozen baseline rules, validated against the definitions
+// embedded with them.
 func Baseline() ([]*threatrules.Rule, error) {
 	entries, err := baselineFS.ReadDir("baseline")
 	if err != nil {
@@ -73,6 +85,18 @@ func Baseline() ([]*threatrules.Rule, error) {
 	}
 	sort.Strings(names)
 
+	embedded, err := fs.Sub(baselineFS, "baseline")
+	if err != nil {
+		return nil, err
+	}
+	lib, skipped, err := threatrules.LoadLibraryFS(embedded)
+	if err != nil {
+		return nil, fmt.Errorf("baseline definitions: %w", err)
+	}
+	if len(skipped) > 0 {
+		return nil, fmt.Errorf("baseline definitions: %s", skipped[0])
+	}
+
 	rules := make([]*threatrules.Rule, 0, len(names))
 	seen := map[string]bool{}
 	for _, name := range names {
@@ -80,7 +104,7 @@ func Baseline() ([]*threatrules.Rule, error) {
 		if err != nil {
 			return nil, err
 		}
-		rule, err := threatrules.DecodeRule(data)
+		rule, err := lib.DecodeRule(data)
 		if err != nil {
 			return nil, fmt.Errorf("baseline %s: %w", name, err)
 		}
@@ -197,12 +221,20 @@ func HasRuleFiles(dir string) bool {
 	return false
 }
 
-// InstallFiles validates every *.rule.yaml found at src (a file or directory) and
-// writes the valid ones into storeDir. Each rule is validated before any file is
-// written; an invalid rule aborts the whole install. A rule whose id already exists
-// in the store is rejected unless force is set. Returns the rules installed. A rule that
-// needs a newer spec than this engine supports aborts the install like any other invalid
-// rule; InstallFilesSkipping is the variant that leaves it out instead.
+// InstallFiles validates the pack found at src (a file or directory) and writes it into
+// storeDir: every *.rule.yaml, and the definitions beside them. Everything is validated
+// before any file is written, and an invalid rule or definition aborts the whole install.
+// A rule whose id already exists in the store is rejected unless force is set, and so are
+// definitions that differ from the ones the store has under the same name. Returns what
+// was installed. A rule that needs a newer spec than this engine supports aborts the
+// install like any other invalid rule; InstallFilesSkipping is the variant that leaves it
+// out instead.
+//
+// The rules are validated against the definitions the store will hold afterwards: its
+// own, with the source's laid over them. When the source brings definitions, the rules
+// already in the store must still validate against the result, so that updating a catalog
+// cannot leave behind a rule that no longer compiles. It can change what such a rule
+// matches: that is what updating a definition is for.
 func InstallFiles(storeDir, src string, force bool) ([]Installed, error) {
 	return installFiles(storeDir, src, force, nil)
 }
@@ -220,14 +252,14 @@ func InstallFilesSkipping(storeDir, src string, force bool) ([]Installed, []thre
 	return installed, skipped, nil
 }
 
-// installFiles implements InstallFiles. When skipped is non-nil, rules needing a newer
-// spec are appended to it rather than aborting the install.
+// installFiles implements InstallFiles. When skipped is non-nil, rules and definitions
+// needing a newer spec are appended to it rather than aborting the install.
 func installFiles(storeDir, src string, force bool, skipped *[]threatrules.SkippedRule) ([]Installed, error) {
-	srcPaths, err := ruleFilesAt(src)
+	rulePaths, definitionPaths, err := packFilesAt(src)
 	if err != nil {
 		return nil, err
 	}
-	if len(srcPaths) == 0 {
+	if len(rulePaths)+len(definitionPaths) == 0 {
 		return nil, fmt.Errorf("no %s files found at %s", RuleFileSuffix, src)
 	}
 
@@ -243,18 +275,76 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 	// Validate everything first; collect the bytes + target names. Abort on any failure
 	// so a partial/invalid install never lands.
 	type pending struct {
-		id   string
-		dest string
-		data []byte
+		id          string
+		file        string // the name in the store
+		data        []byte
+		definitions bool
 	}
 	var todo []pending
-	staged := map[string]bool{}
-	for _, p := range srcPaths {
+
+	// The definitions the store will hold: its own, with the source's laid over them.
+	definitions, err := storeDefinitions(store)
+	if err != nil {
+		return nil, err
+	}
+	incoming := map[string]string{} // name in the store -> source path
+	for _, p := range definitionPaths {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			return nil, err
 		}
-		rule, err := threatrules.DecodeRule(data)
+		name, err := threatrules.DefinitionFile{Name: p, Data: data}.StoreName()
+		if err != nil {
+			return nil, err
+		}
+		if prev, dup := incoming[name]; dup {
+			return nil, fmt.Errorf("%s and %s are both the definitions %s", prev, p, name)
+		}
+		incoming[name] = p
+		if old, ok := definitions[name]; ok {
+			if bytes.Equal(old, data) {
+				continue // already installed as it is
+			}
+			if !force {
+				return nil, fmt.Errorf("definitions %q are already installed and differ (use --force to overwrite)", name)
+			}
+		}
+		definitions[name] = data
+		todo = append(todo, pending{id: definitionID(name), file: name, data: data, definitions: true})
+	}
+	files := make([]threatrules.DefinitionFile, 0, len(definitions))
+	for name, data := range definitions {
+		files = append(files, threatrules.DefinitionFile{Name: name, Data: data})
+	}
+	lib, tooNew, err := threatrules.NewLibrary(files)
+	if err != nil {
+		return nil, fmt.Errorf("definitions: %w", err)
+	}
+	for _, s := range tooNew {
+		from, isIncoming := incoming[s.Path]
+		if !isIncoming {
+			continue // already in the store, and set aside there on every load
+		}
+		if skipped == nil {
+			return nil, fmt.Errorf("%s: %w", from, s.Err)
+		}
+		*skipped = append(*skipped, threatrules.SkippedRule{Path: from, Err: s.Err})
+		todo = slices.DeleteFunc(todo, func(p pending) bool { return p.definitions && p.file == s.Path })
+	}
+	for _, res := range lib.Check() {
+		if !res.OK() {
+			return nil, fmt.Errorf("definitions: fixture %s", res.String())
+		}
+	}
+	changesDefinitions := len(todo) > 0
+
+	staged := map[string]bool{}
+	for _, p := range rulePaths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, err
+		}
+		rule, err := lib.DecodeRule(data)
 		if unsupported, ok := threatrules.AsUnsupportedSpec(err); ok && skipped != nil {
 			*skipped = append(*skipped, threatrules.SkippedRule{Path: p, Err: unsupported})
 			continue
@@ -280,7 +370,21 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 			return nil, fmt.Errorf("rule %q already installed (use --force to overwrite)", rule.ID)
 		}
 		staged[rule.ID] = true
-		todo = append(todo, pending{id: rule.ID, dest: filepath.Join(store, rule.ID+RuleFileSuffix), data: data})
+		todo = append(todo, pending{id: rule.ID, file: rule.ID + RuleFileSuffix, data: data})
+	}
+
+	// New definitions change what the rules already in the store mean. Each one this install
+	// does not replace must still be a valid rule under them.
+	if changesDefinitions {
+		for id := range existing {
+			if staged[id] {
+				continue
+			}
+			_, err := lib.LoadRule(filepath.Join(store, id+RuleFileSuffix))
+			if _, tooNew := threatrules.AsUnsupportedSpec(err); err != nil && !tooNew {
+				return nil, fmt.Errorf("these definitions would break the installed rule %q (install the rules they belong to with them, or remove the rule): %w", id, err)
+			}
+		}
 	}
 
 	tmpDir, err := os.MkdirTemp(store, ".install-*")
@@ -290,33 +394,40 @@ func installFiles(storeDir, src string, force bool, skipped *[]threatrules.Skipp
 	defer os.RemoveAll(tmpDir)
 
 	for _, p := range todo {
-		tmpPath := filepath.Join(tmpDir, p.id+RuleFileSuffix)
-		if err := os.WriteFile(tmpPath, p.data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(tmpDir, p.file), p.data, 0o644); err != nil {
 			return nil, err
 		}
 	}
 
 	installed := make([]Installed, 0, len(todo))
 	for _, p := range todo {
-		tmpPath := filepath.Join(tmpDir, p.id+RuleFileSuffix)
-		backupPath, err := moveExistingRuleAside(p.dest, tmpDir, p.id)
+		dest := filepath.Join(store, p.file)
+		backupPath, err := moveExistingAside(dest, tmpDir)
 		if err != nil {
 			rollbackInstall(installed, tmpDir)
 			return nil, err
 		}
-		if err := os.Rename(tmpPath, p.dest); err != nil {
+		if err := os.Rename(filepath.Join(tmpDir, p.file), dest); err != nil {
 			if backupPath != "" {
-				_ = os.Rename(backupPath, p.dest)
+				_ = os.Rename(backupPath, dest)
 			}
 			rollbackInstall(installed, tmpDir)
 			return nil, err
 		}
-		installed = append(installed, Installed{ID: p.id, Path: p.dest})
+		installed = append(installed, Installed{ID: p.id, Path: dest, Definitions: p.definitions})
 	}
 	return installed, nil
 }
 
-func moveExistingRuleAside(dest, tmpDir, id string) (string, error) {
+// definitionID is the name a definitions file declares, from its name in the store.
+func definitionID(storeName string) string {
+	for _, suffix := range []string{threatrules.CatalogFileSuffix, threatrules.PredicatesFileSuffix} {
+		storeName = strings.TrimSuffix(storeName, suffix)
+	}
+	return storeName
+}
+
+func moveExistingAside(dest, tmpDir string) (string, error) {
 	info, err := os.Lstat(dest)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -327,7 +438,7 @@ func moveExistingRuleAside(dest, tmpDir, id string) (string, error) {
 	if info.IsDir() {
 		return "", fmt.Errorf("%s exists and is a directory", dest)
 	}
-	backupPath := filepath.Join(tmpDir, id+".backup")
+	backupPath := filepath.Join(tmpDir, filepath.Base(dest)+".backup")
 	if err := os.Rename(dest, backupPath); err != nil {
 		return "", err
 	}
@@ -336,7 +447,7 @@ func moveExistingRuleAside(dest, tmpDir, id string) (string, error) {
 
 func rollbackInstall(installed []Installed, tmpDir string) {
 	for i := len(installed) - 1; i >= 0; i-- {
-		backupPath := filepath.Join(tmpDir, installed[i].ID+".backup")
+		backupPath := filepath.Join(tmpDir, filepath.Base(installed[i].Path)+".backup")
 		_ = os.Remove(installed[i].Path)
 		if _, err := os.Stat(backupPath); err == nil {
 			_ = os.Rename(backupPath, installed[i].Path)
@@ -361,33 +472,64 @@ func Remove(storeDir, id string) (string, error) {
 	return target, nil
 }
 
-// ruleFilesAt returns the *.rule.yaml files at src, which may be a single file or a dir.
-func ruleFilesAt(src string) ([]string, error) {
+// packFilesAt returns the *.rule.yaml files and the definitions files at src, which may
+// be a single file of either kind or a directory.
+func packFilesAt(src string) (rules, definitions []string, err error) {
 	info, err := os.Stat(src)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !info.IsDir() {
-		if !isRuleFile(src) {
-			return nil, fmt.Errorf("%s is not a %s file", src, RuleFileSuffix)
+		switch {
+		case isRuleFile(src):
+			return []string{src}, nil, nil
+		case threatrules.IsDefinitionFile(src):
+			return nil, []string{src}, nil
 		}
-		return []string{src}, nil
+		return nil, nil, fmt.Errorf("%s is not a %s file", src, RuleFileSuffix)
 	}
-	var paths []string
 	err = filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() && isRuleFile(path) {
-			paths = append(paths, path)
+		switch {
+		case d.IsDir():
+		case isRuleFile(path):
+			rules = append(rules, path)
+		case threatrules.IsDefinitionFile(path):
+			definitions = append(definitions, path)
 		}
 		return nil
 	})
 	if err != nil {
+		return nil, nil, err
+	}
+	sort.Strings(rules)
+	sort.Strings(definitions)
+	return rules, definitions, nil
+}
+
+// storeDefinitions reads the definitions files of a store, by name. A store is flat.
+func storeDefinitions(store string) (map[string][]byte, error) {
+	definitions := map[string][]byte{}
+	entries, err := os.ReadDir(store)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return definitions, nil
+		}
 		return nil, err
 	}
-	sort.Strings(paths)
-	return paths, nil
+	for _, e := range entries {
+		if e.IsDir() || !threatrules.IsDefinitionFile(e.Name()) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(store, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		definitions[e.Name()] = data
+	}
+	return definitions, nil
 }
 
 func isRuleFile(path string) bool {

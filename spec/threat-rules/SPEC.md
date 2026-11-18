@@ -79,7 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `file_reads` and `script_sends`. See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads` and `script_sends`. See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -184,13 +184,21 @@ the steps in both orders still fires once. A single event never satisfies two st
   `exec`, `nohup`, `time`, `sudo` and `env` with their options and `NAME=value` words, and,
   since v1.3, `timeout`, `nice`, `ionice`, `stdbuf`, `doas`, `torsocks`, `proxychains` and
   `proxychains4` with their options and `timeout`'s duration; each is recognized by its base
-  name so `/usr/bin/env` is `env`; `""` when that word is unknown or a wrapper option moves
+  name so `/usr/bin/env` is `env`; since v1.3 a Windows executable's `.exe`, `.cmd` or `.bat`
+  is dropped from the name, so `ssh-add.exe` is `ssh-add`, and the first word after a PowerShell
+  assignment's `$name =` is taken when it is a bare name (`$t = az account get-access-token`
+  is `az`); `""` when that word is unknown or a wrapper option moves
   or replaces the command or makes the wrapper act on something else, as `sudo -i`, `env -C`,
   `doas -s` and `ionice -p` do),
   `argv` (every word after brace expansion, wrappers included,
   as the shell passes it on, or `""` when its value depends on a parameter, command or
   arithmetic substitution, an ANSI-C or locale string, an unquoted glob character, or a
-  leading tilde), `argv_raw` (the same words as written), `env` (the `NAME=value`
+  leading tilde), `argv_raw` (the same words as written), `args` (since v1.3, with the
+  declaration rule of `file_reads`: the words of `argv` after the one `name` is taken from,
+  as one string with a newline between words, `""` when there are none; a newline inside a
+  word is written as a space, so a line is always one whole word and
+  `c.args.matches("(?m)^auth\ntoken$")` is true exactly when the words `auth` and `token`
+  follow each other), `env` (the `NAME=value`
   assignments before the command, `""` for an unknown value), `file_effects` (the files the
   command evidently writes, `{path, op}`, of the command `name` names), `file_reads` and
   `script_sends` (the files it evidently takes as input and the ones its inline script
@@ -204,9 +212,12 @@ the steps in both orders still fires once. A single event never satisfies two st
   `nested` true and pipeline numbers of their own. Since v1.3 the same holds for the
   here-document or here-string on the standard input of a command whose `name` is one of
   those shells, when the shell is given neither `-c` nor a script file (`sudo bash <<'EOF'`,
-  `sh -s -- arg <<EOF`, `bash <<< 'cmd'`). Other here-document bodies, what a pipe sends a
-  shell, and the strings of other commands are not read as commands. A command line that
-  ends early (an unclosed
+  `sh -s -- arg <<EOF`, `bash <<< 'cmd'`), and for the words after the `-Command` (`-c`)
+  option of `powershell` or `pwsh`, joined with spaces as PowerShell joins them, which read as
+  commands where PowerShell and bash agree on a command and its words
+  (`powershell -Command "Get-StoredCredential -Target x"`). Other here-document bodies, what a
+  pipe sends a shell, and the strings of other commands are not read as commands. A command
+  line that ends early (an unclosed
   quote, here-document, substitution or compound command) yields the commands before the
   point where it became incomplete; one that does not parse yields the empty list, so a
   rule that must not miss such captures keeps a `command.command` fallback for it. The
@@ -310,6 +321,145 @@ the steps in both orders still fires once. A single event never satisfies two st
   not type to `bool`. Because field paths are checked against the event schema, a typo
   like `e.fil.path` is a load-time error.
 
+## Predicates
+
+Since v1.3. A predicate is a named expression a rule calls like a function:
+
+```yaml
+spec: threat-rules/v1.3
+match: credential_file_read(e)
+```
+
+A predicate is not a CEL function. An engine expands it where it is called, before the
+expression is type-checked, so a rule that calls one is the rule with the predicate's body
+written out: it has the same verdicts, the same errors, and the same evaluation cost. A rule
+whose expression calls a predicate MUST declare `spec: threat-rules/v1.3` or later.
+
+Predicates are defined by the **definitions** of the rule pack the rule belongs to: the files
+beside its rules whose names end in `.predicates.yaml` or `.catalog.yaml`, anywhere under the
+pack's directory. An engine MUST load a pack's definitions before its rules and compile each
+rule against them. A rule loaded on its own has none, and a call to a predicate it does not
+have is a load-time error. Two packs are two sets of definitions: the rules of one never
+compile against the definitions of the other. The reference engine keeps the definitions of
+installed rules in the rule store beside them, under the name each file declares, and embeds
+the baseline's with the baseline.
+
+### Predicate definitions (`*.predicates.yaml`)
+
+```yaml
+library: credentials
+version: 1
+spec: threat-rules/v1.3
+definitions:
+  - name: command_reads_credential_file
+    params: [c]
+    description: A parsed command takes in a credential file.
+    body: c.file_reads.exists(f, credential_path(f.path, "likely", "cloud", "ssh", "dotenv"))
+    tests:
+      - name: cat_credentials
+        match: e.command.parsed_commands.exists(c, command_reads_credential_file(c))
+        verdict: match
+        events:
+          - { event: { action: command.executed }, command: { command: "cat ~/.aws/credentials" } }
+```
+
+| Field | Required | Type / values | Meaning |
+|---|---|---|---|
+| `library` | yes | string `^[a-z0-9][a-z0-9-]*$` | The file's identity. Two files of a pack MUST NOT declare the same one. |
+| `version` | yes | int ≥ 1 | Content revision. |
+| `spec` | no | as a rule's | Minimum spec version the file needs. An engine MUST read it before it rejects any unknown field, and sets aside a file that needs a newer version than it implements, as it does a rule. |
+| `description` | no | string | Documentation only. |
+| `definitions` | yes | list ≥ 1 | The predicates. |
+| `definitions[].name` | yes | string `^[a-z][a-z0-9_]*$` | How the predicate is called. Unique across the pack's definitions, and not a name CEL has (a function, a macro, a reserved word, or `e`). |
+| `definitions[].params` | yes | list ≥ 1 of distinct identifiers | The names the body is written over. Every one MUST be used by the body. |
+| `definitions[].description` | yes | non-empty string | What the predicate is true for. |
+| `definitions[].body` | yes | CEL string | The expression. It MUST read nothing but its parameters: a predicate that needs the event takes it as a parameter. It MAY call other predicates of the pack, but a predicate MUST NOT call itself, directly or through another. |
+| `definitions[].tests` | yes | list ≥ 1 | Fixtures, each `{name, match, verdict, events}`. `match` is an expression that calls the predicate, and the fixture passes when `match` gives `verdict` over `events` as a single-event rule's `match` would. `match` MAY be omitted when `params` is `[e]`, and is then the predicate called with `e`. |
+
+Expansion is by substitution: the call `p(a, b)` is the body with each parameter replaced
+by its argument, wherever the parameter appears, so an argument is evaluated as often as the
+body uses it. Expansion is hygienic: a variable the body binds itself (the `f` of
+`x.exists(f, ..)`) never captures an argument, so `p(f)` called inside a rule's own
+`exists(f, ..)` still means the rule's `f`. A call with the wrong number of arguments is a
+load-time error. A predicate is called only as `name(..)`, never as a method.
+
+### Catalogs (`*.catalog.yaml`)
+
+A catalog is a reviewed list of named things that a predicate tests membership of. The
+corpus has one, `credential-stores`: where credentials are kept and how they are got out.
+
+| Field | Required | Type / values | Meaning |
+|---|---|---|---|
+| `catalog` | yes | string `^[a-z0-9][a-z0-9-]*$` | The file's identity. Two files of a pack MUST NOT declare the same one. |
+| `version`, `spec`, `description` | | | As for predicate definitions. |
+| `predicates.path` | no | predicate name | The predicate true for a path that is one of the catalog's stores of files. |
+| `predicates.command` | no | predicate name | The predicate true for a parsed command that reads one of the catalog's stores of commands. |
+| `predicates.mention` | no | predicate name | The predicate true for a text that names one of the catalog's stores of files. |
+| `predicates.redacted` | no | predicate name | The predicate true for a command line in which redaction replaced the name of a command that reads one of the catalog's stores of commands. |
+| `kinds` | yes | list of `{id, title}` | The groups a store may belong to. |
+| `stores` | yes | list ≥ 1 | The stores. |
+| `stores[].id`, `title` | yes | string | Identity within the catalog, and a name. |
+| `stores[].kind` | yes | one of `kinds[].id` | The store's group. |
+| `stores[].tier` | yes | `definite` \| `likely` | `definite`: exists to hold what the catalog is of, or hands it over. `likely`: often does and often does not. |
+| `stores[].match`, `exclude` | one of `match` or `commands` | lists of path patterns | The paths that are the store, and the ones among them that are not. |
+| `stores[].commands` | one of `match` or `commands` | list of `{name, words, flags}` | The commands that read the store. |
+| `stores[].examples` | yes | list of strings | Paths for a store of files, command lines for a store of commands. Each MUST be this store, and there MUST be one for each pattern of `match` and each entry of `commands`. |
+| `stores[].counterexamples` | no | list of strings | Paths or command lines that MUST NOT be any store of the catalog, with one for each pattern of `exclude`. |
+
+A catalog's predicate takes what it is asked about, then optionally a tier and then kinds,
+each a string literal: `credential_path(e.file.path)` is true for a store of either tier,
+`credential_path(f.path, "definite")` for a `definite` store, and
+`credential_command(c, "likely", "keychain", "ssh")` for a store of either tier whose kind is
+one of those. A selection of `likely` stores includes the `definite` ones. The predicate
+over commands is asked of one entry of `e.command.parsed_commands` and reads its `name` and
+`args`.
+
+The other two predicates are asked of a text, for where there is no path and no parsed
+command to ask. `mention` is for a command line that does not parse, or a prompt handed to
+another program: it is true when the text names a file a path pattern matches. A name is
+written with letters, digits and `_ . ~ % + -`, so it starts after a character that is none of
+those and ends before one that is none of those and no separator, with a full stop that ends
+a sentence allowed between; a `*` runs over those characters only, and a directory of a `**`
+over anything but whitespace and quotes. A pattern of one component without a `.` (a plain
+word such as `credentials`) counts only directly after a separator. A store with `exclude`
+patterns is not mentioned by a text that also names something those patterns match.
+`redacted` is for a command line as a log holds it. A log's redaction replaces a value that
+looks like a secret, and the value of `TOKEN=$(gh auth token)` begins with the command's
+name, so the log holds `TOKEN=[REDACTED] auth token)`. The predicate is true when the text
+holds `[REDACTED]`, whitespace, and then, within the same command, an entry's `words` in
+order and one of its `flags`. An entry has this form only when what is left tells the
+command from another: two `words` or more, one word with `flags`, one word that is more than
+letters and digits, or no words and a flag that is a whole option word (which then follows
+`[REDACTED]` after other options only). Both are coarser than the predicates over a path and
+a parsed command, and a rule SHOULD use them only beside those.
+
+A **path pattern** names a file by the last components of its path, so it is anchored by
+construction: `.aws/credentials` matches `/home/u/.aws/credentials` and matches neither
+`/home/u/.aws/credentials.bak` nor `/home/u/my.aws/credentials`. Components are separated
+by `/` in a pattern and by `/` or `\` in a path, and letters match without regard to case
+(RE2's `(?i)`). Within a component, `*` is any run of characters that are not a separator,
+also none, and `{a,b,}` is one of its alternatives, which may be empty and may contain `*`.
+A component that is `**` is any number of whole non-empty components, also none, and a
+pattern that ends in `/**` matches every path under the directory the rest names. There is
+no other syntax. A path is a store when it matches one of the store's `match` patterns and
+none of its `exclude` patterns.
+
+A **command** is a store when it matches one of the store's `commands`: `name` is a pattern
+component for the entry's `name`; `words`, each a pattern component, are words that follow
+each other in that order somewhere in `args`; and `flags` are options of which one MUST be
+among the words of `args`. A flag of one letter or digit is a short option, alone or in a
+cluster of letters and digits (`w` matches `-w` and `-aw`), and matches in its own case; any
+other flag is a pattern component for a whole word, which may be followed by `=` and a
+value. `name`, `words` and the longer flags match without regard to case.
+
+The reference implementation is `pkg/asymptoteobserve/concepts`, which also renders a
+catalog's selections as the regular expressions a predicate expands to; `rules/concepts/`
+holds the corpus's definitions and the generated reference of its catalog. A rule of a pack
+that ships a catalog SHOULD call it rather than carry a regular expression that spells out
+its stores, which stops agreeing with the catalog the next time either changes; the
+reference lint (`beacon rules lint`) fails a rule whose own patterns, matched against a
+path, a command line or a parsed command's `args`, name two or more of a catalog's stores.
+
 ## Verdict model
 
 An engine evaluates the sequence it is given; putting a real event stream into the order the
@@ -348,10 +498,12 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
-- **v1.3**: `file_reads` and `script_sends` on each entry of `e.command.parsed_commands`.
+- **v1.3**: `args`, `file_reads` and `script_sends` on each entry of `e.command.parsed_commands`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
-  `doas`, `torsocks` and `proxychains`, and a shell's here-document or here-string script is
-  read as commands the way its `-c` script is.
+  `doas`, `torsocks` and `proxychains`, without a Windows executable's suffix and after a
+  PowerShell assignment, and a shell's here-document or here-string script, and a PowerShell's
+  `-Command` script, are read as commands the way a `-c` script is. [Predicates](#predicates):
+  named expressions a rule calls, defined by the pack's definitions files.
 - **v1.2**: the derived field `e.command.parsed_commands`.
 - **v1.1**: `correlation.order` (`sequence` default, or `any` for order-insensitive steps),
   and the per-rule `spec` field with the engine rules above.
@@ -372,9 +524,15 @@ A pack MUST NOT contain duplicate `id`s.
 
 An engine conforms if, for every rule in a pack:
 
-1. It loads and validates the rule (structural + CEL compile/type-check).
+1. It loads the pack's definitions, then loads and validates the rule against them
+   (structural + CEL compile/type-check).
 2. It enforces the maturity gate for the rule's `status`.
 3. For every fixture, evaluating `events` yields the declared `verdict`.
+
+and, for the pack's definitions, every fixture of every predicate definition yields its
+declared `verdict`, and every catalog's examples and counterexamples hold. An engine is not
+required to run the definitions' fixtures each time it loads a pack, as it is not required to
+run a rule's.
 
 The reference implementation lives in
 `pkg/asymptoteobserve/threatrules` and is exercised by its conformance test.

@@ -140,8 +140,9 @@ var derivedFieldDocs = map[string]string{
 	ParsedCommandsPath: "`command.command` read as a bash command line (spec v1.2): one\n" +
 		"  entry per command it runs, each with `name` (base name after sudo/env/exec/timeout/...\n" +
 		"  wrappers, \"\" when unknown), `argv` and `argv_raw` (every word, wrappers included: as\n" +
-		"  passed, \"\" when it depends on an expansion, glob or `~`; and as written), `env`\n" +
-		"  (NAME=value prefixes),\n" +
+		"  passed, \"\" when it depends on an expansion, glob or `~`; and as written), `args` (spec\n" +
+		"  v1.3: the words after the name, one per line, so `c.args.matches(\"(?m)^auth\\ntoken$\")`\n" +
+		"  asks for two whole words that follow each other), `env` (NAME=value prefixes),\n" +
 		"  `file_effects` (`{path, op}`), `file_reads` (spec v1.3, `{path, via}`: the files whose\n" +
 		"  content it takes in, each as written without its quotes, so `~/.aws/credentials` and\n" +
 		"  `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one\n" +

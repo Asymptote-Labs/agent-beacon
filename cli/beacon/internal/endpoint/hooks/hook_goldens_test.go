@@ -34,8 +34,6 @@ func requireGolden(t *testing.T, got []byte, name string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A Windows checkout turns the golden file's line endings into CRLF; Beacon writes LF.
-	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(got, want) {
 		t.Fatalf("%s changed:\ngot:\n%s\nwant:\n%s", name, got, want)
 	}
