@@ -1,6 +1,6 @@
 id: high-risk-approval-allowed-without-reason
 spec: threat-rules/v1.3  # needed for predicates
-version: 3
+version: 4
 title: High-risk action approved with an empty approval reason
 description: >
   An approval was granted (event.action approval.allowed) for a high-risk operation —
@@ -12,7 +12,8 @@ description: >
   and intentionally requires approval.required == true so it ignores informational
   no-gate allows. It scopes the dangerous-target test tightly to avoid flagging routine
   approved edits. A credential file is any store of files in the pack's credential
-  catalog (rules/concepts/credential-stores.catalog.yaml).
+  catalog (rules/concepts/credential-stores.catalog.yaml); anything else under ~/.aws counts too,
+  since the config there can name a command that hands over credentials (credential_process).
 severity: high
 status: stable
 posture: detect
@@ -27,13 +28,34 @@ match: >
   (
     e.command.command.matches("(?i)(\\brm\\s+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*\\b|\\bmkfs\\b|\\bdd\\s+if=|\\bsudo\\b|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b)") ||
     credential_path(e.file.path) ||
-    e.file.path.matches("(?i)(\\.github/workflows/|\\.gitlab-ci\\.yml$|/auth\\.|/security\\.)")
+    e.file.path.matches("(?i)(\\.github/workflows/|\\.gitlab-ci\\.yml$|/auth\\.|/security\\.|(^|[/\\\\])\\.aws[/\\\\])")
   )
 
 emit:
   reason: "High-risk action approved with no recorded approval reason"
 
 tests:
+  - name: aws_config_edit_allowed_empty_reason
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        file: { path: "/home/u/.aws/config" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: aws_sso_cache_edit_allowed_empty_reason
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        file: { path: "C:\\Users\\u\\.aws\\sso\\cache\\0a1b2c.json" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: aws_named_project_dir_is_not_aws
+    verdict: no_match
+    events:
+      - event: { action: approval.allowed }
+        file: { path: "/repo/my.aws/notes.md" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
   - name: dangerous_command_allowed_empty_reason
     verdict: match
     events:
