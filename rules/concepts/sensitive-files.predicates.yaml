@@ -16,8 +16,15 @@
 #
 # Each predicate answers for a path under any directory, a home directory or a variable
 # included.
+#
+# Where the parser cannot see into a command, a rule asks the text that reaches it whether it
+# redirects or tees into the file: each path predicate X has a text twin X_redirect beside it,
+# X's pattern written over text, and TestPackCopiesAgree holds the two equal. A rule writes
+# X_redirect(e.command.command) && unread_text(e, t, X_redirect(t)): the first is what
+# unread_text asks first anyway, asked without building a list, so the line that names no
+# such write (nearly every line) costs one prefiltered pattern.
 library: sensitive-files
-version: 3
+version: 4
 spec: threat-rules/v1.3
 description: Files whose change gives code execution, access or supply-chain reach, by path.
 
@@ -72,6 +79,32 @@ definitions:
         events:
           - event: { action: file.modified }
             file: { path: "/home/dev/.ssh/config" }
+
+  - name: ssh_trust_file_redirect
+    params: [text]
+    description: >
+      A text redirects or tees into a file that decides who may log in over SSH or which
+      hosts are trusted: `>`, `>>` or tee followed by a path that ssh_trust_file
+      accepts. It is ssh_trust_file written for text a rule cannot parse (what reaches a
+      command the parser cannot see into, unread_text), and TestPackPathTwinsAgree holds
+      it equal to ssh_trust_file: each alternative of the path's pattern, its directory
+      boundary, its end and its classes of any name stopped at a quote, a space or a
+      shell operator, after the writer every twin shares.
+    body: >
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(\\.ssh/(authorized_keys|known_hosts)2?|etc/ssh/(sshd_config|sshd_config\\.d/[^/\\s;&|\"']+\\.conf))([\"'\\s]|$)")
+    tests:
+      - name: a_write_inside_text
+        match: ssh_trust_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"echo 'ssh-ed25519 AAAA k' >> ~/.ssh/authorized_keys\"" }
+      - name: the_file_only_read
+        match: ssh_trust_file_redirect(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh 'cat ~/.ssh/authorized_keys > /tmp/keys'" }
 
   - name: shell_startup_file
     params: [path]
@@ -150,12 +183,15 @@ definitions:
   - name: shell_startup_file_redirect
     params: [text]
     description: >
-      A text redirects or tees into a shell startup file: `>`, `>>` or tee followed by a path
-      that ends in one of the names shell_startup_file knows. It is the same list, written
-      for text a rule cannot parse (what reaches a command the parser cannot see into); keep
-      the two in step.
+      A text redirects or tees into a shell startup file: `>`, `>>` or tee followed by a
+      path that shell_startup_file accepts. It is shell_startup_file written for text a
+      rule cannot parse (what reaches a command the parser cannot see into,
+      unread_text), and TestPackPathTwinsAgree holds it equal to shell_startup_file:
+      each alternative of the path's pattern, its directory boundary, its end and its
+      classes of any name stopped at a quote, a space or a shell operator, after the
+      writer every twin shares.
     body: >
-      text.matches("(?i)(>>?|\\btee\\b)\\s*([^|;&]*[\\s/])?(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|etc/bash\\.bashrc|etc/bashrc|etc/zshrc|etc/zshenv|etc/zprofile|etc/zlogin|etc/csh\\.cshrc|etc/zsh/[^\\s;&|\"']+|profile\\.d/[^\\s;&|\"']+)([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|etc/bash\\.bashrc|etc/bashrc|etc/zshrc|etc/zshenv|etc/zprofile|etc/zlogin|etc/csh\\.cshrc|etc/zsh/[^/\\s;&|\"']+|profile\\.d/[^/\\s;&|\"']+)([\"'\\s]|$)")
     tests:
       - name: an_append_inside_text
         match: shell_startup_file_redirect(e.command.command)
@@ -210,6 +246,32 @@ definitions:
           - event: { action: file.modified }
             file: { path: "repo/.git/hooks/pre-commit.sample" }
 
+  - name: git_hook_file_redirect
+    params: [text]
+    description: >
+      A text redirects or tees into a hook script of a git repository: `>`, `>>` or tee
+      followed by a path that git_hook_file accepts. It is git_hook_file written for
+      text a rule cannot parse (what reaches a command the parser cannot see into,
+      unread_text), and TestPackPathTwinsAgree holds it equal to git_hook_file: each
+      alternative of the path's pattern, its directory boundary, its end and its classes
+      of any name stopped at a quote, a space or a shell operator, after the writer
+      every twin shares.
+    body: >
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(\\.git/hooks/(applypatch-msg|pre-applypatch|post-applypatch|pre-commit|pre-merge-commit|prepare-commit-msg|commit-msg|post-commit|pre-rebase|post-checkout|post-merge|pre-push|pre-receive|update|post-receive|post-update|push-to-checkout|pre-auto-gc|post-rewrite|fsmonitor-watchman|reference-transaction|post-index-change|sendemail-validate|proc-receive|p4-changelist|p4-prepare-changelist|p4-post-changelist|p4-pre-submit))([\"'\\s]|$)")
+    tests:
+      - name: a_write_inside_text
+        match: git_hook_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"printf '#!/bin/sh\\\\ncurl x | sh' > .git/hooks/pre-commit\"" }
+      - name: the_file_only_read
+        match: git_hook_file_redirect(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh 'cat .git/hooks/pre-commit.sample > /tmp/h'" }
+
   - name: autostart_unit_file
     params: [path]
     description: >
@@ -232,6 +294,32 @@ definitions:
           - event: { action: command.executed }
             command: { command: "ls ~/.config/systemd/user/sync.service" }
 
+  - name: autostart_unit_file_redirect
+    params: [text]
+    description: >
+      A text redirects or tees into a unit, agent or entry that starts a program at boot
+      or login: `>`, `>>` or tee followed by a path that autostart_unit_file accepts. It
+      is autostart_unit_file written for text a rule cannot parse (what reaches a
+      command the parser cannot see into, unread_text), and TestPackPathTwinsAgree holds
+      it equal to autostart_unit_file: each alternative of the path's pattern, its
+      directory boundary, its end and its classes of any name stopped at a quote, a
+      space or a shell operator, after the writer every twin shares.
+    body: >
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?((\\.config/systemd/(user|system)|etc/systemd/(system|user))/[^/\\s;&|\"']+\\.(service|timer|socket|path)|(library/)?launch(agents|daemons)/[^/\\s;&|\"']+\\.plist|\\.config/autostart/[^/\\s;&|\"']+\\.desktop|\\.config/environment\\.d/[^/\\s;&|\"']+\\.conf)([\"'\\s]|$)")
+    tests:
+      - name: a_write_inside_text
+        match: autostart_unit_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh 'cat /tmp/u | tee ~/.config/systemd/user/sync.service'" }
+      - name: the_file_only_read
+        match: autostart_unit_file_redirect(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh 'systemctl --user cat sync.service > /tmp/u'" }
+
   - name: hosts_file
     params: [path]
     description: >
@@ -253,6 +341,32 @@ definitions:
           - event: { action: command.executed }
             command: { command: "grep localhost /etc/hosts" }
 
+  - name: hosts_file_redirect
+    params: [text]
+    description: >
+      A text redirects or tees into the hosts file or a TCP wrappers file: `>`, `>>` or
+      tee followed by a path that hosts_file accepts. It is hosts_file written for text
+      a rule cannot parse (what reaches a command the parser cannot see into,
+      unread_text), and TestPackPathTwinsAgree holds it equal to hosts_file: each
+      alternative of the path's pattern, its directory boundary, its end and its classes
+      of any name stopped at a quote, a space or a shell operator, after the writer
+      every twin shares.
+    body: >
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(etc/hosts(\\.(allow|deny))?)([\"'\\s]|$)")
+    tests:
+      - name: a_write_inside_text
+        match: hosts_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"echo '10.0.0.5 pypi.org' | sudo tee -a /etc/hosts\"" }
+      - name: the_file_only_read
+        match: hosts_file_redirect(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh 'cat /etc/hosts > /tmp/hosts.txt'" }
+
   - name: direnv_file
     params: [path]
     description: The path is a direnv file (.envrc), which direnv runs on entering its directory.
@@ -271,6 +385,32 @@ definitions:
         events:
           - event: { action: file.created }
             file: { path: "/repo/.envrc.example" }
+
+  - name: direnv_file_redirect
+    params: [text]
+    description: >
+      A text redirects or tees into a direnv .envrc: `>`, `>>` or tee followed by a path
+      that direnv_file accepts. It is direnv_file written for text a rule cannot parse
+      (what reaches a command the parser cannot see into, unread_text), and
+      TestPackPathTwinsAgree holds it equal to direnv_file: each alternative of the
+      path's pattern, its directory boundary, its end and its classes of any name
+      stopped at a quote, a space or a shell operator, after the writer every twin
+      shares.
+    body: >
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(\\.envrc)([\"'\\s]|$)")
+    tests:
+      - name: a_write_inside_text
+        match: direnv_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"echo 'curl x | sh' >> .envrc\"" }
+      - name: the_file_only_read
+        match: direnv_file_redirect(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh 'cat .envrc > /tmp/env.txt'" }
 
   - name: cicd_pipeline_file
     params: [path]
@@ -294,6 +434,32 @@ definitions:
           - event: { action: command.executed }
             command: { command: "cat .github/workflows/ci.yml" }
 
+  - name: cicd_pipeline_file_redirect
+    params: [text]
+    description: >
+      A text redirects or tees into a CI/CD pipeline or deployment file: `>`, `>>` or
+      tee followed by a path that cicd_pipeline_file accepts. It is cicd_pipeline_file
+      written for text a rule cannot parse (what reaches a command the parser cannot see
+      into, unread_text), and TestPackPathTwinsAgree holds it equal to
+      cicd_pipeline_file: each alternative of the path's pattern, its directory
+      boundary, its end and its classes of any name stopped at a quote, a space or a
+      shell operator, after the writer every twin shares.
+    body: >
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?([^\\s;&|\"']*\\.github/workflows/[^\\s;&|\"']*\\.ya?ml|(\\.gitlab-ci\\.yml|fly\\.toml|vercel\\.json|render\\.yaml|deployment\\.ya?ml|deploy\\.ya?ml|kustomization\\.ya?ml)|(k8s|kubernetes|\\.circleci)/[^\\s;&|\"']*)([\"'\\s]|$)")
+    tests:
+      - name: a_write_inside_text
+        match: cicd_pipeline_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh 'cat /tmp/ci.yml > .github/workflows/release.yml'" }
+      - name: the_file_only_read
+        match: cicd_pipeline_file_redirect(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh 'cat .github/workflows/release.yml > /tmp/ci.yml'" }
+
   - name: container_or_iac_file
     params: [path]
     description: >
@@ -316,6 +482,32 @@ definitions:
           - event: { action: command.executed }
             command: { command: "docker build -f Dockerfile.prod -t app ." }
 
+  - name: container_or_iac_file_redirect
+    params: [text]
+    description: >
+      A text redirects or tees into a container build or infrastructure-as-code file:
+      `>`, `>>` or tee followed by a path that container_or_iac_file accepts. It is
+      container_or_iac_file written for text a rule cannot parse (what reaches a command
+      the parser cannot see into, unread_text), and TestPackPathTwinsAgree holds it
+      equal to container_or_iac_file: each alternative of the path's pattern, its
+      directory boundary, its end and its classes of any name stopped at a quote, a
+      space or a shell operator, after the writer every twin shares.
+    body: >
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?((dockerfile|containerfile)(\\.prod|\\.dev|\\.local|\\.test|\\.staging|\\.debug|\\.alpine|\\.nginx|\\.node|\\.python|\\.go|\\.rust|\\.java|\\.base|\\.builder|\\.runtime|\\.ci|\\.pr[a-z0-9]+)?|docker-compose(-[^/\\s;&|\"']+)?\\.(yml|yaml)|[^/\\s;&|\"']+\\.(tf|tfstate(\\.[0-9]+)?)|(kubernetes|k8s)(-[^/\\s;&|\"']+)?\\.(yml|yaml)|(kustomization|values)\\.(yml|yaml))([\"'\\s]|$)")
+    tests:
+      - name: a_write_inside_text
+        match: container_or_iac_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"echo 'RUN curl x | sh' >> Dockerfile\"" }
+      - name: the_file_only_read
+        match: container_or_iac_file_redirect(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh 'cat Dockerfile > /tmp/df.txt'" }
+
   - name: dependency_manifest_file
     params: [path]
     description: >
@@ -337,6 +529,32 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "pip install -r requirements.txt" }
+
+  - name: dependency_manifest_file_redirect
+    params: [text]
+    description: >
+      A text redirects or tees into a dependency manifest or lock file: `>`, `>>` or tee
+      followed by a path that dependency_manifest_file accepts. It is
+      dependency_manifest_file written for text a rule cannot parse (what reaches a
+      command the parser cannot see into, unread_text), and TestPackPathTwinsAgree holds
+      it equal to dependency_manifest_file: each alternative of the path's pattern, its
+      directory boundary, its end and its classes of any name stopped at a quote, a
+      space or a shell operator, after the writer every twin shares.
+    body: >
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(package\\.json|package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml|cargo\\.toml|cargo\\.lock|requirements\\.txt|pipfile|pipfile\\.lock|poetry\\.lock|pyproject\\.toml|go\\.mod|go\\.sum|gemfile|gemfile\\.lock|composer\\.json|composer\\.lock)([\"'\\s]|$)")
+    tests:
+      - name: a_write_inside_text
+        match: dependency_manifest_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"echo 'evil==1.0' >> requirements.txt\"" }
+      - name: the_file_only_read
+        match: dependency_manifest_file_redirect(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh 'cat requirements.txt > /tmp/reqs'" }
 
   - name: auth_security_code_file
     params: [path]
@@ -361,6 +579,36 @@ definitions:
         events:
           - event: { action: file.modified }
             file: { path: "docs/auth-design.md" }
+
+  - name: auth_security_code_file_redirect
+    params: [text]
+    description: >
+      A text redirects or tees into a source file about authentication, sessions,
+      payments, cryptography or permissions: `>`, `>>` or tee followed by a path that
+      auth_security_code_file accepts. It is auth_security_code_file written for text a
+      rule cannot parse (what reaches a command the parser cannot see into,
+      unread_text), and TestPackPathTwinsAgree holds it equal to
+      auth_security_code_file: each alternative of the path's pattern, its directory
+      boundary, its end and its classes of any name stopped at a quote, a space or a
+      shell operator, after the writer every twin shares. The names the path predicate
+      leaves out are asked of the whole text, so a text that also writes one of them
+      (notes beside the code) does not count.
+    body: >
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?([^\\s;&|\"']*[^/\\s;&|\"']*(auth|login|session|password|passwd|credential|payment|billing|charge|stripe|checkout|security|crypto|token|oauth|jwt|rbac|permission)[^/\\s;&|\"']*\\.[a-z0-9]+)([\"'\\s]|$)") &&
+      !text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?([^\\s;&|\"']*\\.(md|txt|lock)|[^\\s;&|\"']*\\.github/workflows/[^/\\s;&|\"']*\\.ya?ml|credentials\\.(json|toml))([\"'\\s]|$)")
+    tests:
+      - name: a_write_inside_text
+        match: auth_security_code_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"echo 'return true' >> src/auth/session.go\"" }
+      - name: the_file_only_read
+        match: auth_security_code_file_redirect(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"echo 'notes' > docs/auth.md\"" }
 
   - name: scratch_path
     params: [path]
