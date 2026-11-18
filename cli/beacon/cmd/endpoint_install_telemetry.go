@@ -58,12 +58,15 @@ func firstInstallForDevice(profile onboarding.Profile) bool {
 }
 
 // completed sends cli_install_completed for an install that succeeded. backfill is nil when the
-// install skipped its backfill.
-func (t installTelemetry) completed(selection endpointTargetSelection, backfill *endpointBackfillResult) {
-	destination := telemetry.DestinationLocal
+// install skipped its backfill; connected is true when this install connected to Beacon Cloud.
+func (t installTelemetry) completed(selection endpointTargetSelection, backfill *endpointBackfillResult, connected bool) {
+	destination, cloudConnect := telemetry.DestinationLocal, telemetry.CloudConnectNone
 	if !destinationAskable() {
 		// Connected to Beacon Cloud, by this install or an earlier one.
-		destination = telemetry.DestinationCloud
+		destination, cloudConnect = telemetry.DestinationCloud, telemetry.CloudConnectExisting
+		if connected {
+			cloudConnect = telemetry.CloudConnectNew
+		}
 	}
 	sessions := 0
 	if backfill != nil {
@@ -71,6 +74,7 @@ func (t installTelemetry) completed(selection endpointTargetSelection, backfill 
 	}
 	telemetryCapture(telemetry.EventInstallCompleted, map[string]any{
 		telemetry.PropDestination:          destination,
+		telemetry.PropCloudConnect:         cloudConnect,
 		telemetry.PropHarnessesConfigured:  configuredTargetNames(selection),
 		telemetry.PropBackfillSessionCount: sessions,
 		telemetry.PropDurationMS:           installTelemetryNow().Sub(t.start).Milliseconds(),

@@ -80,6 +80,10 @@ const (
 	PropIsFirstForDevice = "is_first_for_device"
 	// PropDestination is where the endpoint's agent telemetry goes, a Destination value.
 	PropDestination = "destination"
+	// PropCloudConnect says whether this install connected the endpoint to Beacon Cloud, a
+	// CloudConnect value. Only a connect enrolls the device and reports its history, which is
+	// what sends cloud_backfill_received.
+	PropCloudConnect = "cloud_connect"
 	// PropHarnessesConfigured lists the install targets (OTLP and hooks) the install configured.
 	PropHarnessesConfigured = "harnesses_configured"
 	// PropBackfillSessionCount is how many sessions the install's session backfill wrote records
@@ -107,6 +111,16 @@ const (
 const (
 	DestinationLocal = "local"
 	DestinationCloud = "cloud"
+)
+
+// Values of cloud_connect.
+const (
+	// CloudConnectNew is an install that connected to Beacon Cloud itself.
+	CloudConnectNew = "new"
+	// CloudConnectExisting is an install that kept a connection an earlier run made.
+	CloudConnectExisting = "existing"
+	// CloudConnectNone is an install that stays local.
+	CloudConnectNone = "none"
 )
 
 // Identity events. Each is sent right after Identify, as the person it names, who is known from
