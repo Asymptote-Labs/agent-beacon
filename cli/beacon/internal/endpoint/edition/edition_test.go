@@ -151,6 +151,7 @@ func linuxAnswer() map[string]any {
 }
 
 func TestLocateForLinuxReadsTheSignedChecksumsLinks(t *testing.T) {
+	installed(t, "")
 	var gotBody string
 	srv := platform(t, func(w http.ResponseWriter, r *http.Request) {
 		data, _ := io.ReadAll(r.Body)
@@ -181,6 +182,7 @@ func TestLocateForLinuxReadsTheSignedChecksumsLinks(t *testing.T) {
 
 // A platform that predates Linux packages ignores the target and answers with the macOS package.
 func TestLocateForLinuxRefusesAnswersItCannotVerify(t *testing.T) {
+	installed(t, "")
 	for name, tc := range map[string]struct {
 		change map[string]any
 		want   string
@@ -419,33 +421,136 @@ func TestInstallUserRefusesWhatItDidNotAskFor(t *testing.T) {
 	}
 }
 
-func TestLinuxRollbackPackageIsThePublicPackageInstalledNow(t *testing.T) {
+// installed makes the installed beacon report line.
+func installed(t *testing.T, line string) {
+	t.Helper()
 	old := installedVersionLine
 	t.Cleanup(func() { installedVersionLine = old })
-	rpm := Release{Name: "beacon-enterprise_1.3.41_linux_amd64.rpm"}
-	deb := Release{Name: "beacon-enterprise_1.3.41_linux_amd64.deb"}
+	installedVersionLine = func(context.Context) string { return line }
+}
 
-	installedVersionLine = func(context.Context) string { return "beacon version 1.3.40 (abc) built on today\n" }
-	for rel, ext := range map[Release]string{rpm: "rpm", deb: "deb"} {
-		got, err := linuxRollbackPackage(context.Background(), rel)
-		name := "beacon_1.3.40_linux_" + runtime.GOARCH + "." + ext
-		if err != nil || got == nil || got.Version != "1.3.40" || got.Name != name || got.SHA256 != "" ||
-			got.URL != "https://github.com/asymptote-labs/agent-beacon/releases/download/v1.3.40/"+name {
-			t.Fatalf("%s: %+v, %v", ext, got, err)
+func rollbackAnswer(version string) map[string]any {
+	return map[string]any{
+		"version": version, "name": "beacon_" + version + "_linux_amd64.deb",
+		"url": "https://release-assets.example/public-deb?sig=x", "sha256": strings.ToUpper(testSHA),
+		"checksums": map[string]any{
+			"url":           "https://release-assets.example/public-sums?sig=x",
+			"signature_url": "https://release-assets.example/public-sig?sig=x",
+			"key_url":       "https://release-assets.example/public-key?sig=x",
+		},
+	}
+}
+
+// Over the public edition, a .deb or .rpm install asks the platform for the public package of the
+// installed version too, which a failed install reinstalls, so it comes from where the enterprise
+// package does and never from GitHub directly.
+func TestLocateForLinuxAsksForThePackageToRollBackTo(t *testing.T) {
+	installed(t, "beacon version 1.3.40 (abc) built on today\n")
+	var gotBody string
+	srv := platform(t, func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		gotBody = string(data)
+		body := linuxAnswer()
+		body["rollback"] = rollbackAnswer("1.3.40")
+		answer(w, 200, body)
+	})
+	rel, err := LocateFor(context.Background(), nil, srv.URL, testKey, "", linuxDeb)
+	if err != nil {
+		t.Fatalf("LocateFor: %v", err)
+	}
+	if gotBody != `{"os":"linux","arch":"amd64","format":"deb","rollback_from":"1.3.40"}` {
+		t.Fatalf("body = %q", gotBody)
+	}
+	back, err := linuxRollbackPackage(context.Background(), rel)
+	if err != nil {
+		t.Fatalf("linuxRollbackPackage: %v", err)
+	}
+	if back.URL != "https://release-assets.example/public-deb?sig=x" || back.Name != "beacon_1.3.40_linux_amd64.deb" ||
+		back.SHA256 != testSHA || back.Version != "1.3.40" || back.Checksums.URL != "https://release-assets.example/public-sums?sig=x" ||
+		back.Checksums.SignatureURL != "https://release-assets.example/public-sig?sig=x" || back.Checksums.KeyURL != "https://release-assets.example/public-key?sig=x" {
+		t.Fatalf("rollback package = %+v", back)
+	}
+	if strings.Contains(back.URL+back.Checksums.URL, "github.com") {
+		t.Fatalf("rollback package from GitHub: %+v", back)
+	}
+}
+
+func TestLocateForLinuxRefusesAnAnswerWithoutTheRightRollback(t *testing.T) {
+	installed(t, "beacon version 1.3.40 (abc) built on today\n")
+	for name, tc := range map[string]struct {
+		rollback any
+		want     string
+	}{
+		"none":            {nil, "no public deb package of 1.3.40"},
+		"another version": {rollbackAnswer("1.3.39"), "answered with \"beacon_1.3.39_linux_amd64.deb\""},
+		"plain http": {func() map[string]any {
+			b := rollbackAnswer("1.3.40")
+			b["url"] = "http://x.example/deb"
+			return b
+		}(), "no https links to beacon_1.3.40_linux_amd64.deb"},
+		"bad checksum": {func() map[string]any {
+			b := rollbackAnswer("1.3.40")
+			b["sha256"] = "abc"
+			return b
+		}(), "is not a SHA-256"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := linuxAnswer()
+			if tc.rollback != nil {
+				body["rollback"] = tc.rollback
+			}
+			srv := platform(t, func(w http.ResponseWriter, _ *http.Request) { answer(w, 200, body) })
+			_, err := LocateFor(context.Background(), nil, srv.URL, testKey, "", linuxDeb)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Nothing to roll back to is asked for over the enterprise edition, which a newer enterprise update
+// replaces whatever the database says, nor for the user-mode tarball, which no package manager
+// installs.
+func TestLocateForAsksNoRollbackWhereNoneIsNeeded(t *testing.T) {
+	var bodies []string
+	srv := platform(t, func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(data))
+		body := linuxAnswer()
+		if strings.Contains(string(data), "tar.gz") {
+			body["name"] = "beacon-enterprise_1.3.41_linux_amd64.tar.gz"
+		}
+		answer(w, 200, body)
+	})
+	installed(t, "beacon version 1.3.40 (abc) built on today, enterprise edition\n")
+	if _, err := LocateFor(context.Background(), nil, srv.URL, testKey, "", linuxDeb); err != nil {
+		t.Fatalf("over enterprise: %v", err)
+	}
+	installed(t, "beacon version 1.3.40 (abc) built on today\n")
+	if _, err := LocateFor(context.Background(), nil, srv.URL, testKey, "", Target{OS: "linux", Arch: "amd64", Format: FormatTarball}); err != nil {
+		t.Fatalf("tarball: %v", err)
+	}
+	for _, b := range bodies {
+		if strings.Contains(b, "rollback_from") {
+			t.Fatalf("asked for a rollback: %s", b)
 		}
 	}
+}
 
-	installedVersionLine = func(context.Context) string {
-		return "beacon version 1.3.40 (abc) built on today, enterprise edition\n"
-	}
-	if got, err := linuxRollbackPackage(context.Background(), rpm); got != nil || err != nil {
+func TestLinuxRollbackPackageRefusesWithoutOne(t *testing.T) {
+	installed(t, "beacon version 1.3.40 (abc) built on today, enterprise edition\n")
+	if got, err := linuxRollbackPackage(context.Background(), Release{}); got != nil || err != nil {
 		t.Fatalf("over the enterprise edition: %+v, %v", got, err)
 	}
-
 	for _, line := range []string{"", "beacon version dev (unknown) built on unknown\n"} {
-		installedVersionLine = func(context.Context) string { return line }
-		if _, err := linuxRollbackPackage(context.Background(), deb); err == nil || !strings.Contains(err.Error(), "not a public release") {
+		installed(t, line)
+		if _, err := linuxRollbackPackage(context.Background(), Release{}); err == nil || !strings.Contains(err.Error(), "not a public release") {
 			t.Fatalf("installed %q: err = %v", line, err)
 		}
+	}
+	installed(t, "beacon version 1.3.40 (abc) built on today\n")
+	if _, err := linuxRollbackPackage(context.Background(), Release{Rollback: &Rollback{Version: "1.3.39"}}); err == nil ||
+		!strings.Contains(err.Error(), "no public package of 1.3.40") {
+		t.Fatalf("err = %v", err)
 	}
 }

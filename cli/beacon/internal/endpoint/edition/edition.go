@@ -103,6 +103,20 @@ type Release struct {
 	SHA256    string    `json:"sha256"`
 	Size      int64     `json:"size"`
 	Checksums Checksums `json:"checksums"`
+	// Rollback is set on a Linux system install over the public edition: see Rollback.
+	Rollback *Rollback `json:"rollback,omitempty"`
+}
+
+// Rollback is the public package of the version installed now, which a failed install on Linux
+// reinstalls through the package manager, with links to its own release's signed checksums.txt.
+// The platform returns it when asked (rollback_from), so it comes from wherever the enterprise
+// package does rather than from GitHub directly.
+type Rollback struct {
+	Version   string    `json:"version"`
+	Name      string    `json:"name"`
+	URL       string    `json:"url"`
+	SHA256    string    `json:"sha256"`
+	Checksums Checksums `json:"checksums"`
 }
 
 // Checksums are links to the release's checksums.txt, its signature, and the public key that made
@@ -158,7 +172,11 @@ func LocateFor(ctx context.Context, client *http.Client, dashboardURL, deviceKey
 	ask := struct {
 		Version string `json:"version,omitempty"`
 		Target
+		RollbackFrom string `json:"rollback_from,omitempty"`
 	}{Version: strings.TrimPrefix(version, "v"), Target: target}
+	if target.OS == "linux" && (target.Format == FormatDeb || target.Format == FormatRPM) {
+		ask.RollbackFrom = publicVersionInstalled(ctx)
+	}
 	body, err := json.Marshal(ask)
 	if err != nil {
 		return Release{}, err
@@ -198,6 +216,9 @@ func LocateFor(ctx context.Context, client *http.Client, dashboardURL, deviceKey
 		return Release{}, fmt.Errorf("the platform's answer is not JSON: %w", err)
 	}
 	rel.SHA256 = strings.ToLower(strings.TrimSpace(rel.SHA256))
+	if rel.Rollback != nil {
+		rel.Rollback.SHA256 = strings.ToLower(strings.TrimSpace(rel.Rollback.SHA256))
+	}
 	switch {
 	case !updatecheck.CanCheckVersion(rel.Version):
 		return Release{}, fmt.Errorf("the platform named no release version (%q)", rel.Version)
@@ -208,7 +229,7 @@ func LocateFor(ctx context.Context, client *http.Client, dashboardURL, deviceKey
 	case !strings.HasPrefix(rel.URL, "https://"):
 		return Release{}, errors.New("the platform's answer has no https download link")
 	}
-	if err := checkAnswer(rel, target); err != nil {
+	if err := checkAnswer(rel, target, ask.RollbackFrom); err != nil {
 		return Release{}, err
 	}
 	return rel, nil
@@ -216,20 +237,59 @@ func LocateFor(ctx context.Context, client *http.Client, dashboardURL, deviceKey
 
 // checkAnswer refuses a release that is not the package target asked for, which a platform that
 // offers only the macOS package answers with, and on Linux one without the links to its signed
-// checksums.txt.
-func checkAnswer(rel Release, target Target) error {
+// checksums.txt, or, when rollbackFrom asked for one, without the public package of that version.
+func checkAnswer(rel Release, target Target, rollbackFrom string) error {
 	if target.OS != "linux" {
 		return nil
 	}
 	if strings.ContainsAny(rel.Name, `/\`) || !strings.HasSuffix(rel.Name, "."+target.Format) {
 		return fmt.Errorf("the platform answered with %q, not a %s package for linux/%s; it may not offer the enterprise edition for Linux yet", rel.Name, target.Format, target.Arch)
 	}
-	for _, link := range []string{rel.Checksums.URL, rel.Checksums.SignatureURL, rel.Checksums.KeyURL} {
-		if !strings.HasPrefix(link, "https://") {
-			return errors.New("the platform's answer has no https links to the release's signed checksums")
-		}
+	if !httpsLinks(rel.URL, rel.Checksums) {
+		return errors.New("the platform's answer has no https links to the release's signed checksums")
+	}
+	if rollbackFrom == "" {
+		return nil
+	}
+	back := rel.Rollback
+	want := publicPackageName(rollbackFrom, target)
+	switch {
+	case back == nil:
+		return fmt.Errorf("the platform's answer has no public %s package of %s, the version installed here, which a failed install would reinstall", target.Format, rollbackFrom)
+	case back.Version != rollbackFrom || back.Name != want:
+		return fmt.Errorf("asked for %s to roll back to, the platform answered with %q", want, back.Name)
+	case back.SHA256 != "" && !sha256Hex.MatchString(back.SHA256):
+		return fmt.Errorf("the platform's checksum of %s is not a SHA-256", want)
+	case !httpsLinks(back.URL, back.Checksums):
+		return fmt.Errorf("the platform's answer has no https links to %s and its release's signed checksums", want)
 	}
 	return nil
+}
+
+// httpsLinks reports whether a package's link and its signed checksums' links are all https.
+func httpsLinks(url string, c Checksums) bool {
+	for _, link := range []string{url, c.URL, c.SignatureURL, c.KeyURL} {
+		if !strings.HasPrefix(link, "https://") {
+			return false
+		}
+	}
+	return true
+}
+
+// publicPackageName is the public release's name for its package of version for target.
+func publicPackageName(version string, target Target) string {
+	return fmt.Sprintf("beacon_%s_linux_%s.%s", version, target.Arch, target.Format)
+}
+
+// publicVersionInstalled is the version of the public edition installed here, or "" when what is
+// installed is the enterprise edition (or no release at all, which Install refuses).
+func publicVersionInstalled(ctx context.Context) string {
+	line := installedVersionLine(ctx)
+	version := selfupdate.VersionLineVersion(line)
+	if selfupdate.VersionLineEdition(line) == Enterprise || !updatecheck.CanCheckVersion(version) {
+		return ""
+	}
+	return version
 }
 
 // Install verifies and installs rel with the self-updater's steps, rolling back if the result
@@ -248,16 +308,13 @@ func Install(ctx context.Context, rel Release, currentVersion, logPath string) (
 	return a.InstallPackage(ctx, rel.pkg())
 }
 
-// publicPackageURL is where the public release publishes its Linux packages, beside its signed
-// checksums.txt.
-const publicPackageURL = "https://github.com/asymptote-labs/agent-beacon/releases/download/v%[1]s/beacon_%[1]s_linux_%[2]s.%[3]s"
-
 // linuxRollbackPackage is the package a failed install of rel reinstalls on Linux: the public
-// package of the version installed now. The enterprise package's epoch ranks it above every public
-// release, so a rollback that only copied the public files back would leave the package database
-// naming the enterprise package, and neither apt, dnf nor the next public update would ever replace
-// it. Over an enterprise install it is nil: the database then names a newer enterprise package
-// than the files, which the next enterprise update still replaces.
+// package of the version installed now, from the platform's answer (Release.Rollback). The
+// enterprise package's epoch ranks it above every public release, so a rollback that only copied
+// the public files back would leave the package database naming the enterprise package, and
+// neither apt, dnf nor the next public update would ever replace it. Over an enterprise install it
+// is nil: the database then names a newer enterprise package than the files, which the next
+// enterprise update still replaces.
 func linuxRollbackPackage(ctx context.Context, rel Release) (*selfupdate.Package, error) {
 	line := installedVersionLine(ctx)
 	if selfupdate.VersionLineEdition(line) == Enterprise {
@@ -267,12 +324,21 @@ func linuxRollbackPackage(ctx context.Context, rel Release) (*selfupdate.Package
 	if !updatecheck.CanCheckVersion(version) {
 		return nil, fmt.Errorf("the installed beacon (%q) is not a public release, so a failed install could not be rolled back through the package manager", strings.TrimSpace(line))
 	}
-	format := FormatDeb
-	if strings.HasSuffix(rel.Name, "."+FormatRPM) {
-		format = FormatRPM
+	back := rel.Rollback
+	if back == nil || back.Version != version {
+		return nil, fmt.Errorf("the platform named no public package of %s, the version installed here, for a failed install to reinstall", version)
 	}
-	url := fmt.Sprintf(publicPackageURL, version, runtime.GOARCH, format)
-	return &selfupdate.Package{URL: url, Version: version, Name: url[strings.LastIndex(url, "/")+1:]}, nil
+	return &selfupdate.Package{
+		URL:     back.URL,
+		SHA256:  strings.ToLower(back.SHA256),
+		Version: back.Version,
+		Name:    back.Name,
+		Checksums: selfupdate.SignedChecksums{
+			URL:          back.Checksums.URL,
+			SignatureURL: back.Checksums.SignatureURL,
+			KeyURL:       back.Checksums.KeyURL,
+		},
+	}, nil
 }
 
 // Seams, so tests reach neither the network, pkgutil nor this host's package tools.
