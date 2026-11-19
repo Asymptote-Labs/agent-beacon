@@ -98,6 +98,10 @@ func TestFileEffects(t *testing.T) {
 		{"echo hi >&2- 3>&-", nil},
 		{"echo x | tee /dev/stderr out.log", []string{"write out.log"}},
 		{"cp build.log /dev/null; mv a.txt /dev/null", []string{"move_from a.txt"}},
+		// /dev/.. climbs out of /dev: the file written is /etc/hosts, kept as written.
+		{"echo x | sudo tee -a /dev/../etc/hosts", []string{"append /dev/../etc/hosts"}},
+		{"cp k.pub /dev/./../home/u/.ssh/authorized_keys", []string{"write /dev/./../home/u/.ssh/authorized_keys"}},
+		{"echo x > /dev/./null", nil},
 		{"cat a.txt | tee copy.txt", []string{"write copy.txt"}},
 		{"sed -i 's/a/b/' x.go y.go", []string{"edit x.go", "edit y.go"}},
 		{"sed -i.bak -e 's/a/b/' x.go", []string{"edit x.go"}},

@@ -11,6 +11,7 @@ package shellcmd
 
 import (
 	"errors"
+	"path"
 	"slices"
 	"strings"
 
@@ -145,9 +146,17 @@ func isDescriptor(target string) bool {
 
 // isFile reports whether a path a command writes or reads names a file: not standard input or
 // output (-) and not a device (/dev/..., which also holds bash's network pseudo-files). /dev/shm
-// is a directory of ordinary files, which a line can stage a file in as it can in /tmp.
-func isFile(path string) bool {
-	return path != "" && path != "-" && (!strings.HasPrefix(path, "/dev/") || strings.HasPrefix(path, "/dev/shm/"))
+// is a directory of ordinary files, which a line can stage a file in as it can in /tmp. A path
+// under /dev is cleaned before it is judged, since /dev/../etc/hosts is /etc/hosts; the caller
+// keeps the path as written.
+func isFile(p string) bool {
+	if p == "" || p == "-" {
+		return false
+	}
+	if strings.HasPrefix(p, "/dev/") {
+		p = path.Clean(p)
+	}
+	return !strings.HasPrefix(p, "/dev/") || strings.HasPrefix(p, "/dev/shm/")
 }
 
 // Command is one statement of a command line: a simple command with its words, or a compound
