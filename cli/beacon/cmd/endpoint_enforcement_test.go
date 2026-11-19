@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -31,7 +32,9 @@ type enforcementFakes struct {
 
 	located, installed []edition.Release
 	locatedWith        []string
-	handedOff          []string
+	// How many of those asked for the package a user-mode install takes its beacon from.
+	userLocated int
+	handedOff   []string
 	// User mode: what was installed where, which binary's enable ran, and what was forwarded.
 	userInstalled []string
 	userHandedOff []string
@@ -48,6 +51,14 @@ func stubEnforcement(t *testing.T) *enforcementFakes {
 	}
 	rel := edition.Release{Version: "1.3.41", URL: "https://x.example/p", SHA256: strings.Repeat("a", 64), Size: 74_700_000}
 
+	locate := func(_ context.Context, _ *http.Client, dashboard, key, version string) (edition.Release, error) {
+		f.locatedWith = append(f.locatedWith, dashboard+" "+key+" "+version)
+		if f.locateErr != nil {
+			return edition.Release{}, f.locateErr
+		}
+		f.located = append(f.located, rel)
+		return rel, nil
+	}
 	saved := []func(){
 		swapEnforcementSeam(&enforcementPlatformSupported, func() bool { return f.supported }),
 		swapEnforcementSeam(&enforcementHasRoot, func() bool { return f.root }),
@@ -57,13 +68,10 @@ func stubEnforcement(t *testing.T) *enforcementFakes {
 		}),
 		swapEnforcementSeam(&enforcementUserModeProbe, func() (string, []string, error) { return "dev", f.userMode, nil }),
 		swapEnforcementSeam(&installedBeaconVersionLine, func(context.Context) string { return f.installedLine }),
-		swapEnforcementSeam(&locateEnterpriseRelease, func(_ context.Context, _ *http.Client, dashboard, key, version string) (edition.Release, error) {
-			f.locatedWith = append(f.locatedWith, dashboard+" "+key+" "+version)
-			if f.locateErr != nil {
-				return edition.Release{}, f.locateErr
-			}
-			f.located = append(f.located, rel)
-			return rel, nil
+		swapEnforcementSeam(&locateEnterpriseRelease, locate),
+		swapEnforcementSeam(&locateUserEnterpriseRelease, func(ctx context.Context, c *http.Client, dashboard, key, version string) (edition.Release, error) {
+			f.userLocated++
+			return locate(ctx, c, dashboard, key, version)
 		}),
 		swapEnforcementSeam(&installEnterpriseRelease, func(_ context.Context, r edition.Release, _, _ string) (selfupdate.ApplyResult, error) {
 			f.installed = append(f.installed, r)
@@ -141,8 +149,8 @@ func TestEnforcementEnableInstallsTheEnterpriseEditionThenHandsOff(t *testing.T)
 	if len(f.installed) != 1 || f.installed[0].Version != "1.3.41" {
 		t.Fatalf("installed = %+v", f.installed)
 	}
-	if strings.Join(f.locatedWith, ",") != "https://platform.example bcn_device_test " {
-		t.Fatalf("located with = %q", f.locatedWith)
+	if strings.Join(f.locatedWith, ",") != "https://platform.example bcn_device_test " || f.userLocated != 0 {
+		t.Fatalf("located with = %q (%d for user mode)", f.locatedWith, f.userLocated)
 	}
 	if len(f.handedOff) != 1 || f.handedOff[0] != "" {
 		t.Fatalf("handed off = %q", f.handedOff)
@@ -184,7 +192,7 @@ func TestEnforcementEnableRefusesBeforeAskingThePlatform(t *testing.T) {
 		set  func(*enforcementFakes)
 		want string
 	}{
-		"not a Mac":     {func(f *enforcementFakes) { f.supported = false }, "macOS on Apple Silicon only"},
+		"unsupported":   {func(f *enforcementFakes) { f.supported = false }, "macOS on Apple Silicon and for Linux on amd64 and arm64 only"},
 		"not root":      {func(f *enforcementFakes) { f.root = false }, "needs root"},
 		"not connected": {func(f *enforcementFakes) { f.connected = false }, "endpoint connect --system"},
 		"user mode": {func(f *enforcementFakes) {
@@ -290,8 +298,8 @@ func TestEnforcementEnableInUserModeKeepsTheEditionBesideThisOneThenHandsOff(t *
 		t.Fatalf("enable: %v", err)
 	}
 	bin := userEnterpriseBeaconPath()
-	if strings.Join(f.locatedWith, ",") != "https://cloud.example bcn_device_user " {
-		t.Fatalf("located with = %q", f.locatedWith)
+	if strings.Join(f.locatedWith, ",") != "https://cloud.example bcn_device_user " || f.userLocated != 1 {
+		t.Fatalf("located with = %q (%d for user mode)", f.locatedWith, f.userLocated)
 	}
 	if strings.Join(f.userInstalled, ",") != "1.3.41 "+bin {
 		t.Fatalf("user installed = %q, want 1.3.41 at %s", f.userInstalled, bin)
@@ -592,5 +600,27 @@ func TestHookInstallsUpdateAnOlderKeptEnterpriseBinaryFirst(t *testing.T) {
 	}
 	if len(f.userInstalled) != 0 || !strings.Contains(warnings.String(), "Retry later with: beacon endpoint enforcement enable") {
 		t.Fatalf("installed %v, warnings %q", f.userInstalled, warnings.String())
+	}
+}
+
+func TestEnforcementPlatformsAreAppleSiliconAndLinux(t *testing.T) {
+	want := (runtime.GOOS == "darwin" && runtime.GOARCH == "arm64") ||
+		(runtime.GOOS == "linux" && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64"))
+	if got := defaultEnforcementPlatformSupported(); got != want {
+		t.Fatalf("supported on %s/%s = %v, want %v", runtime.GOOS, runtime.GOARCH, got, want)
+	}
+}
+
+// The way out of user mode names this platform's service manager.
+func TestUserModeActiveErrorNamesThisPlatformsServices(t *testing.T) {
+	msg := userModeActiveError("dev", []string{"something"}).Error()
+	if runtime.GOOS == "linux" {
+		if !strings.Contains(msg, "systemctl --user disable --now beacon-collector.service beacon-asymptote-forwarder.service beacon-inventory.timer beacon-session-sync.timer") || strings.Contains(msg, "launchctl") {
+			t.Fatalf("message = %q", msg)
+		}
+		return
+	}
+	if !strings.Contains(msg, "launchctl bootout gui/$(id -u)/com.beacon.endpoint.collector.user") || strings.Contains(msg, "systemctl") {
+		t.Fatalf("message = %q", msg)
 	}
 }

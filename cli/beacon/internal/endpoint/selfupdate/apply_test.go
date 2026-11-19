@@ -742,6 +742,9 @@ func TestApplyRollbackRestoresScriptForwarders(t *testing.T) {
 
 // FetchVerifiedPackage runs every check an install would, and nothing after them.
 func TestFetchVerifiedPackageChecksWithoutInstalling(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the installer signature and Gatekeeper are checked on macOS; Linux's check is TestFetchVerifiedPackageOnLinuxChecksTheSignedChecksums")
+	}
 	body := []byte("a signed package")
 	sum := sha256.Sum256(body)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(body) }))
