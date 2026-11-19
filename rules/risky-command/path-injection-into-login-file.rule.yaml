@@ -1,6 +1,6 @@
 id: path-injection-into-login-file
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 5
+version: 7
 title: PATH shadowing entry written to a shell startup file
 description: >
   A command writes a PATH line into a shell startup or login file, by redirecting or
@@ -49,6 +49,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc" }
+        session: { id: s1 }
+  - name: export_path_into_the_system_bashrc
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=/tmp/x:$PATH' | sudo tee -a /etc/bash.bashrc" }
+        session: { id: s1 }
+  - name: path_line_into_the_system_zshrc_through_a_script_the_parser_cannot_read
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./provision.sh \"echo 'PATH=/tmp/bin:$PATH' >> /etc/zshrc\"" }
         session: { id: s1 }
   - name: path_assign_into_zshrc
     verdict: match

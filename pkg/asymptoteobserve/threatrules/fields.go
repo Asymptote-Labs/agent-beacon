@@ -157,7 +157,11 @@ var derivedFieldDocs = map[string]string{
 		"  are not data), `socket_redirects` (spec v1.3, `{path, op}`: its redirections to or from\n" +
 		"  bash's `/dev/tcp/host/port` and `/dev/udp/host/port`, also through a descriptor an\n" +
 		"  earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`\n" +
-		"  (0-based), `nested` (inside `$(...)`, `<(...)`, a shell's script or what a carrier or an\n" +
+		"  (0-based), `earlier_stages` and `later_stages` (spec v1.3: the indexes, in this list, of\n" +
+		"  the commands at earlier and at later stages of its pipeline, so a rule about two stages\n" +
+		"  of a pipeline asks those and not every command of the line:\n" +
+		"  `c.later_stages.exists(i, e.command.parsed_commands[i].name == \"sh\")`),\n" +
+		"  `nested` (inside `$(...)`, `<(...)`, a shell's script or what a carrier or an\n" +
 		"  inline script runs), `runs_read` (spec v1.3: true when the command hands a command line\n" +
 		"  to another program and that command line was read to its end, so its commands follow it\n" +
 		"  in the list: a shell's `-c` text, the here-document it reads or the literal script a\n" +

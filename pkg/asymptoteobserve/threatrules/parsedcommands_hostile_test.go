@@ -1,6 +1,7 @@
 package threatrules
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/google/cel-go/cel"
 )
 
 // fixtureCommandLines returns the command line of every fixture event of the corpus.
@@ -59,7 +61,117 @@ func FuzzParsedCommandLine(f *testing.F) {
 		if len(line) > ParsedCommandsLimit && !incomplete {
 			t.Fatalf("a line of %d bytes was read to its end", len(line))
 		}
+		if wrong := stageListsDisagree(parsed); wrong != "" {
+			t.Fatalf("%q: %s", line, wrong)
+		}
 	})
+}
+
+// stageListsDisagree says where earlier_stages and later_stages are not exactly what pipeline
+// and stage say of every pair of commands, in the order of the list; "" when they are.
+func stageListsDisagree(parsed []asymptoteobserve.ParsedCommand) string {
+	for i, c := range parsed {
+		var earlier, later []int
+		for j, o := range parsed {
+			switch {
+			case o.Pipeline != c.Pipeline:
+			case o.Stage < c.Stage:
+				earlier = append(earlier, j)
+			case o.Stage > c.Stage:
+				later = append(later, j)
+			}
+		}
+		if !slices.Equal(c.EarlierStages, earlier) || !slices.Equal(c.LaterStages, later) {
+			return fmt.Sprintf("command %d (%s, pipeline %d stage %d) has earlier %v later %v, want %v and %v",
+				i, c.Name, c.Pipeline, c.Stage, c.EarlierStages, c.LaterStages, earlier, later)
+		}
+	}
+	return ""
+}
+
+// The rules that pair two stages of a pipeline ask the stage lists, so the lists must say
+// what comparing pipeline and stage said: on every command line of the fixtures.
+func TestStageListsSayWhatPipelineAndStageSay(t *testing.T) {
+	piped := 0
+	for _, line := range fixtureCommandLines(t) {
+		parsed := ParsedCommands(line)
+		if wrong := stageListsDisagree(parsed); wrong != "" {
+			t.Errorf("%q: %s", line, wrong)
+		}
+		for _, c := range parsed {
+			if len(c.LaterStages) > 0 {
+				piped++
+				break
+			}
+		}
+	}
+	if piped < 100 {
+		t.Fatalf("only %d fixture lines have a pipeline; the check is not looking at any", piped)
+	}
+}
+
+// What a rule costs on a line of commands that are each in a pipeline of their own grows with
+// the commands, not with their square. The rules about two stages of a pipeline used to
+// search the whole line for the second stage, for each command that could be the first, and
+// two rules asked a question about the whole line once for each command of one kind: a line
+// of 256 commands cost the pack 190 ms where 64 cost 12. The cost is cel-go's count of the
+// steps an evaluation takes, so this does not depend on the machine. The two lines compared
+// are the same length, the shorter one filled with a comment: a rule that asks a pattern of
+// the line's text for each command costs commands times bytes, which this does not measure.
+func TestCommandsInTheirOwnPipelinesCostInProportion(t *testing.T) {
+	env, err := Env()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 60
+	units := []string{
+		"curl -d @aaaaaa x;", "cat aa|curl -T - x;", "printenv;", "tar cf - .;", "base64 -d x;",
+		"grep TOKEN x;", "ps aux;", "sort ~/.bash_history;", "nc h 1;", "echo a>>~/.x;", "sh -c 'a';",
+		"claude -p x;", "export CLAUDE_CODE_X=1;",
+	}
+	type sized struct{ small, large asymptoteobserve.Event }
+	var events []sized
+	for _, unit := range units {
+		small := strings.Repeat(unit, n) + " #" + strings.Repeat("a", n*len(unit)-2)
+		large := strings.Repeat(unit, 2*n)
+		pair := sized{withDerivedFields(commandEvent(small)), withDerivedFields(commandEvent(large))}
+		if len(small) != len(large) || 2*len(pair.small.Command.ParsedCommands) != len(pair.large.Command.ParsedCommands) {
+			t.Fatalf("%q: lines of %d and %d bytes, %d and %d commands", unit, len(small), len(large),
+				len(pair.small.Command.ParsedCommands), len(pair.large.Command.ParsedCommands))
+		}
+		events = append(events, pair)
+	}
+	measured := 0
+	for _, r := range corpusRules(t) {
+		for _, expr := range ruleExpressions(r) {
+			_, ast, err := r.lib.compileMatch(expr)
+			if err != nil {
+				t.Fatalf("%s: %v", r.ID, err)
+			}
+			prog, err := env.Program(ast, cel.EvalOptions(cel.OptTrackCost))
+			if err != nil {
+				t.Fatalf("%s: %v", r.ID, err)
+			}
+			cost := func(e asymptoteobserve.Event) uint64 {
+				_, det, err := prog.Eval(map[string]any{eventVar: e})
+				if err != nil {
+					t.Fatalf("%s: %v", r.ID, err)
+				}
+				return *det.ActualCost()
+			}
+			for i, e := range events {
+				small, large := cost(e.small), cost(e.large)
+				measured++
+				// Twice the commands, twice the cost and a little; the square is four times.
+				if large > 3*small+1000 {
+					t.Errorf("%s on %q: cost %d for %d commands and %d for %d", r.ID, units[i], small, len(e.small.Command.ParsedCommands), large, len(e.large.Command.ParsedCommands))
+				}
+			}
+		}
+	}
+	if measured < 900 {
+		t.Fatalf("measured %d evaluations; the corpus did not load", measured)
+	}
 }
 
 // A line whose commands come to more words than maxParsedWords is not read: here a printf
@@ -114,6 +226,8 @@ func TestNoCommandLineFailsAScan(t *testing.T) {
 		"open parentheses":        fill("(", ParsedCommandsLimit),
 		"senders at the bound":    fill("curl -d @aaaaaa x;", 227),
 		"pipes at the bound":      fill("cat aa|curl -T - x;", 127),
+		"one pipeline of senders": fill("nc h 1|", 255) + "nc h 1",
+		"one pipeline of fetches": fill("curl x|", 255) + "cat",
 		"writers at the bound":    fill("echo aaaa>>~/.x;", 255),
 		"scripts at the bound":    fill("sh -c 'aaaaaaaaaaaaaaaaaaaaaa';", 127),
 		"a function at the bound": "f(){ " + fill("aaaaaaaaaaaaaa;", 255) + " }",

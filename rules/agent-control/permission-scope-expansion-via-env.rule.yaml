@@ -1,6 +1,6 @@
 id: permission-scope-expansion-via-env
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+version: 5
 title: Agent runtime spawned with environment variables that elevate permissions
 description: >
   A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
@@ -35,17 +35,18 @@ taxonomy:
 # or `declare -x` the line also runs. The words are read as written (argv_raw), since a
 # value that holds a variable is an unknown word of argv. Requiring both keeps the rule off
 # benign uses of *_TOKEN in unrelated commands.
+# The export is a question about the line, so it is asked once beside "the line runs an
+# agent", not once for each agent command.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
       agent_cli(c) && (
         c.env.exists(k, k.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)$")) ||
-        c.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)=")) ||
-        e.command.parsed_commands.exists(x,
-          (x.name == "export" || x.name.matches("^(declare|typeset)$") && x.args.matches("(?m)^-[A-Za-z]*x[A-Za-z]*$")) &&
-          x.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)=")))
-      )
-    ) ||
+        c.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)=")))) ||
+    e.command.parsed_commands.exists(c, agent_cli(c)) &&
+      e.command.parsed_commands.exists(x,
+        (x.name == "export" || x.name.matches("^(declare|typeset)$") && x.args.matches("(?m)^-[A-Za-z]*x[A-Za-z]*$")) &&
+        x.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)="))) ||
     unread_text(e, t, t.matches("(?i)\\b((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)\\s*=") &&
       t.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+|([A-Z_][A-Z0-9_]*\\s*=\\S+\\s+)+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b"))
   )

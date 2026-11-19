@@ -1,6 +1,6 @@
 id: archive-then-upload
 spec: threat-rules/v1.3  # needed for predicates
-version: 4
+version: 5
 title: Archive piped to a network upload (archive-then-egress)
 description: >
   A tar / zip / 7z archive is created and piped into a network upload, or
@@ -25,13 +25,17 @@ taxonomy:
 
 # Who sends, and whether a sender reads what is piped into it, are the egress rules' shared
 # predicates (rules/concepts/egress.predicates.yaml): a sender reads the pipe unless it is
-# curl or wget without a stdin body (@-, -T -, --post-file=-).
+# curl or wget without a stdin body (@-, -T -, --post-file=-). The sender is looked for among
+# the later stages of the archiver's pipeline (later_stages, indexes into parsed_commands),
+# and the redirect to a socket, which is a question about the line, once beside "the line
+# runs an archiver".
 match: >
   e.event.action == "command.executed" && (
-    e.command.parsed_commands.exists(t, t.name.matches("(?i)^(tar|zip|7z|7za|p7zip)$") && (
-      e.command.parsed_commands.exists(s, s.pipeline == t.pipeline && s.stage > t.stage &&
-        egress_sender(s) && egress_reads_stdin(s)) ||
-      egress_dev_tcp(e))) ||
+    e.command.parsed_commands.exists(t, t.name.matches("(?i)^(tar|zip|7z|7za|p7zip)$") &&
+      t.later_stages.exists(i,
+        egress_sender(e.command.parsed_commands[i]) && egress_reads_stdin(e.command.parsed_commands[i]))) ||
+    e.command.parsed_commands.exists(t, t.name.matches("(?i)^(tar|zip|7z|7za|p7zip)$")) &&
+      egress_dev_tcp(e) ||
     (size(e.command.parsed_commands) == 0 &&
       e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(tar|zip|7z|7za|p7zip)\\b[^;&|]*\\|\\s*(curl|wget)\\b[^;&|]*([@<](-|/dev/stdin)(['\"\\s]|$)|\\s(-[a-zA-Z]*T|--upload-file)(\\s+|=)?['\"]?(-|/dev/stdin)(['\"\\s]|$)|--upload-file\\s+[^;&|\\s]+|\\s--post-file(\\s+|=)[^;&|\\s]+|\\s--body-file(\\s+|=)[^;&|\\s]+)"))
   )

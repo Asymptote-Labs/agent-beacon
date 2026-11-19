@@ -244,6 +244,15 @@ type ParsedCommand struct {
 	// is the 0-based position in it (curl ... | sh: sh is stage 1).
 	Pipeline int `cel:"pipeline"`
 	Stage    int `cel:"stage"`
+	// EarlierStages and LaterStages are the indexes, in the list this command is in
+	// (e.command.parsed_commands), of the commands at earlier and at later stages of its
+	// pipeline, in the order of the list. In `curl u | tee f | sh` the list is curl, tee, sh:
+	// curl has later stages [1, 2], tee earlier [0] and later [2], sh earlier [0, 1]. The
+	// commands inside one compound stage ({ a; b; } | c) are at the same stage and are in
+	// neither list of each other. Both are empty for a command alone in its pipeline. A rule
+	// about two stages of one pipeline asks these, not every command of the line.
+	EarlierStages []int `cel:"earlier_stages"`
+	LaterStages   []int `cel:"later_stages"`
 	// Nested is true for a command inside a command or process substitution, inside the
 	// script a shell runs with -c or reads from a here-document, or run by a carrier (the
 	// command of xargs, find -exec, ssh, docker exec, eval and the like).

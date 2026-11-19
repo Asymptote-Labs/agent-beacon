@@ -11,7 +11,7 @@
 # The predicate takes the event, so it reads the command of an approval event as it reads the
 # command of a command.executed event: parsed_commands is derived for both.
 library: dangerous-commands
-version: 1
+version: 2
 spec: threat-rules/v1.3
 description: A command that destroys data or hands over the machine in one step.
 
@@ -33,7 +33,7 @@ definitions:
         c.name.matches("^mkfs(\\.[a-z0-9]+)?$") ||
         c.name == "dd" && c.argv_raw.exists(a, a.matches("^[\"']?if=")) ||
         c.name.matches("^(curl|wget)$") &&
-          e.command.parsed_commands.exists(s, s.pipeline == c.pipeline && s.stage > c.stage && s.name.matches("^(ba|z|da|k)?sh$")) ||
+          c.later_stages.exists(i, e.command.parsed_commands[i].name.matches("^(ba|z|da|k)?sh$")) ||
         size(c.argv) > 1 && c.argv[0].matches("(^|/)sudo$") && c.argv[1].matches("^(-[A-Za-z]*s[A-Za-z]*|--shell)$") ||
         c.name == "chmod" && c.args.matches("(?m)^(-[A-Za-z]*R[A-Za-z]*|--recursive)$") && c.args.matches("(?m)^0?777$")
       ) ||
