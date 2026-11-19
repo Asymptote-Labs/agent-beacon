@@ -34,6 +34,9 @@ func (s stubHandoffSource) Events(handoff.Session) ([]schema.Event, error) {
 
 func stubHandoffSources(t *testing.T, sources ...handoff.Source) *handoff.StoreDirs {
 	t.Helper()
+	previousLog := handoffOpts.logPath
+	handoffOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Cleanup(func() { handoffOpts.logPath = previousLog })
 	var seen handoff.StoreDirs
 	prev := handoffSources
 	handoffSources = func(dirs handoff.StoreDirs) []handoff.Source {
@@ -61,6 +64,8 @@ func runHandoff(t *testing.T, args ...string) (string, string, error) {
 			f.Changed = false
 		})
 	}
+	// Never inherit the developer runtime log when resetting command flags.
+	handoffOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)

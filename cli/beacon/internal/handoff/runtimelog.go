@@ -1,7 +1,6 @@
 package handoff
 
 import (
-	"sort"
 	"strings"
 	"time"
 
@@ -99,7 +98,6 @@ func beaconBookkeeping(action string) bool {
 // is how a runtime whose store Beacon does not read, or a session its store no longer has, is found
 // by directory. Title is the session's first prompt, cut to one line.
 func LogSessions(logPath string, filter Filter) ([]Session, error) {
-	within := directoryMatcher(filter.Directory)
 	byKey := map[string]*Session{}
 	var order []string
 	err := dashboard.StreamEvents(logPath, func(event schema.Event) error {
@@ -136,23 +134,7 @@ func LogSessions(logPath string, filter Filter) ([]Session, error) {
 	}
 	var sessions []Session
 	for _, key := range order {
-		session := byKey[key]
-		if filter.Directory != "" && (session.Directory == "" || !within(session.Directory)) {
-			continue
-		}
-		sessions = append(sessions, *session)
+		sessions = append(sessions, *byKey[key])
 	}
-	sort.SliceStable(sessions, func(i, j int) bool {
-		if !sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
-			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
-		}
-		if sessions[i].Harness != sessions[j].Harness {
-			return sessions[i].Harness < sessions[j].Harness
-		}
-		return sessions[i].ID < sessions[j].ID
-	})
-	if filter.Limit > 0 && len(sessions) > filter.Limit {
-		sessions = sessions[:filter.Limit]
-	}
-	return sessions, nil
+	return filterSessions(sessions, filter), nil
 }
