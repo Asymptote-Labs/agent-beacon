@@ -637,8 +637,15 @@ func TestLinuxUserModeUnitsAreReportedUnlessSystemdSaysTheyAreStopped(t *testing
 	if got := linuxUserModeUnits(info, func(string, string) string { return "active" }); len(got) != 0 {
 		t.Fatalf("without unit files: %v", got)
 	}
+	wants := filepath.Join(units, "default.target.wants")
+	if err := os.MkdirAll(wants, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for _, unit := range []string{"beacon-collector.service", "beacon-asymptote-forwarder.service"} {
 		if err := os.WriteFile(filepath.Join(units, unit), []byte("[Unit]\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(wants, unit), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -646,7 +653,7 @@ func TestLinuxUserModeUnitsAreReportedUnlessSystemdSaysTheyAreStopped(t *testing
 		"active":   "beacon-collector.service is running in alice's session",
 		"inactive": "",
 		"failed":   "",
-		"":         "beacon-collector.service is installed for alice (" + filepath.Join(units, "beacon-collector.service") + "), and systemd could not say whether it is running",
+		"":         "beacon-collector.service is enabled for alice (" + filepath.Join(units, "beacon-collector.service") + "), and systemd could not say whether it is running",
 	} {
 		var asked []string
 		got := linuxUserModeUnits(info, func(username, unit string) string {
@@ -665,6 +672,38 @@ func TestLinuxUserModeUnitsAreReportedUnlessSystemdSaysTheyAreStopped(t *testing
 		if len(got) != 2 || got[0] != want {
 			t.Fatalf("%q: %v, want %q first", state, got, want)
 		}
+	}
+}
+
+// Where systemd cannot report a state, a unit stopped and disabled as userModeActiveError says
+// (`systemctl --user disable --now`, which leaves the unit file) no longer keeps enable refused.
+func TestLinuxUserModeUnitsLetADisabledUnitGo(t *testing.T) {
+	home := t.TempDir()
+	units := filepath.Join(home, ".config", "systemd", "user")
+	wants := filepath.Join(units, "default.target.wants")
+	if err := os.MkdirAll(wants, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unit := "beacon-collector.service"
+	if err := os.WriteFile(filepath.Join(units, unit), []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(units, unit), filepath.Join(wants, unit)); err != nil {
+		t.Fatal(err)
+	}
+	info := consoleUserInfo{Username: "alice", HomeDir: home}
+	unknown := func(string, string) string { return "" }
+	if got := linuxUserModeUnits(info, unknown); len(got) != 1 || !strings.Contains(got[0], "is enabled for alice") {
+		t.Fatalf("enabled: %v", got)
+	}
+	if err := os.Remove(filepath.Join(wants, unit)); err != nil { // what `disable` does
+		t.Fatal(err)
+	}
+	if got := linuxUserModeUnits(info, unknown); len(got) != 0 {
+		t.Fatalf("after disable: %v", got)
+	}
+	if msg := userModeActiveError("alice", []string{"x"}).Error(); runtime.GOOS == "linux" && !strings.Contains(msg, "systemctl --user disable --now "+unit) {
+		t.Fatalf("the fix it prints = %q", msg)
 	}
 }
 

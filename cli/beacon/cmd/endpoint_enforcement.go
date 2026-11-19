@@ -368,13 +368,15 @@ var consoleUserModeFindings = func(info consoleUserInfo) []string {
 
 // linuxUserModeUnits reports the user-mode collector and forwarder units Beacon installed for a
 // user (their files under ~/.config/systemd/user) that are running, or whose state their systemd
-// user manager could not report: asking another user's manager (systemctl --machine=<user>@) needs
-// systemd 248, older than RHEL 8's, Ubuntu 20.04's and Debian 11's, and a unit that may be running
-// must not read as stopped.
+// user manager could not report and that are still enabled, so would start at their next login.
+// A unit that may be running must not read as stopped, but one stopped and disabled as
+// userModeActiveError says (`systemctl --user disable --now` leaves the file) must not keep enable
+// refused either.
 func linuxUserModeUnits(info consoleUserInfo, state func(username, unit string) string) []string {
 	var found []string
+	units := filepath.Join(info.HomeDir, ".config", "systemd", "user")
 	for _, unit := range userModeSystemdUnits[:2] {
-		file := filepath.Join(info.HomeDir, ".config", "systemd", "user", unit)
+		file := filepath.Join(units, unit)
 		if _, err := os.Stat(file); err != nil {
 			continue
 		}
@@ -383,18 +385,39 @@ func linuxUserModeUnits(info consoleUserInfo, state func(username, unit string) 
 			found = append(found, fmt.Sprintf("%s is running in %s's session", unit, info.Username))
 		case "inactive", "failed", "deactivating", "maintenance":
 		default:
-			found = append(found, fmt.Sprintf("%s is installed for %s (%s), and systemd could not say whether it is running", unit, info.Username, file))
+			// Beacon's user units are WantedBy=default.target; `disable` removes this link.
+			if _, err := os.Lstat(filepath.Join(units, "default.target.wants", unit)); err == nil {
+				found = append(found, fmt.Sprintf("%s is enabled for %s (%s), and systemd could not say whether it is running", unit, info.Username, file))
+			}
 		}
 	}
 	return found
 }
 
 // systemdUserUnitState is what `systemctl is-active` says of unit in username's user manager, or ""
-// when it said nothing (systemctl missing, or one too old to reach another user's manager).
+// when it said nothing. It asks from outside first (`--machine=<user>@`, systemd 248 and later),
+// then, for an older systemd (RHEL 8, Ubuntu 20.04, Debian 11), as the user against their running
+// manager, which needs root and runuser, as enable has.
 func systemdUserUnitState(username, unit string) string {
+	first := func(out []byte) string {
+		state, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+		return state
+	}
 	out, _ := exec.Command("systemctl", "--user", "--machine="+username+"@", "is-active", unit).Output()
-	state, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
-	return state
+	if state := first(out); state != "" {
+		return state
+	}
+	u, err := user.Lookup(username)
+	if err != nil {
+		return ""
+	}
+	runuser, err := exec.LookPath("runuser")
+	if err != nil {
+		return ""
+	}
+	out, _ = exec.Command(runuser, "-u", username, "--", "env", "XDG_RUNTIME_DIR=/run/user/"+u.Uid,
+		"systemctl", "--user", "is-active", unit).Output()
+	return first(out)
 }
 
 // userModeSystemdUnits are a user-mode endpoint's systemd user units: the collector and the
