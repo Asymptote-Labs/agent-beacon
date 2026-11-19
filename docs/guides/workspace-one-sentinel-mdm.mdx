@@ -88,7 +88,7 @@ Create one app and two scripts, scoped to the pilot smart group:
 
 Workspace ONE does not order an app and scripts by itself. Both scripts exit with an error until Beacon is installed, so give them a schedule or a retry, and the app installs first in practice.
 
-If a scheduled task ships the log today, remove it before the forwarder script runs, and add `--read-from end` to the forwarder command, or every line already shipped is sent again.
+If a scheduled task ships the log today, remove it before the forwarder script runs, and add `--read-from end` to the forwarder command, or every line already shipped is sent again. With `--read-from end`, events written while the forwarder is stopped can be lost if the log fills up and rotates before it starts again, so leave it out when you forward into a new table.
 
 ### App: the Beacon MSI
 
