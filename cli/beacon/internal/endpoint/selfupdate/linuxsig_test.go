@@ -122,6 +122,9 @@ func testVerifyReleaseSignature(t *testing.T) {
 // A package behind a short-lived download link (the enterprise edition's) is not beside its
 // checksums.txt: the platform names the package's file name and the signed checksums' own links.
 func TestVerifyReleaseSignatureAtLinksThePlatformNames(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("release signatures are verified on Linux only")
+	}
 	if _, err := exec.LookPath("gpgv"); err != nil {
 		t.Skip("gpgv is not installed")
 	}
