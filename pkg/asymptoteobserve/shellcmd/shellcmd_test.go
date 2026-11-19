@@ -3,6 +3,7 @@ package shellcmd
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -122,6 +123,7 @@ func TestFileEffects(t *testing.T) {
 		{"/usr/bin/env FOO=1 rm a.txt", []string{"delete a.txt"}},
 		{"sudo -E tee /etc/app.conf < in.txt", []string{"write /etc/app.conf"}},
 		{"sudo -i rm old.txt", nil}, // a login shell starts in the target user's home
+		{"sudo -l rm old.txt", nil}, // asks whether rm is allowed
 		{"env FOO=1 rm a.txt", []string{"delete a.txt"}},
 		{"env -C sub rm a.txt", nil},
 		{"rm a.txt # cleanup b.txt", []string{"delete a.txt"}},
@@ -202,6 +204,123 @@ func TestFileEffects(t *testing.T) {
 		if all := FileEffects(commands); len(all) != len(got) {
 			t.Errorf("FileEffects(Parse(%q)) has %d effects, want %d", tc.command, len(all), len(got))
 		}
+		// Every effect is a write, in the same order: a write only adds the paths an effect
+		// leaves out.
+		for _, c := range commands {
+			writes := c.FileWrites()
+			for _, e := range c.FileEffects() {
+				i := slices.Index(writes, e)
+				if i < 0 {
+					t.Errorf("FileWrites(%q) = %v, which lacks the effect %v", tc.command, writes, e)
+					break
+				}
+				writes = writes[i+1:]
+			}
+		}
+	}
+}
+
+// TestFileWrites pins the writes whose path is only known as written, which FileEffects leaves
+// out: a rule asks whether a command writes a login file or an agent's settings, and those are
+// under a home directory or a variable more often than not.
+func TestFileWrites(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    []string
+	}{
+		// Redirections.
+		{"echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc", []string{"append ~/.bashrc"}},
+		{`printf '%s\n' "$KEY" > "$HOME/.ssh/authorized_keys"`, []string{"write $HOME/.ssh/authorized_keys"}},
+		{"sudo bash -c 'cat key.pub >> ~root/.ssh/authorized_keys'", nil}, // the script is its own parse
+		{"make > \"$out\" 2>&1", []string{"write $out"}},
+		{"make >&\"$log\"", nil}, // may be a descriptor
+		{"echo x > \"$TTY\" 2> /dev/null", []string{"write $TTY"}},
+		{"echo x > ''", nil},
+		// The operands of the commands FileEffects reads.
+		{"rm -f ~/.bash_history", []string{"delete ~/.bash_history"}},
+		{"truncate -s 0 $HISTFILE", []string{"truncate $HISTFILE"}},
+		{"tee -a ~/.zshrc ./local.log", []string{"append ~/.zshrc", "append ./local.log"}},
+		{"touch \"$dir/.keep\"", []string{"touch $dir/.keep"}},
+		{"sed -i '' 's/a/b/' ~/.claude/settings.json", []string{"edit ~/.claude/settings.json"}},
+		{"sed -i \"s/$A/b/\" conf.ini", []string{"edit conf.ini"}},
+		{"cp hooks.json ~/.cursor/hooks.json", []string{"write ~/.cursor/hooks.json"}},
+		{"shred -u ~/.bash_history", []string{"delete ~/.bash_history"}},
+		{"shred -n 3 -z disk.img", []string{"write disk.img"}},
+		{"cp -r skills ~/.claude/", []string{"write ~/.claude/skills"}},
+		{"cp a.md b.md \"$DEST\"", []string{"write $DEST/a.md", "write $DEST/b.md"}},
+		{"cp ~/.claude/settings.json /tmp/backup.json", []string{"write /tmp/backup.json"}},
+		{"install -m 600 key ~/.ssh/id_ed25519", []string{"write ~/.ssh/id_ed25519"}},
+		{"ln -sf \"$PWD/rc\" ~/.zshrc", []string{"link ~/.zshrc"}},
+		{"mv ~/.zsh_history /tmp/h", []string{"move_from ~/.zsh_history", "move_to /tmp/h"}},
+		{"mv draft.md ~/notes/", []string{"move_from draft.md", "move_to ~/notes/draft.md"}},
+		// A command whose words are all known writes its effects and nothing more.
+		{"cp a.txt out/b.txt && echo ok > log.txt", []string{"write out/b.txt", "write log.txt"}},
+		// What is not a write is not one as written either: a source, a read, a device.
+		{"cat ~/.bashrc", nil},
+		{"cp ~/.bashrc \"$BACKUP\" 2> /dev/null", []string{"write $BACKUP"}},
+		{"grep -q x ~/.zshrc > /dev/null", nil},
+	} {
+		commands, err := Parse(tc.command)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", tc.command, err)
+			continue
+		}
+		var got []string
+		for _, c := range commands {
+			for _, e := range c.FileWrites() {
+				got = append(got, string(e.Op)+" "+e.Path)
+			}
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("FileWrites(%q) = %q, want %q", tc.command, got, tc.want)
+		}
+	}
+}
+
+// export, declare, local, readonly and typeset are commands of the line: the builtin is the
+// name, and each option and NAME=value is one word, known when its value is.
+func TestDeclarationsAreCommands(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    []string // per command: name, then its words as text, "?" + as written when unknown
+	}{
+		{"export HISTFILE=/dev/null; ls", []string{"export HISTFILE=/dev/null", "ls"}},
+		{"export -n HISTSIZE", []string{"export -n HISTSIZE"}},
+		{`export PATH="/tmp/bin:$PATH" EDITOR=vi`, []string{`export ?PATH="/tmp/bin:$PATH" EDITOR=vi`}},
+		{"declare -x HISTSIZE=0 && readonly HISTFILE", []string{"declare -x HISTSIZE=0", "readonly HISTFILE"}},
+		{"f() { local n=1; echo $n; }", []string{"local n=1", "echo ?$n"}},
+		{"typeset -a list=(a b)", []string{"typeset -a ?list=(a b)"}},
+		{"export T=$(cat .env)", []string{"export ?T=$(cat .env)", "cat .env"}},
+		{"export -p | grep TOKEN", []string{"export -p", "grep TOKEN"}},
+		{"sudo env FOO=1 export BAR=2", []string{"export BAR=2"}}, // a word of env, not a declaration
+		{"HISTFILE=/dev/null", []string{""}},                      // an assignment alone is no command
+	} {
+		commands, err := Parse(tc.command)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", tc.command, err)
+			continue
+		}
+		var got []string
+		for _, c := range commands {
+			words, _ := c.Unwrapped()
+			var text []string
+			for _, w := range words {
+				if w.Known {
+					text = append(text, w.Text)
+				} else {
+					text = append(text, "?"+w.Raw)
+				}
+			}
+			got = append(got, strings.Join(text, " "))
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("Parse(%q) runs %q, want %q", tc.command, got, tc.want)
+		}
+	}
+	// A declaration in a pipeline is a stage of it.
+	commands, _ := Parse("export -p | grep TOKEN")
+	if len(commands) != 2 || commands[0].Pipeline != commands[1].Pipeline || commands[1].Stage != 1 {
+		t.Errorf("export -p | grep: %+v", commands)
 	}
 }
 
@@ -388,6 +507,13 @@ func TestUnwrapped(t *testing.T) {
 		{"/usr/bin/nohup /usr/bin/time git mv a b", "git", true, []string{"git", "mv"}},
 		{"/usr/bin/sudo -i rm x", "", false, nil},
 		{"sudo --login rm x", "", false, nil},
+		// sudo -l asks whether the command is allowed and does not run it; -v and -e run none.
+		{"sudo -l -u postgres dropdb app", "", false, nil},
+		{"sudo -nl rm x", "", false, nil},
+		{"sudo --list rm x", "", false, nil},
+		{"sudo -v", "", false, nil},
+		{"sudo -e /etc/hosts", "", false, nil},
+		{"sudo -n rm x", "rm", true, []string{"rm"}},
 		{"env -C sub rm x", "", false, nil},
 		{"env --split-string='rm x'", "", false, nil},
 		{"timeout 5 cat .env", "cat", true, []string{"cat"}},

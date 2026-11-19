@@ -36,15 +36,18 @@ func TestParsedCommandsShape(t *testing.T) {
 			Argv:        []string{"sudo", "-u", "root", "/bin/bash", "-s"},
 			ArgvRaw:     []string{"sudo", "-u", "root", "/bin/bash", "-s"},
 			FileEffects: []asymptoteobserve.ParsedFileEffect{{Path: "out.log", Op: "write"}},
+			FileWrites:  []asymptoteobserve.ParsedFileEffect{{Path: "out.log", Op: "write"}},
 			Pipeline:    1,
 			Stage:       1,
 		},
 		{
-			Name:     "rm",
-			Args:     "-rf\n\n",
-			Argv:     []string{"rm", "-rf", "", ""},
-			ArgvRaw:  []string{"rm", "-rf", "~/x", "$HOME"},
-			Pipeline: 2,
+			// What rm deletes is only known as written: an effect of neither, a write of both.
+			Name:       "rm",
+			Args:       "-rf\n\n",
+			Argv:       []string{"rm", "-rf", "", ""},
+			ArgvRaw:    []string{"rm", "-rf", "~/x", "$HOME"},
+			FileWrites: []asymptoteobserve.ParsedFileEffect{{Path: "~/x", Op: "delete"}, {Path: "$HOME", Op: "delete"}},
+			Pipeline:   2,
 		},
 	}
 	if !reflect.DeepEqual(got, want) {

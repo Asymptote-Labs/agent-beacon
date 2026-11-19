@@ -143,7 +143,9 @@ var derivedFieldDocs = map[string]string{
 		"  passed, \"\" when it depends on an expansion, glob or `~`; and as written), `args` (spec\n" +
 		"  v1.3: the words after the name, one per line, so `c.args.matches(\"(?m)^auth\\ntoken$\")`\n" +
 		"  asks for two whole words that follow each other), `env` (NAME=value prefixes),\n" +
-		"  `file_effects` (`{path, op}`), `file_reads` (spec v1.3, `{path, via}`: the files whose\n" +
+		"  `file_effects` (`{path, op}`), `file_writes` (spec v1.3, `{path, op}`: the files it\n" +
+		"  writes with each path as written, so a write to `~/.bashrc` or `$HOME/.netrc`, which\n" +
+		"  `file_effects` leaves out, is listed), `file_reads` (spec v1.3, `{path, via}`: the files whose\n" +
 		"  content it takes in, each as written without its quotes, so `~/.aws/credentials` and\n" +
 		"  `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one\n" +
 		"  that reaches its standard input by a redirection or a pipe, `argument` for one a\n" +
@@ -155,9 +157,15 @@ var derivedFieldDocs = map[string]string{
 		"  earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`\n" +
 		"  (0-based) and `nested` (inside `$(...)`, `<(...)` or a shell's script: its `-c` text, or\n" +
 		"  the here-document it reads, which are read too).\n" +
-		"  Other here-document bodies and strings are not commands.\n" +
+		"  Other here-document bodies and strings are not commands. A declaration is one (spec\n" +
+		"  v1.3): `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.\n" +
 		fmt.Sprintf("  The first %d bytes are read; a cut capture yields the commands before the cut, and\n", ParsedCommandsLimit) +
 		"  one that does not parse yields an empty list.",
+	ParsedIncompletePath: "true when `command.command` was not read to its end (spec v1.3):\n" +
+		"  it does not parse, it ends inside a quote, a here-document, a substitution or a compound\n" +
+		"  command (as a cut capture does), or it is longer than the engine reads.\n" +
+		"  `e.command.parsed_commands` then lists the commands before that point only, so a rule\n" +
+		"  that concludes something from a command's absence asks this first.",
 	ToolResultTextPath: "`gen_ai.tool.call.result` as text, only on read-type tool\n" +
 		"  results (`file.read`, `mcp.tool_invoked`, MCP-named tools, web fetch/search tools, a\n" +
 		"  `tool.path` that is an http(s) URL) whose content was retained. String leaves of an\n" +

@@ -17,6 +17,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.command.exit_code` | int |
 | `e.command.output` | string |
 | `e.command.parsed_commands` | list(asymptoteobserve.ParsedCommand) |
+| `e.command.parsed_incomplete` | bool |
 | `e.content.bytes` | int |
 | `e.content.hash` | string |
 | `e.content.included` | bool |
@@ -189,7 +190,9 @@ never written to or read from the log, so a fixture sets the source field, not t
   passed, "" when it depends on an expansion, glob or `~`; and as written), `args` (spec
   v1.3: the words after the name, one per line, so `c.args.matches("(?m)^auth\ntoken$")`
   asks for two whole words that follow each other), `env` (NAME=value prefixes),
-  `file_effects` (`{path, op}`), `file_reads` (spec v1.3, `{path, via}`: the files whose
+  `file_effects` (`{path, op}`), `file_writes` (spec v1.3, `{path, op}`: the files it
+  writes with each path as written, so a write to `~/.bashrc` or `$HOME/.netrc`, which
+  `file_effects` leaves out, is listed), `file_reads` (spec v1.3, `{path, via}`: the files whose
   content it takes in, each as written without its quotes, so `~/.aws/credentials` and
   `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one
   that reaches its standard input by a redirection or a pipe, `argument` for one a
@@ -201,9 +204,15 @@ never written to or read from the log, so a fixture sets the source field, not t
   earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`
   (0-based) and `nested` (inside `$(...)`, `<(...)` or a shell's script: its `-c` text, or
   the here-document it reads, which are read too).
-  Other here-document bodies and strings are not commands.
+  Other here-document bodies and strings are not commands. A declaration is one (spec
+  v1.3): `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.
   The first 4096 bytes are read; a cut capture yields the commands before the cut, and
   one that does not parse yields an empty list.
+- `e.command.parsed_incomplete`: true when `command.command` was not read to its end (spec v1.3):
+  it does not parse, it ends inside a quote, a here-document, a substitution or a compound
+  command (as a cut capture does), or it is longer than the engine reads.
+  `e.command.parsed_commands` then lists the commands before that point only, so a rule
+  that concludes something from a command's absence asks this first.
 - `e.gen_ai.system_instructions_text`: `gen_ai.system_instructions` as text: the `content` of each
   `text` part, one per line (a bare string as is), when content was retained. These are
   runtime-provided instructions such as a skill index, never operator prompt text.

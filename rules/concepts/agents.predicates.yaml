@@ -1,0 +1,71 @@
+# Which commands are a coding agent, said once for the rules about one agent starting,
+# configuring or handing work to another.
+#
+# Four rules ask it: agent-permission-bypass-spawn, permission-scope-expansion-via-env,
+# handoff-to-second-agent-with-credentials and agent-extension-installed-by-command. Three of
+# them listed seven agents and the fourth nine, with five names on one side only; a new agent
+# CLI is added here.
+library: agents
+version: 1
+spec: threat-rules/v1.3
+description: A command that runs a coding agent's CLI.
+
+definitions:
+  - name: agent_cli
+    params: [c]
+    description: >
+      A parsed command runs a coding agent's command-line program: claude, codex,
+      cursor-agent, aider, goose, opencode, gemini, qwen, kiro-cli, amp or copilot, by its
+      name or its package name (claude-code, gemini-cli, qwen-code, opencode-ai), directly or
+      through npx, bunx or pnpm dlx with an optional -y and an optional package scope. The
+      name is the command after sudo, env, timeout and the like, by any path. An agent's name
+      as a word of another command (a commit message, a path) is not one.
+    body: >
+      c.name.matches("(?i)^(claude(-code)?|codex|cursor-agent|aider|goose|opencode(-ai)?|gemini(-cli)?|qwen(-code)?|kiro-cli|amp|copilot)$") ||
+      (c.name.matches("(?i)^pnpm$") ?
+        c.args.matches("(?i)\\Adlx\\n(-y\\n)?([^\\n]*/)?(claude(-code)?|codex|cursor-agent|aider|goose|opencode(-ai)?|gemini(-cli)?|qwen(-code)?|kiro-cli|amp|copilot)(\\n|\\z)") :
+        c.name.matches("(?i)^(npx|bunx)$") &&
+        c.args.matches("(?i)\\A(-y\\n)?([^\\n]*/)?(claude(-code)?|codex|cursor-agent|aider|goose|opencode(-ai)?|gemini(-cli)?|qwen(-code)?|kiro-cli|amp|copilot)(\\n|\\z)"))
+    tests:
+      - name: an_agent_by_name
+        match: e.command.parsed_commands.exists(c, agent_cli(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "claude -p 'summarize the diff'" }
+      - name: an_agent_under_sudo_and_env_by_path
+        match: e.command.parsed_commands.exists(c, agent_cli(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "sudo env TERM=dumb /usr/local/bin/codex exec 'run the tests'" }
+      - name: an_agent_through_npx_by_its_package
+        match: e.command.parsed_commands.exists(c, agent_cli(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "npx -y @anthropic-ai/claude-code --version" }
+      - name: an_agent_inside_a_shell_script
+        match: e.command.parsed_commands.exists(c, agent_cli(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "bash -c 'cd repo && gemini -p \"review this\"'" }
+      - name: an_agent_named_in_a_commit_message
+        match: e.command.parsed_commands.exists(c, agent_cli(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git commit -m 'docs: how to run claude and codex side by side'" }
+      - name: a_directory_named_for_an_agent
+        match: e.command.parsed_commands.exists(c, agent_cli(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ls -la ~/.claude && cat ~/.codex/config.toml" }
+      - name: another_package_run_through_npx
+        match: e.command.parsed_commands.exists(c, agent_cli(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "npx -y prettier --check ." }

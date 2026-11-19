@@ -1,14 +1,18 @@
 id: git-remote-tampering
-version: 5
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 6
 title: Git remote repointed or force-push to remote
 description: >
   A command repoints a git remote (remote set-url / remote add, the config-key form
   remote.<name>.url or remote.<name>.pushurl set to a value, or the same key passed
   for one command with git -c), force-pushes (--force / --force-with-lease / -f / a
   leading + refspec), or installs an insteadOf URL rewrite — ways to redirect
-  code to an attacker-controlled destination or overwrite remote history. Every clause
-  is git-anchored to a command boundary and kept within one command segment, so a
-  benign mention, a `grep insteadOf`, or a read-only `git config --get` does not fire.
+  code to an attacker-controlled destination or overwrite remote history. The command
+  is found by what the line runs: a git command, also under sudo, by path, inside
+  `bash -c` or after git's own options (`git -C dir push --force`), whose subcommand
+  and words say so. The same words in a commit message, an echo or a here-document do
+  not fire, nor does a read (`git config --get`, or a key with no value after it). A
+  line the parser cannot vouch for (see command_unread) is matched on its text.
 severity: high
 status: stable
 posture: detect
@@ -16,13 +20,35 @@ taxonomy:
   beacon_category: source-control
   owasp_llm: LLM03
 
+# The subcommand is the first word after git's own options, of which -C, -c, --git-dir,
+# --work-tree and --namespace take the next word as their value; a word whose value is
+# unknown (`git $OPTS push`) is passed over as an option. A config key and a force
+# option are read as written (argv_raw) where a variable may be part of the word
+# (`url."https://$HOST/".insteadOf`, `--force-with-lease=topic:$old`, `"+$branch"`), since
+# args leaves such a word empty. `git config KEY` alone prints the key, so a key that is
+# the last word is a read. Any word that begins --force counts, as it did in the text: git
+# accepts an unambiguous abbreviation of a long option (--force-with-lea), and a capture
+# may be cut inside the word.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bremote\\b\\s+(set-url|add)\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bconfig\\b[^;&|]*\\bremote\\.[^ ]+\\.(push)?url\\b\\s+\\S") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\s-c\\s+[\"']?remote\\.[^\\s=]+\\.(push)?url=") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b|\\s\\+)") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\binsteadof\\b")
+    e.command.parsed_commands.exists(c, c.name == "git" && (
+      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*remote\\n(set-url|add)(\\n|\\z)") ||
+      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*config\\n") &&
+        !c.args.matches("(?m)^(--get(-all|-regexp|-urlmatch)?|--unset(-all)?|--list|-l)$|^config\\n(-[^\\n]*\\n)*(get|unset|list)$") &&
+        c.argv_raw.exists(a, a.matches("(?i)^[\"']?(remote\\..+\\.(push)?url|url\\..+\\.insteadof)[\"']?$")) &&
+        !c.argv_raw[size(c.argv_raw) - 1].matches("(?i)^[\"']?(remote\\..+\\.(push)?url|url\\..+\\.insteadof)[\"']?$") ||
+      c.args.matches("(?m)^-c$") &&
+        c.argv_raw.exists(a, a.matches("(?i)^[\"']?(remote\\.[^\\s=]+\\.(push)?url|url\\.[^\\s=]+\\.insteadof)=")) ||
+      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*push(\\n|\\z)") && (
+        c.args.matches("(?m)^-[vqnud46]*f[vqnud46]*$") ||
+        c.argv_raw.exists(a, a.matches("^[\"']?(--force\\b|\\+)")))
+    )) ||
+    ((e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bremote\\b\\s+(set-url|add)\\b") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bconfig\\b[^;&|]*\\bremote\\.[^ ]+\\.(push)?url\\b\\s+\\S") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\s-c\\s+[\"']?remote\\.[^\\s=]+\\.(push)?url=") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b|\\s\\+)") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\binsteadof\\b")) &&
+      command_unread(e))
   )
 
 emit:
@@ -112,4 +138,94 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "man git-config | grep insteadOf" }
+        session: { id: s1 }
+  - name: force_push_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo git push --force origin topic" }
+        session: { id: s1 }
+  - name: remote_set_url_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'git remote set-url origin https://mirror.example/x.git'" }
+        session: { id: s1 }
+  - name: force_push_by_absolute_path_after_git_options
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/git -C /srv/repo push origin topic --force-with-lease" }
+        session: { id: s1 }
+  - name: force_push_in_a_cluster_of_short_options
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push -fu origin topic" }
+        session: { id: s1 }
+  - name: force_with_lease_on_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "old=$(git rev-parse origin/topic); git push --force-with-lease=topic:$old origin HEAD:topic" }
+        session: { id: s1 }
+  - name: instead_of_rewrite_with_a_variable_in_the_key
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config --global url.\"https://$MIRROR_HOST/\".insteadOf https://github.com/" }
+        session: { id: s1 }
+  - name: instead_of_rewrite_for_one_clone
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clone -c url.https://mirror.example/.insteadOf=https://github.com/ https://github.com/org/repo.git" }
+        session: { id: s1 }
+  - name: remote_add_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'cd /srv/repo && git remote add mirror https://mirror.example/x.git'" }
+        session: { id: s1 }
+  - name: read_then_set_on_one_line
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config --get remote.origin.url; git config remote.origin.url https://mirror.example/x.git" }
+        session: { id: s1 }
+  - name: force_push_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: never git push --force, and leave git remote set-url to the admins'" }
+        session: { id: s1 }
+  - name: force_push_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\ngit push --force origin main\ngit config url.https://mirror.example/.insteadOf https://github.com/\nEOF" }
+        session: { id: s1 }
+  - name: read_of_a_remote_url_with_a_fallback
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config --get remote.origin.url || echo none" }
+        session: { id: s1 }
+  - name: instead_of_rewrites_listed
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config --global --get-regexp 'url\\..*\\.insteadof'" }
+        session: { id: s1 }
+  - name: push_of_a_stash_is_not_a_push
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git stash push -m 'wip: before --force test' && git push origin topic" }
+        session: { id: s1 }
+  - name: force_option_cut_short
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push -q --force-with-lea origin HEAD:topic" }
         session: { id: s1 }

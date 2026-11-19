@@ -263,7 +263,8 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 	if ok && call == nil && stmt.Cmd != nil {
 		p.compounds = append(p.compounds, compound{start: stmt.Pos().Offset(), end: stmt.End().Offset(), stage: st})
 	}
-	if decl, ok := stmt.Cmd.(*syntax.DeclClause); ok {
+	decl, isDecl := stmt.Cmd.(*syntax.DeclClause)
+	if isDecl {
 		exported := decl.Variant != nil && decl.Variant.Value == "export"
 		for _, as := range decl.Args {
 			switch {
@@ -276,7 +277,7 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			}
 		}
 	}
-	if call == nil && len(stmt.Redirs) == 0 {
+	if call == nil && !isDecl && len(stmt.Redirs) == 0 {
 		return
 	}
 	if !ok {
@@ -337,6 +338,12 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			}
 		}
 		c.Argv, c.refs = p.callArgs(call, c.refs)
+	}
+	// export, declare, local, readonly and typeset are commands of the line too, with the
+	// builtin as their name and each option and NAME=value as a word. What they assign is
+	// carried to the statements after them (declared), not read from these words.
+	if isDecl {
+		c.Argv = p.declWords(decl)
 	}
 	for i, r := range stmt.Redirs {
 		c.Redirects = append(c.Redirects, p.redirect(r))
@@ -419,6 +426,44 @@ func (p *parser) assign(as *syntax.Assign) Assign {
 		a.Value = p.word(as.Value, as.Value)
 	}
 	return a
+}
+
+// declWords returns a declaration as the words of a command: the builtin, then each option and
+// each NAME, NAME=value or NAME+=value as one word. An array or an indexed assignment is a
+// word whose value is unknown.
+func (p *parser) declWords(decl *syntax.DeclClause) []Word {
+	words := make([]Word, 0, 1+len(decl.Args))
+	if decl.Variant != nil {
+		words = append(words, Word{Text: decl.Variant.Value, Raw: decl.Variant.Value, Unquoted: decl.Variant.Value, Known: true})
+	}
+	for _, as := range decl.Args {
+		switch {
+		case as.Name == nil:
+			if as.Value != nil {
+				words = append(words, p.word(as.Value, as.Value))
+			}
+		case as.Index != nil || as.Array != nil:
+			raw := p.raw(as)
+			words = append(words, Word{Raw: raw, Unquoted: raw})
+		default:
+			w := Word{Raw: p.raw(as), Unquoted: as.Name.Value, Known: true}
+			if !as.Naked {
+				if as.Append {
+					w.Unquoted += "+"
+				}
+				w.Unquoted += "="
+				if as.Value != nil {
+					value := p.word(as.Value, as.Value)
+					w.Unquoted, w.Known = w.Unquoted+value.Unquoted, value.Known
+				}
+			}
+			if w.Known {
+				w.Text = w.Unquoted
+			}
+			words = append(words, w)
+		}
+	}
+	return words
 }
 
 func (p *parser) redirect(r *syntax.Redirect) Redirect {

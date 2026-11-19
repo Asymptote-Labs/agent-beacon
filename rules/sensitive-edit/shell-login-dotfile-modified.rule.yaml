@@ -1,5 +1,6 @@
 id: shell-login-dotfile-modified
-version: 2
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 3
 title: Shell rc / login dotfile modified
 description: >
   The agent modified a shell startup or login dotfile (.bashrc, .bash_profile,
@@ -15,14 +16,42 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
+# Which file is one definition (login_dotfile, rules/concepts/sensitive-files.predicates.yaml),
+# asked of a file event's path and of every path a shell command writes (c.file_writes: a
+# redirection, tee, sed -i, cp, mv), under `~` or a variable too.
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] &&
-  e.file.path.matches("(?i)(^|/)(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc)$|(?i)(^|/)\\.config/fish/config\\.fish$")
+  (
+    e.event.action in ["file.modified", "file.created", "file.edited"] &&
+    login_dotfile(e.file.path)
+  ) || (
+    e.event.action == "command.executed" &&
+    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
+      login_dotfile(f.path)))
+  )
 
 emit:
   reason: "Shell rc / login dotfile modified — runs on every new shell/login, durable user-level persistence"
 
 tests:
+  - name: line_appended_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'alias ls=\"ls -la\"' >> ~/.bashrc" }
+        session: { id: s1 }
+  - name: line_appended_under_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "printf 'source %s\\n' /tmp/x.sh | tee -a \"$HOME/.zshrc\" >/dev/null" }
+        session: { id: s1 }
+  - name: dotfile_only_sourced
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "source ~/.zshrc && grep -n PATH ~/.bashrc" }
+        session: { id: s1 }
   - name: bashrc_edit
     verdict: match
     events:

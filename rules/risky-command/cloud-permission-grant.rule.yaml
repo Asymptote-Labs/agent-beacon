@@ -1,11 +1,16 @@
 id: cloud-permission-grant
-version: 1
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 2
 title: Cloud credentials created or permissions granted
 description: >
   An agent creates cloud access keys, attaches or adds IAM policies or bindings,
   assigns an Azure role, resets service-principal credentials, or creates a
   Kubernetes role binding. This records a privileged action for review, not
-  proof that the resulting permissions were broader or malicious.
+  proof that the resulting permissions were broader or malicious. The command is
+  found by what the line runs, so the same words in a commit message, an echo or
+  a here-document do not fire and the client under `sudo env`, by any path or
+  inside `bash -c` does; a line the parser cannot vouch for (see command_unread)
+  is matched on its text.
 severity: high
 status: experimental
 posture: detect
@@ -13,17 +18,34 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM06
 
-# Command prefixes accept environment assignments, relative executable paths, and
+# Each client is a parsed command, named after sudo, env and the like and by any path, and
+# its subcommand is words of that command that follow each other. az takes its command
+# group first (`az deployment group ...` is not `az group ...`); the others may have global
+# options or a release track before it. bq takes its command after its global flags. A
+# command behind sudo -l or sudo -v is not run and has no name, so its line is left to the
+# text.
+#
+# The text patterns are those of version 1, applied to a line the parser cannot vouch for.
+# Their command prefixes accept environment assignments, relative executable paths, and
 # sudo execution options. Value-taking sudo options consume their argument;
 # inspection modes such as sudo -l/-v are not execution prefixes.
 match: >
   e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c,
+      c.name == "aws" && c.args.matches("(?m)^iam\\n(?:create-access-key|attach-(?:user|group|role)-policy|put-(?:user|group|role)-policy|create-policy|create-policy-version|add-user-to-group)$") ||
+      c.name == "gcloud" && c.args.matches("(?m)^iam\\nservice-accounts\\nkeys\\ncreate$|^(?:projects|organizations|folders|iam\\nservice-accounts)\\n(?:add-iam-policy-binding|set-iam-policy)$|^(?:storage\\nbuckets|run\\nservices|secrets)\\nadd-iam-policy-binding$") ||
+      c.name == "bq" && c.args.matches("(?m)\\A(?:--?[A-Za-z][^\\n]*\\n(?:[^-\\n][^\\n]*\\n)?)*(?:add-iam-policy-binding|set-iam-policy)$") ||
+      c.name == "az" && c.args.matches("(?m)\\A(?:role\\nassignment\\ncreate|ad\\nsp\\ncredential\\nreset)$") ||
+      c.name == "kubectl" && c.args.matches("(?m)^create\\n(?:rolebinding|clusterrolebinding)$")
+    ) ||
+    (
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+iam[ \\t]+(?:create-access-key|attach-(?:user|group|role)-policy|put-(?:user|group|role)-policy|create-policy|create-policy-version|add-user-to-group)(?:[ \\t]|$|[;&|\\n<>#])") ||
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+iam[ \\t]+service-accounts[ \\t]+keys[ \\t]+create(?:[ \\t]|$|[;&|\\n<>#])") ||
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:projects|organizations|folders|iam[ \\t]+service-accounts)[ \\t]+(?:add-iam-policy-binding|set-iam-policy)(?:[ \\t]|$|[;&|\\n<>#])") ||
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:storage[ \\t]+buckets|run[ \\t]+services|secrets)[ \\t]+add-iam-policy-binding(?:[ \\t]|$|[;&|\\n<>#])") ||
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?az[ \\t]+(?:role[ \\t]+assignment[ \\t]+create|ad[ \\t]+sp[ \\t]+credential[ \\t]+reset)(?:[ \\t]|$|[;&|\\n<>#])") ||
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?kubectl(?:[ \\t]+(?:-n|--namespace|--context|--kubeconfig)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+create[ \\t]+(?:rolebinding|clusterrolebinding)(?:[ \\t]|$|[;&|\\n<>#])")
+    ) && command_unread(e)
   )
 
 emit:
@@ -323,4 +345,106 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "NOTE=\"aws iam create-access-key\" echo ok" }
+        session: { id: s1 }
+  - name: gcloud_under_sudo_and_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo env CLOUDSDK_CORE_PROJECT=prod gcloud projects add-iam-policy-binding prod --member user:dev@example.test --role roles/editor" }
+        session: { id: s1 }
+  - name: kubectl_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'kubectl create clusterrolebinding ops --clusterrole=cluster-admin --user=agent'" }
+        session: { id: s1 }
+  - name: aws_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/local/bin/aws iam attach-role-policy --role-name agent --policy-arn arn:aws:iam::aws:policy/PowerUserAccess" }
+        session: { id: s1 }
+  - name: aws_with_other_global_options_first
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws --output json --no-cli-pager iam add-user-to-group --group-name admins --user-name agent" }
+        session: { id: s1 }
+  - name: gcloud_beta_release_track
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud beta run services add-iam-policy-binding web --member allUsers --role roles/run.invoker" }
+        session: { id: s1 }
+  - name: az_in_a_remote_command_line
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh ops@host.example 'cd /srv/deploy && az role assignment create --assignee agent --role Owner'" }
+        session: { id: s1 }
+  - name: aws_in_a_here_document_sent_to_a_remote_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh ops@host.example <<'EOF'\naws iam create-access-key --user-name agent\nEOF" }
+        session: { id: s1 }
+  - name: aws_named_in_a_commit_message_body
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'runbook: how the deploy user gets a key\n\naws iam create-access-key --user-name agent'" }
+        session: { id: s1 }
+  - name: aws_named_in_a_here_document_written_to_a_file
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nThe deploy user was given its key with:\naws iam create-access-key --user-name agent\nEOF" }
+        session: { id: s1 }
+  - name: aws_named_in_an_echo_after_a_separator
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'next: review the policy; aws iam attach-user-policy --user-name agent'" }
+        session: { id: s1 }
+  - name: sudo_listing_what_it_may_run
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -l aws iam create-access-key --user-name agent" }
+        session: { id: s1 }
+  - name: gcloud_binding_removed
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud projects remove-iam-policy-binding prod --member user:dev@example.test --role roles/editor" }
+        session: { id: s1 }
+  - name: az_application_credentials_listed
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az ad app credential list --id app" }
+        session: { id: s1 }
+  - name: bq_binding_added_to_a_table
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bq query --nouse_legacy_sql 'select count(*) from warehouse.targets' | tail -1 && bq add-iam-policy-binding --member=serviceAccount:agent@example.test --role=roles/bigquery.dataViewer prod:warehouse.targets" }
+        session: { id: s1 }
+  - name: bq_policy_set_after_global_flags
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo bq --project_id prod --format=json set-iam-policy warehouse.targets policy.json" }
+        session: { id: s1 }
+  - name: bq_policy_read
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bq get-iam-policy --project_id=prod --format=json warehouse.targets" }
+        session: { id: s1 }
+  - name: bq_help_for_the_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bq help add-iam-policy-binding" }
         session: { id: s1 }

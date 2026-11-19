@@ -1,5 +1,6 @@
 id: ssh-tunnel-egress
-version: 2
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 3
 title: SSH tunnel opened for egress (local / remote forward or SOCKS)
 description: >
   An SSH client is invoked with a -R (remote) port-forward, -L (local)
@@ -10,11 +11,16 @@ description: >
   for any tool that honours the SOCKS env. From an agent session,
   opening any of these tunnels is almost always suspicious: the agent
   has no legitimate reason to expose a port on either side of its
-  operator's network. The rule is anchored on the ssh binary at a
-  command boundary and matches the long form (--remote-forward,
+  operator's network. The rule matches the long form (--remote-forward,
   --local-forward, --dynamic) and the short form (-R/-L/-D) wherever it
   appears among the arguments, including inside a cluster of boolean
-  flags such as -fNL.
+  flags such as -fNL. ssh, scp or sftp is found by what the line runs
+  and the flag must be one of its words, so it fires under sudo, nohup
+  or timeout, inside `bash -c` and by path, and not for the same text
+  in a commit message or a here-document. ssh may run a remote command,
+  so every line that runs it is one the parser cannot vouch for (see
+  command_unread) and is also matched on its text, where ssh must stand
+  at a command boundary.
 severity: high
 status: experimental
 posture: detect
@@ -23,9 +29,14 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
+# The flag and its port are one word (-R8080:localhost:80) or two in a row (-R, then
+# 8080:localhost:80), so the pattern over args allows one newline between them.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(ssh|scp|sftp)\\b([^;&|]*\\s)?((?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*[RL])\\s*\\d+:|(?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*D)\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b)")
+    e.command.parsed_commands.exists(c, c.name.matches("^(ssh|scp|sftp)$") &&
+      c.args.matches("(?m)^-[46AaCfGgKkMNnqsTtVvXxYy]*[RL]\\n?\\d+:|^-[46AaCfGgKkMNnqsTtVvXxYy]*D\\n?\\d+\\b|^--(remote-forward|local-forward|dynamic)\\b")) ||
+    (e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(ssh|scp|sftp)\\b([^;&|]*\\s)?((?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*[RL])\\s*\\d+:|(?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*D)\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b)") &&
+      command_unread(e))
   )
 
 emit:
@@ -103,4 +114,58 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'never run ssh -R in this repo' > notes.txt" }
+        session: { id: s1 }
+  - name: tunnel_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'ssh -fN -R 8080:localhost:80 relay.example'" }
+        session: { id: s1 }
+  - name: ssh_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/ssh -D 1080 user@jump.example" }
+        session: { id: s1 }
+  - name: ssh_under_nohup_and_timeout
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "nohup timeout 600 ssh -N -L 5432:db.internal:5432 bastion.example &" }
+        session: { id: s1 }
+  - name: port_attached_to_the_flag
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -NR8080:localhost:80 relay.example" }
+        session: { id: s1 }
+  - name: tunnel_opened_from_a_remote_host
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh jump.example 'ssh -R 8080:localhost:80 relay.example'" }
+        session: { id: s1 }
+  - name: tunnel_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: do not tunnel; ssh -R 8080:localhost:80 relay.example is blocked'" }
+        session: { id: s1 }
+  - name: tunnel_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nDo not open tunnels; ssh -R 8080:localhost:80 relay.example is blocked.\nEOF" }
+        session: { id: s1 }
+  - name: login_name_and_port_flags
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -l deploy -p 2200 host.example 'df -h'" }
+        session: { id: s1 }
+  - name: recursive_copy
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "scp -r -P 2200 dist deploy@host.example:/srv/app" }
         session: { id: s1 }

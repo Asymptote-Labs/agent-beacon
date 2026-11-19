@@ -1,5 +1,6 @@
 id: crontab-modification
-version: 2
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 3
 title: Crontab modified (user, system, or spool)
 description: >
   A persistent-scheduling primitive was modified: the user crontab
@@ -8,9 +9,14 @@ description: >
   /etc/cron.d/ or /etc/cron.{hourly,daily,weekly,monthly}/, or a
   user's spool file under /var/spool/cron/. Adding a cron entry is a
   near-universal persistence primitive — once installed, the job runs
-  on schedule even after the originating agent session ends. The rule
-  is anchored on the command binary or the file path so a `crontab -l`
-  list or a `cat /etc/crontab` read does not fire.
+  on schedule even after the originating agent session ends. The
+  command is found by what the line runs: crontab, also under sudo, by
+  absolute path or inside `bash -c`, that edits (-e), removes (-r) or
+  installs (a file operand, `-`, or no operand at all, which reads
+  standard input), so a `crontab -l` list, or crontab in a commit
+  message or a here-document, does not fire. A line the parser cannot
+  vouch for (see command_unread) is matched on its text. A file event
+  is matched on its path, so a `cat /etc/crontab` read does not fire.
 severity: high
 status: experimental
 posture: detect
@@ -19,10 +25,19 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0011
 
+# crontab installs when its words are an optional `-u user` and at most one operand. A
+# file under ~ or held in a variable is an empty word of args, and no word at all is an
+# install from standard input (`crontab <<EOF`, `... | crontab`), so both forms match.
 match: >
   (e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*crontab\\b[^;&|]*(\\s-e\\b|\\s-[a-z]*r\\b|\\s-\\s+[a-zA-Z0-9_./-]+|\\s-\\s*$|\\b[^;&|]*\\|\\s*crontab\\b)") ||
-    e.command.command.matches("(?i)(^|[;&|(]\\s*|\\bsudo\\s+)\\s*crontab(\\s+-u\\s*[^\\s;&|]+)?\\s+[a-zA-Z0-9_./~][a-zA-Z0-9_./~-]*\\s*($|[;&|)])")
+    e.command.parsed_commands.exists(c,
+      c.name == "crontab" && (
+        c.args.matches("(?m)^-[is]*[er]") ||
+        c.args.matches("\\A(-u(\\n.*|.+)(\\n|\\z))?(-|[^-\\n].*)?\\z"))
+    ) ||
+    ((e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*crontab\\b[^;&|]*(\\s-e\\b|\\s-[a-z]*r\\b|\\s-\\s+[a-zA-Z0-9_./-]+|\\s-\\s*$|\\b[^;&|]*\\|\\s*crontab\\b)") ||
+      e.command.command.matches("(?i)(^|[;&|(]\\s*|\\bsudo\\s+)\\s*crontab(\\s+-u\\s*[^\\s;&|]+)?\\s+[a-zA-Z0-9_./~][a-zA-Z0-9_./~-]*\\s*($|[;&|)])")) &&
+      command_unread(e))
   )) || (
     e.event.action in ["file.modified", "file.created", "file.edited"] && (
       e.file.path.matches("(?i)(^|/)etc/crontab$") ||
@@ -125,4 +140,70 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: "/etc/cron.d/agent-persist" }
+        session: { id: s1 }
+  - name: crontab_edit_for_another_user_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo crontab -u deploy -e" }
+        session: { id: s1 }
+  - name: crontab_install_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo bash -c 'crontab -u deploy /srv/deploy/jobs.cron'" }
+        session: { id: s1 }
+  - name: crontab_remove_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/crontab -r" }
+        session: { id: s1 }
+  - name: crontab_from_standard_input_then_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo '*/5 * * * * /srv/job.sh' | crontab - && echo installed" }
+        session: { id: s1 }
+  - name: crontab_from_a_here_document
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab <<'EOF'\n*/5 * * * * /srv/job.sh\nEOF" }
+        session: { id: s1 }
+  - name: crontab_rewritten_through_a_filter
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab -l | grep -v backup | crontab -" }
+        session: { id: s1 }
+  - name: crontab_file_held_in_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab -u \"$SVC_USER\" \"$JOBS\"" }
+        session: { id: s1 }
+  - name: crontab_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'hostname; crontab -r'" }
+        session: { id: s1 }
+  - name: crontab_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'ops: stop wiping the schedule; crontab -r was a mistake'" }
+        session: { id: s1 }
+  - name: crontab_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nTo reset the schedule on the old host: sudo crontab -r\nEOF" }
+        session: { id: s1 }
+  - name: crontab_list_for_another_user
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo crontab -u deploy -l | grep backup" }
         session: { id: s1 }

@@ -1,12 +1,18 @@
 id: telemetry-or-history-tampering
-version: 1
+spec: threat-rules/v1.3  # needed for args, file_writes and predicates
+version: 2
 title: Beacon telemetry or shell history disabled or removed
 description: >
   An agent deletes or truncates Beacon data, removes its managed plugin files,
   stops its services, uninstalls or disconnects it, or clears/disables shell
   history. Legitimate cleanup and maintenance can also match. Reading logs or
   history and querying service status do not match. Detection requires the
-  command to have reached the runtime log before collection was interrupted.
+  command to have reached the runtime log before collection was interrupted. The
+  command is found by what the line runs, and the file by what that command deletes,
+  truncates or empties, so the command under sudo, by path or inside `bash -c` fires
+  and the same words in a commit message or a here-document written to a notes file
+  do not; a line the parser cannot vouch for (see command_unread) is matched on its
+  text. A line that disables history, written into a shell startup file, fires too.
 severity: high
 status: experimental
 posture: detect
@@ -14,11 +20,66 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM06
 
-# Command prefixes accept environment assignments, relative executable paths, and
-# sudo execution options. Value-taking sudo options consume their argument;
-# inspection modes such as sudo -l/-v are not execution prefixes.
+# What the line runs, in the order of the parsed alternatives:
+#   1. A file of Beacon's (its data directory, a runtime log and its rotations, a managed
+#      plugin or extension) or a shell history file (by name or as $HISTFILE) is deleted,
+#      truncated, shredded, or overwritten by a command that writes nothing: a bare
+#      redirection, `:`, `true`, `cat /dev/null`, `echo` or `printf` of nothing or of an
+#      empty string. Another command's output redirected over the file is not an emptying
+#      and does not fire, as before. The path is the one the command writes
+#      (c.file_writes), as written, so `~/.beacon`, "$HOME/.zsh_history" and $d/runtime.jsonl
+#      are seen. An echo whose only word is a variable is not an echo of nothing: its word
+#      is unknown, which c.argv shows as "" and c.argv_raw as written. A redirected loop or
+#      group has no words either, so the bare redirection is confirmed on the text: some
+#      command of the line starts with `>`.
+#   2. systemctl, launchctl, pkill or killall names one of Beacon's units or processes. The
+#      unit is read as written (c.argv_raw) because `com.beacon.endpoint.*` is a glob.
+#   3. service, beacon endpoint, history, unset, set +o history, by their words.
+#   4. HISTFILE, HISTSIZE or HISTFILESIZE given an emptying value: by export and its like
+#      (a word of the builtin), through sudo or env (a word before the command's name: one
+#      of c.argv that is not one of c.args), or by an assignment alone or before a command
+#      (c.env). An assignment whose value the parse leaves unknown (HISTFILE="$x") has an
+#      empty value in c.env too, so the empty HISTFILE is confirmed on the text.
+#   5. Content, not a command: a line that disables history, in the text of a command that
+#      writes a shell startup file. It is not gated by command_unread, since a here-document
+#      body is nothing the line runs.
+# The text patterns are those of version 1. Their command prefixes accept environment
+# assignments, relative executable paths, and sudo execution options. Value-taking sudo
+# options consume their argument; inspection modes such as sudo -l/-v are not execution
+# prefixes.
 match: >
   e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c,
+      c.file_writes.exists(f,
+        (f.op == "delete" && c.name.matches("^(rm|unlink|shred)$") ||
+         f.op == "truncate" ||
+         f.op == "write" && (
+           c.name == "shred" || c.name.matches("^(:|true)$") ||
+           size(c.argv) == 0 && e.command.command.matches("(^|[;&|\\n({\"\\x27]|\\b(then|do|else))[ \\t]*>") ||
+           c.name == "cat" && c.args == "/dev/null" ||
+           c.name.matches("^(echo|printf)$") && c.args.matches("^(-n\\n?)?$") &&
+             (!c.argv.exists(a, a == "") || c.argv_raw.exists(a, a.matches("^(\"\"|\\x27\\x27)$"))))) &&
+        f.path.matches("(^|/)(\\.beacon(/.*)?|runtime\\.jsonl(\\..*)?\\*?|var/log/beacon-agent(/.*)?|\\.(bash|zsh|sh)_history)$|/(plugins?|extensions)/beacon(-endpoint)?(\\.[jt]s|/.*)?$|^\\$\\{?HISTFILE\\}?$")) ||
+      (c.name == "systemctl" && c.args.matches("(?m)^(stop|disable|mask|kill)$") ||
+       c.name == "launchctl" && c.args.matches("(?m)^(unload|bootout|remove|stop|kill)$") ||
+       c.name.matches("^(pkill|killall)$")) &&
+        c.argv_raw.exists(a, a.matches("^[\"\\x27]?([^\\s\"\\x27]*/)?(com\\.beacon\\.endpoint\\.[\\w.*-]+|beacon-(collector|otelcol|asymptote-forwarder|inventory|session-sync|updater)(\\.(service|timer))?)([ \\t].*)?[\"\\x27]?$")) ||
+      c.name == "service" && c.args.matches("(?m)^beacon-collector\\nstop$") ||
+      c.name == "beacon" && c.args.matches("(?m)^endpoint\\n(uninstall|disconnect|hooks\\nuninstall)$") ||
+      c.name == "history" && c.args.matches("(?m)^-[a-z]*c[a-z]*$|^-w\\n/dev/null$") ||
+      c.name == "unset" && c.args.matches("(?m)^HISTFILE$") ||
+      c.name == "set" && c.args.matches("(?m)^\\+o\\nhistory$") ||
+      c.argv.exists(a, a.matches("^(HISTFILE=(/dev/null)?|(HISTSIZE|HISTFILESIZE)=0)$")) &&
+        (c.name.matches("^(export|declare|typeset|readonly|local)$") ||
+         !c.args.matches("(?m)^(HISTFILE=(/dev/null)?|(HISTSIZE|HISTFILESIZE)=0)$")) ||
+      c.env.exists(k, k.matches("^(HISTSIZE|HISTFILESIZE)$") && c.env[k] == "0") ||
+      "HISTFILE" in c.env && (c.env["HISTFILE"] == "/dev/null" ||
+        c.env["HISTFILE"] == "" && e.command.command.matches("(^|[\\s;&|({])HISTFILE=([\"\\x27][\"\\x27])?([\\s;&|<>#)}]|$)")) ||
+      c.file_writes.exists(f, f.op in ["write", "append"] &&
+        f.path.matches("(^|/)\\.(bashrc|bash_profile|bash_login|profile|zshrc|zprofile|zshenv|zlogin|kshrc)$|(^|/)etc/(profile|bash\\.bashrc|zshrc|zshenv|zprofile)$|(^|/)etc/(profile\\.d|zsh)/[^/]+$")) &&
+        e.command.command.matches("(^|[;&|\\n\"\\x27])[ \\t]*(unset[ \\t]+HISTFILE|(export[ \\t]+)?(HISTFILE=(/dev/null|\"\"|\\x27\\x27)?|(HISTSIZE|HISTFILESIZE)=0)|set[ \\t]+\\+o[ \\t]+history)([ \\t]|$|[;&|\\n<>#\\\\]|[\"\\x27]([ \\t]|$|[;&|\\n<>#)]))")
+    ) ||
+    ((
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:rm|unlink|shred)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?truncate\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:cat[ \\t]+/dev/null|:|true|(?:echo|printf)(?:[ \\t]+[\\\"\\x27][\\\"\\x27])?)[ \\t]*>[ \\t]*[\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
@@ -33,6 +94,7 @@ match: >
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:export[ \\t]+)?HISTFILE=[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?set[ \\t]+\\+o[ \\t]+history(?:[ \\t]|$|[;&|\\n<>#])") ||
     e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:rm|unlink|shred|truncate)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?[^\\s;&|\\\"\\x27]*/\\.(?:bash_history|zsh_history|sh_history)[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])")
+    ) && command_unread(e))
   )
 
 emit:
@@ -566,4 +628,216 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus systemctl --user status beacon-collector" }
+        session: { id: s1 }
+  - name: rm_history_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -H rm -f /home/dev/.bash_history" }
+        session: { id: s1 }
+  - name: history_emptied_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c ': > ~/.zsh_history'" }
+        session: { id: s1 }
+  - name: stop_collector_under_sudo_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sh -c 'systemctl stop beacon-collector && rm -rf /var/log/beacon-agent'" }
+        session: { id: s1 }
+  - name: rm_by_absolute_path_with_quoted_home
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/bin/rm -rf \"$HOME/.beacon\"" }
+        session: { id: s1 }
+  - name: rm_inside_a_substitution
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo \"cleaned: $(rm -f ~/.beacon/endpoint/logs/runtime.jsonl && echo ok)\"" }
+        session: { id: s1 }
+  - name: rm_runtime_log_and_its_rotations
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -f ~/.beacon/endpoint/logs/runtime.jsonl*" }
+        session: { id: s1 }
+  - name: rm_history_after_cd_home
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd ~ && rm .bash_history" }
+        session: { id: s1 }
+  - name: truncate_the_history_file_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "truncate -s 0 \"$HISTFILE\"" }
+        session: { id: s1 }
+  - name: shred_history
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "shred -u ~/.bash_history" }
+        session: { id: s1 }
+  - name: bare_redirection_over_history
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /tmp; > ~/.zsh_history" }
+        session: { id: s1 }
+  - name: pkill_with_a_quoted_command_line
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo pkill -f 'beacon-otelcol --config /etc/beacon/otelcol.yaml'" }
+        session: { id: s1 }
+  - name: history_cleared_and_written
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "history -cw" }
+        session: { id: s1 }
+  - name: export_then_another_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "export HISTFILE=/dev/null; ls -la" }
+        session: { id: s1 }
+  - name: export_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'export HISTSIZE=0; make deploy'" }
+        session: { id: s1 }
+  - name: empty_histfile_before_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "HISTFILE= bash -l" }
+        session: { id: s1 }
+  - name: history_disabled_in_a_startup_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat >> ~/.bashrc <<'EOF'\nunset HISTFILE\nEOF" }
+        session: { id: s1 }
+  - name: history_size_zeroed_in_a_startup_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export HISTSIZE=0' | sudo tee -a /etc/profile.d/quiet.sh" }
+        session: { id: s1 }
+  - name: tampering_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'cd /srv; rm -f ~/.bash_history; history -c'" }
+        session: { id: s1 }
+  - name: tampering_inside_a_script_file_that_is_run
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > /tmp/clean.sh <<'EOF'\nrm -rf ~/.beacon/\nEOF\nbash /tmp/clean.sh" }
+        session: { id: s1 }
+  - name: removal_named_in_a_commit_message
+    # Version 1 matched: the words follow a `;` inside the message.
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'uninstall: confirm first; rm -rf ~/.beacon/ is now behind --purge'" }
+        session: { id: s1 }
+  - name: removal_named_in_a_here_document
+    # Version 1 matched: each line of the notes starts like a command.
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nrm -rf ~/.beacon/\nhistory -c\nunset HISTFILE\nEOF" }
+        session: { id: s1 }
+  - name: history_setting_written_to_notes
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export HISTSIZE=0' >> docs/hardening-notes.txt" }
+        session: { id: s1 }
+  - name: history_backup_removed
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm ~/.bash_history.bak" }
+        session: { id: s1 }
+  - name: test_log_written_with_content
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mkdir -p /tmp/probe && echo '{\"a\":1}' > /tmp/probe/runtime.jsonl" }
+        session: { id: s1 }
+  - name: variable_echoed_over_the_log
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo \"$record\" > runtime.jsonl" }
+        session: { id: s1 }
+  - name: history_file_moved_elsewhere_by_assignment
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "HISTFILE=\"$HOME/.cache/history\"; echo set" }
+        session: { id: s1 }
+  - name: export_of_a_history_file_location
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "export HISTFILE=\"$HOME/.cache/history\"; echo set" }
+        session: { id: s1 }
+  - name: startup_file_written_without_a_history_setting
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export HISTSIZE=100000' >> ~/.bashrc" }
+        session: { id: s1 }
+  - name: log_emptied_under_sudo_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sh -c '> /var/log/beacon-agent/runtime.jsonl'" }
+        session: { id: s1 }
+  - name: loop_output_written_as_a_test_log
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "for i in 1 2 3; do echo \"{\\\"n\\\":$i}\"; done > /tmp/probe/runtime.jsonl" }
+        session: { id: s1 }
+  - name: history_variable_passed_through_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u deploy HISTSIZE=0 bash -c 'id; whoami'" }
+        session: { id: s1 }
+  - name: history_variable_passed_through_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "env HISTFILE=/dev/null bash -c 'id; whoami'" }
+        session: { id: s1 }
+  - name: declare_exported_history_size
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "declare -x HISTFILESIZE=0 && echo ok" }
+        session: { id: s1 }
+  - name: history_setting_searched_for
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo grep -n HISTSIZE=0 /etc/profile /root/.bashrc" }
+        session: { id: s1 }
+  - name: history_setting_printed
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo HISTFILE=/dev/null" }
         session: { id: s1 }

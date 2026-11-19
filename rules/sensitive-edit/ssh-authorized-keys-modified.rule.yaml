@@ -1,5 +1,6 @@
 id: ssh-authorized-keys-modified
-version: 2
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 3
 title: SSH authorized_keys or sshd_config modified
 description: >
   The agent modified an SSH trust file: a user authorized_keys
@@ -21,18 +22,48 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0011
 
+# Which file is one definition (ssh_trust_file, rules/concepts/sensitive-files.predicates.yaml),
+# asked of a file event's path and of every path a shell command writes (c.file_writes: a
+# redirection, tee, sed -i, cp, mv), under `~` or a variable too.
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] && (
-    e.file.path.matches("(?i)(^|/)\\.ssh/authorized_keys(2)?$") ||
-    e.file.path.matches("(?i)(^|/)\\.ssh/known_hosts(2)?$") ||
-    e.file.path.matches("(?i)(^|/)etc/ssh/sshd_config$") ||
-    e.file.path.matches("(?i)(^|/)etc/ssh/sshd_config\\.d/[^/]+\\.conf$")
+  (
+    e.event.action in ["file.modified", "file.created", "file.edited"] &&
+    ssh_trust_file(e.file.path)
+  ) || (
+    e.event.action == "command.executed" &&
+    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
+      ssh_trust_file(f.path)))
   )
 
 emit:
   reason: "SSH authorized_keys, known_hosts, or sshd_config modified (persistence or auth bypass)"
 
 tests:
+  - name: key_appended_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mkdir -p ~/.ssh && cat /tmp/id_ed25519.pub >> ~/.ssh/authorized_keys" }
+        session: { id: s1 }
+  - name: key_appended_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'echo \"ssh-ed25519 AAAAC3Nza attacker\" >> \"$HOME/.ssh/authorized_keys\"'" }
+        session: { id: s1 }
+  - name: daemon_configuration_edited_in_place
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config" }
+        session: { id: s1 }
+  - name: keys_only_listed
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "wc -l ~/.ssh/authorized_keys && ssh-keygen -lf ~/.ssh/known_hosts" }
+        session: { id: s1 }
   - name: modify_authorized_keys
     verdict: match
     events:

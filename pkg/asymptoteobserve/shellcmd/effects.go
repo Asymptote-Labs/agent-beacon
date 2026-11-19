@@ -47,19 +47,53 @@ func FileEffects(commands []Command) []FileEffect {
 }
 
 // FileEffects returns the files the command evidently writes: the targets of its output
-// redirections, then the operands of rm, unlink, touch, truncate, mv, cp, install, ln, tee,
-// `git mv`/`git rm` and in-place sed/perl. Anything it cannot read plainly -- an unknown word, a
+// redirections, then the operands of rm, unlink, shred, touch, truncate, mv, cp, install, ln,
+// tee, `git mv`/`git rm` and in-place sed/perl. Anything it cannot read plainly -- an unknown word, a
 // command that writes files itself -- contributes nothing, and neither does a wrapper that moves
 // the command (sudo -i). Paths are as written: relative to the directory the command runs in,
 // which after a cd (AfterCD) is not the one the command line started in.
 func (c Command) FileEffects() []FileEffect {
+	return c.fileEffects(false)
+}
+
+// FileWrites returns the files the command evidently writes, as FileEffects does, and also the
+// ones whose path depends on something this package does not evaluate: ~/.bashrc, $HOME/.netrc
+// and "$dir/out.log" are reported as those words, without their quotes (Word.Unquoted). The two
+// answer different questions, as FileEffects and FileReads do. An effect is the exact file a
+// command wrote, for a caller that goes on to find that file. A write is asked what it names:
+// ~/.ssh/authorized_keys names a login's authorized keys whatever the home directory is. Every
+// effect is a write, in the same order.
+func (c Command) FileWrites() []FileEffect {
+	if c.Evaluated() {
+		return c.FileEffects()
+	}
+	return c.fileEffects(true)
+}
+
+// Evaluated reports whether every word and redirection target of the command is known, so that
+// its writes are its effects.
+func (c Command) Evaluated() bool {
+	for _, w := range c.Argv {
+		if !w.Known {
+			return false
+		}
+	}
+	for _, r := range c.Redirects {
+		if !r.Target.Known {
+			return false
+		}
+	}
+	return true
+}
+
+func (c Command) fileEffects(written bool) []FileEffect {
 	var effects []FileEffect
 	for _, r := range c.Redirects {
-		if path, op, ok := redirectTarget(r); ok {
+		if path, op, ok := redirectTarget(r, written); ok {
 			effects = append(effects, FileEffect{Path: path, Op: op})
 		}
 	}
-	for _, e := range c.commandTargets() {
+	for _, e := range c.commandTargets(written) {
 		if e.Path != "" {
 			effects = append(effects, e)
 		}
@@ -67,27 +101,39 @@ func (c Command) FileEffects() []FileEffect {
 	return effects
 }
 
+// wordPath returns the path a word names: its value when that is known, and otherwise, when
+// written is set, the word as it is written without its quotes.
+func wordPath(w Word, written bool) (string, bool) {
+	switch {
+	case w.Known:
+		return w.Text, true
+	case written && w.Unquoted != "":
+		return w.Unquoted, true
+	}
+	return "", false
+}
+
 // redirectTarget returns the file an output redirection writes. Input redirections, here-documents
 // and here-strings write nothing, and neither does a duplicated descriptor (2>&1) or a device.
-func redirectTarget(r Redirect) (string, Op, bool) {
+func redirectTarget(r Redirect, written bool) (string, Op, bool) {
 	op := OpWrite
 	switch r.Op {
 	case ">", ">|", "&>":
 	case ">>", "&>>":
 		op = OpAppend
 	case ">&":
-		// >&word writes a file unless word names a descriptor.
+		// >&word writes a file unless word names a descriptor, which an unknown word may.
 		if t := r.Target; !t.Known || t.Text == "-" || strings.Trim(t.Text, "0123456789") == "" {
 			return "", "", false
 		}
 	default:
 		return "", "", false
 	}
-	t := r.Target
-	if !t.Known || t.Text == "" || isDevice(t.Text) {
+	target, ok := wordPath(r.Target, written)
+	if !ok || target == "" || isDevice(target) {
 		return "", "", false
 	}
-	return t.Text, op, true
+	return target, op, true
 }
 
 // optionSpec names a command's options that take a value: a short one takes the rest of its
@@ -98,6 +144,7 @@ type optionSpec struct {
 }
 
 var valueOptions = map[string]optionSpec{
+	"shred":    {short: "ns", long: []string{"--iterations", "--random-source", "--size"}},
 	"touch":    {short: "dtr", long: []string{"--date", "--reference"}},
 	"truncate": {short: "rs", long: []string{"--reference", "--size"}},
 	"cp":       {short: "St", long: []string{"--suffix", "--target-directory"}},
@@ -108,6 +155,7 @@ var valueOptions = map[string]optionSpec{
 
 // flagOptions are the value-less options that change what a command does to its operands.
 var flagOptions = map[string]optionSpec{
+	"shred":   {short: "u", long: []string{"--remove"}},
 	"tee":     {short: "a", long: []string{"--append"}},
 	"cp":      {short: "T", long: []string{"--no-target-directory", "--parents"}},
 	"mv":      {short: "T", long: []string{"--no-target-directory"}},
@@ -119,6 +167,7 @@ var flagOptions = map[string]optionSpec{
 // longOptions are every long option of the GNU commands and git mv, which parseOptions reads, so
 // that an abbreviation resolves to the one option it begins, as getopt_long and git do.
 var longOptions = map[string][]string{
+	"shred":    {"--exact", "--force", "--help", "--iterations", "--random-source", "--remove", "--size", "--verbose", "--version", "--zero"},
 	"git-mv":   {"--dry-run", "--force", "--sparse", "--verbose"},
 	"rm":       {"--dir", "--force", "--help", "--interactive", "--no-preserve-root", "--one-file-system", "--preserve-root", "--recursive", "--verbose", "--version"},
 	"unlink":   {"--help", "--version"},
@@ -287,11 +336,12 @@ func namesFile(p string) bool {
 
 // writtenAsDirectory reports whether w is written as a directory: with a trailing slash, or ending
 // in . or ..
-func writtenAsDirectory(w Word) bool {
-	return w.Known && w.Text != "" && (strings.HasSuffix(w.Text, "/") || !namesFile(w.Text))
+func writtenAsDirectory(w Word, written bool) bool {
+	p, ok := wordPath(w, written)
+	return ok && p != "" && (strings.HasSuffix(p, "/") || !namesFile(p))
 }
 
-func (c Command) commandTargets() []FileEffect {
+func (c Command) commandTargets(written bool) []FileEffect {
 	name := c.Name()
 	if name == "" {
 		return nil
@@ -303,17 +353,24 @@ func (c Command) commandTargets() []FileEffect {
 	}
 	switch name {
 	case "rm", "unlink", "git-rm":
-		return effectsOf(parseOptions(name, args).operands, OpDelete)
+		return effectsOf(parseOptions(name, args).operands, OpDelete, written)
 	case "touch":
-		return effectsOf(parseOptions(name, args).operands, OpTouch)
+		return effectsOf(parseOptions(name, args).operands, OpTouch, written)
 	case "truncate":
-		return effectsOf(parseOptions(name, args).operands, OpTruncate)
+		return effectsOf(parseOptions(name, args).operands, OpTruncate, written)
+	case "shred":
+		// shred overwrites its operands, and with -u removes them.
+		opts := parseOptions(name, args)
+		if opts.flags["u"] || opts.flags["--remove"] {
+			return effectsOf(opts.operands, OpDelete, written)
+		}
+		return effectsOf(opts.operands, OpWrite, written)
 	case "tee":
 		opts := parseOptions(name, args)
 		if opts.flags["a"] || opts.flags["--append"] {
-			return effectsOf(opts.operands, OpAppend)
+			return effectsOf(opts.operands, OpAppend, written)
 		}
-		return effectsOf(opts.operands, OpWrite)
+		return effectsOf(opts.operands, OpWrite, written)
 	case "mv", "git-mv", "cp", "install", "ln":
 		opts := parseOptions(name, args)
 		if opts.flags["d"] || opts.flags["--directory"] || opts.flags["n"] || opts.flags["--dry-run"] {
@@ -346,48 +403,54 @@ func (c Command) commandTargets() []FileEffect {
 			case n == 1 && name == "ln":
 				// ln TARGET links ./<base name of TARGET>.
 				dir, ok = Word{Text: ".", Known: true}, true
-			case n >= 3 || n == 2 && (parents || writtenAsDirectory(sources[1])):
+			case n >= 3 || n == 2 && (parents || writtenAsDirectory(sources[1], written)):
 				// Several sources, or a destination written as a directory, go into the last operand.
 				dir, ok, sources = sources[n-1], true, sources[:n-1]
 			}
 		}
 		if ok {
 			// Every source is written as DIR/<base name>, or DIR/<source> with cp --parents.
-			var written []FileEffect
+			var effects []FileEffect
 			if moves {
-				written = effectsOf(sources, OpMoveFrom)
+				effects = effectsOf(sources, OpMoveFrom, written)
 			}
-			if !dir.Known || dir.Text == "" {
-				return written
+			into, ok := wordPath(dir, written)
+			if !ok || into == "" {
+				return effects
 			}
 			// The command line is shell syntax, so its paths join with "/" on every host; gitlink's
 			// RelPath converts them for the local filesystem.
 			for _, src := range sources {
-				if !src.Known || !namesFile(src.Text) {
+				from, ok := wordPath(src, written)
+				if !ok || !namesFile(from) {
 					continue
 				}
-				file := path.Base(src.Text)
+				file := path.Base(from)
 				if parents {
-					file = src.Text
+					file = from
 				}
-				written = append(written, FileEffect{Path: path.Join(dir.Text, file), Op: dest})
+				effects = append(effects, FileEffect{Path: path.Join(into, file), Op: dest})
 			}
-			return written
+			return effects
 		}
 		if moves {
 			// Every operand but the last is a source. When the last is unknown, so is the
 			// destination, and every known operand is a source.
-			effects := effectsOf(sources, OpMoveFrom)
-			if n := len(sources); n >= 2 && sources[n-1].Known {
-				effects[len(effects)-1].Op = OpMoveTo
+			effects := effectsOf(sources, OpMoveFrom, written)
+			if n := len(sources); n >= 2 {
+				if _, ok := wordPath(sources[n-1], written); ok {
+					effects[len(effects)-1].Op = OpMoveTo
+				}
 			}
 			return effects
 		}
-		if len(sources) == 2 && namesFile(sources[1].Text) {
-			return effectsOf(sources[1:], dest)
+		if len(sources) == 2 {
+			if to, ok := wordPath(sources[1], written); ok && namesFile(to) {
+				return effectsOf(sources[1:], dest, written)
+			}
 		}
 	case "sed", "perl", "gsed":
-		return effectsOf(inPlaceFiles(name, args), OpEdit)
+		return effectsOf(inPlaceFiles(name, args), OpEdit, written)
 	}
 	return nil
 }
@@ -465,12 +528,12 @@ func scriptFiles(name string, args []Word) (files []Word, inPlace bool) {
 	return operands, inPlace
 }
 
-// effectsOf are the known words of words, each with op.
-func effectsOf(words []Word, op Op) []FileEffect {
+// effectsOf are the words of words that name a path (wordPath), each with op.
+func effectsOf(words []Word, op Op, written bool) []FileEffect {
 	var out []FileEffect
 	for _, w := range words {
-		if w.Known {
-			out = append(out, FileEffect{Path: w.Text, Op: op})
+		if p, ok := wordPath(w, written); ok {
+			out = append(out, FileEffect{Path: p, Op: op})
 		}
 	}
 	return out

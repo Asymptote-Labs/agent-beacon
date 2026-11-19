@@ -205,10 +205,12 @@ func TestPackWritesOutNoPredicate(t *testing.T) {
 // matches e.command.command and is the rule's own.
 func TestPackListsNoSenderOfItsOwn(t *testing.T) {
 	literal := regexp.MustCompile(`([\w.]+)\.matches\(("(?:[^"\\]|\\.)*")\)`)
+	// The name as a whole alternative, not letters inside another (truncate).
+	sender := regexp.MustCompile(`(^|[^A-Za-z])(ncat|netcat)([^A-Za-z]|$)`)
 	for _, r := range corpusRules(t) {
 		for _, m := range literal.FindAllStringSubmatch(strings.Join(ruleExpressions(r), " "), -1) {
 			receiver, list := m[1], m[2]
-			if receiver != "e.command.command" && (strings.Contains(list, "ncat") || strings.Contains(list, "netcat")) {
+			if receiver != "e.command.command" && sender.MatchString(list) {
 				t.Errorf("%s: %s.matches(%s) lists network senders; call egress_sender instead, so that every egress rule means the same senders", r.ID, receiver, list)
 			}
 		}

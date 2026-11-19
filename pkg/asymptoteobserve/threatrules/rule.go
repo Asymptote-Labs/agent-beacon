@@ -250,6 +250,9 @@ func (r *Rule) validateExpression(expr string) error {
 				return fmt.Errorf("e.%s[].%s requires spec: threat-rules/v1.3 or later (engines before v1.3 reject the field)", ParsedCommandsPath, field)
 			}
 		}
+		if selectsField(ast, "parsed_incomplete") {
+			return fmt.Errorf("e.%s requires spec: threat-rules/v1.3 or later (engines before v1.3 reject the field)", ParsedIncompletePath)
+		}
 	}
 	if specV1_2.newerThan(v) && selectsField(ast, "parsed_commands") {
 		return fmt.Errorf("e.%s requires spec: threat-rules/v1.2 or later (engines before v1.2 reject the field)", ParsedCommandsPath)

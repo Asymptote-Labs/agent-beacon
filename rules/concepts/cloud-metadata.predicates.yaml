@@ -1,0 +1,242 @@
+# What a cloud instance metadata target is, said once for the rules about reaching one.
+#
+# Five rules ask it: cloud-metadata-endpoint-access, imds-access-via-noncurl-client,
+# cloud-metadata-then-egress, link-local-internal-target-fetch and imds-obfuscated-ip-fetch.
+# Each says who must reach the target for it to matter (curl or wget, an interpreter's
+# script, a /dev/tcp redirection, any network client); what the target is, is said here.
+#
+# The predicates over a target take a text, so a rule can ask them of one word of a parsed
+# command as it is written (c.argv_raw.exists(a, cloud_metadata_target(a))), of the path of
+# a socket redirection, or of the whole command line where the parser cannot vouch for it.
+# They are three because the rules divide the targets between them: the addresses and names
+# as the providers document them, the link-local and alias forms of the same service, and
+# the numeric encodings that hide the address.
+#
+# client_target_unseen takes a parsed command. A client's words do not always show what it
+# fetches (`H=169.254.169.254; curl http://$H/`), and a rule that looked only at the words
+# would stop seeing those lines; for such a client the rule asks the text of the line.
+library: cloud-metadata
+version: 1
+spec: threat-rules/v1.3
+description: A text that names a cloud instance metadata service.
+
+definitions:
+  - name: cloud_metadata_target
+    params: [text]
+    description: >
+      The text names a cloud instance metadata service as its provider documents it: the
+      AWS IMDS address 169.254.169.254, the ECS task-role address 169.254.170.2, the GCP
+      hosts metadata.google.internal and metadata.goog, the Azure host metadata.azure.com,
+      or one of the paths /latest/meta-data and /computeMetadata/.
+    body: >
+      text.matches("(?i)(169\\.254\\.169\\.254|169\\.254\\.170\\.2|metadata\\.google\\.internal|metadata\\.goog\\b|metadata\\.azure\\.com|/latest/meta-data|/computeMetadata/)")
+    tests:
+      - name: aws_imds_address_as_a_word_of_curl
+        match: e.command.parsed_commands.exists(c, c.name == "curl" && c.argv_raw.exists(a, cloud_metadata_target(a)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://169.254.169.254/latest/api/token" }
+      - name: ecs_task_role_address
+        match: cloud_metadata_target(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://169.254.170.2/v2/metadata" }
+      - name: gcp_short_host
+        match: cloud_metadata_target(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "wget -qO- http://metadata.goog/computeMetadata/v1/project/project-id" }
+      - name: azure_host
+        match: cloud_metadata_target(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "wget -qO- 'http://metadata.azure.com/metadata/instance?api-version=2021-02-01'" }
+      - name: metadata_path_on_a_host_held_by_a_variable
+        match: e.command.parsed_commands.exists(c, c.name == "curl" && c.argv_raw.exists(a, cloud_metadata_target(a)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s \"http://$IMDS/latest/meta-data/instance-id\"" }
+      - name: a_word_of_an_interpreter_inside_a_shell_script
+        match: e.command.parsed_commands.exists(c, c.name == "node" && c.argv_raw.exists(a, cloud_metadata_target(a)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "bash -c \"node -e 'fetch(\\\"http://metadata.google.internal/computeMetadata/v1/project/project-id\\\")'\"" }
+      - name: another_link_local_address
+        match: cloud_metadata_target(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://169.254.10.20/status" }
+      - name: a_public_host_that_starts_alike
+        match: cloud_metadata_target(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s https://metadata.googleapis.example/v1/status" }
+      - name: the_address_in_another_command_is_not_a_word_of_curl
+        match: e.command.parsed_commands.exists(c, c.name == "curl" && c.argv_raw.exists(a, cloud_metadata_target(a)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s https://example.com/health && git commit -m 'block 169.254.169.254 in the proxy'" }
+
+  - name: cloud_metadata_link_local_target
+    params: [text]
+    description: >
+      The text holds a URL whose host is a link-local form of a metadata service, or the
+      AWS DNS alias for it: the IPv6 IMDS address fd00:ec2::254, an fe80:: address,
+      169.254.169.254 or 169.254.170.2 after http:// or https://, or instance-data (also
+      with a domain) followed by /latest.
+    body: >
+      text.matches("(?i)(https?://(\\[?(fd00:ec2::254|fe80::[0-9a-f:]+)\\]?|169\\.254\\.169\\.254|169\\.254\\.170\\.2)|instance-data(\\.[a-z0-9.-]+)?/latest)")
+    tests:
+      - name: ipv6_imds_address
+        match: e.command.parsed_commands.exists(c, c.name == "curl" && c.argv_raw.exists(a, cloud_metadata_link_local_target(a)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://[fd00:ec2::254]/latest/meta-data/" }
+      - name: ipv6_link_local_address
+        match: cloud_metadata_link_local_target(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s 'http://[fe80::a9fe:a9fe%25eth0]/latest/meta-data/'" }
+      - name: instance_data_alias_with_a_domain
+        match: cloud_metadata_link_local_target(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "wget -qO- http://instance-data.ec2.internal/latest/meta-data/iam/" }
+      - name: ipv4_address_in_a_url
+        match: cloud_metadata_link_local_target(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://169.254.170.2/v2/credentials/role" }
+      - name: ipv4_address_outside_a_url
+        match: cloud_metadata_link_local_target(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ping -c 1 169.254.169.254" }
+      - name: loopback
+        match: cloud_metadata_link_local_target(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://[::1]:8080/health" }
+      - name: a_path_named_instance_data
+        match: cloud_metadata_link_local_target(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s https://api.example.com/instance-data/v2/list" }
+
+  - name: cloud_metadata_obfuscated_target
+    params: [text]
+    description: >
+      The text holds a URL whose host is 169.254.169.254 in another numeric form: 32-bit
+      decimal (2852039166), hexadecimal (0xa9fea9fe), or each octet in hexadecimal or octal
+      (0xa9.0xfe.0xa9.0xfe, 0251.0376.0251.0376).
+    body: >
+      text.matches("(?i)https?://(2852039166|0xa9fea9fe|0xa9\\.0xfe\\.0xa9\\.0xfe|0251\\.0376\\.0251\\.0376)(\\b|[:/])")
+    tests:
+      - name: decimal_host
+        match: e.command.parsed_commands.exists(c, c.name == "curl" && c.argv_raw.exists(a, cloud_metadata_obfuscated_target(a)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://2852039166/latest/meta-data/" }
+      - name: hexadecimal_host_with_a_port
+        match: cloud_metadata_obfuscated_target(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://0xA9FEA9FE:80/latest/meta-data/" }
+      - name: octal_octets
+        match: cloud_metadata_obfuscated_target(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "wget -qO- http://0251.0376.0251.0376/latest/meta-data/" }
+      - name: the_plain_address
+        match: cloud_metadata_obfuscated_target(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://169.254.169.254/latest/meta-data/" }
+      - name: the_same_digits_as_a_port
+        match: cloud_metadata_obfuscated_target(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://api.example.com:2852039166/" }
+      - name: a_longer_number
+        match: cloud_metadata_obfuscated_target(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s http://28520391660/status" }
+
+  - name: client_target_unseen
+    params: [c]
+    description: >
+      A parsed command may reach an address its words do not show: one of its words holds a
+      variable or a substitution, or it is curl reading a config (-K, --config) or wget
+      reading a list of URLs (-i, --input-file), which may be a file written earlier on the
+      line or a here-document. A rule that looks for a target among the words of a client
+      looks for it in the text of the line when the client is one of these.
+    body: >
+      c.argv_raw.exists(a, a.matches("[$`]")) ||
+      c.name == "curl" && c.args.matches("(?m)^(-[a-zA-Z]*K|--config)") ||
+      c.name == "wget" && c.args.matches("(?m)^(-[a-zA-Z]*i$|-i|--input-file)")
+    tests:
+      - name: a_word_with_a_variable
+        match: e.command.parsed_commands.exists(c, c.name == "curl" && client_target_unseen(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "H=169.254.169.254; curl -s \"http://$H/latest/api/token\"" }
+      - name: a_word_that_is_a_substitution
+        match: e.command.parsed_commands.exists(c, c.name == "curl" && client_target_unseen(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s `cat url.txt`" }
+      - name: curl_reading_a_config_from_a_here_document
+        match: e.command.parsed_commands.exists(c, c.name == "curl" && client_target_unseen(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -sK - <<'EOF'\nurl = \"http://169.254.169.254/latest/user-data\"\nEOF" }
+      - name: wget_reading_a_list_of_urls
+        match: e.command.parsed_commands.exists(c, c.name == "wget" && client_target_unseen(c))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "wget -qi urls.txt -P out/" }
+      - name: every_word_written_out
+        match: e.command.parsed_commands.exists(c, client_target_unseen(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s -k -H 'Accept: application/json' https://example.com/health" }
+      - name: curl_showing_response_headers
+        match: e.command.parsed_commands.exists(c, client_target_unseen(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -si https://example.com/health && wget -q -O index.html https://example.com/" }
+      - name: a_variable_in_another_command
+        match: e.command.parsed_commands.exists(c, c.name == "curl" && client_target_unseen(c))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s https://example.com/health; echo \"$?\"" }

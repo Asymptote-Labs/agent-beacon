@@ -1,5 +1,6 @@
 id: auth-security-code-modified
-version: 5
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 6
 title: Authentication, payment, or security source modified
 description: >
   The agent modified a source file in the auth / payment / security surface (basename
@@ -16,17 +17,50 @@ taxonomy:
   beacon_category: sensitive-edit
   owasp_llm: LLM06
 
+# Which file is one definition (auth_security_code_file,
+# rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
+# path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv). A write
+# that lands in a temporary directory is left out (scratch_write): agents stage copies there
+# all the time, and moving one back into the project is a write of its own.
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] &&
-  e.file.path.matches("(?i)[^/]*(auth|login|session|password|passwd|credential|payment|billing|charge|stripe|checkout|security|crypto|token|oauth|jwt|rbac|permission)[^/]*\\.[a-z0-9]+$") &&
-  !e.file.path.matches("(?i)\\.(md|txt|lock)$") &&
-  !e.file.path.matches("(?i)\\.github/workflows/[^/]*\\.ya?ml$") &&
-  !e.file.path.matches("(?i)(^|/)credentials\\.(json|toml)$")
+  (
+    e.event.action in ["file.modified", "file.created", "file.edited"] &&
+    auth_security_code_file(e.file.path)
+  ) || (
+    e.event.action == "command.executed" &&
+    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
+      auth_security_code_file(f.path) && !scratch_write(e, f)))
+  )
 
 emit:
   reason: "Authentication, payment, or security source file modified"
 
 tests:
+  - name: handler_edited_in_place_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i 's/verify=True/verify=False/' src/auth/session.py" }
+        session: { id: s1 }
+  - name: handler_overwritten_by_a_copy
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp /tmp/patched/login.go internal/login.go" }
+        session: { id: s1 }
+  - name: handler_copied_to_a_scratch_directory
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mkdir -p /tmp/bak && cp internal/session.go /tmp/bak/session.go" }
+        session: { id: s1 }
+  - name: handler_only_tested
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "go test ./internal/auth/ -run TestSessionToken && git commit -m 'fix session.go token check'" }
+        session: { id: s1 }
   - name: edit_login_handler
     verdict: match
     events:

@@ -1,5 +1,6 @@
 id: fork-bomb-pattern
-version: 2
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 3
 title: Fork-bomb pattern executed in a command
 description: >
   A command.executed event invokes a known fork-bomb shape — a function whose whole
@@ -12,7 +13,11 @@ description: >
   resource-DoS or destructive-escalation signal (OWASP LLM10). The rule is
   anchored to a command boundary and matches the well-known shapes; ordinary
   long-running but bounded loops do not fire because they do not recursively
-  spawn.
+  spawn. The shell shapes are matched on the text of the line. The interpreter
+  loop is found by what the line runs, a perl, python or ruby command whose -e or
+  -c script holds the loop, so one in a commit message or a here-document does
+  not fire and `sudo python -c` or one inside `bash -c` does; a line the parser
+  cannot vouch for (see command_unread) is matched on its text.
 severity: high
 status: experimental
 posture: detect
@@ -21,12 +26,21 @@ taxonomy:
   owasp_llm: LLM10
   mitre_atlas: AML.T0040
 
+# The first three alternatives are shell syntax: a function definition whose body pipes the
+# function into itself in the background, a `while true` loop that backgrounds its body, and
+# a `for(;;)` loop. The parsed commands list the commands a line runs, not that one was
+# defined as a function, put in the background, or repeated by a loop, so those stay text.
+# The interpreter loop is a command and its script word, and is asked of the parsed commands.
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)[\\w:.-]+\\s*\\(\\s*\\)\\s*\\{?\\s*[\\w:.-]+\\s*\\|\\s*[\\w:.-]+\\s*&\\s*;?\\s*\\}?[ \\t]*[;\\n]\\s*[\\w:.-]+") ||
     e.command.command.matches("(?i)\\bwhile\\s+true\\s*;?\\s*do\\b[^;&|]*&\\s*\\S") ||
     e.command.command.matches("(?i)\\bfor\\s*\\(\\s*;\\s*;\\s*\\)\\s*[;{]") ||
-    e.command.command.matches("(?i)\\b(perl|python|ruby)\\s+-[ec]\\s+['\"][^'\"]*(\\.fork\\(\\)|for\\s+_\\s+in\\s+iter\\(\\s*int\\s*,\\s*1\\s*\\)|\\bwhile\\s+(1|True)\\b)")
+    e.command.parsed_commands.exists(c,
+      c.name.matches("^(perl|python|ruby)$") &&
+      c.args.matches("(?mi)^-[ec]\\n.*(\\.fork\\(\\)|for\\s+_\\s+in\\s+iter\\(\\s*int\\s*,\\s*1\\s*\\)|\\bwhile\\s+(1|True)\\b)")) ||
+    (e.command.command.matches("(?i)\\b(perl|python|ruby)\\s+-[ec]\\s+['\"][^'\"]*(\\.fork\\(\\)|for\\s+_\\s+in\\s+iter\\(\\s*int\\s*,\\s*1\\s*\\)|\\bwhile\\s+(1|True)\\b)") &&
+      command_unread(e))
   )
 
 emit:
@@ -124,4 +138,52 @@ tests:
       - timestamp: "2026-06-23T10:07:00Z"
         event: { action: command.executed }
         command: { command: "echo 'never run a fork bomb in this repo' > notes.txt" }
+        session: { id: s1 }
+  - name: interpreter_loop_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo python -c 'import os\nwhile True: os.fork()'" }
+        session: { id: s1 }
+  - name: interpreter_loop_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c \"perl -e 'fork while 1'\"" }
+        session: { id: s1 }
+  - name: interpreter_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/ruby -e 'loop { Process.fork() }'" }
+        session: { id: s1 }
+  - name: interpreter_loop_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example \"python -c 'while True: os.fork()'\"" }
+        session: { id: s1 }
+  - name: interpreter_loop_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"docs: never run python -c 'while True: os.fork()' on a shared runner\"" }
+        session: { id: s1 }
+  - name: interpreter_loop_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nA fork loop looks like: python -c 'while True: os.fork()'\nEOF" }
+        session: { id: s1 }
+  - name: fork_call_as_a_search_pattern
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -rn 'os.fork()' src/ | head -5" }
+        session: { id: s1 }
+  - name: interpreter_script_without_a_loop
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python -c 'import os; print(os.cpu_count())'" }
         session: { id: s1 }

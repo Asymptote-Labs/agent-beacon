@@ -1,5 +1,6 @@
 id: git-history-rewrite
-version: 2
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 3
 title: Git history rewritten (filter-branch / filter-repo / interactive rebase)
 description: >
   A history-rewriting git subcommand was invoked: filter-branch,
@@ -12,7 +13,12 @@ description: >
   rewritten history. The rule is anchored on the git binary at a
   command boundary and matches the well-known history-rewriting
   subcommands. A `git rebase` without --interactive (fast-forward
-  merge) does not rewrite authored history and is excluded.
+  merge) does not rewrite authored history and is excluded. The command
+  is found by what the line runs: a git command, also under sudo, by
+  path, inside `bash -c` or after git's own options (`git -C dir commit
+  --amend`), whose subcommand and words say so. The same words in a
+  commit message, an echo or a here-document do not fire. A line the
+  parser cannot vouch for (see command_unread) is matched on its text.
 severity: medium
 status: experimental
 posture: detect
@@ -20,12 +26,22 @@ taxonomy:
   beacon_category: source-control
   owasp_llm: LLM03
 
+# The subcommand is the first word after git's own options, of which -C, -c, --git-dir,
+# --work-tree and --namespace take the next word as their value; a word whose value is
+# unknown (`git $OPTS commit`) is passed over as an option. filter-repo is also installed
+# as a program of its own, git-filter-repo. The text names a replace option git does not
+# have (--convert-forkpoint); the parsed condition names the one git has.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bfilter-(branch|repo)\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\brebase\\b[^;&|]*(\\s-i\\b|\\s--interactive\\b)") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bcommit\\b[^;&|]*\\s--amend\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\breplace\\b\\s+(--edit|--graft|--convert-forkpoint)")
+    e.command.parsed_commands.exists(c,
+      c.name == "git" && c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*(?:filter-(?:branch|repo)|rebase\\n(?:[^\\n]*\\n)*?(?:-[rqvnfmp]*i[rqvnfmp]*|--interactive)|commit\\n(?:[^\\n]*\\n)*?--amend|replace\\n(?:--?[A-Za-z][^\\n]*\\n)*?(?:--edit|--graft|--convert-graft-file))(?:\\n|\\z)") ||
+      c.name.matches("^git-filter-(branch|repo)$")
+    ) ||
+    ((e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bfilter-(branch|repo)\\b") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\brebase\\b[^;&|]*(\\s-i\\b|\\s--interactive\\b)") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bcommit\\b[^;&|]*\\s--amend\\b") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\breplace\\b\\s+(--edit|--graft|--convert-forkpoint)")) &&
+      command_unread(e))
   )
 
 emit:
@@ -103,4 +119,70 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'git filter-branch rewrites history' > notes.md" }
+        session: { id: s1 }
+  - name: commit_amend_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo git commit --amend --no-edit" }
+        session: { id: s1 }
+  - name: interactive_rebase_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'cd /srv/repo && git rebase -i HEAD~4'" }
+        session: { id: s1 }
+  - name: commit_amend_by_absolute_path_after_git_options
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/git -C /srv/repo -c commit.gpgsign=false commit -q --amend --no-edit" }
+        session: { id: s1 }
+  - name: filter_repo_as_its_own_program
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git-filter-repo --path notes.txt --invert-paths" }
+        session: { id: s1 }
+  - name: replace_from_a_graft_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git replace --convert-graft-file" }
+        session: { id: s1 }
+  - name: commit_amend_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'cd /srv/repo && git commit --amend --no-edit'" }
+        session: { id: s1 }
+  - name: commit_amend_run_by_rebase_for_every_commit
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git rebase -q --exec 'git commit -q --amend --no-edit -S' origin/main" }
+        session: { id: s1 }
+  - name: commit_amend_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git add -A && git commit -m 'docs: prefer a new commit to git commit --amend or git rebase -i'" }
+        session: { id: s1 }
+  - name: filter_branch_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\ngit filter-branch --tree-filter 'rm -f big.bin' HEAD\ngit commit --amend\nEOF" }
+        session: { id: s1 }
+  - name: rebase_that_continues
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git add docs/changelog.md && git rebase --continue" }
+        session: { id: s1 }
+  - name: log_of_commits_that_mention_amend
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git log --oneline --grep='commit --amend' | head -5" }
         session: { id: s1 }

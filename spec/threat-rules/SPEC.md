@@ -79,7 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads`, `script_sends` and `socket_redirects`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads`, `file_writes`, `script_sends` and `socket_redirects`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -179,7 +179,13 @@ the steps in both orders still fires once. A single event never satisfies two st
   `spec: threat-rules/v1.2` or later) is derived under the same rules (computed, never read
   from input). It is `command.command`, its first 4096 bytes, read as a bash command line: a
   list with one entry per simple command, and per compound command that carries
-  redirections, in walk order (each statement, then the statements inside it). Each entry
+  redirections, in walk order (each statement, then the statements inside it). Since v1.3 a
+  declaration (`export`, `declare`, `typeset`, `readonly`, `local`) is an entry too: the
+  builtin is its first word, and each option and each `NAME`, `NAME=value` or `NAME+=value`
+  after it is one word, whose value is unknown when the value's is (and for an array or an
+  indexed assignment), so `export HISTFILE=/dev/null` has `name` `export` and `args`
+  `HISTFILE=/dev/null`. An assignment that is a statement by itself is not a declaration and
+  is, as before, an entry with no words and the assignment in `env`. Each entry
   has `name` (the base name of the first word after the wrappers `command`, `builtin`,
   `exec`, `nohup`, `time`, `sudo` and `env` with their options and `NAME=value` words, and,
   since v1.3, `timeout`, `nice`, `ionice`, `stdbuf`, `doas`, `torsocks`, `proxychains` and
@@ -189,7 +195,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   assignment's `$name =` is taken when it is a bare name (`$t = az account get-access-token`
   is `az`); `""` when that word is unknown or a wrapper option moves
   or replaces the command or makes the wrapper act on something else, as `sudo -i`, `env -C`,
-  `doas -s` and `ionice -p` do),
+  `doas -s` and `ionice -p` do, or, since v1.3, does not run it, as `sudo -l` (which lists
+  whether the command is allowed), `sudo -v` and `sudo -e` do),
   `argv` (every word after brace expansion, wrappers included,
   as the shell passes it on, or `""` when its value depends on a parameter, command or
   arithmetic substitution, an ANSI-C or locale string, an unquoted glob character, or a
@@ -200,7 +207,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   `c.args.matches("(?m)^auth\ntoken$")` is true exactly when the words `auth` and `token`
   follow each other), `env` (the `NAME=value`
   assignments before the command, `""` for an unknown value), `file_effects` (the files the
-  command evidently writes, `{path, op}`, of the command `name` names), `file_reads` and
+  command evidently writes, `{path, op}`, of the command `name` names), `file_writes` (the
+  same with every path as written, below), `file_reads` and
   `script_sends` (the files it evidently takes as input and the ones its inline script
   sends, below), `socket_redirects` (its redirections to a network pseudo-file, below),
   `pipeline` (shared by the stages of one
@@ -230,6 +238,41 @@ the steps in both orders still fires once. A single event never satisfies two st
   field once per event. A rule that relies on them (`c.name == "nc"` for `timeout 5 nc ..`)
   SHOULD declare `spec: threat-rules/v1.3`, so an engine at v1.2 sets it aside rather than
   evaluating it on the older derivation.
+- `e.command.parsed_incomplete` (since v1.3; a rule that selects it MUST declare
+  `spec: threat-rules/v1.3` or later) is derived with `e.command.parsed_commands` and says
+  whether the command line was read to its end. It is `true` when `command.command` does not
+  parse, when it ends early (an unclosed quote, here-document, substitution or compound
+  command, which is what a capture cut by a writer or a runtime looks like), or when it is
+  longer than the 4096 bytes that are read; `false` otherwise, and for an event without a
+  command. `parsed_commands` of such a line lists the commands before that point only: in
+  `cd repo && for d in a b; do rm -rf "$d"` cut after `do`, it is `cd` alone. A rule that
+  concludes something from what the list lacks ("no command of this line is X", "every
+  command of this line is known") MUST treat an incomplete line as one it has not read.
+- `file_writes` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
+  later) is a field of each `parsed_commands` entry: the files the command evidently writes,
+  a list of `{path, op}` with the `op` values of `file_effects` (`write`, `append`, `touch`,
+  `truncate`, `edit`, `delete`, `move_from`, `move_to`, `link`). `path` is as for
+  `file_reads`: the word as written with its quotes and escaping backslashes removed and
+  everything the parse does not evaluate left as written, so `>> ~/.bashrc` is
+  `{~/.bashrc, append}` and `> "$HOME/.ssh/authorized_keys"` is
+  `{$HOME/.ssh/authorized_keys, write}`. `file_effects` leaves such a path out, because an
+  effect is the exact file a command wrote; a rule asks what a write names, and `~/.bashrc`
+  names a login file whatever the home directory is. Every entry of `file_effects` is an
+  entry of `file_writes`, in the same order, and for a command whose words and redirection
+  targets are all known the two lists are equal.
+
+  The writes are the targets of the command's output redirections (`>`, `>|`, `&>` and
+  `>&file` are `write`, `>>` and `&>>` are `append`; a path under `/dev/` and the target of
+  `>&` when its value is unknown, which may be a descriptor, are left out), and the operands
+  of the command `name` names: `rm`, `unlink` and `git rm` (`delete`), `shred` (`write`, or
+  `delete` with `-u`), `touch`, `truncate`,
+  `tee` (`write`, or `append` with `-a`), in-place `sed`, `gsed` and `perl` (`edit`), `cp`
+  and `install` (`write`, the destination), `ln` (`link`) and `mv` and `git mv` (`move_from`
+  for each source, `move_to` for the destination). A destination that is a directory (the
+  last of three or more operands, one written with a trailing slash, the value of `-t`) is
+  reported as the directory joined with each source's base name. A command that writes a
+  file named by an option this list does not read (`curl -o`, `dd of=`) reports nothing for
+  it. The reference derivation is `shellcmd.FileWrites`.
 - `file_reads` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) is a field of each `parsed_commands` entry: the files whose content the command
   evidently takes in, a list of `{path, via}`. `path` is the word as written with its quotes
@@ -552,8 +595,8 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
-- **v1.3**: `args`, `file_reads`, `script_sends` and `socket_redirects` on each entry of
-  `e.command.parsed_commands`.
+- **v1.3**: `args`, `file_reads`, `file_writes`, `script_sends` and `socket_redirects` on each
+  entry of `e.command.parsed_commands`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
   `doas`, `torsocks` and `proxychains`, without a Windows executable's suffix and after a
   PowerShell assignment, and a shell's here-document or here-string script, and a PowerShell's

@@ -172,10 +172,13 @@ type wrapperSpec struct {
 }
 
 var (
+	// sudo -l lists what the user may run and -v validates: with a command after it, -l says
+	// whether that command is allowed and does not run it. -e (sudoedit) edits its operands, and
+	// -K, -V and -h take no command.
 	wrapperSudo = wrapperSpec{
 		optionSpec:   optionSpec{short: "CghpRTtUu", long: []string{"--close-from", "--group", "--host", "--prompt", "--role", "--command-timeout", "--type", "--other-user", "--user"}},
-		blocking:     "DRi",
-		blockingLong: []string{"--chdir", "--chroot", "--login"},
+		blocking:     "DRilveKV",
+		blockingLong: []string{"--chdir", "--chroot", "--login", "--list", "--validate", "--edit", "--remove-timestamp", "--version", "--help"},
 		assignments:  true,
 	}
 	wrapperEnv = wrapperSpec{

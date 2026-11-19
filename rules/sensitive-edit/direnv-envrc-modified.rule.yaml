@@ -1,5 +1,6 @@
 id: direnv-envrc-modified
-version: 2
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 3
 title: direnv .envrc modified (auto-exec on directory entry)
 description: >
   The agent modified a direnv .envrc file. When direnv is installed and the
@@ -15,14 +16,36 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
+# Which file is one definition (direnv_file, rules/concepts/sensitive-files.predicates.yaml),
+# asked of a file event's path and of every path a shell command writes (c.file_writes: a
+# redirection, tee, sed -i, cp, mv).
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] &&
-  e.file.path.matches("(?i)(^|/)\\.envrc$")
+  (
+    e.event.action in ["file.modified", "file.created", "file.edited"] &&
+    direnv_file(e.file.path)
+  ) || (
+    e.event.action == "command.executed" &&
+    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
+      direnv_file(f.path)))
+  )
 
 emit:
   reason: "direnv .envrc modified — sourced automatically on directory entry outside the sandbox, durable ambient code execution"
 
 tests:
+  - name: envrc_written_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export AWS_PROFILE=admin' >> .envrc && direnv allow" }
+        session: { id: s1 }
+  - name: envrc_only_printed
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat .envrc" }
+        session: { id: s1 }
   - name: envrc_repo_root
     verdict: match
     events:
