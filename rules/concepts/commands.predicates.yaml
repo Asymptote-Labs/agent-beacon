@@ -298,14 +298,27 @@ definitions:
       end (it does not parse, or it stops inside a quote, a here-document or a loop, as a cut
       capture does); it ends in a mark that says it was cut; one of its commands is not known
       to run only itself (its name is unknown, or it may run one of its words as a command
-      line); or it assigns a variable that names a program to run. A rule about a command
-      applies its text pattern to such a line, and its parsed condition to every line.
+      line); or it assigns a variable that names a program to run, or that hands git config
+      (GIT_CONFIG_VALUE_0 and the like, whose alias or fsmonitor git runs) or zsh a startup
+      directory (ZDOTDIR). A rule about a command applies its text pattern to such a line, and
+      its parsed condition to every line.
     body: >
       e.command.parsed_incomplete ||
       e.command.command.matches("(\\.\\.\\.\\[truncated\\]|…)$") ||
-      e.command.command.matches("\\b([A-Z_]*(EDITOR|VISUAL|PAGER|COMMAND|ASKPASS|EXTERNAL_DIFF)|BASH_ENV|ENV|LESSOPEN|LESSCLOSE)=") ||
+      e.command.command.matches("\\b([A-Z_]*(EDITOR|VISUAL|PAGER|COMMAND|ASKPASS|EXTERNAL_DIFF)|BASH_ENV|ENV|LESSOPEN|LESSCLOSE|GIT_CONFIG_(COUNT|PARAMETERS|GLOBAL|SYSTEM|KEY_[0-9]+|VALUE_[0-9]+)|ZDOTDIR)=") ||
       e.command.parsed_commands.exists(c, size(c.argv) > 0 && !command_runs_only_itself(c))
     tests:
+      - name: git_config_passed_in_the_environment
+        # git reads these variables as config and runs an alias that starts with `!`.
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!rm -rf /srv' git x" }
+      - name: zsh_given_a_startup_directory
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "ZDOTDIR=/tmp/z zsh -c 'echo hi'" }
       - name: a_capture_cut_inside_a_loop
         # The commands before the loop are listed and run only themselves; the loop's body,
         # where the cut fell, is not read.
