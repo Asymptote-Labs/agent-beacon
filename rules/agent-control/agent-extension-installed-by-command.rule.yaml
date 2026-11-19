@@ -1,6 +1,6 @@
 id: agent-extension-installed-by-command
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 2
+version: 3
 title: Agent extension (MCP server, plugin, marketplace) installed by command
 description: >
   A command registers new code that an agent runtime will load on every later
@@ -15,8 +15,8 @@ description: >
   installer is found by what the line runs (the runtime by its command name, also
   behind sudo, by absolute path, inside `bash -c` or launched by npx, bunx or
   pnpm dlx, and the subcommand as its first words), so the same words in a commit
-  message or a here-document do not fire. A line the parser cannot vouch for (see
-  command_unread) is matched on its text.
+  message or a here-document do not fire. The text pattern is asked only of the text
+  that reaches a command the parser cannot see into (unread_text).
 severity: medium
 status: stable
 posture: detect
@@ -37,9 +37,8 @@ match: >
         c.args.matches("(?mi)\\A(mcp\\n(add|add-json|add-from-claude-desktop|install)|plugins?\\n(install|add|i)|plugins?\\nmarketplace\\nadd|extensions?\\n(install|link))$")) ||
       c.name.matches("(?i)^code(-insiders)?(\\.exe|\\.cmd)?$") && c.args.matches("(?m)^--(add-mcp|install-extension)(=.*)?$")
     ) ||
-    ((e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?((npx|bunx|pnpm\\s+dlx)\\s+(-y\\s+)?)?([^\\s;&|]*/)?(claude(-code)?|codex|gemini(-cli)?|qwen(-code)?|opencode(-ai)?|kiro-cli|amp|cursor-agent|copilot)\\s+(mcp\\s+(add|add-json|add-from-claude-desktop|install)\\b|plugins?\\s+(install|add|i)\\b|plugins?\\s+marketplace\\s+add\\b|extensions?\\s+(install|link)\\b)") ||
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?([^\\s;&|]*/)?code(-insiders)?(\\.exe|\\.cmd)?\\s+([^;&|\\n]*\\s)?--(add-mcp|install-extension)\\b")) &&
-      command_unread(e))
+    unread_text(e, t, (t.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?((npx|bunx|pnpm\\s+dlx)\\s+(-y\\s+)?)?([^\\s;&|]*/)?(claude(-code)?|codex|gemini(-cli)?|qwen(-code)?|opencode(-ai)?|kiro-cli|amp|cursor-agent|copilot)\\s+(mcp\\s+(add|add-json|add-from-claude-desktop|install)\\b|plugins?\\s+(install|add|i)\\b|plugins?\\s+marketplace\\s+add\\b|extensions?\\s+(install|link)\\b)") ||
+      t.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?([^\\s;&|]*/)?code(-insiders)?(\\.exe|\\.cmd)?\\s+([^;&|\\n]*\\s)?--(add-mcp|install-extension)\\b")))
   )
 
 emit:
@@ -219,4 +218,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "claude --mcp-config servers.json -p 'add the plugin to the list'" }
+        session: { id: s1 }
+  - name: mcp_add_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'cd tools && claude mcp add helper -- npx -y helper-mcp'" }
+        session: { id: s1 }
+  - name: mcp_add_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: cd tools && claude mcp add helper -- npx -y helper-mcp' && ./run-tests.sh" }
         session: { id: s1 }

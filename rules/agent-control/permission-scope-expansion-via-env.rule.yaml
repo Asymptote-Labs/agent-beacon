@@ -1,6 +1,6 @@
 id: permission-scope-expansion-via-env
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 2
+version: 4
 title: Agent runtime spawned with environment variables that elevate permissions
 description: >
   A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
@@ -18,8 +18,8 @@ description: >
   prefix of that command, a NAME=value word given to its sudo or env wrapper, or a
   word of an `export` or `declare -x` on the same line, so the names in a commit
   message or a here-document do not fire. The command-head reading is that of the
-  text pattern, which applies to a line the parser cannot vouch for (see
-  command_unread).
+  text pattern, which is asked of the text that reaches a command the parser cannot
+  see into (unread_text).
 severity: high
 status: experimental
 posture: detect
@@ -46,9 +46,8 @@ match: >
           x.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)=")))
       )
     ) ||
-    (e.command.command.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+|([A-Z_][A-Z0-9_]*\\s*=\\S+\\s+)+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b") &&
-      e.command.command.matches("(?i)\\b((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)\\s*=") &&
-      command_unread(e))
+    unread_text(e, t, t.matches("(?i)\\b((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)\\s*=") &&
+      t.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+|([A-Z_][A-Z0-9_]*\\s*=\\S+\\s+)+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b"))
   )
 
 emit:
@@ -144,4 +143,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "ELEVATED=1 make deploy && git log --oneline -3" }
+        session: { id: s1 }
+  - name: variable_prefix_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./launch.sh 'ELEVATED=1 claude -p go'" }
+        session: { id: s1 }
+  - name: variable_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: never start it as ELEVATED=1 claude -p go' && ./run-tests.sh" }
         session: { id: s1 }

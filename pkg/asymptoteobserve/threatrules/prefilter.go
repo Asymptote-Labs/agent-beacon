@@ -27,6 +27,7 @@ import (
 type prefilter struct {
 	op   pfOp
 	atom string // canonical; op == pfAtom
+	id   uint32 // the atom's number in the atom table (textatoms.go), 0 when it has none
 	subs []*prefilter
 }
 
@@ -107,7 +108,7 @@ func (in pfInfo) match() *prefilter {
 	slices.Sort(atoms) // a stable order, so a rule's work does not vary between runs
 	subs := make([]*prefilter, len(atoms))
 	for i, s := range atoms {
-		subs[i] = &prefilter{op: pfAtom, atom: s}
+		subs[i] = &prefilter{op: pfAtom, atom: s, id: atomID(s)}
 	}
 	return anyOf(subs...)
 }

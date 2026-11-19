@@ -138,14 +138,16 @@ func RenderFieldsMarkdown() string {
 // rendered. TestEveryDerivedFieldIsDocumented requires one per field.
 var derivedFieldDocs = map[string]string{
 	ParsedCommandsPath: "`command.command` read as a bash command line (spec v1.2): one\n" +
-		"  entry per command it runs, each with `name` (base name after sudo/env/exec/timeout/...\n" +
+		"  entry per command it runs, each with `name` (base name after sudo/env/exec/timeout/uv run/...\n" +
 		"  wrappers, \"\" when unknown), `argv` and `argv_raw` (every word, wrappers included: as\n" +
 		"  passed, \"\" when it depends on an expansion, glob or `~`; and as written), `args` (spec\n" +
 		"  v1.3: the words after the name, one per line, so `c.args.matches(\"(?m)^auth\\ntoken$\")`\n" +
 		"  asks for two whole words that follow each other), `env` (NAME=value prefixes),\n" +
 		"  `file_effects` (`{path, op}`), `file_writes` (spec v1.3, `{path, op}`: the files it\n" +
 		"  writes with each path as written, so a write to `~/.bashrc` or `$HOME/.netrc`, which\n" +
-		"  `file_effects` leaves out, is listed), `file_reads` (spec v1.3, `{path, via}`: the files whose\n" +
+		"  `file_effects` leaves out, is listed; a download's output file and the destination of\n" +
+		"  `scp` and `rsync` are writes, and so is the directory an archive or a clone lands in,\n" +
+		"  written with a trailing slash), `file_reads` (spec v1.3, `{path, via}`: the files whose\n" +
 		"  content it takes in, each as written without its quotes, so `~/.aws/credentials` and\n" +
 		"  `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one\n" +
 		"  that reaches its standard input by a redirection or a pipe, `argument` for one a\n" +
@@ -155,15 +157,28 @@ var derivedFieldDocs = map[string]string{
 		"  are not data), `socket_redirects` (spec v1.3, `{path, op}`: its redirections to or from\n" +
 		"  bash's `/dev/tcp/host/port` and `/dev/udp/host/port`, also through a descriptor an\n" +
 		"  earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`\n" +
-		"  (0-based) and `nested` (inside `$(...)`, `<(...)` or a shell's script: its `-c` text, or\n" +
-		"  the here-document it reads, which are read too).\n" +
+		"  (0-based), `nested` (inside `$(...)`, `<(...)`, a shell's script or what a carrier or an\n" +
+		"  inline script runs), `runs_read` (spec v1.3: true when the command hands a command line\n" +
+		"  to another program and that command line was read to its end, so its commands follow it\n" +
+		"  in the list: a shell's `-c` text, the here-document it reads or the literal script a\n" +
+		"  pipe sends it, the command of `xargs`, `find -exec`, `ssh host`, `docker exec`,\n" +
+		"  `kubectl exec --`, `su -c`, `eval`, `watch` and `trap`, and the command behind\n" +
+		"  `sudo -i` or `env -C`; never for an interpreter, though the commands its inline script\n" +
+		"  runs through `os.system(\"..\")` and the like are listed) and `span` (spec v1.3: the part\n" +
+		"  of the line that can decide what the command runs, for a rule that must match text\n" +
+		"  because the command is a program it cannot see into: its own words, redirections and\n" +
+		"  here-documents, with the earlier stages of its pipeline and the commands before it that\n" +
+		"  wrote a file, the line from its start when a variable the line may have set reaches it,\n" +
+		"  and the loop or the line when it is in a loop or a function).\n" +
 		"  Other here-document bodies and strings are not commands. A declaration is one (spec\n" +
 		"  v1.3): `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.\n" +
 		fmt.Sprintf("  The first %d bytes are read; a cut capture yields the commands before the cut, and\n", ParsedCommandsLimit) +
 		"  one that does not parse yields an empty list.",
 	ParsedIncompletePath: "true when `command.command` was not read to its end (spec v1.3):\n" +
 		"  it does not parse, it ends inside a quote, a here-document, a substitution or a compound\n" +
-		"  command (as a cut capture does), or it is longer than the engine reads.\n" +
+		"  command (as a cut capture does), it is longer than the engine reads, or it names more\n" +
+		"  than the engine reads (more than 256 commands, or a brace expansion of thousands of\n" +
+		"  words; SPEC gives the bounds).\n" +
 		"  `e.command.parsed_commands` then lists the commands before that point only, so a rule\n" +
 		"  that concludes something from a command's absence asks this first.",
 	ToolResultTextPath: "`gen_ai.tool.call.result` as text, only on read-type tool\n" +

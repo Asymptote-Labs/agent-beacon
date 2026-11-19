@@ -1,6 +1,6 @@
 id: base64-decode-piped-to-shell
-spec: threat-rules/v1.2  # needed for e.command.parsed_commands
-version: 4
+spec: threat-rules/v1.3  # needed for the commands a carrier or a pipe hands a shell
+version: 5
 title: Base64-decoded payload piped into a shell
 description: >
   A command base64-decodes content and pipes it straight into a shell — the classic
@@ -8,8 +8,9 @@ description: >
   The shell match is case-insensitive so an uppercase shell name cannot evade, and
   accepts the shell by any path and under `env` or `sudo` with their options. The
   command line is read as bash, so the decode and the shell must be stages of one
-  pipeline, and the same text inside a quoted string does not fire; a command line
-  that does not parse falls back to matching its text.
+  pipeline, and the same text inside a quoted string does not fire; the pipeline that
+  `ssh host`, `docker exec`, `su -c`, `eval` or a script echoed into a shell runs is
+  read too. A command line that does not parse falls back to matching its text.
 severity: high
 status: stable
 posture: detect
@@ -37,6 +38,24 @@ emit:
   reason: "Base64-decoded payload piped directly into a shell"
 
 tests:
+  - name: decode_to_shell_on_another_host
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'echo ZWNobyBoaQ== | base64 -d | sh'" }
+        session: { id: s1 }
+  - name: decode_to_shell_as_another_user
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "su - deploy -c 'echo aGk= | base64 --decode | bash'" }
+        session: { id: s1 }
+  - name: decode_to_shell_echoed_into_a_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "printf '%s\\n' 'base64 -d payload.b64 | sh' | bash" }
+        session: { id: s1 }
   - name: echo_base64_decode_to_bash
     verdict: match
     events:

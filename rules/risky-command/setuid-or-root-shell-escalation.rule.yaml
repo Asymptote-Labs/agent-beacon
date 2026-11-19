@@ -1,20 +1,27 @@
 id: setuid-or-root-shell-escalation
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 5
 title: Setuid bit installed or interactive root shell requested
 description: >
   A command either installs the setuid bit on a file (chmod u+s or +s, chmod with a
   four-digit octal mode carrying the setuid or setgid bit such as 4755, 6755 or 04755,
   or chmod g+s setgid) — creating a standing privileged
   binary that runs as its owner — or escalates to an interactive root shell via
-  `su - root` / `su root` / `su -` or `pkexec` (polkit). Setuid root binaries and
-  pkexec are classic local-privilege-escalation primitives. The command is found by
-  what the line runs: chmod whose first operand is such a mode, su with the operand
-  root or with nothing but a login option (`-`, `-l`, `--login`), or pkexec, also under
-  sudo, by absolute path or inside `bash -c`, so the same words in a commit message or
-  a here-document do not fire and `su someuser` does not match. A line the parser
-  cannot vouch for (see command_unread) is matched on its text, where each command is
-  anchored to the command position.
+  `su`, `su -`, `su root`, `sudo su`, `sudo -i`, `sudo -s`, `sudo bash` or `pkexec`
+  (polkit). Setuid root binaries and pkexec are classic local-privilege-escalation
+  primitives, and an agent that asks for a shell as another account is asking for more
+  than one command. The command is found by what the line runs: chmod whose first
+  operand is such a mode, su with the operand root, with nothing, or with nothing but a
+  login option (`-`, `-l`, `--login`), sudo -i or -s with no command after it, a shell
+  run through sudo or doas with no script, or pkexec, also by absolute path or inside
+  `bash -c`, so the same words in a commit message or a here-document do not fire, and
+  `su someuser`, `sudo -i cmd` and `sudo bash -c '...'` do not match. A sudo -i or -s
+  counts as a shell only from a terminal, as a shell under sudo does: first in its
+  pipeline, with nothing on its standard input, and with every word known, since a word
+  that holds a variable (`sudo "$NGINX" -s reload`) is a program whose own options
+  follow it. Where the parser
+  cannot see into a command, the text that reaches that command is matched instead
+  (unread_text), where each command is anchored to the command position.
 severity: high
 status: stable
 posture: detect
@@ -24,26 +31,100 @@ taxonomy:
   mitre_atlas: AML.T0050
 
 # The mode is the first word of chmod that is not an option (an unknown word, such as a
-# variable, is skipped), so a file named 2024 is not a mode.
+# variable, is skipped), so a file named 2024 is not a mode. A shell to type into is su with
+# no command, `sudo -i` or `sudo -s` with no command (an entry with no name whose command the
+# parser did not read, because there is none), and a shell run through sudo or doas with no
+# words, no script and nothing on its standard input.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
       c.name == "chmod" &&
         c.args.matches("\\A(-[^\\n]*\\n|\\n)*(0?[2-7][0-7]{3}|[ugoa,+=rwxXst-]*[+=][rwxXt]*s[ugoa,+=rwxXst-]*)(\\n|\\z)") ||
-      c.name == "su" && c.args.matches("(?m)^root$|\\A(-|-l|--login)\\z") ||
-      c.name == "pkexec"
+      c.name == "su" && c.args.matches("(?m)^root$|\\A(-|-l|--login)?\\z") ||
+      c.name == "pkexec" ||
+      size(c.argv) > 1 && c.argv[0].matches("(^|/)(sudo|doas)$") && !c.runs_read && (
+        c.name == "" && c.stage == 0 && size(c.file_reads) == 0 && !c.argv.exists(a, a == "") &&
+          c.argv.exists(a, a.matches("^(-[A-Za-z]*[is][A-Za-z]*|--login|--shell)$")) ||
+        c.name.matches("^(ba|z|da|k)?sh$") && c.args == "" && c.stage == 0 && size(c.file_reads) == 0)
     ) ||
-    ((e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+-\\s*$") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)pkexec\\b")) &&
-      command_unread(e))
+    unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
+      t.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
+      t.matches("(?i)(^|[;&|]\\s*)su\\s+-\\s*$") ||
+      t.matches("(?i)(^|[;&|]\\s*)sudo\\s+(-[is]|--login|--shell|su)\\s*($|[;&|])") ||
+      t.matches("(?i)(^|[;&|]\\s*)pkexec\\b")))
   )
 
 emit:
   reason: "Setuid bit installed or interactive root shell requested (local privilege escalation)"
 
 tests:
+  - name: bare_su
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "su" }
+        session: { id: s1 }
+  - name: a_program_named_by_a_variable_under_sudo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo \"$NGINX\" -s reload" }
+        session: { id: s1 }
+  - name: a_container_shell_named_by_a_variable_under_sudo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo \"$DOCKER\" exec -it db psql" }
+        session: { id: s1 }
+  - name: a_script_redirected_into_sudo_i
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -i < setup.sh" }
+        session: { id: s1 }
+  - name: sudo_su
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /srv && sudo su" }
+        session: { id: s1 }
+  - name: sudo_login_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -i" }
+        session: { id: s1 }
+  - name: sudo_shell_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -E -s" }
+        session: { id: s1 }
+  - name: sudo_bare_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo bash" }
+        session: { id: s1 }
+  - name: sudo_login_running_a_command
+    # A command run after a login is that command, not a shell to type into.
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -i systemctl restart web" }
+        session: { id: s1 }
+  - name: sudo_shell_running_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo bash -c 'apt-get update' && sudo bash < setup.sh && sudo -l" }
+        session: { id: s1 }
+  - name: sudo_validating_credentials
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -v && sudo -n true" }
+        session: { id: s1 }
   - name: chmod_u_plus_s
     verdict: match
     events:
@@ -193,5 +274,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "sudo chmod 0755 /usr/local/bin/helper" }
+        session: { id: s1 }
+  - name: setuid_chmod_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'cd /opt; chmod u+s /opt/helper'" }
+        session: { id: s1 }
+  - name: setuid_chmod_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'fix; chmod u+s /opt/helper removed' && ./run-tests.sh" }
         session: { id: s1 }
 

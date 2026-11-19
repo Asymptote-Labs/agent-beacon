@@ -197,10 +197,8 @@ func lensFindings(records []EventRecord, opts LensDataOptions) (*asymptoteobserv
 	// Same reason as RunScan: the log is in append order, not the order things happened, and
 	// ordered correlation rules miss without this.
 	threatrules.SortEvents(events)
-	found, err := threatrules.ScanEvents(compiled, events)
-	if err != nil {
-		return nil, err
-	}
+	result := threatrules.Scan(compiled, events)
+	found := result.Findings
 	threatrules.SortFindings(found)
 
 	taxonomy := make(map[string]map[string]string, len(compiled))
@@ -226,7 +224,11 @@ func lensFindings(records []EventRecord, opts LensDataOptions) (*asymptoteobserv
 			EventIDs: ids,
 		})
 	}
-	return &asymptoteobserve.LensFindingsV1{RulesEvaluated: len(compiled), Items: items, Skipped: skipped}, nil
+	var failed []string
+	for _, f := range threatrules.FailuresByRule(result.Failures) {
+		failed = append(failed, f.RuleID)
+	}
+	return &asymptoteobserve.LensFindingsV1{RulesEvaluated: len(compiled), Items: items, Skipped: skipped, Failed: failed}, nil
 }
 
 // lensTokenCoverage is the trace's own line from the token coverage join, computed over just its

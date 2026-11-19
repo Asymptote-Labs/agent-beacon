@@ -1,6 +1,6 @@
 id: imds-obfuscated-ip-fetch
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 2
+version: 3
 title: Cloud metadata IP fetched via obfuscated address encoding
 description: >
   A command fetches a URL whose host is an alternate numeric encoding of the
@@ -14,9 +14,9 @@ description: >
   so the rule does not name one: the URL (see cloud_metadata_obfuscated_target)
   must be a word of a command the line runs or the value of a variable it sets,
   which holds under sudo, inside `bash -c` and by any path, and does not hold for
-  the URL inside a commit message or a here-document. A line the parser cannot
-  vouch for (see command_unread), which includes every interpreter, is matched on
-  its text.
+  the URL inside a commit message or a here-document. The text pattern is asked of
+  the text that reaches a command the parser cannot see into (unread_text), which
+  includes every interpreter.
 severity: high
 status: stable
 posture: detect
@@ -40,7 +40,7 @@ match: >
       c.argv_raw.exists(a, cloud_metadata_obfuscated_target(a) && !a.matches("\\s")) ||
       c.env.exists(k, cloud_metadata_obfuscated_target(c.env[k]) && !c.env[k].matches("\\s")) ||
       egress_sender(c) && client_target_unseen(c) && cloud_metadata_obfuscated_target(e.command.command)) ||
-    (cloud_metadata_obfuscated_target(e.command.command) && command_unread(e))
+    unread_text(e, t, cloud_metadata_obfuscated_target(t))
   )
 
 emit:
@@ -172,5 +172,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "curl -s http://2852039167/status" }
+        session: { id: s1 }
+  - name: url_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./probe.sh 'curl -s http://2852039166/latest/meta-data/'" }
+        session: { id: s1 }
+  - name: url_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'test: add a fixture for curl http://2852039166/latest/meta-data/' && ./run-tests.sh" }
         session: { id: s1 }
 

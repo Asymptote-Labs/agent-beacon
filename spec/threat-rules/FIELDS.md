@@ -185,14 +185,16 @@ These are computed by the engine from the event just before evaluation. They are
 never written to or read from the log, so a fixture sets the source field, not these.
 
 - `e.command.parsed_commands`: `command.command` read as a bash command line (spec v1.2): one
-  entry per command it runs, each with `name` (base name after sudo/env/exec/timeout/...
+  entry per command it runs, each with `name` (base name after sudo/env/exec/timeout/uv run/...
   wrappers, "" when unknown), `argv` and `argv_raw` (every word, wrappers included: as
   passed, "" when it depends on an expansion, glob or `~`; and as written), `args` (spec
   v1.3: the words after the name, one per line, so `c.args.matches("(?m)^auth\ntoken$")`
   asks for two whole words that follow each other), `env` (NAME=value prefixes),
   `file_effects` (`{path, op}`), `file_writes` (spec v1.3, `{path, op}`: the files it
   writes with each path as written, so a write to `~/.bashrc` or `$HOME/.netrc`, which
-  `file_effects` leaves out, is listed), `file_reads` (spec v1.3, `{path, via}`: the files whose
+  `file_effects` leaves out, is listed; a download's output file and the destination of
+  `scp` and `rsync` are writes, and so is the directory an archive or a clone lands in,
+  written with a trailing slash), `file_reads` (spec v1.3, `{path, via}`: the files whose
   content it takes in, each as written without its quotes, so `~/.aws/credentials` and
   `$HOME/.netrc` stay as they are; `via` is `direct` for a file it opens, `stdin` for one
   that reaches its standard input by a redirection or a pipe, `argument` for one a
@@ -202,15 +204,28 @@ never written to or read from the log, so a fixture sets the source field, not t
   are not data), `socket_redirects` (spec v1.3, `{path, op}`: its redirections to or from
   bash's `/dev/tcp/host/port` and `/dev/udp/host/port`, also through a descriptor an
   earlier `exec` opened; `op` is `write`, `read` or `readwrite`), `pipeline`, `stage`
-  (0-based) and `nested` (inside `$(...)`, `<(...)` or a shell's script: its `-c` text, or
-  the here-document it reads, which are read too).
+  (0-based), `nested` (inside `$(...)`, `<(...)`, a shell's script or what a carrier or an
+  inline script runs), `runs_read` (spec v1.3: true when the command hands a command line
+  to another program and that command line was read to its end, so its commands follow it
+  in the list: a shell's `-c` text, the here-document it reads or the literal script a
+  pipe sends it, the command of `xargs`, `find -exec`, `ssh host`, `docker exec`,
+  `kubectl exec --`, `su -c`, `eval`, `watch` and `trap`, and the command behind
+  `sudo -i` or `env -C`; never for an interpreter, though the commands its inline script
+  runs through `os.system("..")` and the like are listed) and `span` (spec v1.3: the part
+  of the line that can decide what the command runs, for a rule that must match text
+  because the command is a program it cannot see into: its own words, redirections and
+  here-documents, with the earlier stages of its pipeline and the commands before it that
+  wrote a file, the line from its start when a variable the line may have set reaches it,
+  and the loop or the line when it is in a loop or a function).
   Other here-document bodies and strings are not commands. A declaration is one (spec
   v1.3): `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.
   The first 4096 bytes are read; a cut capture yields the commands before the cut, and
   one that does not parse yields an empty list.
 - `e.command.parsed_incomplete`: true when `command.command` was not read to its end (spec v1.3):
   it does not parse, it ends inside a quote, a here-document, a substitution or a compound
-  command (as a cut capture does), or it is longer than the engine reads.
+  command (as a cut capture does), it is longer than the engine reads, or it names more
+  than the engine reads (more than 256 commands, or a brace expansion of thousands of
+  words; SPEC gives the bounds).
   `e.command.parsed_commands` then lists the commands before that point only, so a rule
   that concludes something from a command's absence asks this first.
 - `e.gen_ai.system_instructions_text`: `gen_ai.system_instructions` as text: the `content` of each

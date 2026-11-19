@@ -1,6 +1,6 @@
 id: persistence-install-command
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 5
 title: Command installs scheduled-job or service persistence
 description: >
   A command installs persistence that runs outside any agent sandbox at login,
@@ -12,8 +12,9 @@ description: >
   found by what the line runs: crontab that edits or installs (a file operand, `-`, or
   no operand at all, which reads standard input), systemctl with the word enable, or
   launchctl with one of those subcommands, also under sudo, by absolute path or inside
-  `bash -c`, so the same words in a commit message or a here-document do not fire. A
-  line the parser cannot vouch for (see command_unread) is matched on its text.
+  `bash -c`, so the same words in a commit message or a here-document do not fire. The
+  text patterns are asked of the text that reaches a command the parser cannot see into
+  (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -22,22 +23,18 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
-# crontab installs when its words are an optional `-u user` and at most one operand. A
-# file under ~ or held in a variable is an empty word of args, and no word at all is an
-# install from standard input (`crontab <<EOF`, `... | crontab`), so both forms match.
+# crontab installs when its words are an optional `-u user` and at most one operand
+# (crontab_installs, rules/concepts/scheduling.predicates.yaml).
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
-      c.name == "crontab" && (
-        c.args.matches("(?m)^-[is]*e") ||
-        c.args.matches("\\A(-u(\\n.*|.+)(\\n|\\z))?(-|[^-\\n].*)?\\z")) ||
+      crontab_installs(c) ||
       c.name == "systemctl" && c.args.matches("(?m)^enable$") ||
       c.name == "launchctl" && c.args.matches("\\A(load|bootstrap|enable)(\\n|\\z)")
     ) ||
-    ((e.command.command.matches("(?i)\\bcrontab\\b\\s+(-($|[\\s|])|-e\\b|[^-\\s])") ||
-      e.command.command.matches("(?i)\\bsystemctl\\b(\\s+--?[a-z][a-z-]*(=\\S+)?)*\\s+enable\\b") ||
-      e.command.command.matches("(?i)\\blaunchctl\\b\\s+(load|bootstrap|enable)\\b")) &&
-      command_unread(e))
+    unread_text(e, t, (t.matches("(?i)\\bcrontab\\b\\s+(-($|[\\s|])|-e\\b|[^-\\s])") ||
+      t.matches("(?i)\\bsystemctl\\b(\\s+--?[a-z][a-z-]*(=\\S+)?)*\\s+enable\\b") ||
+      t.matches("(?i)\\blaunchctl\\b\\s+(load|bootstrap|enable)\\b")))
   )
 
 emit:
@@ -175,5 +172,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "crontab -r" }
+        session: { id: s1 }
+  - name: enable_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./provision.sh 'systemctl enable backdoor.service'" }
+        session: { id: s1 }
+  - name: enable_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: systemctl enable is not needed here' && ./run-tests.sh" }
         session: { id: s1 }
 

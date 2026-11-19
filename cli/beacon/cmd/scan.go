@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -116,10 +117,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// correlation rules silently miss without this.
 	threatrules.SortEvents(events)
 
-	findings, err := threatrules.ScanEvents(compiled, events)
-	if err != nil {
-		return fmt.Errorf("scan: %w", err)
-	}
+	result := threatrules.Scan(compiled, events)
+	findings := result.Findings
 	// The --fail-on gate is a CI signal that must reflect every detection in the
 	// scan, so count it before --min-severity (a display-only filter) drops
 	// findings from the output slice.
@@ -147,10 +146,30 @@ func runScan(cmd *cobra.Command, args []string) error {
 		printFindings(cmd, findings, len(events), runtimeLog.EffectiveLogPath)
 	}
 
-	if failRank >= 0 && failCount > 0 {
-		return fmt.Errorf("scan found %d finding(s) at or above %q", failCount, scanOpts.failOn)
+	var errs []error
+	if failed := threatrules.FailuresByRule(result.Failures); len(failed) > 0 {
+		// The findings are what the rules found everywhere else; a rule that could not be
+		// evaluated on an event has no verdict there, so the scan exits non-zero for a script.
+		warnFailures(cmd, failed)
+		errs = append(errs, fmt.Errorf("scan incomplete: %d rule(s) could not be evaluated on every event", len(failed)))
 	}
-	return nil
+	if failRank >= 0 && failCount > 0 {
+		errs = append(errs, fmt.Errorf("scan found %d finding(s) at or above %q", failCount, scanOpts.failOn))
+	}
+	return errors.Join(errs...)
+}
+
+// warnFailures names each rule that could not be evaluated on some event, and the first such event.
+func warnFailures(cmd *cobra.Command, failed []threatrules.RuleFailures) {
+	w := cmd.ErrOrStderr()
+	for _, f := range failed {
+		session := f.First.SessionID
+		if session == "" {
+			session = "-"
+		}
+		fmt.Fprintf(w, "warning: rule %q could not be evaluated on %d event(s), so its verdict there is unknown (first: event %s, session %s): %v\n",
+			f.RuleID, f.Events, f.First.EventID, session, f.First.Err)
+	}
 }
 
 func scanSessionMatches(sessionID, query string) bool {

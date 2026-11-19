@@ -1,6 +1,6 @@
 id: git-remote-tampering
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 6
+version: 7
 title: Git remote repointed or force-push to remote
 description: >
   A command repoints a git remote (remote set-url / remote add, the config-key form
@@ -11,8 +11,9 @@ description: >
   is found by what the line runs: a git command, also under sudo, by path, inside
   `bash -c` or after git's own options (`git -C dir push --force`), whose subcommand
   and words say so. The same words in a commit message, an echo or a here-document do
-  not fire, nor does a read (`git config --get`, or a key with no value after it). A
-  line the parser cannot vouch for (see command_unread) is matched on its text.
+  not fire, nor does a read (`git config --get`, or a key with no value after it). The
+  text pattern is asked only of the text that reaches a command the parser cannot see
+  into (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -43,12 +44,11 @@ match: >
         c.args.matches("(?m)^-[vqnud46]*f[vqnud46]*$") ||
         c.argv_raw.exists(a, a.matches("^[\"']?(--force\\b|\\+)")))
     )) ||
-    ((e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bremote\\b\\s+(set-url|add)\\b") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bconfig\\b[^;&|]*\\bremote\\.[^ ]+\\.(push)?url\\b\\s+\\S") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\s-c\\s+[\"']?remote\\.[^\\s=]+\\.(push)?url=") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b|\\s\\+)") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\binsteadof\\b")) &&
-      command_unread(e))
+    unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bremote\\b\\s+(set-url|add)\\b") ||
+      t.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bconfig\\b[^;&|]*\\bremote\\.[^ ]+\\.(push)?url\\b\\s+\\S") ||
+      t.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\s-c\\s+[\"']?remote\\.[^\\s=]+\\.(push)?url=") ||
+      t.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b|\\s\\+)") ||
+      t.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\binsteadof\\b")))
   )
 
 emit:
@@ -228,4 +228,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git push -q --force-with-lea origin HEAD:topic" }
+        session: { id: s1 }
+  - name: force_push_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'cd repo; git push --force origin main'" }
+        session: { id: s1 }
+  - name: force_push_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: never git push --force' && ./run-tests.sh" }
         session: { id: s1 }

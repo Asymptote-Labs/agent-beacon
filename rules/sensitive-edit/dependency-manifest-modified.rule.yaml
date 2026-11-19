@@ -1,6 +1,6 @@
 id: dependency-manifest-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 4
+version: 5
 title: Dependency manifest or lockfile modified
 description: >
   The agent modified a dependency manifest or lockfile (package.json, lockfiles,
@@ -17,19 +17,19 @@ taxonomy:
 # Which file is one definition (dependency_manifest_file,
 # rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
 # path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv). A write
-# that lands in a temporary directory is left out (scratch_write): agents stage copies and
-# throwaway projects there all the time, and moving one back into the project is a write of
-# its own. A package manager rewriting its own manifest (npm install, go mod tidy) is not a
-# write the parser reports.
+# that lands in a temporary directory is left out (write_outside_scratch): agents stage
+# copies and throwaway projects there all the time, and moving one back into the project is
+# a write of its own. A package manager rewriting its own manifest (npm install, go mod
+# tidy) is not a write the parser reports.
 match: >
   (
     e.event.action in ["file.modified", "file.created", "file.edited"] &&
     dependency_manifest_file(e.file.path)
   ) || (
     e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+    write_outside_scratch(e, f,
       f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      dependency_manifest_file(f.path) && !scratch_write(e, f)))
+      dependency_manifest_file(f.path))
   )
 
 emit:

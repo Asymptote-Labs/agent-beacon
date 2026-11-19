@@ -1,6 +1,6 @@
 id: privileged-container-run
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 6
+version: 7
 title: Container started with host-escaping privileges
 description: >
   A docker/podman run or exec — including Compose v2 (`docker compose run`) and the
@@ -11,8 +11,8 @@ description: >
   line runs: docker, podman or their compose binary, under sudo, by path or inside
   `bash -c`, with `run` or `exec` and then the option among its own words, so the same
   words in a commit message or a here-document do not fire. Whatever the container
-  itself runs is not read, so a line with a docker run or exec, like any line the
-  parser cannot vouch for (see command_unread), is also matched on its text.
+  itself runs is not read, so the text pattern is also asked of the text that reaches a
+  docker run or exec, as of any command the parser cannot see into (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -29,9 +29,8 @@ match: >
       c.name.matches("^(docker|podman)(-compose)?$") &&
       c.args.matches("(?m)^(run|exec)\\n(.*\\n)*?(--privileged(=true)?$|--(pid|net|network|ipc|uts)(=|\\n)host$|(-v|--volume)(=|\\n)/:|--mount(=|\\n)(.*,)?(source|src)=/(,|$)|--cap-add(=|$)|.*/var/run/docker\\.sock\\b)")
     ) ||
-    (e.command.command.matches("(?i)(^|;|&&|\\|\\|)\\s*(sudo(\\s+-\\S+)*\\s+|env\\s+|([A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+)*(docker|podman)(-compose)?\\s+(container\\s+|compose\\s+)?(run|exec)\\b") &&
-      e.command.command.matches("(?i)(--privileged|--(pid|net|network|ipc|uts)[= ]host|(-v|--volume)(=|\\s+)['\"]?/:|--mount[= ]\\S*\\b(source|src)=/(,|['\"]|\\s|$)|--cap-add[= ]|/var/run/docker\\.sock\\b)") &&
-      command_unread(e))
+    unread_text(e, t, t.matches("(?i)(^|;|&&|\\|\\|)\\s*(sudo(\\s+-\\S+)*\\s+|env\\s+|([A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+)*(docker|podman)(-compose)?\\s+(container\\s+|compose\\s+)?(run|exec)\\b") &&
+      t.matches("(?i)(--privileged|--(pid|net|network|ipc|uts)[= ]host|(-v|--volume)(=|\\s+)['\"]?/:|--mount[= ]\\S*\\b(source|src)=/(,|['\"]|\\s|$)|--cap-add[= ]|/var/run/docker\\.sock\\b)"))
   )
 
 emit:
@@ -205,4 +204,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "docker build --network host -t app ." }
+        session: { id: s1 }
+  - name: docker_run_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./ci.sh 'cd /srv && docker run --privileged ubuntu'" }
+        session: { id: s1 }
+  - name: docker_run_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'ci: build && docker run --privileged img in the nightly job' && ./run-tests.sh" }
         session: { id: s1 }

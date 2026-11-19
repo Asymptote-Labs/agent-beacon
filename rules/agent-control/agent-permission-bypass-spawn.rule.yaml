@@ -1,6 +1,6 @@
 id: agent-permission-bypass-spawn
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 5
 title: Agent runtime spawned with permission/approval gating disabled
 description: >
   A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
@@ -17,8 +17,8 @@ description: >
   what the line runs (its command name, also behind sudo or env, by absolute path,
   inside `bash -c` or launched by npx) and the flag as a whole word of that same
   command, so the flag in a commit message or on another command of the line does
-  not fire. A line the parser cannot vouch for (see command_unread) is matched on
-  its text.
+  not fire. Where the parser cannot see into a command, the text that reaches that
+  command is matched instead (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -37,9 +37,8 @@ match: >
       agent_cli(c) &&
       c.args.matches("(?mi)^(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--full-auto|--yolo|--force)$|^--permission-mode[=\\n]bypasspermissions$|^(--sandbox|-s)[=\\n]danger-full-access$|^(--ask-for-approval|-a)[=\\n]never$")
     ) ||
-    (e.command.command.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b") &&
-      e.command.command.matches("(?i)(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--permission-mode[ =]+bypasspermissions|(--sandbox|(^|\\s)-s)[ =]+danger-full-access|--ask-for-approval[ =]+never|--full-auto|--yolo|(^|\\s)-a[ =]+never\\b|--force\\b)") &&
-      command_unread(e))
+    unread_text(e, t, t.matches("(?i)(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--permission-mode[ =]+bypasspermissions|(--sandbox|(^|\\s)-s)[ =]+danger-full-access|--ask-for-approval[ =]+never|--full-auto|--yolo|(^|\\s)-a[ =]+never\\b|--force\\b)") &&
+      t.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b"))
   )
 
 emit:
@@ -164,4 +163,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "codex exec -a on-request --sandbox workspace-write 'review the diff'" }
+        session: { id: s1 }
+  - name: bypass_flag_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./launch.sh 'env claude --dangerously-skip-permissions -p fix'" }
+        session: { id: s1 }
+  - name: bypass_flag_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: never run env claude --dangerously-skip-permissions' && ./run-tests.sh" }
         session: { id: s1 }

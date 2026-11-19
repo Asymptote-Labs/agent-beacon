@@ -97,15 +97,29 @@ type Command struct {
 	// the statement ends, or 0 outside any: what an exec of the statement leaves open is open up
 	// to there (SocketRedirects).
 	execEnd int
-	// shell is, for a command WithScripts added, one more than the index of the shell whose
-	// script it is in, and 0 for a command of the command line itself. scripted is set on a
-	// shell whose script's commands follow it, and scriptOnStdin when it read that script from
-	// its standard input. scriptZero is one more than the index in Argv of the word that is
-	// the script's $0, or 0 where its operands are not the script's.
+	// shell is, for a command WithScripts added, one more than the index of the shell or
+	// carrier whose command line it is in, and 0 for a command of the command line itself.
+	// scripted is set on a shell or carrier whose commands follow it, runsRead when that
+	// command line was read to its end, and scriptOnStdin when a shell read its script from
+	// its standard input. ranCommands is set instead of scripted on an interpreter whose
+	// inline script runs the commands that follow it. scriptZero is one more than the index in
+	// Argv of the word that is the script's $0, or 0 where its operands are not the script's (a
+	// carrier, an interpreter, PowerShell).
 	shell         int32
 	scriptZero    int32
 	scripted      bool
+	runsRead      bool
+	ranCommands   bool
 	scriptOnStdin bool
+	// source is the text the statement was parsed from (the command line, or the script it is
+	// in), end the offset where its words and redirections end, and hdocs its here-documents,
+	// each the offset of its body, which comes after the line it is named on, and the index
+	// of its redirection. scopeStart and scopeEnd are the outermost loop around the statement,
+	// or the whole source when it is in a function's body; scopeEnd is 0 when it is in neither.
+	source               string
+	end                  int
+	hdocs                [][2]int
+	scopeStart, scopeEnd int
 }
 
 // wordRef is one thing a word of a command takes its value from: a command substitution or an
@@ -133,6 +147,25 @@ const (
 	refDeclared
 )
 
+// ErrTooManyWords is Parse's error for a command line whose brace expansions produce more than
+// maxBraceWords words.
+var ErrTooManyWords = errors.New("shellcmd: brace expansions produce too many words to read")
+
+// maxBraceWords bounds the words the brace expansions of one command line may produce. A few
+// bytes of braces name any number of words (`{a,b}{a,b}{a,b}..` doubles with every pair, and
+// `{1..999999999}` is sixteen bytes), and each is a word some rule then looks at. A thousand is
+// more than a line that lists files or counts a loop comes to; a line past it is not read at
+// all, which leaves it to a caller's reading of its text, rather than read without some of its
+// words.
+const maxBraceWords = 1024
+
+// maxCutRetries bounds how many times Parse looks for the part of a cut command line that
+// stands on its own. Each try drops the innermost construct left open, so a line needs as many
+// as it has constructs open where it was cut: a quote inside a substitution inside a quote is
+// three, and an `if` inside a loop is four. A line of nothing but opening parentheses would
+// otherwise be parsed once for each.
+const maxCutRetries = 32
+
 // Parse parses command as bash and returns its statements in walk order: each statement, then the
 // statements inside it (an if's body, a command substitution in its words). A statement that
 // carries nothing -- no simple command and no redirection, such as the `a && b` around its two
@@ -142,36 +175,51 @@ const (
 // quote, here-document, substitution or compound command: a capture cut short), Parse also
 // returns the commands of the part before the point where it became incomplete, parsed on its
 // own; the last of them may be missing words that the cut removed. Any other parse error returns
-// no commands. A caller that must not act on a partial command line ignores the commands
-// whenever the error is not nil.
+// no commands, and so do a line cut inside more than maxCutRetries constructs and one whose
+// brace expansions produce too many words (ErrTooManyWords). A caller that must not act on a
+// partial command line ignores the commands whenever the error is not nil.
 func Parse(command string) ([]Command, error) {
+	return parse(command, new(int))
+}
+
+// parse is Parse with the count of the words brace expansions have produced so far, which the
+// scripts of one command line share (WithScripts).
+func parse(command string, braceWords *int) ([]Command, error) {
 	file, err := parseBash(command)
 	if err == nil {
-		return walk(command, file), nil
+		return walk(command, file, braceWords)
 	}
 	// The prefix can itself end inside an earlier construct (`a "$(b` cut again at `$(`); each
-	// retry is strictly shorter, so this ends.
+	// retry is strictly shorter.
 	prefix, perr := command, err
-	for {
+	for range maxCutRetries {
 		var incomplete syntax.ParseError
 		if !errors.As(perr, &incomplete) || !incomplete.Incomplete || int(incomplete.Pos.Offset()) >= len(prefix) {
 			return nil, err
 		}
 		prefix = prefix[:incomplete.Pos.Offset()]
 		if file, perr = parseBash(prefix); perr == nil {
-			return walk(prefix, file), err
+			commands, tooMany := walk(prefix, file, braceWords)
+			if tooMany != nil {
+				return nil, tooMany
+			}
+			return commands, err
 		}
 	}
+	return nil, err
 }
 
 func parseBash(command string) (*syntax.File, error) {
 	return syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(command), "")
 }
 
-func walk(source string, file *syntax.File) []Command {
-	p := parser{source: source, stages: map[*syntax.Stmt]stage{}, containers: map[*syntax.Stmt]bool{}}
+func walk(source string, file *syntax.File, braceWords *int) ([]Command, error) {
+	p := parser{source: source, stages: map[*syntax.Stmt]stage{}, containers: map[*syntax.Stmt]bool{}, braceWords: braceWords}
 	syntax.Walk(file, p.visit)
-	return p.commands
+	if p.tooManyWords {
+		return nil, ErrTooManyWords
+	}
+	return p.commands, nil
 }
 
 type stage struct{ pipeline, index int }
@@ -208,6 +256,13 @@ type parser struct {
 	substIDs   map[syntax.Node]int
 	declared   []declaration // not yet carried by a statement
 	moved      bool
+	// scopes are the byte ranges of the loops, and the whole source once per function
+	// declaration: a command inside one may run after anything in that range.
+	scopes []substitution
+	// braceWords counts the words brace expansions have produced, and tooManyWords is set
+	// once that passes maxBraceWords: the command line is then not read (ErrTooManyWords).
+	braceWords   *int
+	tooManyWords bool
 }
 
 // declaration is an assignment by export, declare, local, readonly or typeset, and where its
@@ -227,6 +282,13 @@ func (p *parser) visit(node syntax.Node) bool {
 		p.nested = append(p.nested, substitution{n.OpPos.Offset(), n.Rparen.Offset(), p.substID(n)})
 	case *syntax.Subshell:
 		p.subshells = append(p.subshells, substitution{n.Lparen.Offset(), n.Rparen.Offset(), int(n.Lparen.Offset()) + 1})
+	case *syntax.ForClause:
+		p.scopes = append(p.scopes, substitution{start: n.Pos().Offset(), end: n.End().Offset()})
+	case *syntax.WhileClause:
+		p.scopes = append(p.scopes, substitution{start: n.Pos().Offset(), end: n.End().Offset()})
+	case *syntax.FuncDecl:
+		// Whatever the line holds may be there by the time the function is called.
+		p.scopes = append(p.scopes, substitution{start: 0, end: uint(len(p.source))})
 	case *syntax.Stmt:
 		p.stmt(n)
 	}
@@ -345,15 +407,29 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 	if isDecl {
 		c.Argv = p.declWords(decl)
 	}
+	end := offset
+	if stmt.Cmd != nil {
+		end = stmt.Cmd.End().Offset()
+	}
 	for i, r := range stmt.Redirs {
 		c.Redirects = append(c.Redirects, p.redirect(r))
 		if r.Word != nil {
 			c.refs = p.refs(c.refs, r.Word.Parts, refRedirect, i)
+			end = max(end, r.Word.End().Offset())
 		}
 		// What a here-document's body expands (unless its delimiter is quoted, which makes the
 		// body literal) is written onto the command's standard input.
 		if r.Hdoc != nil {
 			c.refs = p.refs(c.refs, r.Hdoc.Parts, refRedirect, i)
+			c.hdocs = append(c.hdocs, [2]int{int(r.Hdoc.Pos().Offset()), i})
+		}
+	}
+	c.source, c.end = p.source, int(min(end, uint(len(p.source))))
+	// A later statement of a loop's body runs before an earlier one the next time round, and
+	// a function's body runs wherever it is called: see Spans.
+	for _, s := range p.scopes {
+		if offset >= s.start && offset < s.end && (c.scopeEnd == 0 || int(s.start) < c.scopeStart) {
+			c.scopeStart, c.scopeEnd = int(s.start), int(min(s.end, uint(len(p.source))))
 		}
 	}
 	p.commands = append(p.commands, c)
@@ -503,13 +579,18 @@ func (p *parser) callArgs(call *syntax.CallExpr, refs []wordRef) ([]Word, []word
 	for _, word := range call.Args {
 		// SplitBraces rewrites the word's parts, so it works on a copy: the tree is still being walked.
 		split := &syntax.Word{Parts: slices.Clone(word.Parts)}
-		if !syntax.SplitBraces(split) {
+		if p.tooManyWords || !syntax.SplitBraces(split) {
 			refs = p.refs(refs, word.Parts, refArg, len(words))
 			words = append(words, p.word(word, word))
 			continue
 		}
-		// Every word a brace expansion produces may hold what the unexpanded word does.
-		for _, expanded := range expand.Braces(split) {
+		// Every word a brace expansion produces may hold what the unexpanded word does. The
+		// words are taken one at a time, so an expansion past the bound is never built.
+		for expanded, err := range expand.BracesSeq(nil, split) {
+			if *p.braceWords++; err != nil || *p.braceWords > maxBraceWords {
+				p.tooManyWords = true
+				break
+			}
 			refs = p.refs(refs, word.Parts, refArg, len(words))
 			words = append(words, p.word(expanded, word))
 		}
@@ -543,6 +624,10 @@ func (p *parser) refs(refs []wordRef, parts []syntax.WordPart, place refPlace, i
 func (p *parser) word(word, source *syntax.Word) Word {
 	w := Word{Raw: p.raw(source)}
 	w.Unquoted, w.Known = p.unquote(word)
+	// A lone [ is the test command, not the start of a glob pattern: nothing closes it.
+	if !w.Known && w.Unquoted == "[" && w.Raw == "[" {
+		w.Known = true
+	}
 	if w.Known {
 		w.Text = w.Unquoted
 	}

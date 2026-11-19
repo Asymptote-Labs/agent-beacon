@@ -165,6 +165,59 @@ func TestScanSkipsNewerSpecRuleWithWarning(t *testing.T) {
 	}
 }
 
+// runawayRule is a rule whose match passes the engine's cost limit on every file.read event:
+// ten million comprehension steps.
+func runawayRule(id string) string {
+	expr := `e.event.action != "x"`
+	for _, v := range []string{"a", "b", "c", "d", "e2", "f", "g"} {
+		expr = "[0,1,2,3,4,5,6,7,8,9].all(" + v + ", " + expr + ")"
+	}
+	return "id: " + id + `
+version: 1
+title: Runaway
+severity: high
+status: experimental
+posture: detect
+match: 'e.event.action == "file.read" && ` + expr + `'
+emit:
+  reason: never
+tests:
+  - name: other
+    verdict: no_match
+    events:
+      - event: { action: other }
+`
+}
+
+// A rule that cannot be evaluated on an event does not take the other rules' findings with it:
+// they are printed, the rule is named on stderr, and the scan exits non-zero.
+func TestScanReportsARuleItCouldNotEvaluate(t *testing.T) {
+	scanFixture(t, []string{evSecretRead})
+	if err := os.WriteFile(filepath.Join(scanOpts.rulesDir, "runaway.rule.yaml"), []byte(runawayRule("scan-runaway")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scanOpts.jsonOutput = true
+	stdout, stderr := &strings.Builder{}, &strings.Builder{}
+	cmd, _ := newCmd()
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	err := runScan(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "scan incomplete: 1 rule(s)") {
+		t.Fatalf("scan error = %v, want it to say the scan is incomplete", err)
+	}
+	var findings []threatrules.Finding
+	if err := json.Unmarshal([]byte(stdout.String()), &findings); err != nil {
+		t.Fatalf("stdout must stay valid JSON: %v\n%s", err, stdout.String())
+	}
+	if len(findings) != 1 || findings[0].RuleID != "scan-test-secret-read" {
+		t.Fatalf("the other rule's finding must still be reported: %+v", findings)
+	}
+	if w := stderr.String(); !strings.Contains(w, `warning: rule "scan-runaway" could not be evaluated on 1 event(s)`) ||
+		!strings.Contains(w, "session s1") || !strings.Contains(w, "cost limit exceeded") {
+		t.Fatalf("want the rule, the session and the reason on stderr, got %q", w)
+	}
+}
+
 func TestScanAllRulesSkippedNamesThem(t *testing.T) {
 	scanFixture(t, []string{evSecretRead})
 	// Replace the fixture's only rule with one that needs a newer spec.

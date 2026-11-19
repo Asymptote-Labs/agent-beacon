@@ -1,6 +1,6 @@
 id: git-force-push-to-protected
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: Force-push directed at a protected branch
 description: >
   A git push with --force, --force-with-lease, -f, or a leading +
@@ -20,8 +20,9 @@ description: >
   `bash -c` or after git's own options (`git -C dir push -f origin main`),
   whose subcommand is push and whose words after it hold the force option
   and the protected destination. The same words in a commit message, an
-  echo or a here-document do not fire. A line the parser cannot vouch for
-  (see command_unread) is matched on its text.
+  echo or a here-document do not fire. Where the parser cannot see into a
+  command, the text that reaches that command is matched instead
+  (unread_text).
 severity: high
 status: experimental
 posture: detect
@@ -44,10 +45,9 @@ match: >
         c.argv_raw.exists(a, a.matches("^[\"']?--force\\b"))) ||
       c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*push\\n(?:[^\\n]*\\n)*?\\+(?:[^\\n:]*:)?(?:refs/heads/)?(?i:main|master|develop|production|release/[^\\n]+)(?:\\n|\\z)")
     )) ||
-    ((e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(\\s[^;&|]*)?(\\s--force(-with-lease)?\\b|\\s-f\\b)") ||
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*\\+\\s*([^\\s;&|:]*:)?(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)")) &&
-      command_unread(e))
+    unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(\\s[^;&|]*)?(\\s--force(-with-lease)?\\b|\\s-f\\b)") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*\\+\\s*([^\\s;&|:]*:)?(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)")))
   )
 
 emit:
@@ -230,4 +230,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git checkout -f topic && git push origin main" }
+        session: { id: s1 }
+  - name: force_push_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./release.sh 'sudo git push origin main --force'" }
+        session: { id: s1 }
+  - name: force_push_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs; git push origin main --force is banned' && ./run-tests.sh" }
         session: { id: s1 }

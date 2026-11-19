@@ -5,16 +5,17 @@
 # every path as written, so `~/.bashrc` and "$HOME/.ssh/authorized_keys" are themselves):
 #
 #   (e.event.action in ["file.modified", "file.created", "file.edited"] &&
-#     login_dotfile(e.file.path)) ||
+#     shell_startup_file(e.file.path)) ||
 #   (e.event.action == "command.executed" &&
 #     e.command.parsed_commands.exists(c, c.file_writes.exists(f,
 #       f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-#       login_dotfile(f.path))))
+#       shell_startup_file(f.path))))
 #
 # Without the second half `echo key >> ~/.ssh/authorized_keys` is not seen at all: a shell
 # command is no file event. What a command writes is the parser's to say (a redirection, tee,
-# sed -i, cp, mv, install, ln, dd, truncate), so a file named in an argument, a commit message
-# or a here-document is not a write.
+# sed -i, cp, mv, install, ln, dd, the file a download is saved to, the destination of scp
+# and rsync), so a file named in an argument, a commit message or a here-document is not a
+# write.
 #
 # Each predicate answers for a path under any directory, a home directory or a variable
 # included.
@@ -38,6 +39,24 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "cat /tmp/id.pub >> ~/.ssh/authorized_keys" }
+      - name: a_key_file_downloaded_into_place
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, ssh_trust_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -fsSL https://x.example/k.pub -o ~/.ssh/authorized_keys" }
+      - name: a_key_file_copied_from_another_host
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, ssh_trust_file(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp build@host.example:keys/authorized_keys ~/.ssh/" }
+      - name: a_key_file_uploaded
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, ssh_trust_file(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "scp ~/.ssh/authorized_keys build@host.example:backup/" }
       - name: a_key_only_read
         match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, ssh_trust_file(f.path)))
         verdict: no_match
@@ -57,27 +76,63 @@ definitions:
           - event: { action: file.modified }
             file: { path: "/home/dev/.ssh/config" }
 
-  - name: login_dotfile
+  - name: shell_startup_file
     params: [path]
     description: >
-      The path is a file a shell runs when it starts or at login: .bashrc, .bash_profile,
-      .bash_login, .profile, .zshrc, .zprofile, .zshenv, .zlogin, .kshrc, .login, .cshrc,
-      .tcshrc, or fish's config.fish.
+      The path is a file a shell runs when it starts or at login: a user's .bashrc,
+      .bash_profile, .bash_login, .profile, .zshrc, .zprofile, .zshenv, .zlogin, .kshrc,
+      .login, .cshrc or .tcshrc, fish's config.fish, or the system's /etc/profile and the
+      files under a profile.d directory.
     body: >
-      path.matches("(?i)(^|/)(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|\\.config/fish/config\\.fish)$")
+      path.matches("(?i)(^|/)(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|profile\\.d/[^/]+)$")
     tests:
       - name: a_line_appended_under_a_variable
-        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, login_dotfile(f.path)))
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, shell_startup_file(f.path)))
         verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "echo 'export PATH=$HOME/bin:$PATH' >> \"$HOME/.zshrc\"" }
+      - name: a_system_wide_drop_in
+        match: shell_startup_file(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.created }
+            file: { path: "/etc/profile.d/tools.sh" }
       - name: a_backup_beside_the_file
-        match: login_dotfile(e.file.path)
+        match: shell_startup_file(e.file.path)
         verdict: no_match
         events:
           - event: { action: file.created }
             file: { path: "/home/dev/.bashrc.bak" }
+
+  - name: shell_startup_file_redirect
+    params: [text]
+    description: >
+      A text redirects or tees into a shell startup file: `>`, `>>` or tee followed by a path
+      that ends in one of the names shell_startup_file knows. It is the same list, written
+      for text a rule cannot parse (what reaches a command the parser cannot see into); keep
+      the two in step.
+    body: >
+      text.matches("(?i)(>>?|\\btee\\b)\\s*([^|;&]*[\\s/])?(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|profile\\.d/[^\\s;&|\"']+)([\"'\\s]|$)")
+    tests:
+      - name: an_append_inside_text
+        match: shell_startup_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"echo 'PATH=/tmp/bin:$PATH' >> ~/.bashrc\"" }
+      - name: a_tee_onto_a_system_drop_in
+        match: shell_startup_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "python3 -c \"import os; os.system('echo x | sudo tee /etc/profile.d/x.sh')\"" }
+      - name: a_startup_file_only_read
+        match: shell_startup_file_redirect(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "grep -n PATH ~/.bashrc > /tmp/paths.txt" }
 
   - name: git_hook_file
     params: [path]
@@ -275,35 +330,96 @@ definitions:
           - event: { action: command.executed }
             command: { command: "cp pyproject.toml tmp/pyproject.toml" }
 
-  - name: scratch_write
-    params: [e, f]
+  - name: stays_in_scratch
+    params: [e]
     description: >
-      A write of a command (an entry of c.file_writes) lands in a temporary directory: its
-      path is under one (scratch_path), or the path is relative and the command line changes
-      directory only into temporary ones (`cd /tmp/probe && echo '{}' > package.json`). A
-      relative path on a line that also changes into any other directory is not assumed to be
-      scratch.
+      The command line changes directory, and only into temporary ones
+      (`cd /tmp/probe && echo '{}' > package.json`), so a relative path it writes is under
+      one. A line that also changes into any other directory says nothing of where a
+      relative path lands.
     body: >
-      scratch_path(f.path) ||
-      (!f.path.matches("^[/~$]") &&
-        e.command.parsed_commands.exists(d, d.name in ["cd", "pushd"] && scratch_path(d.args)) &&
-        e.command.parsed_commands.all(d, !(d.name in ["cd", "pushd"]) || scratch_path(d.args)))
+      e.command.parsed_commands.exists(d, d.name in ["cd", "pushd"] && scratch_path(d.args)) &&
+      e.command.parsed_commands.all(d, !(d.name in ["cd", "pushd"]) || scratch_path(d.args))
+    tests:
+      - name: a_cd_into_tmp
+        match: stays_in_scratch(e)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp/probe && npm init -y" }
+      - name: a_cd_into_tmp_and_back
+        match: stays_in_scratch(e)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp/probe && npm pack && cd ~/project && npm install" }
+      - name: no_cd
+        match: stays_in_scratch(e)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "npm init -y" }
+
+  - name: write_outside_scratch
+    params: [e, f, cond]
+    description: >
+      Some command of the line writes a file that satisfies a condition and does not land in
+      a temporary directory. The caller names the write (an entry of c.file_writes) and
+      writes the condition over it:
+      write_outside_scratch(e, f, f.op == "write" && dependency_manifest_file(f.path)).
+      A write lands in a temporary directory when its path is under one (scratch_path), or
+      when the path is relative and the line changes directory only into temporary ones
+      (stays_in_scratch). Agents stage copies and throwaway projects there all the time, and
+      moving one back into the project is a write of its own.
+
+      Where the line's directory changes lead is one question about the line, so it is asked
+      of the line, and only once some write satisfies the condition outside a temporary
+      path: on most lines none does and nothing more is evaluated. Then, if the line stays
+      in temporary directories, one of those writes has to be by a path that does not
+      depend on the directory. Asked of every write instead, the question is a loop over the
+      commands inside the loop over the commands, whose worst case grows with the square of
+      their number: the rules that did so were metered on every line of nine or more
+      commands.
+    body: >
+      e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+        cond && !scratch_path(f.path))) &&
+      (!stays_in_scratch(e) ||
+       e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+         cond && f.path.matches("^[/~$]") && !scratch_path(f.path))))
     tests:
       - name: a_relative_write_after_a_cd_into_tmp
-        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, scratch_write(e, f)))
-        verdict: match
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: no_match
         events:
           - event: { action: command.executed }
             command: { command: "cd /tmp/probe && echo '{\"type\":\"module\"}' > package.json" }
       - name: a_relative_write_after_a_cd_back_into_the_project
-        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, scratch_write(e, f)))
-        verdict: no_match
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "cd /tmp/probe && npm pack && cd ~/project && echo '{}' > package.json" }
       - name: an_absolute_write_after_a_cd_into_tmp
-        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, scratch_write(e, f)))
-        verdict: no_match
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: match
         events:
           - event: { action: command.executed }
             command: { command: "cd /tmp/probe && cp package.json ~/project/package.json" }
+      - name: a_write_under_tmp_with_no_cd
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cp pyproject.toml /tmp/build/pyproject.toml" }
+      - name: a_relative_write_with_no_cd
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo '{}' > package.json" }
+      - name: a_write_the_condition_does_not_hold_of
+        match: write_outside_scratch(e, f, f.op == "delete")
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "echo '{}' > package.json" }

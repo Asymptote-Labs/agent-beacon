@@ -1,12 +1,13 @@
 id: shell-login-dotfile-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 3
+version: 4
 title: Shell rc / login dotfile modified
 description: >
-  The agent modified a shell startup or login dotfile (.bashrc, .bash_profile,
-  .profile, .zshrc, .zprofile, .zshenv, .kshrc, .login, or fish config.fish).
-  These run on every new shell or login session, outside any agent sandbox, so an
-  edit here is durable user-level persistence (e.g. an injected command, alias, or
+  The agent modified a shell startup or login file: a user's dotfile (.bashrc,
+  .bash_profile, .bash_login, .profile, .zshrc, .zprofile, .zshenv, .zlogin, .kshrc,
+  .login, .cshrc, .tcshrc, or fish config.fish) or the system's /etc/profile or a file
+  under profile.d. These run on every new shell or login session, outside any agent
+  sandbox, so an edit here is durable persistence (e.g. an injected command, alias, or
   PATH change).
 severity: high
 status: stable
@@ -16,24 +17,37 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
-# Which file is one definition (login_dotfile, rules/concepts/sensitive-files.predicates.yaml),
-# asked of a file event's path and of every path a shell command writes (c.file_writes: a
-# redirection, tee, sed -i, cp, mv), under `~` or a variable too.
+# Which file is one definition (shell_startup_file,
+# rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
+# path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv), under `~`
+# or a variable too.
 match: >
   (
     e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    login_dotfile(e.file.path)
+    shell_startup_file(e.file.path)
   ) || (
     e.event.action == "command.executed" &&
     e.command.parsed_commands.exists(c, c.file_writes.exists(f,
       f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      login_dotfile(f.path)))
+      shell_startup_file(f.path)))
   )
 
 emit:
   reason: "Shell rc / login dotfile modified — runs on every new shell/login, durable user-level persistence"
 
 tests:
+  - name: system_profile_drop_in_written_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=/opt/tools:$PATH' | sudo tee /etc/profile.d/tools.sh" }
+        session: { id: s1 }
+  - name: system_profile_edited
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/etc/profile" }
+        session: { id: s1 }
   - name: line_appended_by_a_command
     verdict: match
     events:

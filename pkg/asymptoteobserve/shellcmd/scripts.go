@@ -323,7 +323,8 @@ func scriptReads(l *language, script string) (files, sent []string) {
 				before--
 			}
 			switch {
-			case before >= 0 && script[before] == ')' && vars.groupEnd == before:
+			// A pair that closed just before the arrow; a `)` with no `(` before it closed none.
+			case before >= 0 && script[before] == ')' && vars.groupEnd == before && vars.group < before:
 				vars.bindAll(script[vars.group+1 : before])
 			case before+1 == nameEnd:
 				vars.bind(script[nameStart:nameEnd])

