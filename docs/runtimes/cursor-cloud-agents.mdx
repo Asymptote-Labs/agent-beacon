@@ -189,6 +189,12 @@ BEACON_CLOUD_GCS_CREDENTIALS_B64=<base64-encoded service account key>
 Each `--print-env` run creates a new key for the uploader service account.
 Redact `BEACON_CLOUD_GCS_CREDENTIALS_B64` anywhere you share logs or screenshots.
 
+If your organization blocks service account key creation with the
+`iam.disableServiceAccountKeyCreation` policy, which Google turns on by default
+for organizations created since 2024, `--print-env` cannot create the key. The
+cloud VM has no other way to sign in to GCS, so ask an organization policy
+administrator to exempt the project, or send logs to S3 or Beacon Cloud instead.
+
 The helper creates a dedicated uploader service account and grants it
 `roles/storage.objectUser` on the selected bucket, which can read, list,
 overwrite, and delete objects in that bucket, not only upload them.
@@ -293,6 +299,10 @@ Replace `vX.Y.Z` with the latest Beacon release tag. The script:
   file in `.git/info/exclude`,
 - leaves the repository's own `.cursor/hooks.json` alone if it commits one.
 
+Add `--safe-hooks` to `print-setup` to leave out the shell and edit hooks
+(`beforeShellExecution`, `afterShellExecution`, `afterFileEdit`), so you can prove
+the upload works before the agent's commands and edits pass through Beacon.
+
 Then create the environment:
 
 <Steps>
@@ -348,10 +358,6 @@ with the location set to **None**, since an existing environment stays tied to
 the file, or save the script in the repository, for example as
 `.cursor/beacon-install.sh`, and run it from the file's `install` command. Either
 way the hooks are written at Build time and stay out of the repository.
-
-`--safe-hooks` leaves out the shell and edit hooks (`beforeShellExecution`,
-`afterShellExecution`, `afterFileEdit`), so you can prove the upload works before
-the agent's commands and edits pass through Beacon.
 
 ## 4. Run a cloud agent task
 
