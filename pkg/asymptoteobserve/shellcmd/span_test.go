@@ -2,7 +2,6 @@ package shellcmd
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -52,7 +51,7 @@ func TestCarried(t *testing.T) {
 	}
 }
 
-// WithScripts puts what a carrier runs after it, like a shell's script, and says whether it
+// withScripts puts what a carrier runs after it, like a shell's script, and says whether it
 // read all of it.
 func TestWithScriptsReadsCarriers(t *testing.T) {
 	for _, tc := range []struct {
@@ -97,13 +96,18 @@ func TestWithScriptsReadsCarriers(t *testing.T) {
 		{`sudo -l rm -rf /`, []string{""}},
 		{`uv run -m pytest -q`, []string{""}},
 		{`"$TOOL" sh -c 'id'`, []string{"", "id"}},
+		// A program is the same by any path, so a shell, a carrier and a wrapper by a path the
+		// parse does not evaluate are read as by their name.
+		{`~/bin/bash -c 'rm -rf /'`, []string{"bash*", "rm"}},
+		{`"$HOME"/.local/bin/sh -c 'id'`, []string{"sh*", "id"}},
+		{`git ls-files | ~/bin/xargs rm -rf`, []string{"git", "xargs*", "rm"}},
+		{`~/bin/ssh host.example 'rm -rf /srv'`, []string{"ssh*", "rm"}},
+		{`$HOME/bin/sudo -i rm -rf x`, []string{"*", "rm"}},
+		{`~/.docker/bin/docker exec web rm -rf /`, []string{"docker*", "rm"}},
+		{`find . -print0 | gxargs -0 rm -f`, []string{"find", "gxargs*", "rm"}},
 	} {
-		commands, err := Parse(tc.command)
-		if err != nil {
-			t.Fatalf("Parse(%q): %v", tc.command, err)
-		}
 		var got []string
-		for _, c := range WithScripts(commands, 3) {
+		for _, c := range withScriptsOf(t, tc.command) {
 			name := c.Name()
 			if c.RunsRead() {
 				name += "*"
@@ -111,7 +115,7 @@ func TestWithScriptsReadsCarriers(t *testing.T) {
 			got = append(got, name)
 		}
 		if !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("WithScripts(%q) = %q, want %q", tc.command, got, tc.want)
+			t.Errorf("withScripts(%q) = %q, want %q", tc.command, got, tc.want)
 		}
 	}
 }
@@ -152,20 +156,11 @@ func TestSpans(t *testing.T) {
 		{`echo ok; for f in a b; do ./run.sh; echo 'rm -rf /' > run.sh; done; echo end`, "run.sh", `for f in a b; do ./run.sh; echo 'rm -rf /' > run.sh; done`},
 		{`f() { ./run.sh; }; echo 'rm -rf /' > run.sh; f`, "run.sh", `f() { ./run.sh; }; echo 'rm -rf /' > run.sh; f`},
 	} {
-		commands, err := Parse(tc.command)
-		if err != nil {
-			t.Fatalf("Parse(%q): %v", tc.command, err)
+		line := Read(tc.command)
+		if line.Incomplete {
+			t.Fatalf("Read(%q) is incomplete", tc.command)
 		}
-		commands = WithScripts(commands, 3)
-		writes := make([]bool, len(commands))
-		for i, c := range commands {
-			for _, e := range c.FileWrites() {
-				if (e.Op == OpWrite || e.Op == OpAppend) && !strings.HasPrefix(e.Path, "/dev/") {
-					writes[i] = true
-				}
-			}
-		}
-		spans := Spans(commands, writes)
+		commands, spans := line.Commands, line.Spans
 		found := false
 		for i, c := range commands {
 			if c.Name() != tc.name {
@@ -183,14 +178,10 @@ func TestSpans(t *testing.T) {
 	}
 }
 
-// A command WithScripts added has the span of the command of the line it came from.
+// A command withScripts added has the span of the command of the line it came from.
 func TestSpansOfScriptCommands(t *testing.T) {
-	commands, err := Parse(`git commit -m 'mention ./x.sh'; echo go | bash -c 'cat; ./x.sh'; echo end`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	commands = WithScripts(commands, 3)
-	spans := Spans(commands, make([]bool, len(commands)))
+	line := Read(`git commit -m 'mention ./x.sh'; echo go | bash -c 'cat; ./x.sh'; echo end`)
+	commands, spans := line.Commands, line.Spans
 	for i, c := range commands {
 		if c.Name() == "x.sh" {
 			if want := `echo go | bash -c 'cat; ./x.sh'`; spans[i] != want {

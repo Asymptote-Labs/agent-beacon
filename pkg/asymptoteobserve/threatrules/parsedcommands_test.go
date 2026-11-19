@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shellcmd"
 )
 
 func commandEvent(command string) asymptoteobserve.Event {
@@ -186,8 +187,8 @@ func TestParsedCommandsReadsShellScripts(t *testing.T) {
 	}
 	// Depth is bounded.
 	deep := `sh -c "sh -c \"sh -c 'sh -c true'\""`
-	if got := ParsedCommands(deep); len(got) != 1+maxShellDepth {
-		t.Errorf("deep: %d commands, want %d", len(got), 1+maxShellDepth)
+	if got := ParsedCommands(deep); len(got) != 1+shellcmd.MaxDepth {
+		t.Errorf("deep: %d commands, want %d", len(got), 1+shellcmd.MaxDepth)
 	}
 }
 

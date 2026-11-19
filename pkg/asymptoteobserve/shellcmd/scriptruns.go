@@ -16,7 +16,8 @@ import (
 // (RunsRead), whatever is found here. What is found is still what runs, and a caller that asks
 // a command by its name sees the rm of `python3 -c "os.system('rm -rf /')"` as it sees any other.
 
-// runCalls are a language's calls that run a command, as written before the parenthesis.
+// runCalls are a language's calls that run a command, as written before the parenthesis
+// (language.runs).
 type runCalls struct {
 	calls []string
 	// only, when set, is text the script must hold for the calls to count: `exec` is a method
@@ -30,48 +31,28 @@ type runCalls struct {
 	ticks, percentX bool
 }
 
-var scriptRunCalls = map[*language]runCalls{
-	&python: {calls: []string{
-		"os.system", "os.popen", "subprocess.run", "subprocess.call", "subprocess.check_call",
-		"subprocess.check_output", "subprocess.getoutput", "subprocess.getstatusoutput", "sp.run", "sp.call",
-		"Popen", "check_output", "check_call", "getoutput", "getstatusoutput",
-	}},
-	&javascript: {
-		calls: []string{"execSync", "execFileSync", "spawnSync", "exec", "execFile", "spawn"},
-		only:  "child_process",
-	},
-	&deno: {calls: []string{"execSync", "execFileSync", "spawnSync", "exec", "execFile", "spawn"}, only: "child_process"},
-	&ruby: {
-		calls: []string{"system", "exec", "spawn", "IO.popen", "Process.spawn", "Open3.capture2", "Open3.capture2e", "Open3.capture3", "Open3.popen3"},
-		exact: true, ticks: true, percentX: true,
-	},
-	&php: {
-		calls: []string{"system", "exec", "shell_exec", "passthru", "popen", "proc_open"},
-		exact: true, ticks: true,
-	},
-}
-
 // unknownWord stands for an argument of a call that is not a string literal: a word, or
 // words, of the command whose value the script computes.
 const unknownWord = "\x00"
 
 // scriptRuns returns the command lines the interpreter's inline script runs, one per line, when
-// the command is an interpreter with an inline script and the script runs any that can be read.
-func (c Command) scriptRuns() (string, bool) {
-	name, args := c.run()
+// the command is an interpreter with an inline script and the script runs any that can be read,
+// and whether the script is the interpreter's standard input (inlineScript).
+func (c Command) scriptRuns() (lines string, stdin, ok bool) {
+	name, args := c.program()
 	l, ok := scriptLanguage(name)
 	if !ok {
-		return "", false
+		return "", false, false
 	}
-	script := inlineScript(l, &c, args)
+	script, stdin := inlineScript(l, &c, args)
 	if script == "" {
-		return "", false
+		return "", false, false
 	}
 	commands := scriptCommands(l, script)
 	if len(commands) == 0 {
-		return "", false
+		return "", false, false
 	}
-	return strings.Join(commands, "\n"), true
+	return strings.Join(commands, "\n"), stdin, true
 }
 
 // scriptCommands returns the command lines a script runs through one of its language's calls
@@ -86,49 +67,42 @@ func (c Command) scriptRuns() (string, bool) {
 // language fills in (an f-string, a template with ${..}, #{..}) or that is one operand of an
 // expression (`"rm " + path`, `"rm %s" % path`) is not read, and neither is that call.
 func scriptCommands(l *language, script string) []string {
-	runs, ok := scriptRunCalls[l]
-	if !ok || runs.only != "" && !strings.Contains(script, runs.only) {
+	runs := l.runs
+	if len(runs.calls) == 0 || runs.only != "" && !strings.Contains(script, runs.only) {
 		return nil
 	}
 	var commands []string
-	for i := 0; i < len(script); {
-		c := script[i]
-		switch {
+	s := scanner{l: l, script: script}
+	for {
+		t, ok := s.next()
+		if !ok {
+			break
+		}
+		i := t.start
+		switch c := script[i]; {
+		case t.kind == tokenString:
 		case c == '`' && runs.ticks:
 			text, end := stringLiteral(l, script, i)
 			if !interpolates(text, '`') && strings.TrimSpace(text) != "" {
 				commands = append(commands, unescapeLiteral(text))
 			}
-			i = end
+			s.at = end
 		case c == '%' && runs.percentX && strings.HasPrefix(script[i:], "%x") && i+2 < len(script):
 			closer := strings.IndexByte("({[<", script[i+2])
-			end := -1
-			if closer >= 0 {
-				end = strings.IndexByte(script[i+3:], ")}]>"[closer])
+			if closer < 0 {
+				continue
 			}
+			end := strings.IndexByte(script[i+3:], ")}]>"[closer])
 			if end < 0 {
-				i++
 				continue
 			}
 			if text := script[i+3 : i+3+end]; !interpolates(text, '`') && strings.TrimSpace(text) != "" {
 				commands = append(commands, text)
 			}
-			i += 3 + end + 1
-		case c == '\'' || c == '"' || c == '`' && l.backtick:
-			_, i = stringLiteral(l, script, i)
-		case c == '#' && l.hash, c == '/' && l.slashes && strings.HasPrefix(script[i:], "//"):
-			if end := strings.IndexByte(script[i:], '\n'); end >= 0 {
-				i += end
-			} else {
-				i = len(script)
-			}
-		case isNameByte(c) && (i == 0 || !isNameByte(script[i-1])):
-			start, end := i, i
-			for end < len(script) && isNameByte(script[end]) {
-				end++
-			}
+			s.at = i + 3 + end + 1
+		case t.kind == tokenName:
+			start, end := i, t.end
 			name := script[start:end]
-			i = end
 			if !slices.ContainsFunc(runs.calls, func(call string) bool {
 				if runs.exact {
 					return name == call && (start == 0 || script[start-1] != '>')
@@ -146,8 +120,6 @@ func scriptCommands(l *language, script string) []string {
 			if command, ok := l.commandArgument(script, j); ok {
 				commands = append(commands, command)
 			}
-		default:
-			i++
 		}
 	}
 	return commands
@@ -302,13 +274,11 @@ func interpolates(text string, quote byte) bool {
 	return quote != '\'' && (strings.Contains(text, "${") || strings.Contains(text, "#{"))
 }
 
-var literalEscapes = strings.NewReplacer(`\\`, `\`, `\"`, `"`, `\'`, `'`, `\n`, "\n", `\t`, "\t")
-
 func unescapeLiteral(text string) string {
 	if strings.IndexByte(text, '\\') < 0 {
 		return text
 	}
-	return literalEscapes.Replace(text)
+	return backslashEscapes.Replace(text)
 }
 
 // shellQuote writes a word so that a shell reads it back as that word.

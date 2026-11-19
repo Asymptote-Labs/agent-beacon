@@ -51,6 +51,8 @@ type language struct {
 	// (python). arrows: the parameters of a callback, (a, b) => and function (a, b)
 	// (javascript). blocks: the parameters of a block, { |a| and do |a| (ruby).
 	keywords, as, arrows, blocks bool
+	// runs are the calls that run a command (scriptCommands).
+	runs runCalls
 }
 
 var (
@@ -66,6 +68,11 @@ var (
 		hash:     true,
 		keywords: true,
 		as:       true,
+		runs: runCalls{calls: []string{
+			"os.system", "os.popen", "subprocess.run", "subprocess.call", "subprocess.check_call",
+			"subprocess.check_output", "subprocess.getoutput", "subprocess.getstatusoutput", "sp.run", "sp.call",
+			"Popen", "check_output", "check_call", "getoutput", "getstatusoutput",
+		}},
 	}
 	javascript = language{
 		eval: "ep", values: "r", evalLong: []string{"--eval", "--print"}, wordValues: true,
@@ -79,6 +86,10 @@ var (
 		backtick: true,
 		slashes:  true,
 		arrows:   true,
+		runs: runCalls{
+			calls: []string{"execSync", "execFileSync", "spawnSync", "exec", "execFile", "spawn"},
+			only:  "child_process",
+		},
 	}
 	deno = func() language {
 		l := javascript
@@ -98,6 +109,10 @@ var (
 		bare:   true,
 		hash:   true,
 		blocks: true,
+		runs: runCalls{
+			calls: []string{"system", "exec", "spawn", "IO.popen", "Process.spawn", "Open3.capture2", "Open3.capture2e", "Open3.capture3", "Open3.popen3"},
+			exact: true, ticks: true, percentX: true,
+		},
 	}
 	php = language{
 		eval: "r", values: "dcz",
@@ -107,15 +122,19 @@ var (
 		modes:   true,
 		hash:    true,
 		slashes: true,
+		runs: runCalls{
+			calls: []string{"system", "exec", "shell_exec", "passthru", "popen", "proc_open"},
+			exact: true, ticks: true,
+		},
 	}
 )
 
-// scriptLanguage returns the language of the interpreter a command runs, by its base name.
+// scriptLanguage returns the language of the interpreter a program is (programOf).
 func scriptLanguage(name string) (*language, bool) {
 	switch {
 	case strings.HasPrefix(name, "python"), strings.HasPrefix(name, "pypy"):
 		return &python, true
-	case name == "node", name == "nodejs", name == "bun":
+	case name == "node", name == "bun":
 		return &javascript, true
 	case name == "deno":
 		return &deno, true
@@ -128,23 +147,23 @@ func scriptLanguage(name string) (*language, bool) {
 }
 
 // inlineScript returns the script the interpreter is given as text: the value of its eval option,
-// or, when it is given no script file, the here-document or here-string on its standard input.
-// The text is as written, so a part the shell would expand is still its source. It is "" when the
-// interpreter runs a file, a module, or what a pipe sends it.
-func inlineScript(l *language, c *Command, args []Word) string {
+// or, when it is given no script file, the here-document or here-string on its standard input
+// (stdin). The text is as written, so a part the shell would expand is still its source. It is
+// "" when the interpreter runs a file, a module, or what a pipe sends it.
+func inlineScript(l *language, c *Command, args []Word) (script string, stdin bool) {
 	for i := 0; i < len(args); i++ {
 		t := args[i].Unquoted
 		switch {
 		case l.subcommand != "":
 			switch {
 			case i == 0 && t != l.subcommand:
-				return ""
+				return "", false
 			case i > 0 && !isOption(args[i]):
-				return t
+				return t, false
 			}
 			continue
 		case t == "-":
-			return stdinScript(c)
+			return stdinScript(c), true
 		case strings.HasPrefix(t, "--"):
 			name, value, attached := strings.Cut(t, "=")
 			if slices.Contains(l.valuesLong, name) {
@@ -159,26 +178,30 @@ func inlineScript(l *language, c *Command, args []Word) string {
 			if !attached && i+1 < len(args) {
 				value = args[i+1].Unquoted
 			}
-			return value
+			return value, false
 		case !isOption(args[i]):
-			return "" // a script file
+			return "", false // a script file
 		}
 	cluster:
 		for j := 1; j < len(t); j++ {
 			switch {
+			case !args[i].Known && (t[j] == '$' || t[j] == '`'):
+				// What follows an expansion in a word whose value is unknown is not option
+				// letters, as for every other option walker (valueLetter).
+				break cluster
 			case strings.IndexByte(l.eval, t[j]) >= 0:
 				if j+1 < len(t) && !l.wordValues {
-					return t[j+1:]
+					return t[j+1:], false
 				}
 				if i+1 < len(args) {
 					if l.wordValues && isOption(args[i+1]) {
 						break cluster // node -p -e '..': the -e that follows has the script
 					}
-					return args[i+1].Unquoted
+					return args[i+1].Unquoted, false
 				}
-				return ""
+				return "", false
 			case strings.IndexByte(l.module, t[j]) >= 0:
-				return ""
+				return "", false
 			case strings.IndexByte(l.values, t[j]) >= 0:
 				if j+1 == len(t) {
 					i++ // the value is the next word
@@ -188,27 +211,21 @@ func inlineScript(l *language, c *Command, args []Word) string {
 		}
 	}
 	if l.subcommand != "" {
-		return ""
+		return "", false
 	}
-	return stdinScript(c)
+	return stdinScript(c), true
 }
 
 // HereInput returns the here-document or here-string that is the command's standard input: the
 // body of the document as written, or the string without its quotes.
 func (c Command) HereInput() (text string, ok bool) {
-	for k := len(c.Redirects) - 1; k >= 0; k-- {
-		r := &c.Redirects[k]
-		if r.Fd != "" && r.Fd != "0" {
-			continue
-		}
-		switch r.Op {
-		case "<<", "<<-":
-			return r.Body, true
-		case "<<<":
-			return r.Target.Unquoted, true
-		case "<", "<>", "<&":
-			return "", false
-		}
+	r, _ := c.stdinRedirect()
+	switch {
+	case r == nil:
+	case r.kind() == redirHereDoc:
+		return r.Body, true
+	case r.kind() == redirHereString:
+		return r.Target.Unquoted, true
 	}
 	return "", false
 }
@@ -248,103 +265,24 @@ func scriptReads(l *language, script string) (files, sent []string) {
 			sent = addPath(sent, path)
 		}
 	}
-	for i := 0; i < len(script); {
-		c := script[i]
-		switch {
-		case c == '\'' || c == '"' || c == '`' && l.backtick:
-			var text string
-			text, i = stringLiteral(l, script, i)
+	s := scanner{l: l, script: script}
+	for {
+		t, ok := s.next()
+		if !ok {
+			break
+		}
+		i := t.start
+		switch t.kind {
+		case tokenString:
 			// A credential header's name as a key ('Authorization': ..), or as the start of the
 			// header's line ('Authorization: Bearer ' . ..): its value is no data, wherever the
 			// headers are built.
-			if quotedCredentialHeader(text, script, i) {
+			if text, _ := stringLiteral(l, script, t.start); quotedCredentialHeader(text, script, t.end) {
 				quiet = quietArgs{on: true, depth: open.depth, nest: nest}
 			}
-		case c == '#' && l.hash, c == '/' && l.slashes && strings.HasPrefix(script[i:], "//"):
-			if end := strings.IndexByte(script[i:], '\n'); end >= 0 {
-				i += end
-			} else {
-				i = len(script)
-			}
-		case c == '\n' || c == ';':
-			if open.depth <= vars.depth {
-				vars.assign()
-			}
-			if open.depth == 0 {
-				vars.statement = nil
-				quiet.on = false
-			}
-			// A credential written as a statement of a function's body (`const h = "Authorization:
-			// " + k;`) ends with it, not with the body.
-			if quiet.on && open.depth == quiet.depth && nest == quiet.nest && statementEnds(l, script, i) {
-				quiet.on = false
-			}
-			i++
-		case c == '(':
-			open.push(nameSends && nameEnd >= 0 && skipSpaces(script, nameEnd) == i)
-			if l.arrows {
-				vars.groups = append(vars.groups, i)
-			}
-			i++
-		case c == ')':
-			if open.pop() {
-				afterSend = i + 1
-			}
-			if n := len(vars.groups); n > 0 {
-				vars.group, vars.groupEnd = vars.groups[n-1], i
-				vars.groups = vars.groups[:n-1]
-			}
-			if open.depth < vars.depth {
-				vars.assign()
-			}
-			if open.depth < quiet.depth {
-				quiet.on = false
-			}
-			i++
-		case c == '{' || c == '[':
-			nest++
-			i++
-		case c == '}' || c == ']':
-			nest--
-			if nest < quiet.nest {
-				quiet.on = false
-			}
-			i++
-		case c == ',':
-			if !quiet.rest && open.depth == quiet.depth && nest == quiet.nest {
-				quiet.on = false
-			}
-			i++
-		case c == '=' && l.arrows && strings.HasPrefix(script[i:], "=>"):
-			// The parameters of a callback are given what the statement has in hand:
-			// fs.readFile(".env", (err, data) => ..), readFile(".env").then(data => ..).
-			before := i - 1
-			for before >= 0 && (script[before] == ' ' || script[before] == '\t') {
-				before--
-			}
-			switch {
-			// A pair that closed just before the arrow; a `)` with no `(` before it closed none.
-			case before >= 0 && script[before] == ')' && vars.groupEnd == before && vars.group < before:
-				vars.bindAll(script[vars.group+1 : before])
-			case before+1 == nameEnd:
-				vars.bind(script[nameStart:nameEnd])
-			}
-			i += 2
-		case c == '|' && l.blocks && opensBlock(script, i):
-			// The parameters of a block: File.open(".env") { |f| .. }, .. do |f|.
-			end := strings.IndexAny(script[i+1:], "|\n")
-			if end < 0 || script[i+1+end] == '\n' {
-				i++
-				break
-			}
-			vars.bindAll(script[i+1 : i+1+end])
-			i += end + 2
-		case isNameByte(c) && (i == 0 || !isNameByte(script[i-1])):
+		case tokenName:
 			// A name with the names it is qualified by: fs.promises.readFile, Path, .read.
-			end := i
-			for end < len(script) && isNameByte(script[end]) {
-				end++
-			}
+			end := t.end
 			name := script[i:end]
 			nameStart, nameEnd = i, end
 			nameSends = slices.ContainsFunc(l.sends, func(call string) bool { return isCall(name, call) }) ||
@@ -353,7 +291,6 @@ func scriptReads(l *language, script string) (files, sent []string) {
 			if nameSends && vars.target != "" {
 				vars.sender = true
 			}
-			i = end
 			after := skipSpaces(script, end)
 			switch path, opens := l.opens(script, nameStart, end); {
 			case opens:
@@ -369,7 +306,7 @@ func scriptReads(l *language, script string) (files, sent []string) {
 				// function (err, data) { .. }, as a callback
 				if params, length, ok := parameters(script[end:]); ok {
 					vars.bindAll(params)
-					i = end + length
+					s.at = end + length
 				}
 			case open.depth > 0 && slices.Contains(l.quiet, name) && quietName(l, script, name, after):
 				// A call's credentials: not data, up to the next argument (auth=.. where name=value
@@ -396,7 +333,72 @@ func scriptReads(l *language, script string) (files, sent []string) {
 				}
 			}
 		default:
-			i++
+			switch c := script[i]; {
+			case c == '\n' || c == ';':
+				if open.depth <= vars.depth {
+					vars.assign()
+				}
+				if open.depth == 0 {
+					vars.statement = nil
+					quiet.on = false
+				}
+				// A credential written as a statement of a function's body (`const h =
+				// "Authorization: " + k;`) ends with it, not with the body.
+				if quiet.on && open.depth == quiet.depth && nest == quiet.nest && statementEnds(l, script, i) {
+					quiet.on = false
+				}
+			case c == '(':
+				open.push(nameSends && nameEnd >= 0 && skipSpaces(script, nameEnd) == i)
+				if l.arrows {
+					vars.groups = append(vars.groups, i)
+				}
+			case c == ')':
+				if open.pop() {
+					afterSend = i + 1
+				}
+				if n := len(vars.groups); n > 0 {
+					vars.group, vars.groupEnd = vars.groups[n-1], i
+					vars.groups = vars.groups[:n-1]
+				}
+				if open.depth < vars.depth {
+					vars.assign()
+				}
+				if open.depth < quiet.depth {
+					quiet.on = false
+				}
+			case c == '{' || c == '[':
+				nest++
+			case c == '}' || c == ']':
+				nest--
+				if nest < quiet.nest {
+					quiet.on = false
+				}
+			case c == ',':
+				if !quiet.rest && open.depth == quiet.depth && nest == quiet.nest {
+					quiet.on = false
+				}
+			case c == '=' && l.arrows && strings.HasPrefix(script[i:], "=>"):
+				// The parameters of a callback are given what the statement has in hand:
+				// fs.readFile(".env", (err, data) => ..), readFile(".env").then(data => ..).
+				before := i - 1
+				for before >= 0 && (script[before] == ' ' || script[before] == '\t') {
+					before--
+				}
+				switch {
+				// A pair that closed just before the arrow; a `)` with no `(` before it closed none.
+				case before >= 0 && script[before] == ')' && vars.groupEnd == before && vars.group < before:
+					vars.bindAll(script[vars.group+1 : before])
+				case before+1 == nameEnd:
+					vars.bind(script[nameStart:nameEnd])
+				}
+				s.at = i + 2
+			case c == '|' && l.blocks && opensBlock(script, i):
+				// The parameters of a block: File.open(".env") { |f| .. }, .. do |f|.
+				if end := strings.IndexAny(script[i+1:], "|\n"); end >= 0 && script[i+1+end] != '\n' {
+					vars.bindAll(script[i+1 : i+1+end])
+					s.at = i + end + 2
+				}
+			}
 		}
 	}
 	return files, sent
@@ -754,6 +756,64 @@ func stringLiteral(l *language, script string, i int) (text string, end int) {
 		}
 	}
 	return script[start:], len(script)
+}
+
+// tokenKind is what a token of a script's code is.
+type tokenKind uint8
+
+const (
+	// tokenByte is one byte that is no part of a string or a name: punctuation, a space.
+	tokenByte tokenKind = iota
+	// tokenString is a string literal, quotes included ('..', "..", and `..` or '''..''' where
+	// the language has them).
+	tokenString
+	// tokenName is a name with the names it is qualified by (fs.promises.readFile, .read).
+	tokenName
+)
+
+// token is a piece of a script's code at [start, end).
+type token struct {
+	start, end int
+	kind       tokenKind
+}
+
+// scanner walks the code of a script one token at a time, past its comments (# or // to the
+// end of the line, where the language has them). It is the one reading of where a script's
+// strings, comments and names are, for scriptReads and scriptCommands alike; a reader that
+// reads further on its own moves at past what it read.
+type scanner struct {
+	l      *language
+	script string
+	at     int
+}
+
+// next returns the token at s.at and moves past it, or false at the end of the script.
+func (s *scanner) next() (token, bool) {
+	for s.at < len(s.script) {
+		i, c := s.at, s.script[s.at]
+		switch {
+		case c == '\'' || c == '"' || c == '`' && s.l.backtick:
+			_, s.at = stringLiteral(s.l, s.script, i)
+			return token{i, s.at, tokenString}, true
+		case c == '#' && s.l.hash, c == '/' && s.l.slashes && strings.HasPrefix(s.script[i:], "//"):
+			if end := strings.IndexByte(s.script[i:], '\n'); end >= 0 {
+				s.at = i + end
+			} else {
+				s.at = len(s.script)
+			}
+		case isNameByte(c) && (i == 0 || !isNameByte(s.script[i-1])):
+			end := i + 1
+			for end < len(s.script) && isNameByte(s.script[end]) {
+				end++
+			}
+			s.at = end
+			return token{i, end, tokenName}, true
+		default:
+			s.at = i + 1
+			return token{i, i + 1, tokenByte}, true
+		}
+	}
+	return token{}, false
 }
 
 func skipSpaces(s string, i int) int {

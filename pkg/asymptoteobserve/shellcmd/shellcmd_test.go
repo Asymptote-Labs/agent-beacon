@@ -93,6 +93,15 @@ func TestFileEffects(t *testing.T) {
 		{"cmd >| forced.txt", []string{"write forced.txt"}},
 		{"go build &> build.log", []string{"write build.log"}},
 		{"make 2>/dev/null", nil},
+		// A descriptor, also moved (3-), and a device are no file, whatever writes to them.
+		{"exec 1>&3-", nil},
+		{"echo hi >&2- 3>&-", nil},
+		{"echo x | tee /dev/stderr out.log", []string{"write out.log"}},
+		{"cp build.log /dev/null; mv a.txt /dev/null", []string{"move_from a.txt"}},
+		// /dev/.. climbs out of /dev: the file written is /etc/hosts, kept as written.
+		{"echo x | sudo tee -a /dev/../etc/hosts", []string{"append /dev/../etc/hosts"}},
+		{"cp k.pub /dev/./../home/u/.ssh/authorized_keys", []string{"write /dev/./../home/u/.ssh/authorized_keys"}},
+		{"echo x > /dev/./null", nil},
 		{"cat a.txt | tee copy.txt", []string{"write copy.txt"}},
 		{"sed -i 's/a/b/' x.go y.go", []string{"edit x.go", "edit y.go"}},
 		{"sed -i.bak -e 's/a/b/' x.go", []string{"edit x.go"}},
@@ -201,9 +210,6 @@ func TestFileEffects(t *testing.T) {
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("FileEffects(%q) = %q, want %q", tc.command, got, tc.want)
 		}
-		if all := FileEffects(commands); len(all) != len(got) {
-			t.Errorf("FileEffects(Parse(%q)) has %d effects, want %d", tc.command, len(all), len(got))
-		}
 		// Every effect is a write, in the same order: a write only adds the paths an effect
 		// leaves out.
 		for _, c := range commands {
@@ -258,6 +264,12 @@ func TestFileWrites(t *testing.T) {
 		// What is not a write is not one as written either: a source, a read, a device.
 		{"cat ~/.bashrc", nil},
 		{"cp ~/.bashrc \"$BACKUP\" 2> /dev/null", []string{"write $BACKUP"}},
+		// An option whose value is unknown is still an option, for writes as for reads.
+		{`cp --target-directory="$HOME/.ssh" authorized_keys`, []string{"write $HOME/.ssh/authorized_keys"}},
+		{`cp --suffix="$S" a b`, []string{"write b"}},
+		{`truncate --size="$N" ~/.bash_history`, []string{"truncate ~/.bash_history"}},
+		// A header's value is no URL to save a download under.
+		{`curl -O https://a.example/x --header "Referer: https://b.example/y"`, []string{"write x"}},
 		{"grep -q x ~/.zshrc > /dev/null", nil},
 	} {
 		commands, err := Parse(tc.command)
@@ -378,29 +390,33 @@ func TestParse(t *testing.T) {
 			refs:      []wordRef{{place: refEnv, index: 1, name: "X"}},
 			source:    line,
 			end:       56,
+			unwrapped: unwrapped{at: 3, name: "beacon", program: "beacon"},
 		},
 		{
-			Argv:     []Word{plain("tee"), plain("-a"), plain("out.log")},
-			Offset:   59,
-			Pipeline: 1,
-			Stage:    1,
-			source:   line,
-			end:      73,
+			Argv:      []Word{plain("tee"), plain("-a"), plain("out.log")},
+			Offset:    59,
+			Pipeline:  1,
+			Stage:     1,
+			source:    line,
+			end:       73,
+			unwrapped: unwrapped{name: "tee", program: "tee"},
 		},
 		{
-			Argv:     []Word{plain("sh")},
-			Offset:   76,
-			Pipeline: 1,
-			Stage:    2,
-			source:   line,
-			end:      78,
+			Argv:      []Word{plain("sh")},
+			Offset:    76,
+			Pipeline:  1,
+			Stage:     2,
+			source:    line,
+			end:       78,
+			unwrapped: unwrapped{name: "sh", program: "sh"},
 		},
 		{
-			Argv:     []Word{plain("cd"), plain("sub")},
-			Offset:   79,
-			Pipeline: 2,
-			source:   line,
-			end:      85,
+			Argv:      []Word{plain("cd"), plain("sub")},
+			Offset:    79,
+			Pipeline:  2,
+			source:    line,
+			end:       85,
+			unwrapped: unwrapped{name: "cd", program: "cd"},
 		},
 		{
 			Argv:      []Word{plain("echo"), {Raw: "`rm x`", Unquoted: "`rm x`"}},
@@ -408,20 +424,24 @@ func TestParse(t *testing.T) {
 			Offset:    87,
 			Pipeline:  3,
 			AfterCD:   true,
+			dirSet:    true,
 			refs:      []wordRef{{place: refArg, index: 1, subst: 1}},
 			source:    line,
 			end:       110,
+			unwrapped: unwrapped{name: "echo", program: "echo"},
 		},
 		{
-			Argv:     []Word{plain("rm"), plain("x")},
-			Offset:   93,
-			Pipeline: 4,
-			Nested:   true,
-			AfterCD:  true,
-			within:   1,
-			source:   line,
-			end:      97,
-			execEnd:  97,
+			Argv:      []Word{plain("rm"), plain("x")},
+			Offset:    93,
+			Pipeline:  4,
+			Nested:    true,
+			AfterCD:   true,
+			dirSet:    true,
+			within:    1,
+			source:    line,
+			end:       97,
+			unwrapped: unwrapped{name: "rm", program: "rm"},
+			execEnd:   97,
 		},
 	}
 	if !reflect.DeepEqual(commands, want) {
@@ -562,6 +582,9 @@ func TestUnwrapped(t *testing.T) {
 		{"${TOOL:-/usr/bin/beacon} share", "", true, nil},
 		{"$(which /usr/bin/beacon) share", "", true, nil},
 		{"$(brew --prefix)/bin/gtar xf a.tar", "gtar", true, []string{"gtar", "xf"}},
+		{"/opt/homebrew/bin/gtar czf - ~/.aws", "gtar", true, []string{"gtar", "czf"}},
+		{"~/bin/bash -c id", "bash", true, []string{"bash", "-c"}},
+		{"proxychains4 -q curl https://x.example", "curl", true, []string{"curl"}},
 		{"~/bin/*/run now", "run", true, []string{"run", "now"}},
 		{"~/bin/run* now", "", true, nil},
 		// A wrapper's own options are not the command.

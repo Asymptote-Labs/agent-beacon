@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-// Spans returns, for each command of a parsed command line, the part of the line that can
-// decide what the command runs: its own words, redirections and here-documents, and whatever
-// of the line before it can reach it. The result is parallel to commands. writes[i] says
-// whether command i writes a file's content.
+// spans returns, for each command of a command line, the part of the line that can decide what
+// the command runs: its own words, redirections and here-documents, and whatever of the line
+// before it can reach it. The result is parallel to commands, and so is writes, each command's
+// FileWrites; pipes is the index of commands by pipeline.
 //
 // A program this package cannot see into (an interpreter, a project's script, a tool nobody
 // listed) runs what it is given, and on a command line that is text: its words, its standard
@@ -25,11 +25,11 @@ import (
 // because the body runs wherever the function is called.
 //
 // The span is that piece, preceded by the own piece of every command before it that writes a
-// file, which it may then read or run without naming it (`cat > x.sh <<EOF .. EOF; sh x.sh`,
-// `echo .. > Makefile; make`). Pieces are in the order of the line, a newline between two
-// that do not touch, and each is followed by the bodies of the here-documents of its
-// commands, which a command line holds after the line they are named on. What lies between
-// two pieces (a commit, a test run) is not in the span.
+// file's content (writesContent), which it may then read or run without naming it
+// (`cat > x.sh <<EOF .. EOF; sh x.sh`, `echo .. > Makefile; make`). Pieces are in the order of
+// the line, a newline between two that do not touch, and each is followed by the bodies of the
+// here-documents of its commands, which a command line holds after the line they are named on.
+// What lies between two pieces (a commit, a test run) is not in the span.
 //
 // When a word, a redirection or a NAME=value prefix of the command, or of one of those
 // writers, takes a variable's value, the span is instead everything from the start of the
@@ -37,19 +37,19 @@ import (
 // A variable the environment sets (HOME, PWD, PATH and the like) does not count unless the
 // line assigns it.
 //
-// A command WithScripts added (one of a shell's script, or of what a carrier runs) has the
+// A command withScripts added (one of a shell's script, or of what a carrier runs) has the
 // span of the command of the line itself that it came from: that command's words hold the
 // script, and what reaches it reaches them.
 //
 // The span is an over-approximation, on purpose. It is not followed across a background job
 // that writes a file while a later command runs, or a file the line names nowhere.
-func Spans(commands []Command, writes []bool) []string {
+func spans(commands []Command, writes [][]FileEffect, pipes *pipelineIndex) []string {
 	out := make([]string, len(commands))
 	// wrote[i], for a command of the line itself, is whether it or a command it handed on
-	// writes a file.
+	// writes a file's content.
 	wrote := make([]bool, len(commands))
 	for i := range commands {
-		if i < len(writes) && writes[i] {
+		if slices.ContainsFunc(writes[i], FileEffect.writesContent) {
 			top := i
 			for commands[top].shell != 0 {
 				top = int(commands[top].shell) - 1
@@ -60,7 +60,7 @@ func Spans(commands []Command, writes []bool) []string {
 	// A line of a thousand short commands is four kilobytes, and every command is asked about
 	// every writer before it, so what is asked of a command is worked out once: its own piece,
 	// whether it takes a variable's value, and which commands write or carry a here-document.
-	own := ownPieces(commands)
+	own := ownPieces(commands, pipes)
 	takes := make([]int8, len(commands)) // 0 not asked yet, 1 yes, -1 no
 	takesVar := func(i int) bool {
 		if takes[i] == 0 {
@@ -131,20 +131,15 @@ type piece struct{ start, end int }
 
 // ownPieces returns, for each command of the line itself, the range of the line it covers by
 // itself: see Spans.
-func ownPieces(commands []Command) []piece {
-	// The stages of each pipeline in order, each with the earliest offset of a command at that
-	// stage or before it: a command's piece starts at the earliest of the stages before its own.
-	type stageStart struct{ stage, offset int }
-	pipelines := map[int][]stageStart{}
-	for j := range commands {
-		if d := &commands[j]; d.shell == 0 {
-			pipelines[d.Pipeline] = append(pipelines[d.Pipeline], stageStart{d.Stage, d.Offset})
-		}
-	}
-	for _, stages := range pipelines {
-		slices.SortStableFunc(stages, func(a, b stageStart) int { return a.stage - b.stage })
-		for k := 1; k < len(stages); k++ {
-			stages[k].offset = min(stages[k].offset, stages[k-1].offset)
+func ownPieces(commands []Command, pipes *pipelineIndex) []piece {
+	// For each place in the pipeline index, the earliest offset of a command of its pipeline
+	// at that place or before it: a command's piece starts at the earliest of the stages
+	// before its own. A pipeline's commands are all of the line, or all of one script.
+	earliest := make([]int, len(commands))
+	for k, j := range pipes.order {
+		earliest[k] = commands[j].Offset
+		if k > pipes.first[j] {
+			earliest[k] = min(earliest[k], earliest[k-1])
 		}
 	}
 	own := make([]piece, len(commands))
@@ -157,11 +152,10 @@ func ownPieces(commands []Command) []piece {
 		if c.scopeEnd > 0 {
 			p.start, p.end = min(p.start, c.scopeStart), max(p.end, c.scopeEnd)
 		}
-		stages := pipelines[c.Pipeline]
-		if k := sort.Search(len(stages), func(k int) bool { return stages[k].stage >= c.Stage }); k > 0 {
+		if lo, _ := pipes.stageRange(i, c.Stage); lo > pipes.first[i] {
 			// Only a command that comes before this one counts; the earliest of the stages
 			// before it is one whenever any is.
-			if first := stages[k-1].offset; first < c.Offset {
+			if first := earliest[lo-1]; first < c.Offset {
 				p.start = min(p.start, first)
 			}
 		}

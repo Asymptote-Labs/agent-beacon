@@ -11,6 +11,7 @@ package shellcmd
 
 import (
 	"errors"
+	"path"
 	"slices"
 	"strings"
 
@@ -59,6 +60,105 @@ type Redirect struct {
 	Body string
 }
 
+// redirKind is what a redirection does, by its operator.
+type redirKind uint8
+
+const (
+	redirOut          redirKind = iota // >, >|: the descriptor to a file
+	redirAppend                        // >>
+	redirOutErr                        // &>: standard output and standard error to a file
+	redirOutErrAppend                  // &>>
+	redirDupOut                        // >&: a copy of a descriptor, or (bash) a file
+	redirIn                            // <: the descriptor from a file
+	redirInOut                         // <>
+	redirDupIn                         // <&: a copy of a descriptor
+	redirHereDoc                       // <<, <<-
+	redirHereString                    // <<<
+)
+
+// kind is what the redirection does: every question about a redirection asks this, never its
+// operator's text.
+func (r *Redirect) kind() redirKind {
+	switch r.Op {
+	case ">>":
+		return redirAppend
+	case "&>":
+		return redirOutErr
+	case "&>>":
+		return redirOutErrAppend
+	case ">&":
+		return redirDupOut
+	case "<":
+		return redirIn
+	case "<>":
+		return redirInOut
+	case "<&":
+		return redirDupIn
+	case "<<", "<<-":
+		return redirHereDoc
+	case "<<<":
+		return redirHereString
+	}
+	return redirOut
+}
+
+// descriptor is the descriptor the redirection is of: the one written before its operator, or
+// the operator's own, standard input (0) for the ones that read and standard output (1)
+// otherwise. &> and &>> are of standard error too.
+func (r *Redirect) descriptor() string {
+	switch {
+	case r.Fd != "":
+		return r.Fd
+	case r.kind() >= redirIn:
+		return "0"
+	}
+	return "1"
+}
+
+// ofStdout reports whether the redirection sends the command's standard output elsewhere.
+func (r *Redirect) ofStdout() bool {
+	switch r.kind() {
+	case redirOutErr, redirOutErrAppend:
+		return true
+	case redirOut, redirAppend, redirDupOut:
+		return r.descriptor() == "1"
+	}
+	return false
+}
+
+// stdinRedirect returns the redirection that supplies the command's standard input, the last
+// one of descriptor 0 that reads, and its index in Redirects; nil when there is none.
+func (c *Command) stdinRedirect() (*Redirect, int) {
+	for k := len(c.Redirects) - 1; k >= 0; k-- {
+		if r := &c.Redirects[k]; r.kind() >= redirIn && r.descriptor() == "0" {
+			return r, k
+		}
+	}
+	return nil, -1
+}
+
+// isDescriptor reports whether the target of >& or <&, as written, names a descriptor: its
+// number, the number with the - that moves it (3-), or - alone, which closes it.
+func isDescriptor(target string) bool {
+	number := strings.TrimSuffix(target, "-")
+	return target == "-" || number != "" && strings.Trim(number, "0123456789") == ""
+}
+
+// isFile reports whether a path a command writes or reads names a file: not standard input or
+// output (-) and not a device (/dev/..., which also holds bash's network pseudo-files). /dev/shm
+// is a directory of ordinary files, which a line can stage a file in as it can in /tmp. A path
+// under /dev is cleaned before it is judged, since /dev/../etc/hosts is /etc/hosts; the caller
+// keeps the path as written.
+func isFile(p string) bool {
+	if p == "" || p == "-" {
+		return false
+	}
+	if strings.HasPrefix(p, "/dev/") {
+		p = path.Clean(p)
+	}
+	return !strings.HasPrefix(p, "/dev/") || strings.HasPrefix(p, "/dev/shm/")
+}
+
 // Command is one statement of a command line: a simple command with its words, or a compound
 // one (a subshell, block, if, loop) that has redirections of its own, in which case Argv is empty.
 type Command struct {
@@ -78,12 +178,23 @@ type Command struct {
 	Stage    int
 	// Nested is true inside a command substitution ($(...), `...`) or a process substitution.
 	Nested bool
-	// InScript is true for a command of the script a shell of the command line runs (its -c
-	// text, or the here-document it reads): WithScripts adds those after the shell.
+	// InScript is true for a command of a command line another command hands on, which
+	// withScripts adds after it: a shell's script, what a carrier runs, what an inline script
+	// runs (handOn).
 	InScript bool
 	// AfterCD is true when a cd, pushd or popd comes earlier in the command line, so a relative
-	// path no longer names the file it would at the start. The directory itself is not tracked.
+	// path no longer names the file it would at the start. It does not ask where.
 	AfterCD bool
+	// Dir is the directory the command runs in when the line changed into it, as a literal
+	// path with one trailing slash (/tmp/probe/): the last cd or pushd before the command in
+	// the shell it runs in (not one inside a subshell, substitution or pipeline stage that has
+	// ended), with an absolute operand or a relative one from a known Dir. It is "" when the
+	// line has not changed directory, and
+	// when where it did is unknown (cd alone, cd -, popd, an operand that is not a literal, a
+	// change inside a loop or a function, a command line ssh or the like runs elsewhere).
+	// dirSet is true when the line has changed directory before the command.
+	Dir    string
+	dirSet bool
 	// within identifies the command or process substitution the statement is directly inside, or
 	// is 0. outer is 1 + the index of the innermost compound statement around it that carries
 	// redirections of its own ({ ..; } > f, (..) > f, if ..; fi > f), or 0: that statement's
@@ -97,20 +208,14 @@ type Command struct {
 	// the statement ends, or 0 outside any: what an exec of the statement leaves open is open up
 	// to there (SocketRedirects).
 	execEnd int
-	// shell is, for a command WithScripts added, one more than the index of the shell or
-	// carrier whose command line it is in, and 0 for a command of the command line itself.
-	// scripted is set on a shell or carrier whose commands follow it, runsRead when that
-	// command line was read to its end, and scriptOnStdin when a shell read its script from
-	// its standard input. ranCommands is set instead of scripted on an interpreter whose
-	// inline script runs the commands that follow it. scriptZero is one more than the index in
-	// Argv of the word that is the script's $0, or 0 where its operands are not the script's (a
-	// carrier, an interpreter, PowerShell).
-	shell         int32
-	scriptZero    int32
-	scripted      bool
-	runsRead      bool
-	ranCommands   bool
-	scriptOnStdin bool
+	// shell is, for a command WithScripts added, one more than the index of the command whose
+	// command line it is in, and 0 for a command of the command line itself. handed is what
+	// WithScripts read of the command line this command hands on, when it put its commands
+	// after it.
+	shell  int32
+	handed handOff
+	// unwrapped is what the command's wrappers leave of it, worked out when it is read.
+	unwrapped unwrapped
 	// source is the text the statement was parsed from (the command line, or the script it is
 	// in), end the offset where its words and redirections end, and hdocs its here-documents,
 	// each the offset of its body, which comes after the line it is named on, and the index
@@ -216,6 +321,7 @@ func parseBash(command string) (*syntax.File, error) {
 func walk(source string, file *syntax.File, braceWords *int) ([]Command, error) {
 	p := parser{source: source, stages: map[*syntax.Stmt]stage{}, containers: map[*syntax.Stmt]bool{}, braceWords: braceWords}
 	syntax.Walk(file, p.visit)
+	p.directories()
 	if p.tooManyWords {
 		return nil, ErrTooManyWords
 	}
@@ -259,6 +365,9 @@ type parser struct {
 	// scopes are the byte ranges of the loops, and the whole source once per function
 	// declaration: a command inside one may run after anything in that range.
 	scopes []substitution
+	// isolated are the byte ranges that run in a shell of their own, whose cd ends with them:
+	// subshells, substitutions, pipeline stages and background statements (directories).
+	isolated []substitution
 	// braceWords counts the words brace expansions have produced, and tooManyWords is set
 	// once that passes maxBraceWords: the command line is then not read (ErrTooManyWords).
 	braceWords   *int
@@ -278,10 +387,13 @@ func (p *parser) visit(node syntax.Node) bool {
 	switch n := node.(type) {
 	case *syntax.CmdSubst:
 		p.nested = append(p.nested, substitution{n.Left.Offset(), n.Right.Offset(), p.substID(n)})
+		p.isolated = append(p.isolated, substitution{start: n.Left.Offset(), end: n.Right.Offset()})
 	case *syntax.ProcSubst:
 		p.nested = append(p.nested, substitution{n.OpPos.Offset(), n.Rparen.Offset(), p.substID(n)})
+		p.isolated = append(p.isolated, substitution{start: n.OpPos.Offset(), end: n.Rparen.Offset()})
 	case *syntax.Subshell:
 		p.subshells = append(p.subshells, substitution{n.Lparen.Offset(), n.Rparen.Offset(), int(n.Lparen.Offset()) + 1})
+		p.isolated = append(p.isolated, substitution{start: n.Lparen.Offset(), end: n.Rparen.Offset()})
 	case *syntax.ForClause:
 		p.scopes = append(p.scopes, substitution{start: n.Pos().Offset(), end: n.End().Offset()})
 	case *syntax.WhileClause:
@@ -310,6 +422,9 @@ func (p *parser) substID(node syntax.Node) int {
 }
 
 func (p *parser) stmt(stmt *syntax.Stmt) {
+	if stmt.Background {
+		p.isolated = append(p.isolated, substitution{start: stmt.Pos().Offset(), end: stmt.End().Offset()})
+	}
 	if p.containers[stmt] {
 		return
 	}
@@ -317,6 +432,7 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 		p.pipelines++
 		for i, s := range p.flatten(stmt, nil) {
 			p.stages[s] = stage{pipeline: p.pipelines, index: i}
+			p.isolated = append(p.isolated, substitution{start: s.Pos().Offset(), end: s.End().Offset()})
 		}
 		return
 	}
@@ -432,16 +548,15 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			c.scopeStart, c.scopeEnd = int(s.start), int(min(s.end, uint(len(p.source))))
 		}
 	}
+	c.resolve()
 	p.commands = append(p.commands, c)
 	if call == nil && stmt.Cmd != nil && len(stmt.Redirs) > 0 {
 		p.redirected = append(p.redirected, redirected{start: offset, end: stmt.End().Offset(), index: len(p.commands) - 1})
 	}
 	// After a cd, a relative path is relative to somewhere this parser does not track.
-	if words, _ := c.Unwrapped(); len(words) > 0 && words[0].Known {
-		switch words[0].Text {
-		case "cd", "pushd", "popd":
-			p.moved = true
-		}
+	switch c.unwrapped.program {
+	case "cd", "pushd", "popd":
+		p.moved = true
 	}
 }
 

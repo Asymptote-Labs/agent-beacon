@@ -168,23 +168,18 @@ func TestPackWritesOutNoPredicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	const names = `"(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"`
-	const wrapped = `"(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$"`
-	sender := func(v, w string) string {
-		return v + `.name.matches(` + names + `) || ` + v + `.name.matches(` + wrapped + `) && ` + v + `.argv.exists(` + w + `, ` + w + `.matches(` + names + `))`
-	}
+	sender := func(v string) string { return v + `.name.matches(` + names + `)` }
 	for match, want := range map[string][]string{
 		// The eight copies, as the egress rules carried them.
-		`e.event.action == "command.executed" && e.command.parsed_commands.exists(s, (` + sender("s", "a") + `) && s.argv_raw.exists(a, a.matches("x")))`: {"egress_sender"},
+		`e.event.action == "command.executed" && e.command.parsed_commands.exists(s, (` + sender("s") + `) && s.argv_raw.exists(a, a.matches("x")))`: {"egress_sender"},
 		// Under other names, and as operands of a longer ||.
-		`e.command.parsed_commands.exists(cmd, cmd.name == "gh" || ` + sender("cmd", "word") + `)`: {"egress_sender"},
+		`e.command.parsed_commands.exists(cmd, cmd.name == "gh" || ` + sender("cmd") + `)`: {"egress_sender"},
 		// A predicate whose body calls another.
 		`e.command.parsed_commands.exists(c, c.name == "scp" && c.file_reads.exists(x, credential_file(x.path)))`: {"command_reads_credential_file"},
 		// Called, not written out.
 		`e.command.parsed_commands.exists(s, egress_sender(s) && egress_reads_stdin(s))`: nil,
-		// The sender list without the wrappers is another question (TestPackListsNoSenderOfItsOwn asks it).
-		`e.command.parsed_commands.exists(s, s.name.matches(` + names + `))`: nil,
-		// The same shape about two different commands is not one predicate's body.
-		`e.command.parsed_commands.exists(s, e.command.parsed_commands.exists(t, s.name.matches(` + names + `) || t.name.matches(` + wrapped + `) && t.argv.exists(a, a.matches(` + names + `))))`: nil,
+		// Another list of names is another question.
+		`e.command.parsed_commands.exists(s, s.name.matches("(?i)^(curl|wget)$"))`: nil,
 		// More than the body allows inside it.
 		`e.command.parsed_commands.exists(c, c.file_reads.exists(x, credential_file(x.path) && x.via == "direct"))`: nil,
 	} {

