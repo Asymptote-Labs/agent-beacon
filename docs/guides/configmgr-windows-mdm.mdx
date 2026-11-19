@@ -33,7 +33,7 @@ flowchart LR
   Collector --> Logs["runtime.jsonl"]
 ```
 
-To send the log on to a SIEM, add a forwarder after this guide; see [Log forwarding](/log-forwarding). The [Workspace ONE and Microsoft Sentinel guide](/guides/workspace-one-sentinel-mdm) shows the Sentinel forwarder script, which runs the same way from a ConfigMgr application or script.
+To send the log to Microsoft Sentinel, add [step 5](#5-forward-to-microsoft-sentinel). For other destinations, see [Log forwarding](/log-forwarding).
 
 ## Before you start
 
@@ -144,7 +144,8 @@ Each person's Claude Code and Codex settings live in their own profile, so this 
 ```powershell title="configure-agent-tools.ps1"
 # Points this person's agent runtimes at the Beacon collector.
 # Configuration Manager runs it as the signed-in user.
-$beacon = Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe'
+$programFiles = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+$beacon = Join-Path $programFiles 'Beacon\bin\beacon.exe'
 if (-not (Test-Path -LiteralPath $beacon)) { Write-Error 'Beacon is not installed yet'; exit 1 }
 & $beacon endpoint user-config repair-installed --system --harness claude,codex
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -168,7 +169,6 @@ Create a second application, this time choosing **Manually specify the applicati
 | Installation behavior | Install for user |
 | Logon requirement | Only when a user is logged on |
 | Installation program visibility | Hidden |
-| Run installation and uninstall program as 32-bit process on 64-bit clients | Unchecked. As a 32-bit process, the script looks for Beacon under `Program Files (x86)` and never finds it |
 
 ```powershell title="Detection script"
 if (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Beacon\configmgr-agent-tools')) { 'Installed' }
@@ -203,6 +203,83 @@ Get-Content "$env:ProgramData\Beacon\Endpoint\logs\runtime.jsonl" -Tail 20 | Con
 
 The person's account should appear, not the machine account (`COMPUTERNAME$`).
 
+## 5. Forward to Microsoft Sentinel
+
+This optional step sends every machine's log to Microsoft Sentinel through the Logs Ingestion API, using the `BeaconSentinelForwarder` service the MSI carries.
+
+Do the Azure part once first. [Prepare Sentinel](/guides/workspace-one-sentinel-mdm#1-prepare-sentinel) in the Workspace ONE guide creates the table, the Data Collection Rule, an app with a certificate, and its role. Keep the PFX and its password.
+
+A task sequence sets up the forwarder, not an application, because a task sequence can read hidden collection variables. That keeps the certificate out of application content, which is copied to distribution points and to each client's cache, and out of command lines and logs.
+
+1. **Put the certificate in hidden variables.** Encode the PFX and check its length:
+
+   ```powershell
+   $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path 'beacon-sentinel.pfx')))
+   $b64.Length
+   ```
+
+   A variable can hold at most 4,000 characters. A PFX with one 2048-bit certificate comes to 3,500 to 3,750. If yours is longer, export it again without its chain, with `Export-PfxCertificate -ChainOption EndEntityCertOnly`.
+
+   In the pilot device collection's **Properties**, on **Collection Variables**, add these two variables, and check **Do not display this value in the Configuration Manager console** for each:
+
+   | Name | Value |
+   | --- | --- |
+   | `BeaconSentinelPfx` | The base64 text |
+   | `BeaconSentinelPfxPassword` | The PFX password |
+
+2. **Let a task sequence install Beacon.** In the properties of the Beacon Endpoint Agent application from step 2, on **General Information**, check **Allow this application to be installed from the Install Application task sequence action without being deployed**.
+3. **Create the task sequence.** Go to **Software Library > Operating Systems > Task Sequences**, choose **Create Task Sequence > Create a new custom task sequence**, and name it `Beacon Sentinel forwarder`. Edit it and add two steps:
+
+   | Step | Settings |
+   | --- | --- |
+   | **Software > Install Application** | The Beacon Endpoint Agent application, so Beacon is installed before the next step |
+   | **General > Run PowerShell Script** | **Enter a PowerShell script**, with the script below. **PowerShell execution policy:** Bypass |
+
+   Fill in the four values at the top of the script from the Azure step:
+
+   ```powershell title="Forward to Sentinel"
+   # Sets up Beacon's Microsoft Sentinel forwarder. The task sequence runs it as SYSTEM, and the
+   # certificate comes from hidden collection variables.
+   $ErrorActionPreference = 'Stop'
+   $endpoint = '<logs ingestion URL>'
+   $dcr = '<dcr-... immutable ID>'
+   $tenant = '<tenant ID>'
+   $client = '<application (client) ID>'
+
+   $programFiles = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+   $beacon = Join-Path $programFiles 'Beacon\bin\beacon.exe'
+   if (-not (Test-Path -LiteralPath $beacon)) { Write-Error 'Beacon is not installed yet'; exit 1 }
+
+   $ts = New-Object -ComObject Microsoft.SMS.TSEnvironment
+   $pfx = Join-Path $env:SystemRoot "Temp\beacon-sentinel-$([Guid]::NewGuid().ToString('N')).pfx"
+   try {
+       [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($ts.Value('BeaconSentinelPfx')))
+       $env:AZURE_CLIENT_CERTIFICATE_PASSWORD = $ts.Value('BeaconSentinelPfxPassword')
+       & $beacon endpoint sentinel forwarder install --system `
+           --endpoint $endpoint --dcr-immutable-id $dcr --tenant-id $tenant --client-id $client `
+           --client-certificate $pfx
+       $code = $LASTEXITCODE
+   } finally {
+       Remove-Item -LiteralPath $pfx -Force -ErrorAction SilentlyContinue
+       Remove-Item Env:\AZURE_CLIENT_CERTIFICATE_PASSWORD -ErrorAction SilentlyContinue
+   }
+   exit $code
+   ```
+
+4. **Deploy it** to the pilot device collection with **Purpose: Required** and an **As soon as possible** schedule. It runs once on each machine.
+
+The forwarder keeps its own copy of the certificate in `C:\ProgramData\Beacon\Endpoint\forwarders\sentinel`, which only SYSTEM and Administrators can read, and the script deletes the one it wrote. On its first start the forwarder sends what is already in the log once, then each new line.
+
+If a scheduled task ships the log today, remove it first and add `--read-from end` to the command, or every line already shipped is sent again. With `--read-from end`, events written while the forwarder is stopped can be lost if the log fills up and rotates before it starts again, so leave it out when you forward into a new table.
+
+To rotate the certificate, change the two collection variables and deploy the task sequence again.
+
+**Success looks like:** the deployment reports success, `sc.exe query BeaconSentinelForwarder` reports `RUNNING`, and after `beacon.exe endpoint sentinel validate --system` on the machine, this query returns a row within a few minutes (up to 30 the first time, while the role assignment applies):
+
+```kusto
+BeaconRuntime_CL | where Message has "Beacon endpoint Sentinel validation event"
+```
+
 ## Upgrades and removal
 
 Beacon never updates itself, so the version on each machine is the one you deploy.
@@ -221,8 +298,10 @@ The per-user application needs no change for an upgrade. If you change `--harnes
 | The device application fails, and `Get-ExecutionPolicy -List` shows `AllSigned` or `Restricted` for `MachinePolicy` | Group Policy blocks unsigned PowerShell scripts, which the MSI needs. See [Before you start](#before-you-start). |
 | The device application fails with "No Beacon MSI" | The content folder has only the script. Put the MSI beside it and update the content on the distribution points. |
 | The MSI fails with "A newer version is already installed" | The machine already has a newer Beacon. Deploy the newer application, or uninstall it first to roll back. |
+| The forwarder task sequence fails with "Beacon is not installed yet" | The Install Application step is missing, or the Beacon application does not allow installs from a task sequence. See step 5. |
+| The forwarder task sequence fails with "PKCS12 parsing failed" | `BeaconSentinelPfxPassword` does not match the PFX. |
 | `log_access` is not `restricted` | The policy values were not there when the MSI ran, or the release is 1.3.57 or earlier. Check `HKLM\SOFTWARE\Policies\Beacon\Endpoint`, then run `beacon endpoint repair --system --log-access restricted` or redeploy. |
-| The per-user application keeps failing | The device application has not installed Beacon on that machine yet, and it succeeds at the next evaluation after the install. If Beacon is installed, check the 32-bit process setting on the deployment type. |
+| The per-user application keeps failing | The device application has not installed Beacon on that machine yet, and it succeeds at the next evaluation after the install. |
 | The per-user application ran but reports failure, or detection always fails | The detection script was blocked by the PowerShell execution policy. See the note under step 3. |
 | Events arrive under `COMPUTERNAME$` | That person's agent tools are not set up yet: check the per-user deployment for them. |
 | An install step or a hook is blocked | AppLocker or WDAC; allow everything listed in step 2. |
