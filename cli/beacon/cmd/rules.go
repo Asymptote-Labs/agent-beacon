@@ -34,10 +34,7 @@ var rulesOpts struct {
 }
 
 func rulesUserMode() bool {
-	if rulesOpts.systemMode {
-		return false
-	}
-	return rulesOpts.userMode
+	return flagsUserMode(rulesOpts.userMode, rulesOpts.systemMode)
 }
 
 var rulesCmd = &cobra.Command{

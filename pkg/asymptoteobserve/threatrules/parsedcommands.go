@@ -15,9 +15,6 @@ const ParsedCommandsPath = "command.parsed_commands"
 // to its end, after the "e." prefix.
 const ParsedIncompletePath = "command.parsed_incomplete"
 
-// v1_3Fields are the fields of a parsed command that spec v1.3 added.
-var v1_3Fields = []string{"args", "file_reads", "file_writes", "script_sends", "socket_redirects", "runs_read", "span", "earlier_stages", "later_stages"}
-
 // ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
 // to the retained command line, so a longer value (from an in-process caller) is cut there too.
 const ParsedCommandsLimit = asymptoteobserve.DefaultStringLimit

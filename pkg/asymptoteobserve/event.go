@@ -191,20 +191,23 @@ type CommandInfo struct {
 	// the commands it runs, so a rule can tell `curl ... | sudo bash` from the same text inside
 	// a quoted string or a here-document. It is never written or read; the engine fills it on
 	// its own copy of each event, as it does GenAIToolCallInfo.ResultText. See
-	// threatrules.ParsedCommands.
-	ParsedCommands []ParsedCommand `json:"-" cel:"parsed_commands"`
+	// threatrules.ParsedCommands. The spec tag here and on ParsedCommand's fields is the Threat
+	// Rules version that added the field; a rule that selects it must declare that version, and
+	// threatrules reads the tags for that check and for the field reference.
+	ParsedCommands []ParsedCommand `json:"-" cel:"parsed_commands" spec:"v1.2"`
 	// ParsedIncomplete is set when Command was not read to its end: it does not parse, it ends
 	// inside a quote, a here-document, a substitution or a compound command (as a cut capture
 	// does), it is longer than the engine reads, or it names more than the engine reads
 	// (hundreds of commands, a brace expansion of thousands of words). ParsedCommands then
 	// lists the commands before that point only, and none in the last case, so nothing can be
 	// concluded from a command's absence. Derived like ParsedCommands, never written or read.
-	ParsedIncomplete bool `json:"-" cel:"parsed_incomplete"`
+	ParsedIncomplete bool `json:"-" cel:"parsed_incomplete" spec:"v1.3"`
 }
 
 // ParsedCommand is one command of a command line, as the threat-rules engine presents it to
 // rules (e.command.parsed_commands). It is never serialized; the cel tags are the names a rule
-// uses. threatrules.ParsedCommands says how each field is derived.
+// uses, and a spec tag the Threat Rules version that added a field after parsed_commands itself
+// (CommandInfo.ParsedCommands). threatrules.ParsedCommands says how each field is derived.
 type ParsedCommand struct {
 	// Name is the base name of the command after its wrappers (sudo, env, exec, timeout, ...):
 	// rm for `sudo /bin/rm -rf x`. Empty when it is unknown.
@@ -218,7 +221,7 @@ type ParsedCommand struct {
 	// one regular expression to ask for whole words that follow each other, as in
 	// args.matches("(?m)^auth\ntoken$") for `sudo gh auth token`. A newline inside a word is a
 	// space here.
-	Args string `cel:"args"`
+	Args string `cel:"args" spec:"v1.3"`
 	// Env are the NAME=value assignments before the command; an unknown value is "".
 	Env map[string]string `cel:"env"`
 	// FileEffects are the files the command evidently writes, and how.
@@ -226,20 +229,20 @@ type ParsedCommand struct {
 	// FileWrites are the files the command evidently writes, and how, with every path as
 	// written without its quotes, also where the value depends on an expansion (~/.bashrc,
 	// $HOME/.ssh/authorized_keys), which FileEffects leaves out. Every effect is a write.
-	FileWrites []ParsedFileEffect `cel:"file_writes"`
+	FileWrites []ParsedFileEffect `cel:"file_writes" spec:"v1.3"`
 	// FileReads are the files whose content the command evidently takes in, and how: directly
 	// (what it prints, searches, copies, archives or sends), on its standard input, or written
 	// into one of its words by a substitution. A path is as written without its quotes, also
 	// where the value depends on an expansion ($HOME/.netrc, ~/.ssh/id_*).
-	FileReads []ParsedFileRead `cel:"file_reads"`
+	FileReads []ParsedFileRead `cel:"file_reads" spec:"v1.3"`
 	// ScriptSends are the files an interpreter's inline script opens inside the arguments of a
 	// call that sends them over the network: .env for
 	// python3 -c "requests.post(url, data=open('.env'))". Each is also one of FileReads.
-	ScriptSends []string `cel:"script_sends"`
+	ScriptSends []string `cel:"script_sends" spec:"v1.3"`
 	// SocketRedirects are the command's redirections to or from bash's network pseudo-files
 	// (/dev/tcp/host/port, /dev/udp/host/port), its own or through a descriptor an earlier exec
 	// opened: where its output is sent, or its input comes from, without a network client.
-	SocketRedirects []ParsedSocketRedirect `cel:"socket_redirects"`
+	SocketRedirects []ParsedSocketRedirect `cel:"socket_redirects" spec:"v1.3"`
 	// Pipeline identifies the command's pipeline: the stages of one pipeline share it. Stage
 	// is the 0-based position in it (curl ... | sh: sh is stage 1).
 	Pipeline int `cel:"pipeline"`
@@ -251,8 +254,8 @@ type ParsedCommand struct {
 	// commands inside one compound stage ({ a; b; } | c) are at the same stage and are in
 	// neither list of each other. Both are empty for a command alone in its pipeline. A rule
 	// about two stages of one pipeline asks these, not every command of the line.
-	EarlierStages []int `cel:"earlier_stages"`
-	LaterStages   []int `cel:"later_stages"`
+	EarlierStages []int `cel:"earlier_stages" spec:"v1.3"`
+	LaterStages   []int `cel:"later_stages" spec:"v1.3"`
 	// Nested is true for a command inside a command or process substitution, inside the
 	// script a shell runs with -c or reads from a here-document, or run by a carrier (the
 	// command of xargs, find -exec, ssh, docker exec, eval and the like).
@@ -260,13 +263,13 @@ type ParsedCommand struct {
 	// RunsRead is true when the command hands a command line to another program to run (a
 	// shell's script, the command of xargs, find -exec, ssh, docker exec, eval and the like)
 	// and that command line was read to its end: its commands follow this one in the list.
-	RunsRead bool `cel:"runs_read"`
+	RunsRead bool `cel:"runs_read" spec:"v1.3"`
 	// Span is the part of the command line that can decide what the command runs: its own
 	// words, redirections and here-documents, starting earlier when something before it on
 	// the line reaches it (an earlier stage of its pipeline, a command that wrote a file, a
 	// variable). For a rule that must match text because the command is a program it cannot
 	// see into, and wants the text that reaches that command, not the whole line.
-	Span string `cel:"span"`
+	Span string `cel:"span" spec:"v1.3"`
 }
 
 // ParsedFileEffect is a file a parsed command evidently writes. Op is one of write, append,

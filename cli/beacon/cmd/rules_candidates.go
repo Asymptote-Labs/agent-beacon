@@ -47,7 +47,7 @@ Nothing leaves the machine. The output holds file paths from your log.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		userMode := rulesCandidatesOpts.userMode && !rulesCandidatesOpts.systemMode
+		userMode := flagsUserMode(rulesCandidatesOpts.userMode, rulesCandidatesOpts.systemMode)
 		loaded, skipped, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(rulesCandidatesOpts.rulesDir))
 		if err != nil {
 			return fmt.Errorf("load rules: %w", err)
