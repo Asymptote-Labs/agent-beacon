@@ -624,3 +624,66 @@ func TestUserModeActiveErrorNamesThisPlatformsServices(t *testing.T) {
 		t.Fatalf("message = %q", msg)
 	}
 }
+
+// A unit counts only where Beacon installed it for the user; one whose state systemd cannot report
+// (older than 248 cannot reach another user's manager) is not taken for stopped.
+func TestLinuxUserModeUnitsAreReportedUnlessSystemdSaysTheyAreStopped(t *testing.T) {
+	home := t.TempDir()
+	info := consoleUserInfo{Username: "alice", HomeDir: home}
+	units := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(units, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := linuxUserModeUnits(info, func(string, string) string { return "active" }); len(got) != 0 {
+		t.Fatalf("without unit files: %v", got)
+	}
+	for _, unit := range []string{"beacon-collector.service", "beacon-asymptote-forwarder.service"} {
+		if err := os.WriteFile(filepath.Join(units, unit), []byte("[Unit]\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for state, want := range map[string]string{
+		"active":   "beacon-collector.service is running in alice's session",
+		"inactive": "",
+		"failed":   "",
+		"":         "beacon-collector.service is installed for alice (" + filepath.Join(units, "beacon-collector.service") + "), and systemd could not say whether it is running",
+	} {
+		var asked []string
+		got := linuxUserModeUnits(info, func(username, unit string) string {
+			asked = append(asked, username+" "+unit)
+			return state
+		})
+		if strings.Join(asked, ",") != "alice beacon-collector.service,alice beacon-asymptote-forwarder.service" {
+			t.Fatalf("%q: asked %v", state, asked)
+		}
+		if want == "" {
+			if len(got) != 0 {
+				t.Fatalf("%q: %v", state, got)
+			}
+			continue
+		}
+		if len(got) != 2 || got[0] != want {
+			t.Fatalf("%q: %v, want %q first", state, got, want)
+		}
+	}
+}
+
+// Every user the system install configures is asked about, not only the console's.
+func TestUserModeProbeAsksEveryConsoleUser(t *testing.T) {
+	defer swapEnforcementSeam(&activeConsoleUsers, func() ([]consoleUserInfo, error) {
+		return []consoleUserInfo{{Username: "bob"}, {Username: "alice"}, {Username: "carol"}}, nil
+	})()
+	defer swapEnforcementSeam(&consoleUserModeFindings, func(info consoleUserInfo) []string {
+		if info.Username == "bob" {
+			return nil
+		}
+		return []string{"user mode for " + info.Username}
+	})()
+	who, found, err := probeConsoleUserMode()
+	if err != nil || who != "alice, carol" || strings.Join(found, ",") != "user mode for alice,user mode for carol" {
+		t.Fatalf("probe = %q %v %v", who, found, err)
+	}
+	if msg := userModeActiveError(who, found).Error(); !strings.Contains(msg, "As each of alice, carol:") {
+		t.Fatalf("message = %q", msg)
+	}
+}

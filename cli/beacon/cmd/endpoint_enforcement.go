@@ -325,22 +325,32 @@ func explainEnterpriseRefusal(dashboard string, err error) error {
 	}
 }
 
-// probeConsoleUserMode reports what shows the console user running Beacon in user mode: its
+// probeConsoleUserMode reports what shows a console user running Beacon in user mode: its
 // collector or forwarder running in their session (launchd on macOS, their systemd user manager on
 // Linux), or Claude Code hooks that write to their own runtime log. Enforcement runs in system mode
-// only, and enabling it would repoint those hooks.
+// only, and enabling it would repoint those hooks. It asks about everyone the system install
+// configures (activeConsoleUsers): on Linux every logged-in user, not only the one at the console,
+// and names those it found in user mode.
 func probeConsoleUserMode() (string, []string, error) {
-	info, ok, err := activeConsoleUser()
-	if err != nil || !ok {
+	users, err := activeConsoleUsers()
+	if err != nil || len(users) == 0 {
 		return "", nil, err
 	}
+	var who, found []string
+	for _, info := range users {
+		if f := consoleUserModeFindings(info); len(f) > 0 {
+			who = append(who, info.Username)
+			found = append(found, f...)
+		}
+	}
+	return strings.Join(who, ", "), found, nil
+}
+
+// consoleUserModeFindings is what shows one user running Beacon in user mode.
+var consoleUserModeFindings = func(info consoleUserInfo) []string {
 	var found []string
 	if runtime.GOOS == "linux" {
-		for _, unit := range userModeSystemdUnits[:2] {
-			if exec.Command("systemctl", "--user", "--machine="+info.Username+"@", "is-active", "--quiet", unit).Run() == nil {
-				found = append(found, fmt.Sprintf("%s is running in %s's session", unit, info.Username))
-			}
-		}
+		found = linuxUserModeUnits(info, systemdUserUnitState)
 	} else if u, err := user.Lookup(info.Username); err == nil {
 		for _, label := range []string{service.UserLabel, service.ForwarderLabel} {
 			if exec.Command("launchctl", "print", "gui/"+u.Uid+"/"+label).Run() == nil {
@@ -353,7 +363,38 @@ func probeConsoleUserMode() (string, []string, error) {
 	if data, err := os.ReadFile(settings); err == nil && strings.Contains(string(data), userLog) {
 		found = append(found, fmt.Sprintf("Claude Code hooks in %s write to %s", settings, userLog))
 	}
-	return info.Username, found, nil
+	return found
+}
+
+// linuxUserModeUnits reports the user-mode collector and forwarder units Beacon installed for a
+// user (their files under ~/.config/systemd/user) that are running, or whose state their systemd
+// user manager could not report: asking another user's manager (systemctl --machine=<user>@) needs
+// systemd 248, older than RHEL 8's, Ubuntu 20.04's and Debian 11's, and a unit that may be running
+// must not read as stopped.
+func linuxUserModeUnits(info consoleUserInfo, state func(username, unit string) string) []string {
+	var found []string
+	for _, unit := range userModeSystemdUnits[:2] {
+		file := filepath.Join(info.HomeDir, ".config", "systemd", "user", unit)
+		if _, err := os.Stat(file); err != nil {
+			continue
+		}
+		switch s := state(info.Username, unit); s {
+		case "active", "activating", "reloading", "refreshing":
+			found = append(found, fmt.Sprintf("%s is running in %s's session", unit, info.Username))
+		case "inactive", "failed", "deactivating", "maintenance":
+		default:
+			found = append(found, fmt.Sprintf("%s is installed for %s (%s), and systemd could not say whether it is running", unit, info.Username, file))
+		}
+	}
+	return found
+}
+
+// systemdUserUnitState is what `systemctl is-active` says of unit in username's user manager, or ""
+// when it said nothing (systemctl missing, or one too old to reach another user's manager).
+func systemdUserUnitState(username, unit string) string {
+	out, _ := exec.Command("systemctl", "--user", "--machine="+username+"@", "is-active", unit).Output()
+	state, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	return state
 }
 
 // userModeSystemdUnits are a user-mode endpoint's systemd user units: the collector and the
@@ -368,7 +409,11 @@ func userModeActiveError(who string, found []string) error {
 	for _, f := range found {
 		fmt.Fprintf(&b, "  - %s\n", f)
 	}
-	fmt.Fprintf(&b, "Stop user mode first. As %s:\n", who)
+	if strings.Contains(who, ", ") {
+		fmt.Fprintf(&b, "Stop user mode first. As each of %s:\n", who)
+	} else {
+		fmt.Fprintf(&b, "Stop user mode first. As %s:\n", who)
+	}
 	if runtime.GOOS == "linux" {
 		fmt.Fprintf(&b, "  systemctl --user disable --now %s\n", strings.Join(userModeSystemdUnits, " "))
 	} else {

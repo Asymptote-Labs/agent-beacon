@@ -418,3 +418,34 @@ func TestInstallUserRefusesWhatItDidNotAskFor(t *testing.T) {
 		})
 	}
 }
+
+func TestLinuxRollbackPackageIsThePublicPackageInstalledNow(t *testing.T) {
+	old := installedVersionLine
+	t.Cleanup(func() { installedVersionLine = old })
+	rpm := Release{Name: "beacon-enterprise_1.3.41_linux_amd64.rpm"}
+	deb := Release{Name: "beacon-enterprise_1.3.41_linux_amd64.deb"}
+
+	installedVersionLine = func(context.Context) string { return "beacon version 1.3.40 (abc) built on today\n" }
+	for rel, ext := range map[Release]string{rpm: "rpm", deb: "deb"} {
+		got, err := linuxRollbackPackage(context.Background(), rel)
+		name := "beacon_1.3.40_linux_" + runtime.GOARCH + "." + ext
+		if err != nil || got == nil || got.Version != "1.3.40" || got.Name != name || got.SHA256 != "" ||
+			got.URL != "https://github.com/asymptote-labs/agent-beacon/releases/download/v1.3.40/"+name {
+			t.Fatalf("%s: %+v, %v", ext, got, err)
+		}
+	}
+
+	installedVersionLine = func(context.Context) string {
+		return "beacon version 1.3.40 (abc) built on today, enterprise edition\n"
+	}
+	if got, err := linuxRollbackPackage(context.Background(), rpm); got != nil || err != nil {
+		t.Fatalf("over the enterprise edition: %+v, %v", got, err)
+	}
+
+	for _, line := range []string{"", "beacon version dev (unknown) built on unknown\n"} {
+		installedVersionLine = func(context.Context) string { return line }
+		if _, err := linuxRollbackPackage(context.Background(), deb); err == nil || !strings.Contains(err.Error(), "not a public release") {
+			t.Fatalf("installed %q: err = %v", line, err)
+		}
+	}
+}

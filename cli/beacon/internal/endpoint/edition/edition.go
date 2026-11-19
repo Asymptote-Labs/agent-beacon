@@ -238,12 +238,52 @@ func checkAnswer(rel Release, target Target) error {
 func Install(ctx context.Context, rel Release, currentVersion, logPath string) (selfupdate.ApplyResult, error) {
 	a := selfupdate.NewApplier(currentVersion)
 	a.LogPath = logPath
+	if runtime.GOOS == "linux" {
+		back, err := linuxRollbackPackage(ctx, rel)
+		if err != nil {
+			return selfupdate.ApplyResult{}, err
+		}
+		a.RollbackPackage = back
+	}
 	return a.InstallPackage(ctx, rel.pkg())
+}
+
+// publicPackageURL is where the public release publishes its Linux packages, beside its signed
+// checksums.txt.
+const publicPackageURL = "https://github.com/asymptote-labs/agent-beacon/releases/download/v%[1]s/beacon_%[1]s_linux_%[2]s.%[3]s"
+
+// linuxRollbackPackage is the package a failed install of rel reinstalls on Linux: the public
+// package of the version installed now. The enterprise package's epoch ranks it above every public
+// release, so a rollback that only copied the public files back would leave the package database
+// naming the enterprise package, and neither apt, dnf nor the next public update would ever replace
+// it. Over an enterprise install it is nil: the database then names a newer enterprise package
+// than the files, which the next enterprise update still replaces.
+func linuxRollbackPackage(ctx context.Context, rel Release) (*selfupdate.Package, error) {
+	line := installedVersionLine(ctx)
+	if selfupdate.VersionLineEdition(line) == Enterprise {
+		return nil, nil
+	}
+	version := selfupdate.VersionLineVersion(line)
+	if !updatecheck.CanCheckVersion(version) {
+		return nil, fmt.Errorf("the installed beacon (%q) is not a public release, so a failed install could not be rolled back through the package manager", strings.TrimSpace(line))
+	}
+	format := FormatDeb
+	if strings.HasSuffix(rel.Name, "."+FormatRPM) {
+		format = FormatRPM
+	}
+	url := fmt.Sprintf(publicPackageURL, version, runtime.GOARCH, format)
+	return &selfupdate.Package{URL: url, Version: version, Name: url[strings.LastIndex(url, "/")+1:]}, nil
 }
 
 // Seams, so tests reach neither the network, pkgutil nor this host's package tools.
 var (
 	lookPath             = exec.LookPath
+	installedVersionLine = func(ctx context.Context) string {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		out, _ := exec.CommandContext(ctx, selfupdate.SystemBeaconPath(), "version").Output()
+		return string(out)
+	}
 	fetchVerifiedPackage = func(ctx context.Context, pkg selfupdate.Package, dest string) error {
 		return selfupdate.NewApplier("").FetchVerifiedPackage(ctx, pkg, dest)
 	}

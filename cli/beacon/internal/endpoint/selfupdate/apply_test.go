@@ -463,7 +463,7 @@ func TestRollbackDoesNotRemoveLiveInstallWhenRestorePreparationFails(t *testing.
 		t.Fatal(err)
 	}
 	var result ApplyResult
-	if err := a.rollback(filepath.Join(t.TempDir(), "missing-backup"), &result); err == nil {
+	if err := a.rollback(context.Background(), filepath.Join(t.TempDir(), "missing-backup"), "", &result); err == nil {
 		t.Fatal("expected rollback error for missing backup")
 	}
 	if got := string(mustRead(t, liveBin)); got != "live" {
@@ -497,7 +497,7 @@ func TestRollbackReportsCollectorRestartFailure(t *testing.T) {
 		return "launchctl failed", fmt.Errorf("exit 1")
 	}
 	var result ApplyResult
-	if err := a.rollback(backup, &result); err == nil {
+	if err := a.rollback(context.Background(), backup, "", &result); err == nil {
 		t.Fatal("expected restart failure")
 	}
 	if got := string(mustRead(t, liveBin)); got != "backup" {

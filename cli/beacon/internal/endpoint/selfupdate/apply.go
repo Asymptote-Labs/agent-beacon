@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +70,15 @@ type Applier struct {
 	// SkipGatekeeper relaxes notarization/staple checks. Requires
 	// AllowInsecureTest. The sha256 check is always enforced regardless.
 	SkipGatekeeper bool
+
+	// RollbackPackage, on Linux, is the package that reinstalls what is installed now. A rollback
+	// that only copies the old files back leaves the package database naming the package that
+	// failed; when that one ranks above every later release (the enterprise edition's epoch), dnf,
+	// apt and the next update would never replace it. With RollbackPackage, it is downloaded and
+	// verified before anything is installed (without it, nothing is), and a rollback reinstalls it
+	// through the package manager before the files are copied back. Its SHA256 may be empty: on
+	// Linux the release's signed checksums.txt is what it is held to.
+	RollbackPackage *Package
 
 	HTTPClient *http.Client
 	run        runnerFunc
@@ -262,6 +272,27 @@ func (a *Applier) verifyPackage(ctx context.Context, pkg Package, pkgPath, workD
 	}
 }
 
+// fetchRollbackPackage downloads pkg to dest and checks it as an install would. Without a SHA-256 of
+// its own it must be held to a signed checksums.txt, which only the Linux check does.
+func (a *Applier) fetchRollbackPackage(ctx context.Context, pkg Package, dest, workDir string) error {
+	if err := a.download(ctx, pkg.URL, dest); err != nil {
+		return fmt.Errorf("download %s: %w", pkg.fileName(), err)
+	}
+	if pkg.SHA256 != "" {
+		if err := verifySHA256(dest, pkg.SHA256); err != nil {
+			return fmt.Errorf("verify checksum: %w", err)
+		}
+	}
+	verification, err := a.verifyPackage(ctx, pkg, dest, workDir)
+	if err != nil {
+		return err
+	}
+	if pkg.SHA256 == "" && verification != "sha256+gpg" && !a.AllowInsecureTest {
+		return fmt.Errorf("%s has no checksum to be held to", pkg.fileName())
+	}
+	return nil
+}
+
 // installPackage is everything after discovery: download, verify, snapshot, install, restart,
 // health check, and rollback when any step after the install fails.
 func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyResult, success string) (ApplyResult, error) {
@@ -296,6 +327,17 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 		return result, err
 	}
 
+	reinstall := ""
+	if a.RollbackPackage != nil {
+		reinstall = filepath.Join(stage, "rollback-package"+packageExt(a.RollbackPackage.fileName()))
+		if err := a.fetchRollbackPackage(ctx, *a.RollbackPackage, reinstall, stage); err != nil {
+			message := "fetch the installed version's package, which a failed install reinstalls: " + err.Error()
+			a.emit(false, result, message)
+			return result, errors.New(message)
+		}
+		defer os.Remove(reinstall)
+	}
+
 	// Snapshot the whole install tree for rollback, then install. A snapshot
 	// failure on an existing install aborts before we touch anything: proceeding
 	// would leave us unable to roll back.
@@ -306,7 +348,7 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 	}
 
 	if err := a.install(ctx, pkgPath); err != nil {
-		rollbackErr := a.rollback(backup, &result)
+		rollbackErr := a.rollback(ctx, backup, reinstall, &result)
 		message := err.Error()
 		if rollbackErr != nil {
 			message += "; rollback failed: " + rollbackErr.Error()
@@ -318,7 +360,7 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 
 	if !a.AllowInsecureTest {
 		if err := a.restartCollector(); err != nil {
-			rollbackErr := a.rollback(backup, &result)
+			rollbackErr := a.rollback(ctx, backup, reinstall, &result)
 			message := "post-install collector restart failed: " + err.Error()
 			if rollbackErr != nil {
 				message += "; rollback failed: " + rollbackErr.Error()
@@ -330,7 +372,7 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 	}
 
 	if err := a.healthCheck(ctx, pkg.Version, pkg.Edition); err != nil {
-		rollbackErr := a.rollback(backup, &result)
+		rollbackErr := a.rollback(ctx, backup, reinstall, &result)
 		message := "post-install health check failed: " + err.Error()
 		if rollbackErr != nil {
 			message += "; rollback failed: " + rollbackErr.Error()
@@ -633,9 +675,18 @@ func (a *Applier) snapshotInstall() (string, error) {
 // config/plists live outside the tree but reference stable paths and a
 // release-stable schema, so the restored older binaries run against them
 // consistently after the collector restarts.
-func (a *Applier) rollback(backup string, result *ApplyResult) error {
+//
+// reinstall, when set, is the verified package of what was installed before
+// (Applier.RollbackPackage). It is installed through the package manager first,
+// so the package database names what is on disk again; the snapshot is copied
+// back either way, and a failed reinstall is reported as a failed rollback.
+func (a *Applier) rollback(ctx context.Context, backup, reinstall string, result *ApplyResult) error {
 	if backup == "" {
 		return nil
+	}
+	var reinstallErr error
+	if reinstall != "" {
+		reinstallErr = a.reinstall(ctx, reinstall)
 	}
 	live := a.installDir()
 	restore := filepath.Join(a.stageDir(), "rollback", "restore")
@@ -665,6 +716,23 @@ func (a *Applier) rollback(backup string, result *ApplyResult) error {
 		if err := restoreScriptForwarders(); err != nil {
 			return fmt.Errorf("restore forwarders: %w", err)
 		}
+	}
+	if reinstallErr != nil {
+		return fmt.Errorf("the files are restored, but reinstalling the previous package failed, so the package database still names the one that failed: %w", reinstallErr)
+	}
+	return nil
+}
+
+// reinstall installs the package of what was installed before, which may rank below the one that
+// failed: rpm needs --oldpackage for that, and dpkg allows it with a warning.
+func (a *Applier) reinstall(ctx context.Context, pkgPath string) error {
+	name, args := installerCommand(pkgPath, a.prefix())
+	if name == "rpm" {
+		args = []string{"--upgrade", "--oldpackage", "--replacepkgs", pkgPath}
+	}
+	out, err := a.runner()(ctx, name, args...)
+	if err != nil {
+		return fmt.Errorf("%s %s: %s: %w", name, strings.Join(args[:len(args)-1], " "), strings.TrimSpace(out), err)
 	}
 	return nil
 }
