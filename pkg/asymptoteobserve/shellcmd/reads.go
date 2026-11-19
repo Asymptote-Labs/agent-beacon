@@ -187,6 +187,8 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 		}
 	case "socat":
 		return socatFiles(args), data
+	case "openssl":
+		return opensslInputs(args, base)
 	default:
 		r, ok := readers[name]
 		if !ok {
@@ -521,6 +523,124 @@ func wgetInputs(args []Word, base int) (files []string, data dataWords) {
 		} else {
 			data.index = append(data.index, base+i)
 		}
+	}
+	return files, data
+}
+
+// opensslFileOptions are the subcommand options whose value is a file openssl reads: the input
+// of enc, dgst, rsa, pkey, x509, req and pkcs12 and their kin, the keys -inkey and -key, the
+// certificates -certfile, -signkey, -recip and -content, the config -config, the CA bundle
+// -CAfile and s_client's -verifyCAfile, -signaturefile of cms and smime, the randomness seeds
+// -rand and -writerand, enc's -kfile and the PVK key -pvkfile. The option and its value may be
+// attached (`-in=key.pem` or the legacy `-inkey.pem`); opensslInputs peels the longest known name.
+var opensslFileOptions = []string{
+	"-in", "-inkey", "-key", "-certfile", "-signkey", "-recip", "-content", "-config",
+	"-CAfile", "-verifyCAfile", "-signaturefile", "-rand", "-writerand", "-kfile", "-pvkfile",
+}
+
+// opensslValueOptions are the options that consume a value openssl does not read as a file: the
+// output file, the forms, the digest and cipher names, the password sources and the literal
+// password of enc's -k, and s_client's connection options.
+var opensslValueOptions = []string{
+	"-out", "-inform", "-outform", "-inkeyform", "-keyform", "-certform", "-digest", "-cipher",
+	"-md", "-kdf", "-iter", "-engine", "-provider", "-provider-path", "-saltlen", "-macalg",
+	"-passin", "-passout", "-k", "-salt", "-connect", "-servername", "-proxy", "-passarg",
+	"-passphrase-arg",
+}
+
+// opensslInputs returns the files openssl reads and the words carrying a literal password.
+//
+// The first word after the name is the subcommand (`openssl rsa -in key.pem ...`); the option
+// names that hold files are shared by the subcommands, so one table covers them. Every other
+// word that starts with `-` is an option and is skipped, since OpenSSL's option vocabulary is
+// far larger than the ones it reads files by.
+//
+// -passin and -passout take a password source: `file:path` is a read, a `pass:...`, `env:...`
+// or plain password is the word's own data, and a `stdin:` or `fd:` source is neither. The
+// short form of enc's `-k`, whose value is a literal password, is data as well.
+func opensslInputs(args []Word, base int) (files []string, data dataWords) {
+	data.listed = true
+	if len(args) < 2 || !args[0].Known || args[0].Text == "" {
+		return nil, data
+	}
+	for i := 1; i < len(args); i++ {
+		w := args[i]
+		t := w.Unquoted
+		if !isOption(w) {
+			files = append(files, t)
+			continue
+		}
+		name := strings.TrimPrefix(t, "-")
+		value, attached := "", false
+		if eq := strings.IndexByte(name, '='); eq >= 0 {
+			value, attached = name[eq+1:], true
+			name = name[:eq]
+		}
+		if !attached {
+			if optionValue(name, opensslFileOptions) || optionValue(name, opensslValueOptions) {
+				// The word is a whole known option; its value is the next word.
+				if i+1 < len(args) {
+					i++
+					value = args[i].Unquoted
+					attached = true
+				}
+			} else if option, rest, ok := opensslAttached(name); ok {
+				// The legacy attached form: -inkey.pem names -inkey and its value .pem.
+				name, value, attached = option, rest, true
+			}
+		}
+		switch {
+		case !attached:
+		case optionValue(name, opensslFileOptions):
+			if value != "-" {
+				files = append(files, value)
+			}
+		case name == "passin" || name == "passout":
+			files, data = opensslPasswordSource(value, base+i, files, data)
+		case name == "k":
+			data.index = append(data.index, base+i)
+		}
+	}
+	return files, data
+}
+
+// optionValue reports whether a word is one of the option names that take a value.
+func optionValue(name string, table []string) bool {
+	return slices.Contains(table, "-"+name)
+}
+
+// opensslAttached splits the legacy attached spelling of an option and its value (-inkey.pem):
+// the longest known option name the word begins, and the rest as the value.
+func opensslAttached(name string) (string, string, bool) {
+	best := ""
+	for _, table := range [][]string{opensslFileOptions, opensslValueOptions} {
+		for _, option := range table {
+			option = option[1:] // the option without its dash
+			if len(option) > len(best) && strings.HasPrefix(name, option) && len(option) < len(name) {
+				best = option
+			}
+		}
+	}
+	if best == "" {
+		return "", "", false
+	}
+	return best, name[len(best):], true
+}
+
+// opensslPasswordSource reads one password source as openssl's -passin and -passout spell them.
+func opensslPasswordSource(value string, index int, files []string, data dataWords) ([]string, dataWords) {
+	scheme, rest, hasScheme := strings.Cut(value, ":")
+	if !hasScheme {
+		data.index = append(data.index, index)
+		return files, data
+	}
+	switch scheme {
+	case "file":
+		if rest != "" {
+			files = append(files, rest)
+		}
+	case "pass", "env":
+		data.index = append(data.index, index)
 	}
 	return files, data
 }

