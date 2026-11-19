@@ -221,9 +221,10 @@ Copy the printed values. Treat `AWS_ACCESS_KEY_ID` and
 ## 2. Add the upload settings to Cursor
 
 In [cursor.com/dashboard/cloud-agents](https://cursor.com/dashboard/cloud-agents),
-open **Secrets** and add the values for your destination. User secrets reach
-every cloud agent you start, and team secrets reach your team's. Cursor gives
-secrets only to agents started after you add them.
+open **Secrets**, choose **New secret**, and add the values for your destination
+with the type **Runtime secret**. User secrets reach every cloud agent you start, and team
+secrets reach your team's; **Apply to** limits them to chosen repositories.
+Cursor gives secrets only to agents started after you add them.
 
 For Beacon Cloud, add:
 
@@ -240,6 +241,10 @@ BEACON_CLOUD_GCS_BUCKET=<bucket-from-setup>
 BEACON_CLOUD_GCS_PREFIX=<prefix-from-setup>
 BEACON_CLOUD_GCS_CREDENTIALS_B64=<base64-service-account-json>
 ```
+
+<Frame caption="Cursor masks secret values as you type and never shows them again after saving.">
+  <img src="/images/cursor-cloud-agents/cursor-secrets-gcs.png" width="560" alt="Cursor Add secrets dialog with BEACON_CLOUD_GCS_BUCKET, BEACON_CLOUD_GCS_PREFIX, and BEACON_CLOUD_GCS_CREDENTIALS_B64 entered as runtime secrets with masked values, applied to all repositories." />
+</Frame>
 
 For S3, add:
 
@@ -276,11 +281,45 @@ Replace `vX.Y.Z` with the latest Beacon release tag. The script:
 
 Then create the environment:
 
-1. In [cursor.com/dashboard/cloud-agents](https://cursor.com/dashboard/cloud-agents),
-   open **Environments** and create one for your repository.
-2. Paste the script into **Install script**.
-3. Wait for the first Build to finish on the environment's **Builds** tab. A
-   successful Build's log ends with `Beacon wrote <repository>/.cursor/hooks.json`.
+<Steps>
+  <Step title="Create the environment">
+    In [cursor.com/dashboard/cloud-agents](https://cursor.com/dashboard/cloud-agents),
+    choose **New environment** and pick your repository. Leave
+    **environment.json location** at **None**, then choose **Skip & save**.
+
+    <Frame>
+      <img src="/images/cursor-cloud-agents/cursor-new-environment.png" width="420" alt="Cursor New environment dialog with a repository selected, the environment named, and environment.json location set to None." />
+    </Frame>
+  </Step>
+  <Step title="Paste the install script">
+    On the environment's page, turn on **Install script**, paste the script, and
+    save. The script starts with `# Beacon for Cursor cloud agents` and names the
+    release in `BEACON_VERSION`.
+
+    <Frame>
+      <img src="/images/cursor-cloud-agents/cursor-install-script.png" alt="Cursor environment Configuration section showing Beacon's install script in the Install script field, with BEACON_VERSION set to the release." />
+    </Frame>
+  </Step>
+  <Step title="Build the environment">
+    Under **Builds**, choose **Trigger build**. Turn off **Draft build**, since
+    agents don't start from a draft until it is promoted, and wait for the Build
+    to succeed.
+
+    <Frame>
+      <img src="/images/cursor-cloud-agents/cursor-builds.png" alt="Cursor Builds list showing one manual Build marked Current with status Succeeded." />
+    </Frame>
+
+    Open the Build to check its log. Beacon's two lines come just before the
+    install step's exit code:
+
+    <Frame>
+      <img src="/images/cursor-cloud-agents/cursor-build-log.png" alt="End of a Cursor Build log showing Beacon installed /tmp/beacon/bin/beacon-hooks, Beacon wrote .cursor/hooks.json, and the install step exiting with code 0." />
+    </Frame>
+  </Step>
+</Steps>
+
+To move to a newer Beacon release later, print the script for that release,
+replace the Install script with it, and trigger a Build.
 
 <Warning>
   An agent started before the environment's first Build runs on Cursor's
@@ -288,11 +327,13 @@ Then create the environment:
   for it. Start agents once the first Build has finished.
 </Warning>
 
-If your repository commits a `.cursor/environment.json`, Cursor takes the
-install script from that file and the dashboard field is read-only. Save the
-script in the repository, for example as `.cursor/beacon-install.sh`, and run it
-from the file's `install` command. The hooks are still written at Build time and
-stay out of the repository.
+An environment whose **environment.json location** names a
+`.cursor/environment.json` in the repository takes its install script from that
+file, and its Install script field is read-only. Either create a new environment
+with the location set to **None**, since an existing environment stays tied to
+the file, or save the script in the repository, for example as
+`.cursor/beacon-install.sh`, and run it from the file's `install` command. Either
+way the hooks are written at Build time and stay out of the repository.
 
 `--safe-hooks` leaves out the shell and edit hooks (`beforeShellExecution`,
 `afterShellExecution`, `afterFileEdit`), so you can prove the upload works before
@@ -342,10 +383,6 @@ You should see a path like:
 ```text
 runtime/date=YYYY-MM-DD/<timestamp>-cursor_cloud-<run_id>.jsonl.gz
 ```
-
-<Frame caption="Beacon uploads one readable runtime.jsonl object per Cursor cloud agent session.">
-  <img src="/images/cursor-cloud-agents/gcs-object-browser.png" alt="Google Cloud Storage object browser showing Beacon cloud agent traces partitioned by provider, user ID, Cursor run ID, and runtime.jsonl." />
-</Frame>
 
 Inspect the log:
 
