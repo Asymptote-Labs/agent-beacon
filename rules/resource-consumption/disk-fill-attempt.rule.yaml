@@ -9,7 +9,10 @@ description: >
   truncate with a size that has a unit suffix, yes redirected to a file, or another
   command that is given one of those devices, as a word or on the standard input of a
   pipeline's first command, and writes a file (`cat /dev/zero > /var/log/big`,
-  `tr '\0' x < /dev/zero > /tmp/fill`). A reader that stops after a fixed amount (head,
+  `tr '\0' x < /dev/zero > /tmp/fill`). Standard input is the command's own: the `<` is
+  in the last piece of its span, so `$(head -c 32 </dev/urandom)` earlier on the line,
+  or a download beside it, is not that command reading the device. A reader that
+  stops after a fixed amount (head,
   or -N, -l, --read-bytes or --length, as in `head -c 32 /dev/urandom > key.bin` or `od
   -N4`) makes a key, not a fill. A write is the command's own file_writes, or a
   redirection after the word or device in the line's text (`(yes) > f`, `sh -c 'cat
@@ -37,14 +40,14 @@ match: >
         (c.argv_raw.exists(a, a.matches("^[\"']?of=.")) || c.file_writes.exists(w, w.op in ["write", "append"]) ||
          e.command.command.matches("\\bdd\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") && !e.command.command.matches("\\bdd\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b")) &&
         (c.args.matches("(?m)^if=/dev/(zero|urandom|random)$") ||
-         !c.argv_raw.exists(a, a.matches("^[\"']?if=")) && c.stage == 0 && e.command.command.matches("<\\s*/dev/(zero|urandom|random)\\b")) ||
+         !c.argv_raw.exists(a, a.matches("^[\"']?if=")) && c.stage == 0 && c.span.matches("<\\s*/dev/(zero|urandom|random)\\b[^;&|()\\n]*$")) ||
       c.name.matches("^(fallocate|truncate)$") && c.args.matches("(?mi)^(-[ls]|--length|--size)\\n\\+?[0-9]+[KMGTP]|^(-[ls]|--length=|--size=)\\+?[0-9]+[KMGTP]") ||
       c.name == "yes" &&
         (c.file_writes.exists(w, w.op in ["write", "append"]) ||
          e.command.command.matches("\\byes\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") && !e.command.command.matches("\\byes\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b")) ||
       c.name != "head" && !c.args.matches("(?m)^(-N|-l|--read-bytes|--length)") &&
         (c.argv.exists(a, a.matches("^/dev/(zero|urandom|random)$")) ||
-         c.stage == 0 && e.command.command.matches("<\\s*/dev/(zero|urandom|random)\\b")) &&
+         c.stage == 0 && c.span.matches("<\\s*/dev/(zero|urandom|random)\\b[^;&|()\\n]*$")) &&
         (c.file_writes.exists(w, w.op in ["write", "append"]) ||
          e.command.command.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") &&
          !e.command.command.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b"))
@@ -151,6 +154,30 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "tr -dc A-Za-z0-9 < /dev/urandom | head -c 32 > .secret" }
+        session: { id: s1 }
+  - name: a_secret_generated_beside_a_clone
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clone https://github.com/org/app && cd app && export SECRET_KEY=$(tr -dc 'a-z0-9' </dev/urandom | head -c 50) && npm ci" }
+        session: { id: s1 }
+  - name: a_nonce_read_beside_a_download
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -fsSL -o setup.sh https://example.com/setup.sh && head -c 16 </dev/urandom | xxd -p" }
+        session: { id: s1 }
+  - name: a_secret_written_to_a_dotenv
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "SECRET=$(head -c 32 </dev/urandom | base64); echo \"SECRET=$SECRET\" > .env" }
+        session: { id: s1 }
+  - name: a_key_generated_then_copied
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "head -c 16 </dev/urandom > key.bin && cp key.bin /srv/keys/" }
         session: { id: s1 }
   - name: dd_output_redirected
     verdict: match
