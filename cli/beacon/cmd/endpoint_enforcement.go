@@ -35,11 +35,12 @@ import (
 // activateEnforcement, which enable runs instead, and adds its other subcommands to
 // endpointEnforcementCmd.
 //
-// On a Mac connected to its organization in system mode, run as root, the edition's package is
-// installed into /opt/beacon. On a Mac connected to Beacon Cloud in user mode, run without root,
-// only the package's beacon is kept, in the user's endpoint directory (userEnterpriseBeaconPath);
-// this build then hands that binary the enforcement subcommands it lacks and, while enforcement is
-// on, its hook installs, whose enforce entries only the enterprise edition writes.
+// On a Mac or Linux machine connected to its organization in system mode, run as root, the
+// edition's package (the macOS .pkg, or the .deb or .rpm on Linux) is installed into /opt/beacon.
+// On one connected to Beacon Cloud in user mode, run without root, only the edition's beacon is
+// kept, in the user's endpoint directory (userEnterpriseBeaconPath); this build then hands that
+// binary the enforcement subcommands it lacks and, while enforcement is on, its hook installs,
+// whose enforce entries only the enterprise edition writes.
 
 // activateEnforcement turns enforcement on in a build that carries it. Nil in this repository.
 var activateEnforcement func(cmd *cobra.Command, dashboardURL string) error
@@ -73,10 +74,10 @@ var endpointEnforcementCmd = &cobra.Command{
 	Long: `Policy enforcement for AI coding agents, part of Beacon's enterprise edition.
 
 enable installs the enterprise edition, if the platform this machine is connected to offers it,
-and turns enforcement on:
-  - on a Mac connected to Beacon Cloud in user mode (beacon endpoint connect), run without sudo:
-    for this user, with the edition kept in ~/.beacon/endpoint/enterprise
-  - on a Mac connected to its organization in system mode (beacon endpoint connect --system),
+and turns enforcement on. It runs on macOS (Apple Silicon) and Linux (amd64, arm64):
+  - on a machine connected to Beacon Cloud in user mode (beacon endpoint connect), run without
+    sudo: for this user, with the edition kept in ~/.beacon/endpoint/enterprise
+  - on a machine connected to its organization in system mode (beacon endpoint connect --system),
     run with sudo: for the machine, with the edition installed into /opt/beacon`,
 	// Unknown subcommands land here: status, update and disable come with the enterprise edition,
 	// so a user-mode install passes them, flags and all, to the one it keeps.
@@ -95,7 +96,7 @@ var endpointEnforcementEnableCmd = &cobra.Command{
 
 // Seams, so tests reach none of the machine, the platform or the installer.
 var (
-	enforcementPlatformSupported  = func() bool { return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" }
+	enforcementPlatformSupported  = defaultEnforcementPlatformSupported
 	enforcementHasRoot            = lifecycle.HasSystemPrivileges
 	enforcementConnected          = func() bool { return asymptote.Connected(false) }
 	enforcementUserConnected      = func() bool { return asymptote.Connected(true) }
@@ -106,12 +107,34 @@ var (
 	installedBeaconVersionLine    = defaultInstalledBeaconVersionLine
 	userEnterpriseVersionLine     = defaultUserEnterpriseVersionLine
 	locateEnterpriseRelease       = edition.Locate
+	locateUserEnterpriseRelease   = defaultLocateUserEnterpriseRelease
 	installEnterpriseRelease      = edition.Install
 	installUserEnterpriseRelease  = edition.InstallUser
 	runInstalledEnforcementEnable = defaultRunInstalledEnforcementEnable
 	runUserEnforcementEnable      = defaultRunUserEnforcementEnable
 	runUserEnterpriseBeacon       = defaultRunUserEnterpriseBeacon
 )
+
+// errEnforcementPlatform is enable on a machine the enterprise edition is not built for.
+var errEnforcementPlatform = errors.New("policy enforcement is available for macOS on Apple Silicon and for Linux on amd64 and arm64 only")
+
+// defaultEnforcementPlatformSupported reports whether the enterprise edition is built for this
+// machine: Apple Silicon Macs, and Linux on amd64 and arm64.
+func defaultEnforcementPlatformSupported() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		return runtime.GOARCH == "arm64"
+	case "linux":
+		return runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64"
+	}
+	return false
+}
+
+// defaultLocateUserEnterpriseRelease asks for the package a user-mode install takes its beacon
+// from, which on Linux is the release's tarball rather than a .deb or .rpm.
+func defaultLocateUserEnterpriseRelease(ctx context.Context, client *http.Client, dashboardURL, deviceKey, version string) (edition.Release, error) {
+	return edition.LocateFor(ctx, client, dashboardURL, deviceKey, version, edition.UserTarget())
+}
 
 func init() {
 	endpointEnforcementEnableCmd.Flags().StringVar(&endpointEnforcementOpts.dashboardURL, "dashboard-url", "",
@@ -149,12 +172,12 @@ func runEndpointEnforcementEnable(cmd *cobra.Command, _ []string) error {
 	return runInstalledEnforcementEnable(cmd.Context(), endpointEnforcementOpts.dashboardURL)
 }
 
-// enforcementMode says where enable turns enforcement on: system mode, run as root on a Mac
-// connected with --system, or user mode, run without root on a Mac connected in user mode. Any
+// enforcementMode says where enable turns enforcement on: system mode, run as root on a machine
+// connected with --system, or user mode, run without root on a machine connected in user mode. Any
 // other combination is refused with what to run instead.
 func enforcementMode() (userMode bool, err error) {
 	if !enforcementPlatformSupported() {
-		return false, errors.New("policy enforcement is available for macOS on Apple Silicon only")
+		return false, errEnforcementPlatform
 	}
 	root := enforcementHasRoot()
 	switch {
@@ -171,9 +194,9 @@ func enforcementMode() (userMode bool, err error) {
 	}
 }
 
-// enableUserModeEnforcement is enable on a Mac connected in user mode. There is no root to run the
-// package's installer, whose postinstall would set the machine up in system mode anyway, so only
-// the package's beacon is kept, beside this one, and its enable turns enforcement on for this
+// enableUserModeEnforcement is enable on a machine connected in user mode. There is no root to run
+// the package's installer, whose postinstall would set the machine up in system mode anyway, so
+// only the edition's beacon is kept, beside this one, and its enable turns enforcement on for this
 // user. Running enable again replaces that binary when the platform has a newer release.
 func enableUserModeEnforcement(cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
@@ -187,7 +210,7 @@ func enableUserModeEnforcement(cmd *cobra.Command) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), enforcementInstallTimeout)
 	defer cancel()
 	locateCtx, cancelLocate := context.WithTimeout(ctx, enforcementLocateTimeout)
-	rel, err := locateEnterpriseRelease(locateCtx, nil, dashboard, deviceKey, "")
+	rel, err := locateUserEnterpriseRelease(locateCtx, nil, dashboard, deviceKey, "")
 	cancelLocate()
 	if err != nil {
 		var refused *edition.HTTPError
@@ -212,11 +235,11 @@ func enableUserModeEnforcement(cmd *cobra.Command) error {
 }
 
 // checkEnforcementPrerequisites refuses, before anything is downloaded, on a machine that cannot
-// run enforcement: anything but a Mac in system mode connected to its organization, with no
-// user-mode Beacon running for the person at the console.
+// run enforcement: anything but a Mac or Linux machine in system mode connected to its
+// organization, with no user-mode Beacon running for the person at the console.
 func checkEnforcementPrerequisites() error {
 	if !enforcementPlatformSupported() {
-		return errors.New("policy enforcement is available for macOS on Apple Silicon only")
+		return errEnforcementPlatform
 	}
 	if !enforcementHasRoot() {
 		return fmt.Errorf("turning on enforcement installs Beacon's enterprise edition, which needs root:\n  sudo %s endpoint enforcement enable", runningBeaconPath())
@@ -302,16 +325,33 @@ func explainEnterpriseRefusal(dashboard string, err error) error {
 	}
 }
 
-// probeConsoleUserMode reports what shows the console user running Beacon in user mode: its
-// collector or forwarder loaded in their launchd session, or Claude Code hooks that write to their
-// own runtime log. Enforcement runs in system mode only, and enabling it would repoint those hooks.
+// probeConsoleUserMode reports what shows a console user running Beacon in user mode: its
+// collector or forwarder running in their session (launchd on macOS, their systemd user manager on
+// Linux), or Claude Code hooks that write to their own runtime log. Enforcement runs in system mode
+// only, and enabling it would repoint those hooks. It asks about everyone the system install
+// configures (activeConsoleUsers): on Linux every logged-in user, not only the one at the console,
+// and names those it found in user mode.
 func probeConsoleUserMode() (string, []string, error) {
-	info, ok, err := activeConsoleUser()
-	if err != nil || !ok {
+	users, err := activeConsoleUsers()
+	if err != nil || len(users) == 0 {
 		return "", nil, err
 	}
+	var who, found []string
+	for _, info := range users {
+		if f := consoleUserModeFindings(info); len(f) > 0 {
+			who = append(who, info.Username)
+			found = append(found, f...)
+		}
+	}
+	return strings.Join(who, ", "), found, nil
+}
+
+// consoleUserModeFindings is what shows one user running Beacon in user mode.
+var consoleUserModeFindings = func(info consoleUserInfo) []string {
 	var found []string
-	if u, err := user.Lookup(info.Username); err == nil {
+	if runtime.GOOS == "linux" {
+		found = linuxUserModeUnits(info, systemdUserUnitState)
+	} else if u, err := user.Lookup(info.Username); err == nil {
 		for _, label := range []string{service.UserLabel, service.ForwarderLabel} {
 			if exec.Command("launchctl", "print", "gui/"+u.Uid+"/"+label).Run() == nil {
 				found = append(found, fmt.Sprintf("%s is loaded in %s's session", label, info.Username))
@@ -323,7 +363,67 @@ func probeConsoleUserMode() (string, []string, error) {
 	if data, err := os.ReadFile(settings); err == nil && strings.Contains(string(data), userLog) {
 		found = append(found, fmt.Sprintf("Claude Code hooks in %s write to %s", settings, userLog))
 	}
-	return info.Username, found, nil
+	return found
+}
+
+// linuxUserModeUnits reports the user-mode collector and forwarder units Beacon installed for a
+// user (their files under ~/.config/systemd/user) that are running, or whose state their systemd
+// user manager could not report and that are still enabled, so would start at their next login.
+// A unit that may be running must not read as stopped, but one stopped and disabled as
+// userModeActiveError says (`systemctl --user disable --now` leaves the file) must not keep enable
+// refused either.
+func linuxUserModeUnits(info consoleUserInfo, state func(username, unit string) string) []string {
+	var found []string
+	units := filepath.Join(info.HomeDir, ".config", "systemd", "user")
+	for _, unit := range userModeSystemdUnits[:2] {
+		file := filepath.Join(units, unit)
+		if _, err := os.Stat(file); err != nil {
+			continue
+		}
+		switch s := state(info.Username, unit); s {
+		case "active", "activating", "reloading", "refreshing":
+			found = append(found, fmt.Sprintf("%s is running in %s's session", unit, info.Username))
+		case "inactive", "failed", "deactivating", "maintenance":
+		default:
+			// Beacon's user units are WantedBy=default.target; `disable` removes this link.
+			if _, err := os.Lstat(filepath.Join(units, "default.target.wants", unit)); err == nil {
+				found = append(found, fmt.Sprintf("%s is enabled for %s (%s), and systemd could not say whether it is running", unit, info.Username, file))
+			}
+		}
+	}
+	return found
+}
+
+// systemdUserUnitState is what `systemctl is-active` says of unit in username's user manager, or ""
+// when it said nothing. It asks from outside first (`--machine=<user>@`, systemd 248 and later),
+// then, for an older systemd (RHEL 8, Ubuntu 20.04, Debian 11), as the user against their running
+// manager, which needs root and runuser, as enable has.
+func systemdUserUnitState(username, unit string) string {
+	first := func(out []byte) string {
+		state, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+		return state
+	}
+	out, _ := exec.Command("systemctl", "--user", "--machine="+username+"@", "is-active", unit).Output()
+	if state := first(out); state != "" {
+		return state
+	}
+	u, err := user.Lookup(username)
+	if err != nil {
+		return ""
+	}
+	runuser, err := exec.LookPath("runuser")
+	if err != nil {
+		return ""
+	}
+	out, _ = exec.Command(runuser, "-u", username, "--", "env", "XDG_RUNTIME_DIR=/run/user/"+u.Uid,
+		"systemctl", "--user", "is-active", unit).Output()
+	return first(out)
+}
+
+// userModeSystemdUnits are a user-mode endpoint's systemd user units: the collector and the
+// forwarder, which show it running, then its two scheduled jobs.
+var userModeSystemdUnits = []string{
+	service.SystemdUserUnit, service.ForwarderSystemdUnit, service.InventoryTimerUnit, service.SessionSyncTimerUnit,
 }
 
 func userModeActiveError(who string, found []string) error {
@@ -332,9 +432,17 @@ func userModeActiveError(who string, found []string) error {
 	for _, f := range found {
 		fmt.Fprintf(&b, "  - %s\n", f)
 	}
-	fmt.Fprintf(&b, "Stop user mode first. As %s:\n", who)
-	for _, label := range []string{service.UserLabel, service.ForwarderLabel, service.InventoryLabel, service.SessionSyncLabel} {
-		fmt.Fprintf(&b, "  launchctl bootout gui/$(id -u)/%s; launchctl disable gui/$(id -u)/%s\n", label, label)
+	if strings.Contains(who, ", ") {
+		fmt.Fprintf(&b, "Stop user mode first. As each of %s:\n", who)
+	} else {
+		fmt.Fprintf(&b, "Stop user mode first. As %s:\n", who)
+	}
+	if runtime.GOOS == "linux" {
+		fmt.Fprintf(&b, "  systemctl --user disable --now %s\n", strings.Join(userModeSystemdUnits, " "))
+	} else {
+		for _, label := range []string{service.UserLabel, service.ForwarderLabel, service.InventoryLabel, service.SessionSyncLabel} {
+			fmt.Fprintf(&b, "  launchctl bootout gui/$(id -u)/%s; launchctl disable gui/$(id -u)/%s\n", label, label)
+		}
 	}
 	fmt.Fprintf(&b, "then point the hooks at system mode and run this again:\n")
 	fmt.Fprintf(&b, "  sudo %s endpoint user-config repair-installed --system --harness claude,codex", selfupdate.SystemBeaconPath())
@@ -434,8 +542,8 @@ func enforcementOn() bool {
 	return err == nil
 }
 
-// enforcementStatusLine is endpoint status's enforcement line: whether it is on, on the Macs that
-// can have it (and anywhere it is somehow on).
+// enforcementStatusLine is endpoint status's enforcement line: whether it is on, on the machines
+// that can have it (and anywhere it is somehow on).
 func enforcementStatusLine() string {
 	switch {
 	case enforcementOn():
@@ -511,7 +619,7 @@ func refreshUserEnterpriseBeacon(ctx context.Context, warnings io.Writer, bin st
 			return err
 		}
 		locateCtx, cancel := context.WithTimeout(ctx, enforcementLocateTimeout)
-		rel, err := locateEnterpriseRelease(locateCtx, nil, dashboard, deviceKey, want)
+		rel, err := locateUserEnterpriseRelease(locateCtx, nil, dashboard, deviceKey, want)
 		cancel()
 		if err != nil {
 			return err
