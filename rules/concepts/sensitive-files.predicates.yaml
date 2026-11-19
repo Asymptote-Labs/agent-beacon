@@ -395,16 +395,25 @@ definitions:
       writes the condition over it:
       write_outside_scratch(e, f, f.op == "write" && dependency_manifest_file(f.path)).
       A write lands in a temporary directory when its path is under one (scratch_path), or
-      when the path is relative and does not start with ../, and the directory the command
-      runs in (c.cwd, which the parser works out in line order and per subshell, with a
-      trailing slash) is one: `cd /tmp/probe && echo x > package.json`, also `cd /tmp && ..`
-      into the directory itself. A write before the cd, or after a cd inside a subshell that
-      has ended, is not in it. Agents stage copies and throwaway projects there all the time,
-      and moving one back into the project is a write of its own.
+      when the path is relative with no .. in it, every directory the line changes into (a
+      cd or pushd's words, nested commands included) is a temporary one, and the directory
+      the command runs in (c.cwd, which the parser works out in line order and per
+      subshell, with a trailing slash) is one: `cd /tmp/probe && echo x > package.json`,
+      also `cd /tmp && ..` into the directory itself. A write before the cd, or after a cd
+      inside a subshell that has ended, is not in it. The line-wide test keeps every cd the
+      parser's order cannot vouch for from excusing a write: one that may not run (`[ -d
+      /tmp/x ] && cd /tmp/x`), one eval or an inline script runs, `pushd -n`, a relative
+      operand CDPATH may send elsewhere, or a cd back into the project. Agents stage copies
+      and throwaway projects there all the time, and moving one back into the project is a
+      write of its own.
     body: >
       e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-        cond && !scratch_path(f.path) &&
-        !(c.cwd != "" && !f.path.matches("^([/~$]|\\.\\./)") && scratch_path(c.cwd))))
+        cond && !scratch_path(f.path))) &&
+      (!e.command.parsed_commands.all(d, !(d.name in ["cd", "pushd"]) ||
+         scratch_path(d.args) || d.args.matches("^(/private)?/(tmp|var/tmp|var/folders)$")) ||
+       e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+         cond && !scratch_path(f.path) &&
+         !(c.cwd != "" && !f.path.matches("^[/~$]|(^|/)\\.\\.(/|$)") && scratch_path(c.cwd)))))
     tests:
       - name: a_relative_write_after_a_cd_into_tmp
         match: write_outside_scratch(e, f, f.op == "write")
@@ -466,3 +475,39 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "cd /tmp/probe && bash -c \"echo '{}' > package.json\"" }
+      - name: a_cd_that_may_not_run_after_a_cd_into_the_project
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /home/u/proj; [ -d /tmp/x ] && cd /tmp/x; echo '{}' > package.json" }
+      - name: a_cd_that_eval_runs
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp/x; eval 'cd ~/project'; echo '{}' > package.json" }
+      - name: a_pushd_that_only_edits_the_stack
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "pushd -n /tmp/x && echo '{}' > package.json" }
+      - name: a_relative_cd_cdpath_may_send_elsewhere
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp && CDPATH=$HOME cd project && echo '{}' > package.json" }
+      - name: a_relative_path_that_climbs_out_of_tmp
+        match: write_outside_scratch(e, f, f.op == "write")
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp/x && echo '{}' > a/../../../home/u/proj/package.json" }
+      - name: a_cd_in_one_os_system_call_and_a_write_in_the_next
+        match: write_outside_scratch(e, f, f.op == "append")
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd ~/proj && python3 -c \"import os; os.system('cd /tmp/x'); os.system('echo evil==1.0 >> requirements.txt')\"" }
