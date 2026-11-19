@@ -15,7 +15,11 @@ description: >
   login option (`-`, `-l`, `--login`), sudo -i or -s with no command after it, a shell
   run through sudo or doas with no script, or pkexec, also by absolute path or inside
   `bash -c`, so the same words in a commit message or a here-document do not fire, and
-  `su someuser`, `sudo -i cmd` and `sudo bash -c '...'` do not match. Where the parser
+  `su someuser`, `sudo -i cmd` and `sudo bash -c '...'` do not match. A sudo -i or -s
+  counts as a shell only from a terminal, as a shell under sudo does: first in its
+  pipeline, with nothing on its standard input, and with every word known, since a word
+  that holds a variable (`sudo "$NGINX" -s reload`) is a program whose own options
+  follow it. Where the parser
   cannot see into a command, the text that reaches that command is matched instead
   (unread_text), where each command is anchored to the command position.
 severity: high
@@ -39,7 +43,8 @@ match: >
       c.name == "su" && c.args.matches("(?m)^root$|\\A(-|-l|--login)?\\z") ||
       c.name == "pkexec" ||
       size(c.argv) > 1 && c.argv[0].matches("(^|/)(sudo|doas)$") && !c.runs_read && (
-        c.name == "" && c.argv.exists(a, a.matches("^(-[A-Za-z]*[is][A-Za-z]*|--login|--shell)$")) ||
+        c.name == "" && c.stage == 0 && size(c.file_reads) == 0 && !c.argv.exists(a, a == "") &&
+          c.argv.exists(a, a.matches("^(-[A-Za-z]*[is][A-Za-z]*|--login|--shell)$")) ||
         c.name.matches("^(ba|z|da|k)?sh$") && c.args == "" && c.stage == 0 && size(c.file_reads) == 0)
     ) ||
     unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
@@ -58,6 +63,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "su" }
+        session: { id: s1 }
+  - name: a_program_named_by_a_variable_under_sudo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo \"$NGINX\" -s reload" }
+        session: { id: s1 }
+  - name: a_container_shell_named_by_a_variable_under_sudo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo \"$DOCKER\" exec -it db psql" }
+        session: { id: s1 }
+  - name: a_script_redirected_into_sudo_i
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -i < setup.sh" }
         session: { id: s1 }
   - name: sudo_su
     verdict: match

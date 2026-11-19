@@ -33,6 +33,9 @@ taxonomy:
   beacon_category: resource-consumption
   owasp_llm: LLM10
 
+# The span is asked only when the line has the device on a standard input at all: a span
+# holds the pieces of every earlier writer, so asking it of each command of a line of
+# writers costs the square of the commands.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
@@ -40,14 +43,16 @@ match: >
         (c.argv_raw.exists(a, a.matches("^[\"']?of=.")) || c.file_writes.exists(w, w.op in ["write", "append"]) ||
          e.command.command.matches("\\bdd\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") && !e.command.command.matches("\\bdd\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b")) &&
         (c.args.matches("(?m)^if=/dev/(zero|urandom|random)$") ||
-         !c.argv_raw.exists(a, a.matches("^[\"']?if=")) && c.stage == 0 && c.span.matches("<\\s*/dev/(zero|urandom|random)\\b[^;&|()\\n]*$")) ||
+         !c.argv_raw.exists(a, a.matches("^[\"']?if=")) && c.stage == 0 && e.command.command.matches("<\\s*/dev/(zero|urandom|random)\\b") &&
+         c.span.matches("<\\s*/dev/(zero|urandom|random)\\b(?:[^;&|()\\n]|&>|[<>]&)*$")) ||
       c.name.matches("^(fallocate|truncate)$") && c.args.matches("(?mi)^(-[ls]|--length|--size)\\n\\+?[0-9]+[KMGTP]|^(-[ls]|--length=|--size=)\\+?[0-9]+[KMGTP]") ||
       c.name == "yes" &&
         (c.file_writes.exists(w, w.op in ["write", "append"]) ||
          e.command.command.matches("\\byes\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") && !e.command.command.matches("\\byes\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b")) ||
       c.name != "head" && !c.args.matches("(?m)^(-N|-l|--read-bytes|--length)") &&
         (c.argv.exists(a, a.matches("^/dev/(zero|urandom|random)$")) ||
-         c.stage == 0 && c.span.matches("<\\s*/dev/(zero|urandom|random)\\b[^;&|()\\n]*$")) &&
+         c.stage == 0 && e.command.command.matches("<\\s*/dev/(zero|urandom|random)\\b") &&
+         c.span.matches("<\\s*/dev/(zero|urandom|random)\\b(?:[^;&|()\\n]|&>|[<>]&)*$")) &&
         (c.file_writes.exists(w, w.op in ["write", "append"]) ||
          e.command.command.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") &&
          !e.command.command.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b"))
@@ -178,6 +183,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "head -c 16 </dev/urandom > key.bin && cp key.bin /srv/keys/" }
+        session: { id: s1 }
+  - name: device_on_standard_input_with_errors_joined
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tr '\\0' x < /dev/zero > /tmp/fill 2>&1" }
+        session: { id: s1 }
+  - name: device_on_standard_input_into_both_streams
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat < /dev/zero &> /tmp/fill" }
         session: { id: s1 }
   - name: dd_output_redirected
     verdict: match
