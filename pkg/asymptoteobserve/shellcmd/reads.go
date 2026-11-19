@@ -411,13 +411,18 @@ const (
 	curlForm                 // name=content, name=@file or name=<file
 	curlRaw                  // the body as written
 	curlUpload               // a file
+	curlCookie               // a cookie jar, or a literal cookie the word carries
+	curlConfig               // a config file
+	curlNetrc                // a netrc file
 )
 
 // curlInputs returns the files curl sends and the words whose value it sends as the request body.
 // The files are the @file of -d, --data, --data-binary, --data-ascii, --data-urlencode and --json,
-// the @file or <file of a -F field, and the file of -T. The words are the values of those options
-// where they are content rather than a file, and of --data-raw and --form-string. A header, a
-// URL, a credential and an output file are neither.
+// the @file or <file of a -F field, and the file of -T. What curl reads to make the request is a
+// read as well: the cookie jar of -b/--cookie (unless the value carries `=`, which makes it the
+// literal cookie curl sends), the config of -K/--config, and the netrc of --netrc-file. The words
+// are the values of those options where they are content rather than a file, and of --data-raw and
+// --form-string. A header, a URL, and a credential option such as -u or -H are neither.
 func curlInputs(args []Word, base int) (files []string, data dataWords) {
 	data.listed = true
 	for i := 0; i < len(args); i++ {
@@ -441,6 +446,12 @@ func curlInputs(args []Word, base int) (files []string, data dataWords) {
 				sends = curlForm
 			case "--upload-file":
 				sends = curlUpload
+			case "--cookie":
+				sends = curlCookie
+			case "--config":
+				sends = curlConfig
+			case "--netrc-file":
+				sends = curlNetrc
 			default:
 				continue
 			}
@@ -459,6 +470,10 @@ func curlInputs(args []Word, base int) (files []string, data dataWords) {
 				sends = curlForm
 			case 'T':
 				sends = curlUpload
+			case 'b':
+				sends = curlCookie
+			case 'K':
+				sends = curlConfig
 			}
 			value, attached = t[j+1:], j+1 < len(t)
 		}
@@ -488,6 +503,15 @@ func curlInputs(args []Word, base int) (files []string, data dataWords) {
 			if file = value; file == "." {
 				continue
 			}
+		case curlCookie:
+			// -b/--cookie is a cookie jar unless the value carries `=`, which makes it the
+			// literal cookie curl sends: `name=value`, `=value`, or pairs separated by `; `.
+			if !strings.Contains(value, "=") {
+				file = value
+			}
+		case curlConfig, curlNetrc:
+			// The config file and --netrc-file are files curl reads before it sends anything.
+			file = value
 		}
 		// Content, or a file that is the output of a process substitution, is the word's own value.
 		if file == "" || strings.HasPrefix(file, "<(") {
