@@ -15,6 +15,8 @@ const (
 	ForwarderLabel = "com.beacon.endpoint.asymptote-forwarder"
 	// ForwarderSystemdUnit is the systemd equivalent, under the user or system scope.
 	ForwarderSystemdUnit = "beacon-asymptote-forwarder.service"
+	// ForwarderWindowsService is the Service Control Manager name, for a system install only.
+	ForwarderWindowsService = "BeaconAsymptoteForwarder"
 )
 
 // forwarderStartTimeout bounds the wait for a Windows forwarder to reach RUNNING after a start.
@@ -52,16 +54,29 @@ type ForwarderSpec struct {
 	// StopTimeout bounds a Windows stop; zero means serviceStopTimeout. It has to outlast Vector's
 	// own drain limit, or a stop gives up while Vector is still flushing.
 	StopTimeout time.Duration
+	// SupervisedName, when set, offers the forwarder to a user-mode endpoint on Windows as a
+	// supervised Vector process (see forwarder_supervised.go), the way the user-mode collector runs
+	// there, tracked by <BaseDir>/<SupervisedName>.pid with its output in <SupervisedName>.out.
+	// Empty refuses user mode on Windows.
+	SupervisedName string
 }
 
-// AsymptoteForwarderSpec is the Asymptote managed-ingest forwarder. It has no Windows service:
-// connect stays refused there.
+// AsymptoteForwarderSpec is the Asymptote managed-ingest forwarder. It has no Args or Env, so its
+// launchd plist and systemd unit stay byte-identical to what connect wrote before forwarders had a
+// spec (UnitCurrent compares them, and a change would restart every connected forwarder on its next
+// upgrade). The Windows fields reach only Windows: the SCM registration and its stop budget for a
+// system endpoint, and a supervised process for a user endpoint. Vector drains for up to a minute
+// on its own; past the budget the stop ends its process, which loses nothing the disk buffer and
+// checkpoints do not keep.
 func AsymptoteForwarderSpec() ForwarderSpec {
 	return ForwarderSpec{
-		Label:         ForwarderLabel,
-		SystemdUnit:   ForwarderSystemdUnit,
-		Description:   "Beacon endpoint forwarder to Asymptote managed ingest",
-		Documentation: "https://docs.asymptotelabs.ai/cli/endpoint-connect",
+		Label:          ForwarderLabel,
+		SystemdUnit:    ForwarderSystemdUnit,
+		WindowsService: ForwarderWindowsService,
+		Description:    "Beacon endpoint forwarder to Asymptote managed ingest",
+		Documentation:  "https://docs.asymptotelabs.ai/cli/endpoint-connect",
+		StopTimeout:    30 * time.Second,
+		SupervisedName: "asymptote-forwarder",
 	}
 }
 
@@ -99,11 +114,13 @@ func (m ForwarderManager) resolvedKind() Kind {
 	return DetectKind()
 }
 
-// Supported reports whether a supervised forwarder can be installed here.
+// Supported reports whether a forwarder can be installed here.
 //
-// Supervised mode is deliberately not offered: a forwarder nothing restarts would silently stop
-// shipping after the first crash or reboot, which is worse than telling the operator to run the
-// pack's vector.toml under their own supervisor.
+// Supervised mode (no service manager: containers, Linux without systemd) is deliberately not
+// offered: a forwarder nothing restarts would silently stop shipping after the first crash or
+// reboot, which is worse than telling the operator to run the pack's vector.toml under their own
+// supervisor. The one exception is a user-mode endpoint on Windows, which has no per-user service
+// manager at all and already runs its collector supervised, with the same caveats in status.
 func (m ForwarderManager) Supported() bool {
 	switch m.resolvedKind() {
 	case KindLaunchd:
@@ -111,7 +128,10 @@ func (m ForwarderManager) Supported() bool {
 	case KindSystemd:
 		return systemdIsInit()
 	case KindWindowsService:
-		// System mode only: Windows has no per-user service manager.
+		if m.windowsUserSupervised() {
+			return runtime.GOOS == "windows"
+		}
+		// System mode: Windows has no per-user service manager.
 		return runtime.GOOS == "windows" && !m.UserMode && m.spec().WindowsService != ""
 	default:
 		return false
@@ -127,8 +147,12 @@ func (m ForwarderManager) UnsupportedReason() string {
 		return "systemd is not PID 1 on this host, so the forwarder cannot be installed as a service"
 	case KindWindowsService:
 		switch {
+		case m.windowsUserSupervised():
+			if runtime.GOOS != "windows" {
+				return "a supervised user-mode forwarder runs only on Windows"
+			}
 		case m.spec().WindowsService == "":
-			// The Asymptote forwarder; keeps the message it has always had.
+			// A forwarder not offered on Windows.
 		case runtime.GOOS != "windows":
 			return "Windows service management is available only on Windows"
 		case m.UserMode:
@@ -146,6 +170,9 @@ func (m ForwarderManager) Label() string {
 	case KindSystemd:
 		return m.spec().SystemdUnit
 	case KindWindowsService:
+		if m.windowsUserSupervised() {
+			return m.spec().SupervisedName
+		}
 		if name := m.spec().WindowsService; name != "" {
 			return name
 		}
@@ -156,6 +183,10 @@ func (m ForwarderManager) Label() string {
 // UnitPath returns where the forwarder's service definition lives.
 func (m ForwarderManager) UnitPath() (string, error) {
 	spec := m.spec()
+	if m.windowsUserSupervised() {
+		// Supervised mode has no unit; the pidfile is its record, as the collector's is.
+		return m.supervisedPidPath()
+	}
 	switch m.resolvedKind() {
 	case KindSystemd:
 		if m.UserMode {
@@ -184,9 +215,47 @@ func (m ForwarderManager) UnitPath() (string, error) {
 	}
 }
 
+// Installed reports whether the forwarder's service definition exists: the unit file, or on Windows
+// the SCM registration. A registration the SCM cannot be asked about counts as installed, so a
+// caller that removes state on this answer never leaves a service behind.
+func (m ForwarderManager) Installed() bool {
+	if m.resolvedKind() == KindWindowsService && !m.windowsUserSupervised() {
+		return m.Supported() && serviceRegistered(m.spec().WindowsService)
+	}
+	path, err := m.UnitPath()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(path)
+	return err == nil
+}
+
+// RestoresRegistration reports whether a reconcile should register a missing service again. Only
+// the Windows service: the MSI's uninstall step deletes it on every upgrade so vector.exe can be
+// replaced, and only the install that follows puts it back. A launchd or systemd unit is removed
+// only by disconnect or uninstall, so a missing one stays missing.
+func (m ForwarderManager) RestoresRegistration() bool {
+	return m.resolvedKind() == KindWindowsService && !m.UserMode && m.Supported()
+}
+
+// StartsWhenStopped reports whether a reconcile that restarts the forwarder should also start one
+// that is not running. Only the supervised user-mode forwarder on Windows: nothing stops it on
+// purpose but disconnect, which removes its record too, so a recorded one that is not running was
+// ended by a sign-out or a crash, and install and repair are how it comes back, as the collector
+// does. A service an operator stopped stays stopped.
+func (m ForwarderManager) StartsWhenStopped() bool {
+	return m.windowsUserSupervised() && m.Supported()
+}
+
 // RemoveUnits deletes the service definition. Missing files are not an error. On Windows the
 // definition is the SCM registration, so this stops and deletes the service.
 func (m ForwarderManager) RemoveUnits() {
+	if m.windowsUserSupervised() {
+		if m.Supported() {
+			m.removeSupervised()
+		}
+		return
+	}
 	if m.resolvedKind() == KindWindowsService {
 		if m.Supported() {
 			_ = removeService(m.spec().WindowsService, m.stopTimeout(), true)
@@ -206,6 +275,9 @@ func (m ForwarderManager) WriteUnit(vectorBin, configPath string) (string, error
 	path, err := m.UnitPath()
 	if err != nil {
 		return "", err
+	}
+	if m.windowsUserSupervised() {
+		return m.writeSupervisedUnit(vectorBin, configPath)
 	}
 	if m.resolvedKind() == KindWindowsService {
 		return path, createOrUpdateService(m.scmService(vectorBin, configPath))
@@ -237,6 +309,9 @@ func (m ForwarderManager) WriteUnit(vectorBin, configPath string) (string, error
 // rewrites one that is not, so a unit an earlier release wrote, such as one logging to /tmp, is
 // brought up to date by an upgrade rather than only by a fresh connect.
 func (m ForwarderManager) UnitCurrent(vectorBin, configPath string) (bool, error) {
+	if m.windowsUserSupervised() {
+		return m.supervisedUnitCurrent(vectorBin, configPath)
+	}
 	if m.resolvedKind() == KindWindowsService {
 		return serviceCurrent(m.scmService(vectorBin, configPath))
 	}
@@ -274,6 +349,9 @@ func (m ForwarderManager) Load() error {
 		return fmt.Errorf("%s", m.UnsupportedReason())
 	}
 	spec := m.spec()
+	if m.windowsUserSupervised() {
+		return m.loadSupervised()
+	}
 	switch m.resolvedKind() {
 	case KindSystemd:
 		unit := spec.SystemdUnit
@@ -319,6 +397,13 @@ func (m ForwarderManager) Load() error {
 // Unload stops and deregisters the forwarder. A missing unit is not an error.
 func (m ForwarderManager) Unload() error {
 	spec := m.spec()
+	if m.windowsUserSupervised() {
+		// Stops Vector and keeps its record, so it can be started again; RemoveUnits drops the record.
+		if !m.Supported() {
+			return nil
+		}
+		return m.unloadSupervised()
+	}
 	switch m.resolvedKind() {
 	case KindSystemd:
 		if !systemdIsInit() {
@@ -352,6 +437,9 @@ func (m ForwarderManager) Unload() error {
 // Status reports whether the forwarder is loaded and running.
 func (m ForwarderManager) Status() Status {
 	kind := m.resolvedKind()
+	if m.windowsUserSupervised() {
+		return m.supervisedStatus()
+	}
 	if !m.Supported() {
 		return Status{Label: m.Label(), Kind: string(kind), Message: m.UnsupportedReason()}
 	}

@@ -120,6 +120,8 @@ For Fedora, RHEL and other `.rpm` hosts, install the versioned `.rpm` from the r
 
    A silent install adds nobody to `beacon-log`. See [Windows](/platforms/windows) for logs and time limits.
 
+With Configuration Manager (SCCM), follow [Beacon with Microsoft Configuration Manager](/guides/configmgr-windows-mdm), which writes these values and installs the MSI in one application.
+
 ## Versions and updates
 
 Beacon never updates itself. `beacon endpoint update --apply` runs only when someone runs it, and the update notice appears only in an interactive terminal. Your fleet tooling decides the version: `version:` in the Salt state (or a pin in your apt mirror), the package you upload to the MDM, the MSI you assign in Intune. To stay one release behind, approve each release after the next one is out. Upgrades keep the log access mode and the `beacon-log` members, and read the settings again.

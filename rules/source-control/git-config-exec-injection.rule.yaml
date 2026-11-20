@@ -1,5 +1,6 @@
 id: git-config-exec-injection
-version: 3
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 6
 title: Git config sets a code-execution directive
 description: >
   A command sets a git directive that turns an ordinary git operation into code
@@ -7,7 +8,11 @@ description: >
   the true/false boolean), a content filter (clean/smudge/process), or a shell-escape
   alias (alias.<name>=!...). Matches the `git config ...` and inline `git -c key=`
   set forms and excludes read subcommands (--get/--unset/--list/...), so a directive
-  name appearing in a commit message, a path, or a read does not fire.
+  name appearing in a commit message, a path, or a read does not fire. The command is
+  found by what the line runs: a git command, also under sudo, by path, inside
+  `bash -c` or after git's own options, whose words are a directive and the value it
+  is set to. A directive with no value after it is a read. The text pattern is asked
+  only of the text that reaches a command the parser cannot see into (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -16,14 +21,31 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
+# The subcommand is the first word after git's own options (git_subcommand). `git config
+# KEY VALUE` is the key as a whole word with a word after it; the key alone prints it. A
+# value that holds a variable is an empty word in args, so the inline `-c KEY=VALUE` word
+# and the `!` that opens a shell alias are read as written (argv_raw) where args cannot tell.
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\bgit\\b") &&
-  e.command.command.matches("(?i)(\\bgit\\s+config\\b|\\bgit\\s+(-[a-z]+\\s+)*-c\\s)") &&
-  !e.command.command.matches("(?i)--(get|unset|list|get-regexp|get-all)\\b") && (
-    e.command.command.matches("(?i)(core\\.sshcommand|diff\\.external|filter\\.[a-z0-9_-]+\\.(clean|smudge|process))") ||
-    (e.command.command.matches("(?i)\\bcore\\.fsmonitor\\b") && !e.command.command.matches("(?i)\\bcore\\.fsmonitor[=\\s]+[\"']?(true|false)\\b")) ||
-    e.command.command.matches("(?i)\\balias\\.[a-z0-9_-]+[=\\s]+[\"']?\\s*!")
+  e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c, c.name == "git" && (
+      git_subcommand(c, "config\\n") &&
+        !c.args.matches("(?m)^(--get(-all|-regexp|-urlmatch)?|--unset(-all)?|--list|-l)$|^config\\n(-[^\\n]*\\n)*(get|unset|list)$") && (
+          c.args.matches("(?mi)^(core\\.sshcommand|diff\\.external|filter\\.[a-z0-9_-]+\\.(clean|smudge|process))\\n") ||
+          c.args.matches("(?mi)^core\\.fsmonitor\\n") && !c.args.matches("(?mi)^core\\.fsmonitor\\n(true|false)$") ||
+          c.args.matches("(?mi)^alias\\.[a-z0-9_-]+\\n\\s*!") ||
+          c.args.matches("(?mi)^alias\\.[a-z0-9_-]+\\n$") && c.argv_raw.exists(a, a.matches("^[\"']\\s*!"))) ||
+      c.args.matches("(?m)^-c$") && c.argv_raw.exists(a,
+        a.matches("(?i)^[\"']?(core\\.sshcommand|diff\\.external|filter\\.[a-z0-9_-]+\\.(clean|smudge|process))=") ||
+        a.matches("(?i)^[\"']?core\\.fsmonitor=") && !a.matches("(?i)^[\"']?core\\.fsmonitor=[\"']?(true|false)[\"']?$") ||
+        a.matches("(?i)^[\"']?alias\\.[a-z0-9_-]+=[\"']?\\s*!"))
+    )) ||
+    unread_text(e, t, t.matches("(?i)\\bgit\\b") &&
+      t.matches("(?i)(\\bgit\\s+config\\b|\\bgit\\s+(-[a-z]+\\s+)*-c\\s)") &&
+      !t.matches("(?i)--(get|unset|list|get-regexp|get-all)\\b") && (
+        t.matches("(?i)(core\\.sshcommand|diff\\.external|filter\\.[a-z0-9_-]+\\.(clean|smudge|process))") ||
+        (t.matches("(?i)\\bcore\\.fsmonitor\\b") && !t.matches("(?i)\\bcore\\.fsmonitor[=\\s]+[\"']?(true|false)\\b")) ||
+        t.matches("(?i)\\balias\\.[a-z0-9_-]+[=\\s]+[\"']?\\s*!")
+      ))
   )
 
 emit:
@@ -95,4 +117,84 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git log --grep='diff.external usage'" }
+        session: { id: s1 }
+  - name: ssh_command_set_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo git config --system core.sshCommand /opt/tools/ssh-wrap" }
+        session: { id: s1 }
+  - name: filter_set_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'cd /srv/repo && git config filter.lfsx.process ./run-filter'" }
+        session: { id: s1 }
+  - name: shell_alias_set_by_absolute_path_after_git_options
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/git -C /srv/repo config --local alias.deploy '!sh deploy.sh'" }
+        session: { id: s1 }
+  - name: ssh_command_set_to_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config --global core.sshCommand \"$SSH_WRAPPER\"" }
+        session: { id: s1 }
+  - name: inline_ssh_command_from_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git -C repo -c core.sshCommand=\"$SSH_WRAPPER\" fetch origin" }
+        session: { id: s1 }
+  - name: external_diff_set_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'cd /srv/repo && git config diff.external /opt/tools/d.sh'" }
+        session: { id: s1 }
+  - name: directive_set_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git add -A && git commit -m 'docs: the installer runs git config core.sshCommand for you'" }
+        session: { id: s1 }
+  - name: directive_set_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\ngit config core.sshCommand /opt/tools/ssh-wrap\ngit config alias.deploy '!sh deploy.sh'\nEOF" }
+        session: { id: s1 }
+  - name: directive_read_by_its_bare_key
+    # `git config KEY` prints the value. The text, which looks for the key anywhere on the
+    # line, took this for a set.
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config core.sshCommand" }
+        session: { id: s1 }
+  - name: fsmonitor_boolean_inline
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git -c core.fsmonitor=false status --short" }
+        session: { id: s1 }
+  - name: alias_that_is_a_git_subcommand
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config --global alias.unstage 'reset HEAD --' && git config user.name dev" }
+        session: { id: s1 }
+  - name: directive_set_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'git config core.sshCommand /opt/tools/ssh-wrap'" }
+        session: { id: s1 }
+  - name: directive_set_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: the installer runs git config core.sshCommand for you' && ./run-tests.sh" }
         session: { id: s1 }

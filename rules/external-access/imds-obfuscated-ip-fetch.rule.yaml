@@ -1,5 +1,6 @@
 id: imds-obfuscated-ip-fetch
-version: 1
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 3
 title: Cloud metadata IP fetched via obfuscated address encoding
 description: >
   A command fetches a URL whose host is an alternate numeric encoding of the
@@ -9,7 +10,13 @@ description: >
   IMDS endpoint, so they are a deliberate evasion of plain-dotted-quad metadata
   detection and a strong SSRF / cloud-credential-theft signal. Plain
   169.254.169.254 is handled by cloud-metadata-endpoint-access; this rule covers
-  only the obfuscated encodings that rule misses.
+  only the obfuscated encodings that rule misses. Any program may be the client,
+  so the rule does not name one: the URL (see cloud_metadata_obfuscated_target)
+  must be a word of a command the line runs or the value of a variable it sets,
+  which holds under sudo, inside `bash -c` and by any path, and does not hold for
+  the URL inside a commit message or a here-document. The text pattern is asked of
+  the text that reaches a command the parser cannot see into (unread_text), which
+  includes every interpreter.
 severity: high
 status: stable
 posture: detect
@@ -18,9 +25,23 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
+# A URL given to a client is content, and the client may be anything (curl, git clone, a
+# program the parser has never heard of), so no list of clients is asked for. What tells a
+# URL that is fetched from one that is written about is where it stands: a word of its own
+# (no blank in it: `http://2852039166/x`, `--url=http://2852039166/x`), or the value of a
+# variable. A message that holds the URL is a word with blanks in it; a here-document body
+# is not a word. `echo` or `grep` given the bare URL still fire, as in version 1.
+# Where the words of a network client do not show what it fetches (see
+# client_target_unseen: a loop variable, a config on standard input) and the URL is
+# elsewhere on the line, the text decides.
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)https?://(2852039166|0xa9fea9fe|0xa9\\.0xfe\\.0xa9\\.0xfe|0251\\.0376\\.0251\\.0376)(\\b|[:/])")
+  e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c,
+      c.argv_raw.exists(a, cloud_metadata_obfuscated_target(a) && !a.matches("\\s")) ||
+      c.env.exists(k, cloud_metadata_obfuscated_target(c.env[k]) && !c.env[k].matches("\\s")) ||
+      egress_sender(c) && client_target_unseen(c) && cloud_metadata_obfuscated_target(e.command.command)) ||
+    unread_text(e, t, cloud_metadata_obfuscated_target(t))
+  )
 
 emit:
   reason: "HTTP client fetch of an obfuscated numeric encoding of the cloud metadata IP (169.254.169.254)"
@@ -55,5 +76,113 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "curl -s http://api.example.com:2852039166/" }
+        session: { id: s1 }
+  - name: octal_octets
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://0251.0376.0251.0376/latest/meta-data/" }
+        session: { id: s1 }
+  - name: curl_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo curl -s http://2852039166/latest/meta-data/iam/info" }
+        session: { id: s1 }
+  - name: wget_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'wget -qO- http://0xa9fea9fe/latest/meta-data/'" }
+        session: { id: s1 }
+  - name: curl_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/curl -s http://0xa9.0xfe.0xa9.0xfe:80/latest/dynamic/instance-identity/document" }
+        session: { id: s1 }
+  - name: url_held_by_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "U=http://2852039166; curl -s \"$U/latest/dynamic/instance-identity/document\"" }
+        session: { id: s1 }
+  - name: url_in_a_loop_list
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "for u in http://0xa9fea9fe/latest/user-data http://2852039166/latest/user-data; do curl -s $u; done" }
+        session: { id: s1 }
+  - name: url_held_by_a_variable_given_to_a_client_that_is_not_an_http_tool
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "REPO=http://2852039166/repo.git; git clone \"$REPO\" /tmp/repo" }
+        session: { id: s1 }
+  - name: url_held_by_an_exported_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "export REPO=http://2852039166/repo.git; git clone \"$REPO\" /tmp/repo" }
+        session: { id: s1 }
+  - name: url_given_to_a_client_that_is_not_an_http_tool
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clone http://2852039166/repo.git /tmp/repo" }
+        session: { id: s1 }
+  - name: url_attached_to_an_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s --url=http://0xa9.0xfe.0xa9.0xfe/latest/user-data" }
+        session: { id: s1 }
+  - name: interpreter_script_the_parser_does_not_read
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import urllib.request as u; print(u.urlopen('http://0xa9fea9fe/latest/meta-data/').read())\"" }
+        session: { id: s1 }
+  - name: curl_through_a_remote_shell_the_parser_does_not_read
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'curl -s http://2852039166/latest/meta-data/'" }
+        session: { id: s1 }
+  - name: url_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'test: add a fixture for curl http://2852039166/latest/meta-data/'" }
+        session: { id: s1 }
+  - name: url_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nThe decimal form is http://2852039166/latest/meta-data/ and curl resolves it.\nEOF" }
+        session: { id: s1 }
+  - name: url_named_in_a_message_beside_an_unrelated_curl
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s https://example.com/health && gh pr comment 12 --body 'the fixture uses http://0xa9fea9fe/ as its host'" }
+        session: { id: s1 }
+  - name: a_different_decimal_host
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://2852039167/status" }
+        session: { id: s1 }
+  - name: url_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./probe.sh 'curl -s http://2852039166/latest/meta-data/'" }
+        session: { id: s1 }
+  - name: url_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'test: add a fixture for curl http://2852039166/latest/meta-data/' && ./run-tests.sh" }
         session: { id: s1 }
 

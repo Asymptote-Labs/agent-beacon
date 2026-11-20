@@ -1,6 +1,6 @@
 id: base64-decode-piped-to-shell
-spec: threat-rules/v1.2  # needed for e.command.parsed_commands
-version: 4
+spec: threat-rules/v2.0  # needed for the commands a carrier or a pipe hands a shell
+version: 8
 title: Base64-decoded payload piped into a shell
 description: >
   A command base64-decodes content and pipes it straight into a shell — the classic
@@ -8,8 +8,11 @@ description: >
   The shell match is case-insensitive so an uppercase shell name cannot evade, and
   accepts the shell by any path and under `env` or `sudo` with their options. The
   command line is read as bash, so the decode and the shell must be stages of one
-  pipeline, and the same text inside a quoted string does not fire; a command line
-  that does not parse falls back to matching its text.
+  pipeline, and the same text inside a quoted string does not fire; the pipeline that
+  `ssh host`, `docker exec`, `su -c`, `eval` or a script echoed into a shell runs is
+  read too. Where the parser cannot see into a command (a line that does not parse or
+  was cut, a script handed the pipeline as its argument), the text that reaches that
+  command is matched instead (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -19,24 +22,40 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 # The decoder is any command with a base64 word and a decode flag (openssl base64 -d counts);
-# the shell is the command a later stage of the same pipeline runs.
+# the shell is a command at a later stage of the same pipeline (pipes_into_shell,
+# rules/concepts/commands.predicates.yaml).
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(d,
       d.argv.exists(a, a.matches("(?i)(^|/)base64$")) &&
       d.argv.exists(a, a.matches("(?i)^(-d|--decode)$")) &&
-      e.command.parsed_commands.exists(s,
-        s.pipeline == d.pipeline && s.stage > d.stage &&
-        s.name.matches("(?i)^(ba|z|da|k)?sh$"))) ||
-    (size(e.command.parsed_commands) == 0 &&
-      e.command.command.matches("(?i)\\bbase64\\b\\s+(-d|-D|--decode)\\b") &&
-      e.command.command.matches("(?i)\\|\\s*(sudo(\\s+-\\S+)*\\s+)?(\\S*/)?(env\\s+)?(ba|z|da|k)?sh\\b"))
+      pipes_into_shell(e, d)) ||
+    unread_text(e, t,
+      t.matches("(?i)\\bbase64\\b\\s+(-d|-D|--decode)\\b[^;&\\n]*\\|\\s*(sudo(\\s+-\\S+)*\\s+)?(\\S*/)?(env\\s+)?(ba|z|da|k)?sh\\b"))
   )
 
 emit:
   reason: "Base64-decoded payload piped directly into a shell"
 
 tests:
+  - name: decode_to_shell_on_another_host
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'echo ZWNobyBoaQ== | base64 -d | sh'" }
+        session: { id: s1 }
+  - name: decode_to_shell_as_another_user
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "su - deploy -c 'echo aGk= | base64 --decode | bash'" }
+        session: { id: s1 }
+  - name: decode_to_shell_echoed_into_a_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "printf '%s\\n' 'base64 -d payload.b64 | sh' | bash" }
+        session: { id: s1 }
   - name: echo_base64_decode_to_bash
     verdict: match
     events:
@@ -126,6 +145,30 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo aGk= | base64 -d | bash )" }
+        session: { id: s1 }
+  - name: decode_to_shell_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./run.sh 'echo aGk= | base64 -d | bash'" }
+        session: { id: s1 }
+  - name: capture_cut_inside_a_loop
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /srv && for p in a b; do echo aGk= | base64 -d | bash" }
+        session: { id: s1 }
+  - name: decode_to_shell_in_a_comment
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "# echo aGk= | base64 -d | bash" }
+        session: { id: s1 }
+  - name: decode_to_shell_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'never base64 -d | bash' && ./run-tests.sh" }
         session: { id: s1 }
   - name: decode_and_shell_in_separate_pipelines
     verdict: no_match

@@ -1,6 +1,7 @@
 package threatrules
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,12 @@ emit:
     events:
       - event: { action: file.read }
 `
+}
+
+// futureSpec is the spec one minor version past the engine's, which a rule must not need to
+// load. It moves with SupportedSpec, so raising the supported spec rewrites no test.
+func futureSpec() string {
+	return fmt.Sprintf("threat-rules/v%d.%d", supportedSpec.major, supportedSpec.minor+1)
 }
 
 func TestSupportedSpecMatchesVersionFile(t *testing.T) {
@@ -50,7 +57,7 @@ func TestDecodeRuleAcceptsSupportedSpecs(t *testing.T) {
 }
 
 func TestDecodeRuleRejectsNewerSpecClearly(t *testing.T) {
-	for _, spec := range []string{"threat-rules/v1.3", "threat-rules/v2"} {
+	for _, spec := range []string{futureSpec(), "threat-rules/v3"} {
 		// A future rule also carries the fields its version added; the spec check must
 		// come first so the error names the version rather than the unknown field.
 		_, err := DecodeRule([]byte(specRule("future-rule", "spec: "+spec, "future_field: true\n")))
@@ -92,35 +99,7 @@ func TestOrderRequiresSpecV1_1(t *testing.T) {
 	}
 }
 
-func TestParsedCommandsRequiresSpecV1_2(t *testing.T) {
-	const uses = "match: 'e.command.parsed_commands.exists(c, c.name == \"rm\")'\n"
-	for _, spec := range []string{"", "spec: threat-rules/v1", "spec: threat-rules/v1.1"} {
-		rule, err := DecodeRule([]byte(strings.Replace(specRule("r", spec, ""), "match: 'e.event.action == \"file.read\"'\n", uses, 1)))
-		if err != nil {
-			t.Fatalf("%q: decode: %v", spec, err)
-		}
-		if err := rule.Validate(); err == nil || !strings.Contains(err.Error(), "e.command.parsed_commands requires spec: threat-rules/v1.2") {
-			t.Errorf("%q: want the parsed_commands/spec error, got %v", spec, err)
-		}
-	}
-	// Naming the field in a string is not using it.
-	rule, err := DecodeRule([]byte(strings.Replace(specRule("r", "", ""), `e.event.action == "file.read"`, `e.command.command != "parsed_commands"`, 1)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rule.Validate(); err != nil {
-		t.Errorf("a string literal required the spec: %v", err)
-	}
-	rule, err = DecodeRule([]byte(strings.Replace(specRule("r", "spec: threat-rules/v1.2", ""), "match: 'e.event.action == \"file.read\"'\n", uses, 1)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rule.Validate(); err != nil {
-		t.Errorf("v1.2: %v", err)
-	}
-}
-
-func TestLoadDirSkippingSetsNewerSpecAside(t *testing.T) {
+func TestLoadPackDirSetsNewerSpecAside(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) {
 		t.Helper()
@@ -130,19 +109,20 @@ func TestLoadDirSkippingSetsNewerSpecAside(t *testing.T) {
 	}
 	write("current.rule.yaml", specRule("current-rule", "spec: "+SupportedSpec, ""))
 	write("legacy.rule.yaml", specRule("legacy-rule", "", ""))
-	write("future.rule.yaml", specRule("future-rule", "spec: threat-rules/v1.9", "future_field: 1\n"))
+	write("future.rule.yaml", specRule("future-rule", "spec: "+futureSpec(), "future_field: 1\n"))
 
-	rules, skipped, err := LoadDirSkipping(dir)
+	pack, err := LoadPackDir(dir)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
+	rules, skipped := pack.Rules, pack.Skipped
 	if len(rules) != 2 || rules[0].ID != "current-rule" || rules[1].ID != "legacy-rule" {
 		t.Fatalf("want current-rule and legacy-rule loaded, got %v", ruleIDs(rules))
 	}
 	if len(skipped) != 1 || skipped[0].Err.RuleID != "future-rule" || filepath.Base(skipped[0].Path) != "future.rule.yaml" {
 		t.Fatalf("want future-rule skipped, got %+v", skipped)
 	}
-	if !strings.Contains(skipped[0].String(), "future.rule.yaml: rule \"future-rule\" requires threat-rules/v1.9") {
+	if !strings.Contains(skipped[0].String(), "future.rule.yaml: rule \"future-rule\" requires "+futureSpec()) {
 		t.Errorf("skip message should name the file, rule, and version: %s", skipped[0])
 	}
 
@@ -152,7 +132,7 @@ func TestLoadDirSkippingSetsNewerSpecAside(t *testing.T) {
 	}
 	// Other failures still fail the whole skipping load.
 	write("broken.rule.yaml", specRule("broken-rule", "", "typo_field: 1\n"))
-	if _, _, err := LoadDirSkipping(dir); err == nil {
+	if _, err := LoadPackDir(dir); err == nil {
 		t.Fatal("an unknown field in a current-spec rule must still fail the load")
 	}
 }

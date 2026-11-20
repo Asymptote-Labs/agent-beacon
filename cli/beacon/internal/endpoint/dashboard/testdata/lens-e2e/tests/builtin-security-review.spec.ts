@@ -6,13 +6,15 @@ test('security review: findings grouped by risk, the combination flagged, eviden
   // The host stays hidden until /api/status finishes local runtime discovery.
   await expect(frame.locator('#root')).toBeVisible({ timeout: 15_000 });
 
-  await expect(frame.locator('#root > p').first()).toHaveText('6 findings across 87 rules evaluated.');
+  // credential-file-read matches twice: the file.read event, and `curl -d @/home/dev/.aws/credentials`,
+  // whose @file argument curl reads (a parsed command's file_reads, since threat-rules v2.0).
+  await expect(frame.locator('#root > p').first()).toHaveText('7 findings across 87 rules evaluated.');
   await expect(frame.locator('.alert')).toContainText('combines untrusted input, sensitive access and a consequential action');
 
   const rows = frame.locator('tbody tr');
   await expect(rows.nth(0)).toContainText('Untrusted input');
   await expect(rows.nth(0).locator('td').nth(2)).toHaveText('2');
-  await expect(rows.nth(1).locator('td').nth(2)).toHaveText('1');
+  await expect(rows.nth(1).locator('td').nth(2)).toHaveText('2');
   await expect(rows.nth(2).locator('td').nth(2)).toHaveText('3');
   await expect(rows.nth(2).locator('td').nth(3)).toHaveText('high');
 

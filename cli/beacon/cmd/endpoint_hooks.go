@@ -51,7 +51,21 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 		}
 		return printPlannedActions(actions)
 	}
-	return installEndpointHookTargets(os.Stderr, targets, loadOrDefaultConfig(), endpointOpts.allTargets)
+	cfg := loadOrDefaultConfig()
+	if bin, ok := enforcedHookBeacon(cmd.Context(), os.Stderr, cfg); ok {
+		selection := []string{"--harness", strings.Join(targets, ",")}
+		if endpointOpts.allTargets {
+			// A sweep, so the enterprise binary skips what a sweep skips.
+			selection = []string{"--all"}
+		}
+		if err := installHooksWithEnterpriseBeacon(cmd.Context(), bin, cfg, selection...); err != nil {
+			// The enterprise binary has already said what went wrong.
+			cmd.SilenceErrors = true
+			return err
+		}
+		return nil
+	}
+	return installEndpointHookTargets(os.Stderr, targets, cfg, endpointOpts.allTargets)
 }
 
 // installEndpointHookTargets installs each target in turn and stops at the first error, except

@@ -9,12 +9,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func TestRecordTracesSendsOneEventPerNewSession(t *testing.T) {
 	s, home := setup(t, nil)
 	Init(options(nil, io.Discard))
-	RecordTraces(TraceSourceBackfill, []Trace{{"claude_code", "a"}, {"codex", "a"}, {"claude_code", "a"}, {"claude_code", ""}})
+	RecordTraces(TraceSourceBackfill, []Trace{{"claude_code", "a"}, {"codex_cli", "a"}, {"claude_code", "a"}, {"claude_code", ""}})
 	RecordTraces(TraceSourceLive, []Trace{{"claude_code", "a"}, {"cursor", "b"}})
 	Close()
 
@@ -27,7 +29,7 @@ func TestRecordTracesSendsOneEventPerNewSession(t *testing.T) {
 		first           bool
 	}{
 		{"claude_code", TraceSourceBackfill, true},
-		{"codex", TraceSourceBackfill, false},
+		{"codex_cli", TraceSourceBackfill, false},
 		{"cursor", TraceSourceLive, false},
 	}
 	for i, w := range want {
@@ -44,6 +46,32 @@ func TestRecordTracesSendsOneEventPerNewSession(t *testing.T) {
 		t.Fatalf("the seen file holds session IDs or names: %s", data)
 	}
 	assertNoPII(t, s.all())
+}
+
+// Any local process can send OTLP under a service name of its choosing, which reaches the runtime
+// log as the harness name. Only names Beacon's own collectors write leave the machine.
+func TestRecordTracesSendsOnlyKnownHarnessNames(t *testing.T) {
+	s, _ := setup(t, nil)
+	Init(options(nil, io.Discard))
+	RecordTraces(TraceSourceLive, []Trace{{"acme-billing-service", "a"}, {"Jane's laptop", "b"}, {"codex_cli", "c"}})
+	Close()
+	var got []any
+	for _, event := range s.byEvent(EventTraceRecorded) {
+		got = append(got, properties(t, event)[PropHarness])
+	}
+	if want := []any{TraceHarnessOther, TraceHarnessOther, "codex_cli"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("harness properties = %v, want %v", got, want)
+	}
+}
+
+// Every name NormalizeHarnessName resolves to is a known one, so a runtime Beacon supports is never
+// reported as other.
+func TestTraceHarnessesCoverNormalizedNames(t *testing.T) {
+	for _, spelling := range []string{"claude", "codex", "codex_desktop", "gemini", "copilot", "vscode", "cowork", "claude_agent_sdk", "claude.ai", "chatgpt", "openclaw", "antigravity", "pi", "omp", "prime", "omo", "cline", "qwen", "kimi", "muse", "dsh", "fx", "harness2", "goose", "kiro", "openhands", "cursor", "opencode", "devin", "devin-cli", "devin-desktop", "factory", "grok", "hermes"} {
+		if name := asymptoteobserve.NormalizeHarnessName(spelling); traceHarness(name) != name {
+			t.Errorf("%q normalizes to %q, which is reported as %q", spelling, name, TraceHarnessOther)
+		}
+	}
 }
 
 func TestRecordTracesCapsEventsAndRemembersTheRest(t *testing.T) {

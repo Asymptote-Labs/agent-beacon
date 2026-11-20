@@ -1,5 +1,6 @@
 id: sandbox-escape-attempt
-version: 1
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 3
 title: Sandbox-escape primitives invoked in an agent session
 description: >
   A command.executed event invokes a primitive commonly used to escape a container
@@ -15,7 +16,13 @@ description: >
   `-U` is the only flag, chroot with a non-`/` argument), so benign
   `unshare -U` for normal user-namespace apps does not fire. RE2's lack of
   negative lookahead forces the short-flag combinations to be enumerated
-  explicitly (single non-U flag, U-then-non-U, non-U-then-U).
+  explicitly (single non-U flag, U-then-non-U, non-U-then-U). The command is
+  found by what the line runs (its name, also behind sudo, env, nohup, exec or
+  command, by absolute path or inside `bash -c`, and its own options, those
+  before the program it runs), so the same words in a commit message or a
+  here-document do not fire. The boundary anchoring and the enumerated
+  combinations are those of the text pattern, which is asked only of the text that
+  reaches a command the parser cannot see into (unread_text).
 severity: critical
 status: experimental
 posture: detect
@@ -24,12 +31,22 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0011
 
+# unshare and chroot take a program to run, whose own options must not be read as theirs:
+# only the option words before the first operand count. setsid is not a wrapper the
+# parser looks through, so `setsid unshare -m` is a line it cannot vouch for and is
+# matched by the text.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*nsenter\\b\\s+(?:--?(?:t|m|p|i|u|a|r|target|pid|mount|net|ipc|uts|all)\\b\\s*\\S*\\s*)+") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*unshare\\b\\s+(?:-[mnpiCAr]+|-U[mnpiCAr]+|-[mnpiCAr]+U|--(?:mount|net|ipc|uts|pid|all|cgroup))\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*chroot\\b\\s+/[^\\s;&|/][^;&|]*") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*pivot_root\\b")
+    e.command.parsed_commands.exists(c,
+      c.name == "nsenter" && c.args.matches("(?m)^(-[A-Za-z]*[tmpiunarUT][A-Za-z0-9]*|--(target|pid|mount|net|ipc|uts|all)(=.*)?)$") ||
+      c.name == "unshare" && c.args.matches("\\A(-[^\\n]*\\n)*?(-[A-Za-z]*[mnpiuCAr][A-Za-z]*|--(mount|net|ipc|uts|pid|all|cgroup)(=[^\\n]*)?)(\\n|\\z)") ||
+      c.name == "chroot" && c.args.matches("\\A(-[^\\n]*\\n)*/[^\\n/]") ||
+      c.name == "pivot_root"
+    ) ||
+    unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*nsenter\\b\\s+(?:--?(?:t|m|p|i|u|a|r|target|pid|mount|net|ipc|uts|all)\\b\\s*\\S*\\s*)+") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*unshare\\b\\s+(?:-[mnpiCAr]+|-U[mnpiCAr]+|-[mnpiCAr]+U|--(?:mount|net|ipc|uts|pid|all|cgroup))\\b") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*chroot\\b\\s+/[^\\s;&|/][^;&|]*") ||
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*pivot_root\\b")))
   )
 
 emit:
@@ -189,4 +206,70 @@ tests:
       - timestamp: "2026-06-23T10:21:00Z"
         event: { action: command.executed }
         command: { command: "setsid pivot_root /new-root /old-root" }
+        session: { id: s1 }
+  - name: nsenter_under_sudo_with_options
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -n nsenter -t 1 -m -u -i -n -- sh" }
+        session: { id: s1 }
+  - name: nsenter_clustered_flags_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'nsenter -at 1 /bin/sh'" }
+        session: { id: s1 }
+  - name: chroot_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/sbin/chroot --userspec=0:0 /mnt/host /bin/sh" }
+        session: { id: s1 }
+  - name: unshare_pid_after_fork_flag
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "timeout 30 unshare --fork --pid --mount-proc /bin/sh" }
+        session: { id: s1 }
+  - name: pivot_root_inside_a_shell_script_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sh -c 'cd /new-root && pivot_root . old-root'" }
+        session: { id: s1 }
+  - name: nsenter_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh ops@host.example 'sudo nsenter -t 1 -m -p sh'" }
+        session: { id: s1 }
+  - name: nsenter_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: the escape is sudo nsenter -t 1 -m -p sh; block it'" }
+        session: { id: s1 }
+  - name: chroot_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nBuild step: sudo chroot /mnt/rootfs /bin/sh, then exit.\nEOF" }
+        session: { id: s1 }
+  - name: unshare_user_namespace_program_with_its_own_flags
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "unshare -U --map-root-user python3 -m http.server -p 8000" }
+        session: { id: s1 }
+  - name: nsenter_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'sudo nsenter -t 1 -m -p sh'" }
+        session: { id: s1 }
+  - name: nsenter_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: the escape is sudo nsenter -t 1 -m -p sh' && ./run-tests.sh" }
         session: { id: s1 }

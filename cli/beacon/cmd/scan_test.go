@@ -8,8 +8,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
-
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
 
@@ -139,7 +139,7 @@ func TestScanFailOnIgnoresMinSeverityFilter(t *testing.T) {
 
 func TestScanSkipsNewerSpecRuleWithWarning(t *testing.T) {
 	scanFixture(t, []string{evSecretRead})
-	future := strings.Replace(strings.Replace(scanTestRule, "id: scan-test-secret-read\n", "id: scan-future-rule\nspec: threat-rules/v2\n", 1),
+	future := strings.Replace(strings.Replace(scanTestRule, "id: scan-test-secret-read\n", "id: scan-future-rule\nspec: threat-rules/v3\n", 1),
 		"emit:", "future_field: true\nemit:", 1)
 	if err := os.WriteFile(filepath.Join(scanOpts.rulesDir, "future.rule.yaml"), []byte(future), 0o644); err != nil {
 		t.Fatal(err)
@@ -159,16 +159,69 @@ func TestScanSkipsNewerSpecRuleWithWarning(t *testing.T) {
 	if len(findings) != 1 || findings[0].RuleID != "scan-test-secret-read" {
 		t.Fatalf("the current rule should still run: %+v", findings)
 	}
-	want := `rule "scan-future-rule" requires threat-rules/v2, but this Beacon supports up to ` + threatrules.SupportedSpec + `; upgrade Beacon to load it`
+	want := `rule "scan-future-rule" requires threat-rules/v3, but this Beacon supports up to ` + threatrules.SupportedSpec + `; upgrade Beacon to load it`
 	if !strings.Contains(stderr.String(), "warning: skipped ") || !strings.Contains(stderr.String(), want) {
 		t.Fatalf("want the skip warning on stderr, got %q", stderr.String())
+	}
+}
+
+// runawayRule is a rule whose match passes the engine's cost limit on every file.read event:
+// ten million comprehension steps.
+func runawayRule(id string) string {
+	expr := `e.event.action != "x"`
+	for _, v := range []string{"a", "b", "c", "d", "e2", "f", "g"} {
+		expr = "[0,1,2,3,4,5,6,7,8,9].all(" + v + ", " + expr + ")"
+	}
+	return "id: " + id + `
+version: 1
+title: Runaway
+severity: high
+status: experimental
+posture: detect
+match: 'e.event.action == "file.read" && ` + expr + `'
+emit:
+  reason: never
+tests:
+  - name: other
+    verdict: no_match
+    events:
+      - event: { action: other }
+`
+}
+
+// A rule that cannot be evaluated on an event does not take the other rules' findings with it:
+// they are printed, the rule is named on stderr, and the scan exits non-zero.
+func TestScanReportsARuleItCouldNotEvaluate(t *testing.T) {
+	scanFixture(t, []string{evSecretRead})
+	if err := os.WriteFile(filepath.Join(scanOpts.rulesDir, "runaway.rule.yaml"), []byte(runawayRule("scan-runaway")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scanOpts.jsonOutput = true
+	stdout, stderr := &strings.Builder{}, &strings.Builder{}
+	cmd, _ := newCmd()
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	err := runScan(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "scan incomplete: 1 rule(s)") {
+		t.Fatalf("scan error = %v, want it to say the scan is incomplete", err)
+	}
+	var findings []threatrules.Finding
+	if err := json.Unmarshal([]byte(stdout.String()), &findings); err != nil {
+		t.Fatalf("stdout must stay valid JSON: %v\n%s", err, stdout.String())
+	}
+	if len(findings) != 1 || findings[0].RuleID != "scan-test-secret-read" {
+		t.Fatalf("the other rule's finding must still be reported: %+v", findings)
+	}
+	if w := stderr.String(); !strings.Contains(w, `warning: rule "scan-runaway" could not be evaluated on 1 event(s)`) ||
+		!strings.Contains(w, "session s1") || !strings.Contains(w, "cost limit exceeded") {
+		t.Fatalf("want the rule, the session and the reason on stderr, got %q", w)
 	}
 }
 
 func TestScanAllRulesSkippedNamesThem(t *testing.T) {
 	scanFixture(t, []string{evSecretRead})
 	// Replace the fixture's only rule with one that needs a newer spec.
-	future := strings.Replace(scanTestRule, "id: scan-test-secret-read\n", "id: scan-future-rule\nspec: threat-rules/v1.3\n", 1)
+	future := strings.Replace(scanTestRule, "id: scan-test-secret-read\n", "id: scan-future-rule\nspec: "+testenv.FutureSpec()+"\n", 1)
 	if err := os.WriteFile(filepath.Join(scanOpts.rulesDir, "secret.rule.yaml"), []byte(future), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +237,7 @@ func TestScanAllRulesSkippedNamesThem(t *testing.T) {
 	if strings.Contains(msg, "store is empty") {
 		t.Fatalf("error must not claim the store is empty: %s", msg)
 	}
-	for _, want := range []string{`rule "scan-future-rule" requires threat-rules/v1.3`, "secret.rule.yaml", "supports up to " + threatrules.SupportedSpec, "upgrade Beacon"} {
+	for _, want := range []string{`rule "scan-future-rule" requires ` + testenv.FutureSpec(), "secret.rule.yaml", "supports up to " + threatrules.SupportedSpec, "upgrade Beacon"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q missing %q", msg, want)
 		}

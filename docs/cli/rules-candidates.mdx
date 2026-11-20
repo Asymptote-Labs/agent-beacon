@@ -1,0 +1,51 @@
+---
+title: "beacon rules candidates"
+description: "List files your agents read that look like credentials and that the credential catalog does not have"
+---
+
+## Command overview
+
+`beacon rules candidates` reads the local telemetry log and lists the files agents read whose name looks like a credential's and that the active rules' credential catalog does not have.
+
+```bash title="Command syntax"
+beacon rules candidates [--log-path <file>] [--rules <dir>] [--json] [--user | --system]
+```
+
+The credential rules share one reviewed list of where credentials are kept, the [credential catalog](/detections/yaml-schema#predicates). A reviewed list is as complete as what its reviewers have seen. This command shows what your agents read that it has not.
+
+## What it reports
+
+It collects every file an agent read, with a file tool or by a shell command that takes the file in (`cat`, `cp`, an upload). It keeps the ones that are in no store of the catalog and are named like something that holds a credential: a name with `secret`, `credential`, `token`, `password` or `api_key` in it, or a key or certificate file such as `.pem`, `.key` or `.p12`. Source code, documentation, templates and public keys are left out.
+
+```text title="Example output"
+   3  client_secret.json               /home/u/work/client_secret.json
+   1  master.key                       /srv/app/config/master.key
+
+2 candidate(s) for credential-stores among 854 file(s) read in ~/.beacon/endpoint/logs/runtime.jsonl
+```
+
+Each line is the number of distinct paths with that name, the name, and one of the paths.
+
+The names are a guess, for a person to review. A file listed here may hold no credential, and one that does may not be listed. To make the rules see one, add a store for it to a catalog of your rule pack and reinstall the pack.
+
+Nothing leaves the machine. The output holds file paths from your log.
+
+## Flags
+
+| Flag | Description |
+| --- | --- |
+| `--log-path <file>` | Runtime JSONL log to read. Defaults to the configured endpoint log. |
+| `--rules <dir>` | Check against the catalog of this rule directory, instead of the store and baseline. |
+| `--json` | Output as JSON. |
+| `--user`, `--system` | Use per-user (default) or system endpoint paths. |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Rule YAML schema" icon="code" href="/detections/yaml-schema">
+    Predicates, catalogs and the definitions a pack ships.
+  </Card>
+  <Card title="beacon rules lint" icon="check" href="/cli/rules-lint">
+    Validate a pack after adding a store.
+  </Card>
+</Columns>

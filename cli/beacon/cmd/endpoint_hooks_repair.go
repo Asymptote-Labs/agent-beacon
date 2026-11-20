@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -473,6 +474,15 @@ func defaultRunHookRepairAsUser(info consoleUserInfo, args ...string) error {
 // macOS. Hook repair and native config repair share it so the two cannot disagree about who they
 // run as.
 func consoleUserCommand(ctx context.Context, info consoleUserInfo, bin string, args ...string) *exec.Cmd {
+	// Without root, the only hooks this can repair are the user's own (user-mode enforcement), so
+	// it runs bin directly: sudo would ask for a password to become who it already is.
+	if os.Geteuid() != 0 {
+		if me, err := user.Current(); err == nil && me.Username == info.Username {
+			child := exec.CommandContext(ctx, bin, args...)
+			child.Env = append(os.Environ(), telemetry.InternalChildEnv())
+			return child
+		}
+	}
 	launcher, cmdArgs := "sudo", []string{"-u", info.Username}
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
 		if path, err := exec.LookPath("runuser"); err == nil {

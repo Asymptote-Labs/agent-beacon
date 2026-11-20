@@ -1,5 +1,6 @@
 id: high-risk-approval-allowed-without-reason
-version: 2
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 6
 title: High-risk action approved with an empty approval reason
 description: >
   An approval was granted (event.action approval.allowed) for a high-risk operation —
@@ -10,7 +11,14 @@ description: >
   without a human-supplied rationale. The rule fires on a single approval.allowed event
   and intentionally requires approval.required == true so it ignores informational
   no-gate allows. It scopes the dangerous-target test tightly to avoid flagging routine
-  approved edits.
+  approved edits. A credential file is any store of files in the pack's credential
+  catalog (rules/concepts/credential-stores.catalog.yaml). The approved command is
+  found by what its line runs (rm also under sudo, by absolute path or inside
+  `bash -c`; sudo as the wrapper of a command), so the same words in a commit
+  message or a here-document do not make an approval high-risk. The text pattern is
+  asked of the text that reaches a command the parser cannot see into (unread_text).
+  Anything under ~/.aws counts as well as the catalog's credential files, since the config
+  there can name a command that hands over credentials (credential_process).
 severity: high
 status: stable
 posture: detect
@@ -18,19 +26,49 @@ taxonomy:
   beacon_category: approval-abuse
   owasp_llm: LLM06
 
+# A dangerous command is the approval rules' shared definition (dangerous_command,
+# rules/concepts/dangerous-commands.predicates.yaml). Here any sudo counts as well, not only
+# a root shell: sudo is a word of the command that is not one of its arguments, its first
+# word or a wrapper behind env, nohup and the like. `which sudo` and `echo sudo` do not run
+# it.
 match: >
   e.event.action == "approval.allowed" &&
   e.approval.required &&
   e.approval.reason == "" &&
   (
-    e.command.command.matches("(?i)(\\brm\\s+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*\\b|\\bmkfs\\b|\\bdd\\s+if=|\\bsudo\\b|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b)") ||
-    e.file.path.matches("(?i)(\\.env$|\\.env\\.|/credentials$|id_rsa$|\\.aws/|\\.github/workflows/|\\.gitlab-ci\\.yml$|/auth\\.|/security\\.)")
+    dangerous_command(e) ||
+    e.command.parsed_commands.exists(c,
+      c.argv.exists(a, a.matches("(^|/)sudo$")) && (c.argv[0].matches("(^|/)sudo$") || !c.args.matches("(?m)^(.*/)?sudo$"))) ||
+    unread_text(e, t, t.matches("(?i)\\bsudo\\b")) ||
+    credential_path(e.file.path) ||
+    e.file.path.matches("(?i)(\\.github/workflows/|\\.gitlab-ci\\.yml$|/auth\\.|/security\\.|(^|[/\\\\])\\.aws[/\\\\])")
   )
 
 emit:
   reason: "High-risk action approved with no recorded approval reason"
 
 tests:
+  - name: aws_config_edit_allowed_empty_reason
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        file: { path: "/home/u/.aws/config" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: aws_sso_cache_edit_allowed_empty_reason
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        file: { path: "C:\\Users\\u\\.aws\\sso\\cache\\0a1b2c.json" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: aws_named_project_dir_is_not_aws
+    verdict: no_match
+    events:
+      - event: { action: approval.allowed }
+        file: { path: "/repo/my.aws/notes.md" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
   - name: dangerous_command_allowed_empty_reason
     verdict: match
     events:
@@ -79,5 +117,68 @@ tests:
       - event: { action: approval.allowed }
         command: { command: "sudo rm -rf /etc" }
         approval: { decision: "allow", required: false, reason: "" }
+        session: { id: s1 }
+  - name: any_command_under_sudo_allowed_empty_reason
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "env LANG=C sudo -n systemctl restart nginx" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: rm_inside_a_shell_script_allowed_empty_reason
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "bash -c 'cd /srv && rm -rf releases'" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: rm_by_absolute_path_with_separate_flags_allowed_empty_reason
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "/bin/rm -r -f /srv/releases" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: rm_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "ssh ops@host.example 'rm -rf /srv/releases'" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: rm_named_in_a_commit_message_allowed_empty_reason
+    verdict: no_match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "git commit -m 'docs: sudo is not needed to rm -rf build'" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: rm_named_in_a_here_document_allowed_empty_reason
+    verdict: no_match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "cat > NOTES.md <<'EOF'\nCleanup is sudo rm -rf /srv/releases; ask first.\nEOF" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: sudo_looked_up_but_not_run
+    verdict: no_match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "which sudo && rm -r build/cache" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: sudo_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "./deploy.sh 'sudo systemctl restart app'" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: sudo_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "git commit -m 'docs: the installer no longer needs sudo' && ./run-tests.sh" }
+        approval: { decision: "allow", required: true, reason: "" }
         session: { id: s1 }
 

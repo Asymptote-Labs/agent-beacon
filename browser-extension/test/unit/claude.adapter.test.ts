@@ -49,6 +49,17 @@ describe('claude adapter — simple turn', () => {
   });
 });
 
+it('keeps valid Claude events in a chunk that also contains a null payload', () => {
+  const parser = claudeAdapter.createParser('req-0001');
+  parser.onRequest(URL, 'POST', JSON.stringify({ prompt: 'What is the capital of France?' }));
+  parser.onChunk('data: null\n\n' + fixture('simple-turn'));
+  parser.onDone();
+
+  const turn = parser.getTurn()!;
+  expect(turn.responseText).toBe('Paris.');
+  expect(turn.completedAt).toBeTypeOf('number');
+});
+
 describe('claude adapter — tool call', () => {
   const turn = run('with-tool-call', 'What is the weather today?')!.getTurn()!;
 

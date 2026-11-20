@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -122,5 +124,24 @@ func TestConsoleUserCommandRunsAsTheUserWithTheirHome(t *testing.T) {
 	// child is marked internal, so it never uses up the first-run notice in a buffer.
 	if !strings.HasSuffix(args, "env HOME=/home/alice USER=alice LOGNAME=alice BEACON_TELEMETRY=0 BEACON_INTERNAL_CHILD=1 /opt/beacon/bin/beacon endpoint user-config apply-native") {
 		t.Fatalf("launcher args = %q, want alice's HOME, the telemetry opt-out, the internal marker and the child command", args)
+	}
+}
+
+// Without root, repairing the current user's own hooks (user-mode enforcement) runs the child
+// directly: sudo would only ask for a password to become who it already is.
+func TestConsoleUserCommandRunsDirectlyForTheCurrentUserWithoutRoot(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("POSIX, without root")
+	}
+	me, err := user.Current()
+	if err != nil {
+		t.Skip(err)
+	}
+	cmd := consoleUserCommand(context.Background(), consoleUserInfo{Username: me.Username, HomeDir: me.HomeDir}, "/u/beacon", "endpoint", "hooks", "install")
+	if got := strings.Join(cmd.Args, " "); got != "/u/beacon endpoint hooks install" {
+		t.Fatalf("args = %q, want the child run directly", got)
+	}
+	if !slices.Contains(cmd.Env, "BEACON_INTERNAL_CHILD=1") {
+		t.Fatal("the child is not marked internal")
 	}
 }

@@ -766,7 +766,13 @@ func loadConfigForMode(userMode bool, logPath string) endpointconfig.Config {
 }
 
 func endpointUserMode() bool {
-	return endpointOpts.userMode && !endpointOpts.systemMode
+	return flagsUserMode(endpointOpts.userMode, endpointOpts.systemMode)
+}
+
+// flagsUserMode is the mode a command's --user and --system flags select: user mode when --user
+// is given and --system is not.
+func flagsUserMode(user, system bool) bool {
+	return user && !system
 }
 
 func splitCSV(value string) []string {

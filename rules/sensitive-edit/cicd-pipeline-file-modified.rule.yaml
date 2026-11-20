@@ -1,5 +1,6 @@
 id: cicd-pipeline-file-modified
-version: 3
+spec: threat-rules/v2.0  # needed for file_writes and predicates
+version: 6
 title: CI/CD or deployment manifest modified
 description: >
   The agent modified a CI/CD or deployment manifest (GitHub Actions workflow,
@@ -14,17 +15,36 @@ taxonomy:
   beacon_category: sensitive-edit
   owasp_llm: LLM03
 
+# Which file is one definition (cicd_pipeline_file,
+# rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
+# path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv).
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] && (
-    e.file.path.matches("(?i)\\.github/workflows/.*\\.ya?ml$") ||
-    e.file.path.matches("(?i)(^|/)(\\.gitlab-ci\\.yml|fly\\.toml|vercel\\.json|render\\.yaml|deployment\\.ya?ml|deploy\\.ya?ml|kustomization\\.ya?ml)$") ||
-    e.file.path.matches("(?i)(^|/)(k8s|kubernetes|\\.circleci)/")
-  )
+  file_changed(e, p, cicd_pipeline_file(p)) ||
+  e.event.action == "command.executed" && cicd_pipeline_file_redirect(e.command.command) &&
+    unread_text(e, t, cicd_pipeline_file_redirect(t))
 
 emit:
   reason: "CI/CD or deployment manifest modified"
 
 tests:
+  - name: workflow_edited_in_place_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i 's/pull_request:/pull_request_target:/' .github/workflows/ci.yml" }
+        session: { id: s1 }
+  - name: workflow_written_by_a_redirection
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "printf 'on: push\\njobs: {}\\n' > .github/workflows/release.yaml" }
+        session: { id: s1 }
+  - name: workflow_only_linted
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "actionlint .github/workflows/ci.yml && git add .github/workflows/ci.yml" }
+        session: { id: s1 }
   - name: github_workflow_edit
     verdict: match
     events:
@@ -72,4 +92,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: ".github/workflows/deploy.yml" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh 'cat /tmp/ci.yml > .github/workflows/release.yml'" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never cat /tmp/ci.yml > .github/workflows/release.yml\" && ./run-tests.sh" }
         session: { id: s1 }

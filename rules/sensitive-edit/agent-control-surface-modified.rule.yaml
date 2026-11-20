@@ -1,5 +1,6 @@
 id: agent-control-surface-modified
-version: 3
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 7
 title: Agent control surface (settings / hooks / MCP config / plugins) modified
 description: >
   The agent wrote a file that constrains or wires its own runtime or another agent's:
@@ -14,7 +15,13 @@ description: >
   that writes one of these paths (a redirect, tee, sed -i, cp/mv/install/ln/rsync to
   it, git clone into it, or a download saved there). Writing these can disable the
   sandbox, widen auto-approval, register a hook, or wire in a new MCP server or plugin
-  that runs on every future session.
+  that runs on every future session. The command is found by what the line runs: a
+  command one of whose writes (c.file_writes, which keeps a path under `~` or a variable
+  as written, and includes where a download is saved and the directory an archive or a
+  clone lands in) is one of these paths, so `sudo cp` and cp inside `bash -c` fire and a
+  path named in a commit message, a here-document or a sed script does not. The text
+  patterns are asked of the text that reaches a command the parser cannot see into
+  (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -24,15 +31,12 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    e.file.path.matches("(?i)(^|/)((\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor/(mcp|hooks|cli|cli-config)\\.json|\\.codex/(config\\.toml|hooks\\.json)|\\.gemini/settings\\.json|\\.copilot/(config|mcp-config)\\.json|\\.vscode/mcp\\.json|\\.kiro/settings/mcp\\.json|opencode\\.jsonc?|\\.codeium/windsurf/mcp_config\\.json|\\.windsurf/hooks\\.json|cline_mcp_settings\\.json)$|(\\.claude/plugins|\\.github/hooks|\\.kiro/(hooks|agents)|\\.gemini/extensions|\\.opencode/plugins?|\\.config/opencode/plugins?|\\.cline/plugins)/)")
-  ) || (
-    e.event.action == "command.executed" && (
-      e.command.command.matches("(?i)((^|[^-=>\\n])>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?-i\\S*\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)(['\"]([^'\"\\n;|]*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\][^'\"\\n;|]*)?)['\"]|(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\]([^\\s;&|'\"<>\\\\]|\\\\.)*)?))($|[\\s;&|)<>])") ||
-      e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s(['\"]([^'\"\\n;|]*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\][^'\"\\n;|]*)?)['\"]|(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\]([^\\s;&|'\"<>\\\\]|\\\\.)*)?))(\\s+([0-9]*|&)>{1,2}&?\\s*[^\\s;&|]*|\\s+#[^\\n]*)*\\s*($|[;&|)\\n])")
-    )
-  )
+  file_changed(e, p, agent_control_surface(p)) ||
+  e.event.action == "command.executed" &&
+    unread_text(e, t, (
+    t.matches("(?i)((^|[^-=>\\n])>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?-i\\S*\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)(['\"]([^'\"\\n;|]*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\][^'\"\\n;|]*)?)['\"]|(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\]([^\\s;&|'\"<>\\\\]|\\\\.)*)?))($|[\\s;&|)<>])") ||
+    t.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s(['\"]([^'\"\\n;|]*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\][^'\"\\n;|]*)?)['\"]|(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\]([^\\s;&|'\"<>\\\\]|\\\\.)*)?))(\\s+([0-9]*|&)>{1,2}&?\\s*[^\\s;&|]*|\\s+#[^\\n]*)*\\s*($|[;&|)\\n])")
+    ))
 
 emit:
   reason: "Agent control surface modified (runtime settings, hooks, MCP server config or plugins) — can weaken the sandbox or register persistent hooks/servers"
@@ -421,4 +425,100 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "cp .claude/settings.json /tmp/settings.bak" }
+        session: { id: s1 }
+  - name: cp_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo cp /tmp/managed.json /etc/claude-code/managed-settings.json" }
+        session: { id: s1 }
+  - name: cp_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'cp /tmp/h.json ~/.cursor/hooks.json'" }
+        session: { id: s1 }
+  - name: tee_by_absolute_path_to_a_home_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo '{}' | /usr/bin/tee ~/.claude/settings.json" }
+        session: { id: s1 }
+  - name: sed_in_place_on_a_variable_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i.bak 's/\"ask\"/\"allow\"/' \"$HOME/.claude/settings.json\"" }
+        session: { id: s1 }
+  - name: redirection_to_a_variable_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo '{}' > \"$HOME/.claude/settings.json\"" }
+        session: { id: s1 }
+  - name: download_saved_to_a_home_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -fsSL https://host.example/hooks.json -o ~/.cursor/hooks.json" }
+        session: { id: s1 }
+  - name: tee_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example \"tee .mcp.json < /tmp/m.json\"" }
+        session: { id: s1 }
+  - name: tee_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: the installer runs tee -a .mcp.json and sed -i s/a/b/ .cursor/mcp.json'" }
+        session: { id: s1 }
+  - name: cp_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nTo register the server: tee -a .mcp.json, or\ncp /tmp/m.json .cursor/mcp.json\nEOF" }
+        session: { id: s1 }
+  - name: backup_of_home_settings
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp ~/.claude/settings.json ~/settings.backup.json" }
+        session: { id: s1 }
+  - name: download_of_a_config_saved_elsewhere
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -fsSL -o /tmp/mcp.json https://host.example/configs/.mcp.json" }
+        session: { id: s1 }
+  - name: home_redirection_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nTo reset the hooks: echo '{}' > ~/.claude/settings.json\nEOF" }
+        session: { id: s1 }
+  - name: home_redirection_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"docs: reset with echo '{}' > ~/.claude/settings.json\"" }
+        session: { id: s1 }
+  - name: plugin_synced_into_home
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rsync -a /tmp/plugin/ \"$HOME/.claude/plugins/extra/\"" }
+        session: { id: s1 }
+  - name: settings_write_piped_to_a_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'echo {} > .claude/settings.json && echo ok' | sh" }
+        session: { id: s1 }
+  - name: settings_write_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: echo {} > .claude/settings.json resets it' && ./run-tests.sh" }
         session: { id: s1 }

@@ -1,25 +1,19 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { defineConfig } from '@playwright/test';
 
 /**
  * Runs the real dashboard handler (../../e2eserver) with the hostile fixture lenses and drives the
- * session page in Chromium. HOME is a fresh directory, so no opt-in trace history exists, and its
- * rule store holds the whole open corpus (rules/) rather than the six-rule embedded baseline, so
- * findings span every category the Security Review lens groups.
+ * session page in Chromium. HOME is a fresh directory, so no opt-in trace history exists, and the
+ * server installs the whole open corpus (rules/, with its definitions files) into that HOME's rule
+ * store through the same installer as `beacon rules add`, rather than running the six-rule
+ * embedded baseline, so findings span every category the Security Review lens groups.
  */
 const home = mkdtempSync(join(tmpdir(), 'beacon-lens-e2e-'));
-const store = join(home, '.beacon', 'endpoint', 'rules');
-mkdirSync(store, { recursive: true });
 const corpus = resolve(__dirname, '../../../../../../../rules');
-for (const category of readdirSync(corpus)) {
-  for (const file of readdirSync(join(corpus, category))) {
-    if (file.endsWith('.rule.yaml')) copyFileSync(join(corpus, category, file), join(store, basename(file)));
-  }
-}
 
 const port = Number(process.env.LENS_E2E_PORT || 8798);
 // The dashboard serves only requests that carry its launch secret. The config is evaluated again in
@@ -68,7 +62,7 @@ export default defineConfig({
     launchOptions: process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {},
   },
   webServer: {
-    command: `go run ../../e2eserver --addr 127.0.0.1:${port} --log fixtures/runtime.jsonl ${lenses}`,
+    command: `go run ../../e2eserver --addr 127.0.0.1:${port} --log fixtures/runtime.jsonl --rules ${JSON.stringify(corpus)} ${lenses}`,
     // Unauthenticated, so it answers 401 once the server is up, which Playwright counts as ready.
     url: `http://127.0.0.1:${port}/api/lenses`,
     timeout: 180_000,

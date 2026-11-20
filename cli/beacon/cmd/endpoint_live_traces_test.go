@@ -25,6 +25,21 @@ func appendSessionEvent(t *testing.T, logPath, harnessName, method, session stri
 	}
 }
 
+// appendSessionEventAt is appendSessionEvent with the event's own time, as a session-store
+// collector writes it.
+func appendSessionEventAt(t *testing.T, logPath, harnessName, method, session string, at time.Time) {
+	t.Helper()
+	event := schema.NewEvent(schema.NewEventOptions{
+		Action: "prompt.submitted", Category: "agent", Severity: schema.SeverityInfo,
+		Harness: schema.HarnessInfo{Name: harnessName, CollectionMethod: method},
+	})
+	event.Timestamp = schema.FormatTimestamp(at)
+	event.Session = &schema.SessionInfo{ID: session}
+	if _, err := writer.AppendEvent(event, writer.Options{Path: logPath, UserMode: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSessionsInLogCountsEveryCollectionMethod(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "h1")
@@ -43,7 +58,7 @@ func TestSessionsInLogCountsEveryCollectionMethod(t *testing.T) {
 	_, _ = f.WriteString(`{"harness":{"name":"cursor"},"session":{"id":"partial"}`)
 	_ = f.Close()
 
-	got, next := sessionsInLog(logPath, 0, "")
+	got, next := sessionsInLog(logPath, 0, "", time.Time{})
 	want := []sweptSession{{"claude_code", "h1"}, {"codex", "p1"}, {"gemini_cli", "o1"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("sessions = %+v, want %+v", got, want)
@@ -53,8 +68,9 @@ func TestSessionsInLogCountsEveryCollectionMethod(t *testing.T) {
 	}
 }
 
-// liveTraceClock is the time the scans in these tests run at.
-var liveTraceClock = time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+// liveTraceClock is the time the scans in these tests run at: when they start, so the events they
+// write, stamped with the real time, are newer than any position saved before it.
+var liveTraceClock = time.Now().UTC()
 
 // liveTraceHarness stubs the stored position, the clock and what recordLocalTraces sends.
 func liveTraceHarness(t *testing.T, connected bool) (calls *[]string, pos *telemetry.LiveTracePosition, set *bool) {
@@ -122,6 +138,30 @@ func TestRecordLiveTracesReportsNewSessionsFromEveryCollector(t *testing.T) {
 	}
 }
 
+// A manual sync of old sessions writes their records after the last scan, but they are history:
+// only session-store records from shortly before the last scan or later are live. Live collectors'
+// lines count whatever their time.
+func TestRecordLiveTracesSkipsSessionStoreHistory(t *testing.T) {
+	calls, pos, set := liveTraceHarness(t, false)
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "before")
+	readUpTo(logPath, pos, set)
+	old := liveTraceClock.Add(-30 * 24 * time.Hour)
+	appendSessionEventAt(t, logPath, "codex_cli", schema.CollectionMethodPoll, "month-old", old)
+	appendSessionEventAt(t, logPath, "claude_code", schema.CollectionMethodHook, "hook", old)
+	appendSessionEvent(t, logPath, "codex_cli", schema.CollectionMethodPoll, "new")
+	// A session that ended just before the last scan, which the session sync wrote after it.
+	appendSessionEventAt(t, logPath, "fx", schema.CollectionMethodPoll, "synced-after", pos.SavedAt.Add(-10*time.Minute))
+
+	recordLiveTraces(logPath, true)
+	if want := []string{"live:claude_code/hook", "live:codex_cli/new", "live:fx/synced-after"}; !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("recorded %v, want %v", *calls, want)
+	}
+	if pos.Offset != logSize(logPath) {
+		t.Fatalf("offset %d, want the log's end %d", pos.Offset, logSize(logPath))
+	}
+}
+
 func TestRecordLiveTracesFollowsTheLogThroughARotation(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -169,6 +209,28 @@ func TestRecordLiveTracesReadsEveryArchiveNewerThanTheLastRead(t *testing.T) {
 	want := []string{"live:claude_code/middle", "live:claude_code/newest"}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("recorded %v, want %v", *calls, want)
+	}
+}
+
+// A run that finds no live log (rotated and not yet written again) reads what it can and leaves a
+// position the next run resumes from on the new log, never every archive from the start.
+func TestRecordLiveTracesResumesAfterARunWithoutALiveLog(t *testing.T) {
+	calls, pos, set := liveTraceHarness(t, false)
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "history")
+	readUpTo(logPath, pos, set)
+	appendSessionEvent(t, logPath, "claude_code", schema.CollectionMethodHook, "before-rotation")
+	rotate(t, logPath)
+
+	recordLiveTraces(logPath, true)
+	if want := []string{"live:claude_code/before-rotation"}; !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("run without a live log recorded %v, want %v", *calls, want)
+	}
+
+	appendSessionEvent(t, logPath, "codex_cli", schema.CollectionMethodHook, "after")
+	recordLiveTraces(logPath, true)
+	if want := []string{"live:claude_code/before-rotation", "live:codex_cli/after"}; !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("recorded %v, want %v (the archive read again from its start)", *calls, want)
 	}
 }
 

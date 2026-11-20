@@ -54,10 +54,14 @@ func activationEvent(a *eventActivation) asymptoteobserve.Event {
 	return a.e.(asymptoteobserve.Event)
 }
 
-// nativeProgram compiles expr in nativeEnv with the cost limit, and with opts.
-func nativeProgram(t testing.TB, expr string, opts ...cel.ProgramOption) cel.Program {
+// nativeProgram compiles expr, which may call lib's predicates, in nativeEnv with the cost
+// limit, and with opts.
+func nativeProgram(t testing.TB, lib *Library, expr string, opts ...cel.ProgramOption) cel.Program {
 	t.Helper()
 	env, err := nativeEnv()
+	if err == nil {
+		env, err = lib.extend(env)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +84,7 @@ func referenceRule(t testing.TB, rule *Rule) *CompiledRule {
 		t.Fatalf("%s: %v", rule.ID, err)
 	}
 	ref := func(expr string) matcher {
-		return matcher{prog: referenceProgram{nativeProgram(t, expr, cel.OptimizeRegex(referenceRegex))}}
+		return matcher{prog: referenceProgram{nativeProgram(t, rule.lib, expr, cel.OptimizeRegex(referenceRegex))}, derived: c.derived}
 	}
 	if rule.Correlation != nil {
 		for i, step := range rule.Correlation.Steps {
@@ -263,15 +267,15 @@ func fastPathAgrees(t *testing.T, r *Rule, big string) (compared int) {
 	}
 	var ps []progs
 	for _, expr := range ruleExpressions(r) {
-		fast, err := CompileMatch(expr)
+		fast, err := r.lib.CompileMatch(expr)
 		if err != nil {
 			t.Fatalf("%s: %v", r.ID, err)
 		}
 		ps = append(ps, progs{
 			expr:        expr,
 			fast:        fast,
-			def:         nativeProgram(t, expr),
-			referenceRx: nativeProgram(t, expr, cel.OptimizeRegex(referenceRegex)),
+			def:         nativeProgram(t, r.lib, expr),
+			referenceRx: nativeProgram(t, r.lib, expr, cel.OptimizeRegex(referenceRegex)),
 		})
 	}
 	var variants []asymptoteobserve.Event
@@ -435,13 +439,13 @@ func correlationRules(rules []*CompiledRule) []*CompiledRule {
 	return out
 }
 
-// anyStepReference evaluates every step of every rule on the event as the correlation evaluator
-// does (CompiledRule.eval): true when one holds, otherwise the first failure in rule and step order.
+// anyStepReference evaluates every step of every rule on the event on its own, read as its rule
+// reads it: true when one holds, otherwise the first failure in rule and step order.
 func anyStepReference(rules []*CompiledRule, e asymptoteobserve.Event) (bool, error) {
 	var first error
 	for _, r := range rules {
 		for i, st := range r.steps {
-			matched, err := r.eval(st, e)
+			matched, err := evalAlone(st, e)
 			if err != nil {
 				if first == nil {
 					first = fmt.Errorf("rule %q step %q: %w", r.rule.ID, r.rule.Correlation.Steps[i].ID, err)
@@ -574,16 +578,12 @@ func FuzzScanAgreesWithReference(f *testing.F) {
 // corpusPatterns returns every constant matches() pattern in the corpus.
 func corpusPatterns(t testing.TB, rules []*Rule) []string {
 	t.Helper()
-	env, err := Env()
-	if err != nil {
-		t.Fatal(err)
-	}
 	var patterns []string
 	for _, r := range rules {
 		for _, expr := range ruleExpressions(r) {
-			ast, iss := env.Compile(expr)
-			if iss != nil && iss.Err() != nil {
-				t.Fatal(iss.Err())
+			_, ast, err := r.lib.compileMatch(expr)
+			if err != nil {
+				t.Fatal(err)
 			}
 			celast.PreOrderVisit(ast.NativeRep().Expr(), celast.NewExprVisitor(func(e celast.Expr) {
 				if e.Kind() != celast.CallKind || e.AsCall().FunctionName() != "matches" {
@@ -633,7 +633,7 @@ func TestPrefilterIsSound(t *testing.T) {
 					for _, v := range variants {
 						if re.MatchString(v) {
 							checked.Add(1)
-							if !pf.holds(canon(v)) {
+							if !pf.holds(plainText(v)) {
 								t.Errorf("pattern %q matches %q but its prefilter rejects it", p, v)
 							}
 						}
@@ -661,7 +661,7 @@ func FuzzPrefilterIsSound(f *testing.F) {
 		if err != nil {
 			t.Fatalf("%q compiles but its prefilter does not: %v", pattern, err)
 		}
-		if re.MatchString(text) && !pf.holds(canon(text)) {
+		if re.MatchString(text) && !pf.holds(plainText(text)) {
 			t.Fatalf("pattern %q matches %q but its prefilter rejects it", pattern, text)
 		}
 	})
@@ -690,7 +690,7 @@ func TestPrefilterRejectsAndKeeps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := pf.holds(canon(tc.text)); got != tc.holds {
+		if got := pf.holds(plainText(tc.text)); got != tc.holds {
 			t.Errorf("%q on %q: prefilter %v, want %v", tc.pattern, tc.text, got, tc.holds)
 		}
 		if regexp.MustCompile(tc.pattern).MatchString(tc.text) && !tc.holds {

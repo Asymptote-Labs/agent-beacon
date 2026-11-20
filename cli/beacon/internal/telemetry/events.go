@@ -80,6 +80,10 @@ const (
 	PropIsFirstForDevice = "is_first_for_device"
 	// PropDestination is where the endpoint's agent telemetry goes, a Destination value.
 	PropDestination = "destination"
+	// PropCloudConnect says whether this install connected the endpoint to Beacon Cloud, a
+	// CloudConnect value. Only a connect enrolls the device and reports its history, which is
+	// what sends cloud_backfill_received.
+	PropCloudConnect = "cloud_connect"
 	// PropHarnessesConfigured lists the install targets (OTLP and hooks) the install configured.
 	PropHarnessesConfigured = "harnesses_configured"
 	// PropBackfillSessionCount is how many sessions the install's session backfill wrote records
@@ -107,6 +111,16 @@ const (
 const (
 	DestinationLocal = "local"
 	DestinationCloud = "cloud"
+)
+
+// Values of cloud_connect.
+const (
+	// CloudConnectNew is an install that connected to Beacon Cloud itself.
+	CloudConnectNew = "new"
+	// CloudConnectExisting is an install that kept a connection an earlier run made.
+	CloudConnectExisting = "existing"
+	// CloudConnectNone is an install that stays local.
+	CloudConnectNone = "none"
 )
 
 // Identity events. Each is sent right after Identify, as the person it names, who is known from
@@ -158,7 +172,8 @@ const EventTraceRecorded = "cli_trace_recorded"
 
 // Trace event properties.
 const (
-	// PropHarness is the runtime's normalized harness name, as the runtime log carries it.
+	// PropHarness is the runtime's normalized harness name, as the runtime log carries it, when it
+	// is one of traceHarnesses, else TraceHarnessOther.
 	PropHarness = "harness"
 	// PropSource says how the session was found, a TraceSource value.
 	PropSource = "source"
@@ -171,3 +186,30 @@ const (
 	// TraceSourceLive is the scheduled session sync, reading sessions as they happen.
 	TraceSourceLive = "live"
 )
+
+// TraceHarnessOther is the harness property of a session whose harness name is not one Beacon's own
+// collectors write. Any local process can send OTLP with a service name of its choosing, which
+// NormalizeHarnessName passes through, so only names from this fixed list leave the machine.
+const TraceHarnessOther = "other"
+
+// traceHarnesses are the harness names cli_trace_recorded may carry: what NormalizeHarnessName
+// resolves to, and the hook platforms it passes through unchanged.
+var traceHarnesses = map[string]bool{
+	"antigravity_cli": true, "chatgpt_web": true, "claude_agent_sdk": true, "claude_code": true,
+	"claude_cowork": true, "claude_web": true, "cline": true, "codex_cli": true, "codex_desktop": true,
+	"copilot_cli": true, "cursor": true, "deepseek_harness": true, "devin": true, "devin-cli": true,
+	"devin-desktop": true, "factory": true, "gemini_cli": true, "goose": true, "grok": true,
+	"grok_bot": true, "harness2": true, "hermes": true, "kimi_code": true, "kiro": true,
+	"muse_code": true, "omo_senpi": true, "omp": true, "openclaw_gateway": true, "opencode": true,
+	"openhands": true, "pi_cli": true, "prime_agent": true, "qwen_code": true, "vercel_fx": true,
+	"vscode_copilot": true,
+}
+
+// traceHarness is the harness property for name: name itself when it is in traceHarnesses, else
+// TraceHarnessOther.
+func traceHarness(name string) string {
+	if traceHarnesses[name] {
+		return name
+	}
+	return TraceHarnessOther
+}

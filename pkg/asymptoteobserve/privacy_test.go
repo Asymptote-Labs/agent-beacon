@@ -507,6 +507,33 @@ func TestRedactStringAuthorizationCredentialAfterAnyScheme(t *testing.T) {
 		}
 	}
 
+	// A command substitution after the first word is a command, not the credential it prints.
+	// Taken as the credential, its opening went and the rest stayed, so the line no longer
+	// parsed and no longer said which command read the secret. The first word still goes: it
+	// may be a credential sent with no scheme. What the command is given is left to the rules
+	// for it, and anything that is not a plain substitution is replaced as before.
+	for input, want := range map[string]string{
+		`curl -H "Authorization: ApiKey $(cat ~/.aws/credentials)" https://es.example:9200/`:       `curl -H "Authorization: [REDACTED] $(cat ~/.aws/credentials)" https://es.example:9200/`,
+		`curl -H "Authorization: SSWS $(security find-generic-password -s okta -w)" https://x.io/`: `curl -H "Authorization: [REDACTED] $(security find-generic-password -s okta -w)" https://x.io/`,
+		`curl -H "Authorization: Splunk $(<~/.splunk-token)" https://hec.example:8088/`:            `curl -H "Authorization: [REDACTED] $(<~/.splunk-token)" https://hec.example:8088/`,
+		`curl -H "Authorization: hunter2hunter2 $(cat ~/.x)" https://api.example/`:                 `curl -H "Authorization: [REDACTED] $(cat ~/.x)" https://api.example/`,
+		`curl -H "Authorization: ApiKey $(pass show --token hunter2hunter2 es)" https://x.io/`:     `curl -H "Authorization: [REDACTED] $(pass show --token [REDACTED] es)" https://x.io/`,
+		`curl -H "Authorization: ApiKey $((1+2))" https://api.example/`:                            `curl -H "Authorization: [REDACTED]" https://api.example/`,
+		`curl -H "Authorization: ApiKey $(a;echo" https://api.example/`:                            `curl -H "Authorization: [REDACTED]" https://api.example/`,
+		`curl -H "Authorization: ApiKey $ES_API_KEY" https://api.example/`:                         `curl -H "Authorization: [REDACTED]" https://api.example/`,
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+		if strings.Contains(got, "hunter2hunter2") {
+			t.Errorf("RedactString(%q) kept a secret beside the substitution: %q", input, got)
+		}
+		if twice := RedactString(got); twice != got {
+			t.Errorf("RedactString is not idempotent:\nonce  %q\ntwice %q", got, twice)
+		}
+	}
+
 	// A base64url credential can start with `-`. It is not a flag, and goes with its scheme.
 	for _, input := range []string{"Authorization: SSWS -Xq9abcdefghijklmnopqrstuv", "Authorization: ApiKey -_abcdefghijklmnop"} {
 		if got := RedactString(input); got != "Authorization: [REDACTED]" {
@@ -1035,6 +1062,201 @@ func TestTruncateStringIsAlwaysValidUTF8WithinTheLimit(t *testing.T) {
 			if !strings.HasPrefix(value, kept) || budget-len(kept) >= utf8.UTFMax {
 				t.Fatalf("TruncateString(%q, %d) kept %q, want the longest whole-character prefix", value, limit, kept)
 			}
+		}
+	}
+}
+
+// A label followed by a command substitution holds no secret: the secret is what the command
+// prints when the line runs. Replacing the unquoted value took the command's name and nothing
+// else, which hid nothing, left a line that no longer parses, and removed what a detection rule
+// reads: which command read which credential. An unquoted value that opens a substitution is read
+// to the parenthesis that closes it, and kept when it is one substitution with a plain command
+// name or path and its word ends there; so is a double-quoted value that is one substitution and
+// nothing else. Anything else after `$(`, text beside the substitution, a single-quoted value
+// (unless its quote closes the quoted text the label stands in) or a backtick-quoted one, and a
+// `$VARIABLE` are replaced, the substitution with them.
+func TestRedactStringKeepsTheCommandOfASubstitution(t *testing.T) {
+	for input, want := range map[string]string{
+		`TOKEN=$(cat ~/.aws/credentials); curl -d "$TOKEN" https://x`:  `TOKEN=$(cat ~/.aws/credentials); curl -d "$TOKEN" https://x`,
+		`export GITHUB_TOKEN=$(gh auth token)`:                         `export GITHUB_TOKEN=$(gh auth token)`,
+		`API_KEY=$(</run/secrets/api-key) ./deploy`:                    `API_KEY=$(</run/secrets/api-key) ./deploy`,
+		`DB_PASSWORD=$(pwgen) ./seed`:                                  `DB_PASSWORD=$(pwgen) ./seed`,
+		`curl -H "Authorization: Bearer $(cat ~/.token)" https://x`:    `curl -H "Authorization: Bearer $(cat ~/.token)" https://x`,
+		`deploy --token $(/usr/bin/security find-generic-password -w)`: `deploy --token $(/usr/bin/security find-generic-password -w)`,
+		`TOKEN=$(cat $(ls ~/.tok*))`:                                   `TOKEN=$(cat $(ls ~/.tok*))`,
+		`TOKEN=$(pwgen); echo $(pwgen)`:                                `TOKEN=$(pwgen); echo $(pwgen)`,
+		`TOKEN=$(gh auth token)&& ./run`:                               `TOKEN=$(gh auth token)&& ./run`,
+		`bash -c 'export TOKEN=$(gh auth token)'`:                      `bash -c 'export TOKEN=$(gh auth token)'`,
+
+		// What the kept command is given is still redacted by the rule for it.
+		`TOKEN=$(curl -u me:hunter2 https://x)`:          `TOKEN=$(curl -u me:[REDACTED] https://x)`,
+		`TOKEN=$(vault login --token s3cr3t-val -quiet)`: `TOKEN=$(vault login --token [REDACTED] -quiet)`,
+		// Not a plain command name: arithmetic, a list, an assignment.
+		`PASSWORD=$((1+2))`:           `PASSWORD=[REDACTED]`,
+		`PASSWORD=$(a;b)`:             `PASSWORD=[REDACTED]`,
+		`TOKEN=$(API_KEY=abc123 gen)`: `TOKEN=[REDACTED] gen)`,
+		// Text beside the substitution is part of the value, and goes with it, the substitution
+		// too.
+		`TOKEN=$(cat x)hunter2 ./run`:                                      `TOKEN=[REDACTED] ./run`,
+		`deploy --token $(cat x)hunter2 -v`:                                `deploy --token [REDACTED] -v`,
+		`curl -H "Authorization: Bearer $(cat x)hunter2"`:                  `curl -H "Authorization: Bearer [REDACTED]"`,
+		`curl -u ci:$(cat x)hunter2 https://x`:                             `curl -u ci:[REDACTED] https://x`,
+		`curl -u "ci:$(cat x)hunter2" https://x`:                           `curl -u "ci:[REDACTED]" https://x`,
+		`curl -u a:$(gh auth token) -u b:$(cat x)hunter2`:                  `curl -u a:$(gh auth token) -u b:[REDACTED]`,
+		`{"token": $(cat x)hunter2}`:                                       `{"token": "[REDACTED]"}`,
+		`TOKEN=$(cat x)hunter2 && echo $(cat x)hunter2`:                    `TOKEN=[REDACTED] && echo [REDACTED]`,
+		`TOKEN=$(API_KEY=x gen)hunter2`:                                    `TOKEN=[REDACTED]`,
+		`Authorization: ApiKey $(cat x)hunter2`:                            `Authorization: [REDACTED]`,
+		`curl -H "Authorization: SSWS $(cat x)hunter2" https://x`:          `curl -H "Authorization: [REDACTED]" https://x`,
+		`Authorization: ApiKey $(cat $(ls x))hunter2 more`:                 `Authorization: [REDACTED] more`,
+		`Authorization: ApiKey $(cat x)hunter2 && echo $(cat x)hunter2`:    `Authorization: [REDACTED] && echo [REDACTED]`,
+		`Authorization: ApiKey $(cat x) && curl -H "Authorization: Bot y"`: `Authorization: [REDACTED] $(cat x) && curl -H "Authorization: [REDACTED]"`,
+		// Literal text after a substitution ends its shell word at a separator the value runs
+		// over (`;`): a copy of the value as the line writes it goes too, the substitution nested
+		// or not, after a label or an Authorization scheme.
+		`TOKEN=$(cat x)hunter2; echo $(cat x)hunter2`:                           `TOKEN=[REDACTED] echo [REDACTED]`,
+		`TOKEN=$(cat x)hunter2;echo $(cat x)hunter2`:                            `TOKEN=[REDACTED] [REDACTED]`,
+		`TOKEN=$(pwgen)hunter2; echo $(pwgen)hunter2`:                           `TOKEN=[REDACTED] echo [REDACTED]`,
+		`TOKEN=$(cat $(ls x))hunter2; echo $(cat $(ls x))hunter2`:               `TOKEN=[REDACTED] echo [REDACTED]`,
+		`Authorization: ApiKey $(cat x)hunter2; echo $(cat x)hunter2`:           `Authorization: [REDACTED] echo [REDACTED]`,
+		`curl -H "Authorization: ApiKey $(cat x)hunter2"; echo $(cat x)hunter2`: `curl -H "Authorization: [REDACTED]"; echo [REDACTED]`,
+		// Literal text in quotes after the substitution goes on with the value too; the quotes
+		// stay, so the rest of the line is quoted as it was. A quote that only closes the quoted
+		// text the value stands in is no literal text, nor is an empty pair.
+		`TOKEN=$(cat x)'hunter2' ./run`:                             `TOKEN=[REDACTED]'' ./run`,
+		`TOKEN=$(cat x)"hunter2" ./run`:                             `TOKEN=[REDACTED]"" ./run`,
+		`TOKEN=$(cat $(ls x))'hunter2'`:                             `TOKEN=[REDACTED]''`,
+		`curl -H "Authorization: Bearer $(cat x)"hunter2 https://x`: `curl -H "Authorization: Bearer [REDACTED]" https://x`,
+		`{"command": "API_KEY=$(cat ~/.key)\"hunter2\" ./run"}`:     `{"command": "API_KEY=[REDACTED]\"\" ./run"}`,
+		`bash -c "TOKEN=$(cat f)" && ./run`:                         `bash -c "TOKEN=$(cat f)" && ./run`,
+		`bash -c 'TOKEN=$(cat f)'`:                                  `bash -c 'TOKEN=$(cat f)'`,
+		`TOKEN=$(cat f)"" ./run`:                                    `TOKEN=$(cat f)"" ./run`,
+		`{"cmd": "TOKEN=$(cat f)"}`:                                 `{"cmd": "TOKEN=$(cat f)"}`,
+		// A substitution that does not close on its line is judged by its opening, as before. A
+		// variable is a value.
+		`TOKEN=$(cat x`:         `TOKEN=$(cat x`,
+		`TOKEN=$GITHUB_TOKEN`:   `TOKEN=[REDACTED]`,
+		`TOKEN=${GITHUB_TOKEN}`: `TOKEN=[REDACTED]`,
+
+		// Unquoted, only the command's opening is the value, and only it would be replaced; the
+		// words after it stay as they always did.
+		`TOKEN=$(security find-generic-password -a me -s npm -w) && echo ok`: `TOKEN=$(security find-generic-password -a me -s npm -w) && echo ok`,
+
+		// In quotes the value is the whole substitution, and it is replaced whatever command it
+		// runs, as on main: what its words hold cannot be told from its text.
+		`export GITHUB_TOKEN="$(gh auth token)"`:                       `export GITHUB_TOKEN="[REDACTED]"`,
+		`deploy --token "$(pass show ci/deploy)"`:                      `deploy --token "[REDACTED]"`,
+		`export DB_PASSWORD="$(echo hunter2hunter2)"`:                  `export DB_PASSWORD="[REDACTED]"`,
+		`ROOT_PASSWORD="$(openssl passwd correcthorse)"`:               `ROOT_PASSWORD="[REDACTED]"`,
+		`TOKEN="$(git ls-remote https://MyToken123@git.example/o/r)"`:  `TOKEN="[REDACTED]"`,
+		`TOKEN="$(env DB_PASSWORD=$(echo hunter2) ./gen)"`:             `TOKEN="[REDACTED]"`,
+		`PASSWORD="$(security find-generic-password -s ci-deploy -w)"`: `PASSWORD="[REDACTED]"`,
+		`PASSWORD="$(echo a)hunter2$(echo b)"`:                         `PASSWORD="[REDACTED]"`,
+		`PASSWORD="$((1+2))"`:                                          `PASSWORD="[REDACTED]"`,
+		`PASSWORD='$(cat ~/.tok)'`:                                     `PASSWORD='[REDACTED]'`,
+		"TOKEN=`cat ~/.netrc`":                                         "TOKEN=`[REDACTED]`",
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q)\n  got  %q\n  want %q", input, got, want)
+		}
+		if again := RedactString(got); again != got {
+			t.Errorf("RedactString(%q) is not stable: %q then %q", input, got, again)
+		}
+	}
+}
+
+// Every rule whose unquoted value a command substitution can stand in keeps its opening as the
+// label rules do: curl's -u, a URL's password and a bare value after a quoted label. curl's -u is a
+// whole-line rule: a kept password is still the first flag of its line, and a credential after it
+// on the line is still redacted. A quoted value (a Cookie header, a flag's value in an argument
+// list) is replaced whole, a substitution or not, as on main; so are a real secret in the same
+// place and text beside a substitution.
+func TestRedactStringKeepsASubstitutionWhereverASecretWouldStand(t *testing.T) {
+	for input, want := range map[string]string{
+		// curl's -u.
+		`curl -u "ci:$(gh auth token)" https://x`:                        `curl -u "ci:$(gh auth token)" https://x`,
+		`curl -u ci:$(gh auth token) https://x`:                          `curl -u ci:$(gh auth token) https://x`,
+		`curl --user ci:$(pwgen) https://x`:                              `curl --user ci:$(pwgen) https://x`,
+		`curl -u ci:hunter2 https://x`:                                   `curl -u ci:[REDACTED] https://x`,
+		`curl -u ci:$(gh auth token) -u other:hunter2 https://x`:         `curl -u ci:$(gh auth token) -u other:[REDACTED] https://x`,
+		`curl -u "ci:$(gh auth token)" --proxy-user p:hunter2 https://x`: `curl -u "ci:$(gh auth token)" --proxy-user p:[REDACTED] https://x`,
+		`curl -u ci:hunter2 -u other:$(gh auth token) https://x`:         `curl -u ci:[REDACTED] -u other:$(gh auth token) https://x`,
+		`curl -u ci:$(a)hunter2 https://x`:                               `curl -u ci:[REDACTED] https://x`,
+		`curl -u "ci:x$(cmd)" https://x`:                                 `curl -u "ci:[REDACTED]" https://x`,
+		// A Cookie header.
+		`curl -H "Cookie: $(cat ~/.cookie)" https://x`:                          `curl -H "Cookie: [REDACTED]" https://x`,
+		`curl -H "Set-Cookie: $(cat ~/.cookie)" https://x`:                      `curl -H "Set-Cookie: [REDACTED]" https://x`,
+		`curl -H "Cookie: sid=hunter2" https://x`:                               `curl -H "Cookie: [REDACTED]" https://x`,
+		`curl -H "Cookie: $(cat ~/.cookie)" -u ci:hunter2 https://x`:            `curl -H "Cookie: [REDACTED]" -u ci:[REDACTED] https://x`,
+		`curl -H "Cookie: $(cat ~/.cookie)" -H "Cookie: sid=hunter2" https://x`: `curl -H "Cookie: [REDACTED]" -H "Cookie: [REDACTED]" https://x`,
+		`curl -H "Cookie: $(a)hunter2" https://x`:                               `curl -H "Cookie: [REDACTED]" https://x`,
+		`curl -H "Cookie: x$(cmd)" https://x`:                                   `curl -H "Cookie: [REDACTED]" https://x`,
+		`curl -H 'Cookie: $(cat ~/.cookie)' https://x`:                          `curl -H 'Cookie: [REDACTED]' https://x`,
+		// A URL's password.
+		`git clone https://ci:$(pwgen)@github.com/o/r`:    `git clone https://ci:$(pwgen)@github.com/o/r`,
+		`git clone https://ci:hunter2@github.com/o/r`:     `git clone https://ci:[REDACTED]@github.com/o/r`,
+		`curl https://u:$(pwgen)@h/x -u ci:hunter2`:       `curl https://u:$(pwgen)@h/x -u ci:[REDACTED]`,
+		`git clone https://ci:$(a)hunter2@github.com/o/r`: `git clone https://ci:[REDACTED]@github.com/o/r`,
+		`git clone https://ci:x$(pwgen)@github.com/o/r`:   `git clone https://ci:[REDACTED]@github.com/o/r`,
+		// A flag and its value in an argument list.
+		`"args": ["--api-key", "$(cat f)"]`:                       `"args": ["--api-key", "[REDACTED]"]`,
+		`"args": ["--api-key", "hunter2"]`:                        `"args": ["--api-key", "[REDACTED]"]`,
+		`"args": ["--api-key", "$(cat f)", "--token", "hunter2"]`: `"args": ["--api-key", "[REDACTED]", "--token", "[REDACTED]"]`,
+		`"args": ["--api-key", "$(a)hunter2"]`:                    `"args": ["--api-key", "[REDACTED]"]`,
+		`"args": ["--api-key", "x$(cmd)"]`:                        `"args": ["--api-key", "[REDACTED]"]`,
+		`['--api-key', '$(cat f)']`:                               `['--api-key', '[REDACTED]']`,
+		// A value in single quotes that close the quoted text its label stands in, as in a JSON
+		// body: the shell runs the substitution, but the value is replaced, as on main.
+		`curl -d '{"token":'$(cat f)'}' https://x`:                      `curl -d '{"token":'[REDACTED]'}' https://x`,
+		`curl -d '{"token":'$(cat f)',"password":"hunter2"}' https://x`: `curl -d '{"token":'[REDACTED]',"password":"[REDACTED]"}' https://x`,
+		`curl -d '{"token":'hunter2'}' https://x`:                       `curl -d '{"token":'[REDACTED]'}' https://x`,
+		`curl -d '{"token":'$(a)hunter2'}' https://x`:                   `curl -d '{"token":'[REDACTED]'}' https://x`,
+		`curl -d '{"token":'x$(cmd)'}' https://x`:                       `curl -d '{"token":'[REDACTED]'}' https://x`,
+		// Literal text in the reopened quoted text goes on with the value, after blanks too, the
+		// substitution nested or not, and past what would end a shell word, which is literal in
+		// single quotes; the quote stays. Structure after it does not.
+		`curl -d '{"token":'$(cat f)'hunter2"}' https://x`:         `curl -d '{"token":'[REDACTED]'"}' https://x`,
+		`curl -d '{"token":'$(cat $(ls f))'hunter2"}' https://x`:   `curl -d '{"token":'[REDACTED]'"}' https://x`,
+		`curl -d '{"token":'$(cat f)' hunter2"}' https://x`:        `curl -d '{"token":'[REDACTED]'"}' https://x`,
+		`curl -d '{"token":'$(cat f)'hunter2' https://x`:           `curl -d '{"token":'[REDACTED]'' https://x`,
+		`curl -d '{"token":'$(cat f)' }' https://x`:                `curl -d '{"token":'[REDACTED]' }' https://x`,
+		`curl -d '{"password":'$(cat f)'p&ss hunter2"}' https://x`: `curl -d '{"password":'[REDACTED]'"}' https://x`,
+		`curl 'https://x/?token='$(cat f)'&user=a'`:                `curl 'https://x/?token='[REDACTED]''`,
+		`curl 'https://x/?token='$(cat f)'hunter2&user=a'`:         `curl 'https://x/?token='[REDACTED]''`,
+		`TOKEN='$(cat f)'`:                           `TOKEN='[REDACTED]'`,
+		`curl -d "{\"token\":'$(cat f)'}" https://x`: `curl -d "{\"token\":'[REDACTED]'}" https://x`,
+		// A bare value after a quoted label.
+		`{"token": $(cat f)}`:                      `{"token": $(cat f)}`,
+		`{"token": hunter2}`:                       `{"token": "[REDACTED]"}`,
+		`{"token": $(pwgen), "password": hunter2}`: `{"token": $(pwgen), "password": "[REDACTED]"}`,
+		`{"token": $(a)hunter2}`:                   `{"token": "[REDACTED]"}`,
+		`{"token": x$(cmd)}`:                       `{"token": "[REDACTED]"}`,
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q)\n  got  %q\n  want %q", input, got, want)
+		}
+		if strings.Contains(got, "hunter2") {
+			t.Errorf("RedactString(%q) kept a secret: %q", input, got)
+		}
+		if again := RedactString(got); again != got {
+			t.Errorf("RedactString(%q) is not stable: %q then %q", input, got, again)
+		}
+	}
+}
+
+// Far into a line, past where its quotes are read, literal text after a substitution is still
+// part of the secret: a redaction that cannot tell how the line is quoted replaces it.
+func TestRedactStringReplacesTextAfterASubstitutionFarIntoALine(t *testing.T) {
+	pad := strings.Repeat("x", 2*redactSubstitutionSpan)
+	for _, input := range []string{
+		`{"command":"` + pad + ` API_KEY=$(cat ~/.key)\"hunter2\""}`,
+		`{"command":"` + pad + ` curl -H \"Authorization: Bearer $(cat ~/.key)\"hunter2"}`,
+		pad + ` curl -d '{"token":'$(cat f)'hunter2"}' https://x`,
+	} {
+		if got := RedactString(input); strings.Contains(got, "hunter2") {
+			t.Errorf("RedactString(…%q) kept a secret: …%q", input[len(pad):], got[min(len(got), len(pad)):])
 		}
 	}
 }
