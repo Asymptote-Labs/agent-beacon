@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beacon.dev/spec/threat-rules/v1/predicates.schema.json",
+  "title": "Beacon Threat Rules predicate definitions",
+  "description": "A *.predicates.yaml file of a rule pack (threat-rules/v2.0): named CEL expressions its rules call like functions. CEL correctness, the uniqueness of names across the pack, that every parameter is used, and that the fixtures pass are enforced by an engine, not by this structural schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["library", "version", "definitions"],
+  "properties": {
+    "library": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "The file's identity; two files of a pack must not declare the same one."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Content revision."
+    },
+    "spec": {
+      "type": "string",
+      "pattern": "^threat-rules/v[0-9]+(\\.[0-9]+)?$",
+      "description": "Minimum Threat Rules spec version the file needs. Engines set aside a file whose spec is newer than they support, as they do a rule."
+    },
+    "description": { "type": "string" },
+    "definitions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "params", "description", "body", "tests"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "description": "How the predicate is called; unique across the pack's definitions and not a name CEL has."
+          },
+          "params": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[a-z_][a-zA-Z0-9_]*$" },
+            "description": "The names the body is written over; the body must use every one."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What the predicate is true for."
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "CEL expression over the parameters and nothing else."
+          },
+          "tests": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "verdict", "events"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "match": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "An expression that calls the predicate; may be left out only when params is [e]."
+                },
+                "verdict": { "type": "string", "enum": ["match", "no_match"] },
+                "events": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "object" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

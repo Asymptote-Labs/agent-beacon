@@ -36,11 +36,15 @@ With `--token-env`, the config instead references a personal token, created with
 variable. For other harnesses it prints the steps to add the
 server by hand.
 
+`beacon mcp managed` is separate from both: it pushes MCP servers an administrator chooses, of any
+name, to every Claude Code and Codex user on a machine from MDM.
+
 ## Commands
 
 <span id="beacon-mcp-serve" />
 <span id="beacon-mcp-doctor" />
 <span id="beacon-mcp-connect" />
+<span id="beacon-mcp-managed" />
 
 <Columns cols={2}>
   <Card title="beacon mcp serve" icon="server" href="/cli/mcp-serve">
@@ -51,6 +55,9 @@ server by hand.
   </Card>
   <Card title="beacon mcp connect" icon="plug" href="/cli/mcp-connect">
     Register Beacon Cloud MCP in every harness, and remove or inspect it with `disconnect` and `status`.
+  </Card>
+  <Card title="beacon mcp managed" icon="building" href="/cli/mcp-managed">
+    Push MCP servers to every Claude Code and Codex user on a machine from MDM.
   </Card>
 </Columns>
 

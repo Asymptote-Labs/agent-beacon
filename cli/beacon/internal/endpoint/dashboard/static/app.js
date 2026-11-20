@@ -2863,6 +2863,7 @@ function renderFindings(resp) {
   state.findingsExpanded = remapFindingExpansions(state.findings, findings, state.findingsExpanded);
   state.findings = findings;
   setText("#findings-meta", `${findings.length} finding${findings.length === 1 ? "" : "s"} across ${resp?.scanned || 0} events`);
+  renderFindingsNotice(resp?.failed || [], resp?.skipped || []);
   const tbody = $("#findings-rows");
   if (!tbody) return;
   if (!findings.length) {
@@ -2885,6 +2886,30 @@ function renderFindings(resp) {
     row.addEventListener("click", () => toggleFinding(Number(row.dataset.findingRow)));
   });
   applyFindingExpansions();
+}
+
+// The scan judged everything but two kinds of rule: one that could not be evaluated on some events
+// (most often a command line that took it past its cost limit) has no verdict there, and one that
+// needs a newer Beacon was not run at all. The findings above leave both out, so say so.
+function renderFindingsNotice(failed, skipped) {
+  const notice = $("#findings-notice");
+  if (!notice) return;
+  const parts = [];
+  if (failed.length) {
+    const rules = failed.map((f) => `${f.rule_id} on ${f.events} event${f.events === 1 ? "" : "s"}`
+      + (f.first_event_id ? ` (first ${f.first_event_id})` : "") + `: ${f.error}`);
+    parts.push(`${failed.length === 1 ? "A rule" : `${failed.length} rules`} could not be evaluated on some events, so ${failed.length === 1 ? "its" : "their"} verdict there is unknown: ${rules.join("; ")}.`);
+  }
+  if (skipped.length) {
+    parts.push(`${skipped.length === 1 ? "A rule was" : `${skipped.length} rules were`} skipped because ${skipped.length === 1 ? "it needs" : "they need"} a newer Beacon: ${skipped.join("; ")}.`);
+  }
+  if (!parts.length) {
+    notice.hidden = true;
+    notice.textContent = "";
+    return;
+  }
+  notice.hidden = false;
+  notice.textContent = `The scan is incomplete. ${parts.join(" ")}`;
 }
 
 function toggleFinding(i) {

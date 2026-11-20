@@ -135,25 +135,92 @@ func CompileMatch(expr string) (cel.Program, error) {
 
 // compileMatch is CompileMatch, also returning the checked expression.
 func compileMatch(expr string) (cel.Program, *cel.Ast, error) {
-	if strings.TrimSpace(expr) == "" {
-		return nil, nil, fmt.Errorf("empty match expression")
-	}
-	env, err := Env()
+	return (*Library)(nil).compileMatch(expr)
+}
+
+// compileMatch compiles expr against the library's environment: the engine's, with the
+// library's predicates expanded where expr calls them (compileMatcher).
+func (l *Library) compileMatch(expr string) (cel.Program, *cel.Ast, error) {
+	m, err := compileMatcher(l, expr)
+	return m.prog, m.ast, err
+}
+
+// compileMatcherUncached parses, checks and plans expr, tracked and untracked.
+func (l *Library) compileMatcherUncached(expr string) (matcher, error) {
+	env, err := l.environment()
 	if err != nil {
-		return nil, nil, fmt.Errorf("build CEL env: %w", err)
+		return matcher{}, fmt.Errorf("build CEL env: %w", err)
 	}
 	ast, iss := env.Compile(expr)
 	if iss != nil && iss.Err() != nil {
-		return nil, nil, fmt.Errorf("compile match: %w", iss.Err())
+		return matcher{}, fmt.Errorf("compile match: %w", iss.Err())
 	}
 	if ast.OutputType() != cel.BoolType {
-		return nil, nil, fmt.Errorf("match expression must evaluate to bool, got %s", ast.OutputType())
+		return matcher{}, fmt.Errorf("match expression must evaluate to bool, got %s", ast.OutputType())
 	}
 	prog, err := env.Program(ast, cel.CostLimit(evalCostLimit), cel.OptimizeRegex(prefilteredMatches))
 	if err != nil {
-		return nil, nil, fmt.Errorf("build CEL program: %w", err)
+		return matcher{}, fmt.Errorf("build CEL program: %w", err)
 	}
-	return prog, ast, nil
+	u, err := newUntracked(env, ast, evalCostLimit)
+	if err != nil {
+		return matcher{}, fmt.Errorf("build CEL program: %w", err)
+	}
+	return matcher{prog: prog, ast: ast, actions: eventActions(ast.NativeRep().Expr()), derived: selectsDerivedField(ast), untracked: u}, nil
+}
+
+// matchCache holds what compiling an expression gave, for one set of definitions: the matcher,
+// or the error. An expression means the same every time it is compiled with the same
+// definitions and the same cost limit, and a matcher is safe to share: its programs are, and
+// so is what its untracked program has learned of its bounds (untracked.learn), which the
+// rules that share the expression then share.
+type matchCache struct {
+	mu      sync.Mutex
+	matches map[matchKey]cachedMatch
+}
+
+type matchKey struct {
+	expr  string
+	limit uint64
+}
+
+type cachedMatch struct {
+	match matcher
+	err   error
+}
+
+// maxCachedMatches bounds a cache. A pack has a hundred expressions or so. A process that
+// compiles arbitrary ones (a linter run over many packs, a fuzzer) fills it, and then the
+// cache keeps what it holds and an expression it does not hold is compiled where it is used:
+// the rule of every process-wide table here (the pattern table in regexcall.go).
+const maxCachedMatches = 4096
+
+// plainMatches is the cache of expressions compiled with no definitions.
+var plainMatches matchCache
+
+func (l *Library) matchCache() *matchCache {
+	if l == nil {
+		return &plainMatches
+	}
+	return &l.matches
+}
+
+func (c *matchCache) get(key matchKey) (cachedMatch, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	m, ok := c.matches[key]
+	return m, ok
+}
+
+func (c *matchCache) put(key matchKey, m cachedMatch) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.matches == nil {
+		c.matches = map[matchKey]cachedMatch{}
+	}
+	if len(c.matches) < maxCachedMatches {
+		c.matches[key] = m
+	}
 }
 
 // selectsField reports whether the checked expression selects a field named name anywhere,
@@ -171,12 +238,12 @@ func selectsField(ast *cel.Ast, name string) bool {
 // EvalMatch runs a compiled match program against one event and reports whether it
 // matched. A non-bool result is treated as an evaluation error.
 //
-// Derived fields (see DerivedFields) are filled on a copy of the event first, so a caller
-// holding only a program sees the same values a CompiledRule does. CompiledRule skips that
-// step for rules that never reference a derived field, and ScanEvents and EventScanner do it
-// once per event for all the rules that do.
+// The program reads the event with its derived fields (see DerivedFields) filled, so a caller
+// holding only a program sees the same values a CompiledRule does; a rule that never reads a
+// derived field skips that step, and a scan does it once per event for all the rules that do.
+// It is evaluated as a scan evaluates a rule (expressions.evaluate), with no action to skip.
 func EvalMatch(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
-	return evalMatch(prog, newEventActivation(withDerivedFields(event)))
+	return evalAlone(matcher{prog: prog, derived: true}, event)
 }
 
 func evalMatch(prog cel.Program, act *eventActivation) (bool, error) {

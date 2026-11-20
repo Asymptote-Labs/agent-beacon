@@ -15,3 +15,11 @@ func IsSecretFile(string) bool { return false }
 
 // SecureSecretDir is a no-op off Windows, where a root-owned 0700 directory is already private.
 func SecureSecretDir(string) error { return nil }
+
+// WriteUserSecretFile replaces path with data as a 0600 file, like WriteSecretFile.
+func WriteUserSecretFile(path string, data []byte) error {
+	return atomicfile.Write(path, data, 0600)
+}
+
+// SecureUserSecretDir is a no-op off Windows, where the account's own 0700 directory is private.
+func SecureUserSecretDir(string) error { return nil }

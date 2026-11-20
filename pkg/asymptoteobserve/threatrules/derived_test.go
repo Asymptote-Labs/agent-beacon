@@ -13,23 +13,37 @@ import (
 )
 
 func TestDerivedFieldsAreReadFromTheSchema(t *testing.T) {
-	want := []string{ParsedCommandsPath, SystemInstructionsTextPath, ToolResultTextPath}
+	want := []string{ParsedCommandsPath, ParsedIncompletePath, SystemInstructionsTextPath, ToolResultTextPath}
 	if got := DerivedFields(); !slices.Equal(got, want) {
 		t.Fatalf("DerivedFields = %q, want %q", got, want)
 	}
+	derived := func(expr string) bool {
+		t.Helper()
+		_, ast, err := compileMatch(expr)
+		if err != nil {
+			t.Fatalf("%s: %v", expr, err)
+		}
+		return selectsDerivedField(ast)
+	}
+	// Every derived field, including one added after this test was written, and one reached
+	// inside a comprehension over something else.
+	exprs := []string{`["rm"].exists(n, e.command.parsed_commands.exists(c, c.name == n))`}
 	for _, path := range DerivedFields() {
-		name := path[strings.LastIndex(path, ".")+1:]
-		if !referencesDerivedField("e." + path + `.contains("x")`) {
-			t.Errorf("a rule naming %s is not marked as needing derivation", name)
+		exprs = append(exprs, "dyn(e."+path+") != null")
+	}
+	for _, expr := range exprs {
+		if !derived(expr) {
+			t.Errorf("a rule that selects a derived field is not marked as needing derivation: %s", expr)
 		}
 	}
 	for _, expr := range []string{
-		`e.gen_ai.system_instructions == null || e.prompt.text == "x"`,
-		// The other command fields, and a command line that merely says "parsed".
+		`e.prompt.text == "x" || e.file.path.endsWith(".env")`,
+		// The other command fields, and a derived field's name in a string, which selects nothing.
 		`e.command.command.matches("parsed") && e.command.output != ""`,
+		`e.command.command.contains("parsed_commands") || e.prompt.text == "result_text"`,
 	} {
-		if referencesDerivedField(expr) {
-			t.Errorf("a rule naming no derived field is marked as needing derivation: %s", expr)
+		if derived(expr) {
+			t.Errorf("a rule that selects no derived field is marked as needing derivation: %s", expr)
 		}
 	}
 }
@@ -90,6 +104,8 @@ func setDerived(t *testing.T, v reflect.Value, segments []string, value string) 
 			field.SetString(value)
 		case reflect.Slice:
 			field.Set(reflect.MakeSlice(field.Type(), 1, 1))
+		case reflect.Bool:
+			field.SetBool(true)
 		default:
 			t.Fatalf("derived field %q is a %s", segments[0], field.Kind())
 		}

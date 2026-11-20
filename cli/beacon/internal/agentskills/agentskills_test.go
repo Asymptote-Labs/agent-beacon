@@ -11,10 +11,6 @@ import (
 
 const publishedSkills = "../../../../agent-skills/skills"
 
-func normalize(data []byte) string {
-	return strings.ReplaceAll(string(data), "\r\n", "\n")
-}
-
 // The embedded copy is what onboarding installs; the published copy is what marketplaces ship.
 // They must be the same skills. Edit agent-skills/skills and copy it here.
 func TestEmbeddedSkillsMatchPublishedSkills(t *testing.T) {
@@ -25,7 +21,7 @@ func TestEmbeddedSkillsMatchPublishedSkills(t *testing.T) {
 		}
 		rel, _ := filepath.Rel(publishedSkills, p)
 		data, err := os.ReadFile(p)
-		published[filepath.ToSlash(rel)] = normalize(data)
+		published[filepath.ToSlash(rel)] = string(data)
 		return err
 	})
 	if err != nil {
@@ -37,7 +33,7 @@ func TestEmbeddedSkillsMatchPublishedSkills(t *testing.T) {
 			return err
 		}
 		data, err := embedded.ReadFile(p)
-		embeddedFiles[strings.TrimPrefix(p, "skills/")] = normalize(data)
+		embeddedFiles[strings.TrimPrefix(p, "skills/")] = string(data)
 		return err
 	})
 	if err != nil {

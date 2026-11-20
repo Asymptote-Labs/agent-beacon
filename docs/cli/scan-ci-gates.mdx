@@ -37,6 +37,10 @@ beacon scan --fail-on high
 
 The `--fail-on` check evaluates every finding from the scan before `--min-severity` filters display output. This keeps the exit code accurate even when the printed output is narrowed.
 
+## Incomplete scans
+
+A rule can fail to evaluate on an event, most often because a command line took it past the engine's cost limit. That rule's verdict on that event is unknown, and nothing else is affected: every other rule still judges the event, and the rule still judges every other event. `beacon scan` prints the findings it has, names each rule it could not evaluate on stderr with how many events and the first of them, and exits non-zero with `scan incomplete`, whether or not you pass `--fail-on`. With `--json`, stdout stays the findings array.
+
 ## JSON output
 
 Combine JSON output with severity gates for automation:

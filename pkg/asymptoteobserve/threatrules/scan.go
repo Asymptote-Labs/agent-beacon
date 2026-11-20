@@ -2,7 +2,6 @@ package threatrules
 
 import (
 	"fmt"
-	"slices"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -16,10 +15,7 @@ import (
 // fields are worked out once, and only when a rule that reads them is evaluated.
 type EventScanner struct {
 	rules []*CompiledRule
-	// byAction lists, for each action some rule is limited to, the rules that can match an event
-	// with that action, in rule order; anyAction lists them for every other action.
-	byAction  map[string][]int
-	anyAction []int
+	match expressions // the rules' matches
 }
 
 // NewEventScanner returns a scanner over single-event rules. A correlation rule needs the events
@@ -34,24 +30,11 @@ func NewEventScanner(rules []*CompiledRule) (*EventScanner, error) {
 }
 
 func newEventScanner(rules []*CompiledRule) *EventScanner {
-	s := &EventScanner{rules: rules, byAction: map[string][]int{}}
+	match := make([]matcher, len(rules))
 	for i, r := range rules {
-		if r.match.actions == nil {
-			s.anyAction = append(s.anyAction, i)
-		}
+		match[i] = r.match
 	}
-	for i, r := range rules {
-		for action := range r.match.actions {
-			if _, ok := s.byAction[action]; !ok {
-				s.byAction[action] = slices.Clone(s.anyAction)
-			}
-			s.byAction[action] = append(s.byAction[action], i)
-		}
-	}
-	for _, rs := range s.byAction {
-		slices.Sort(rs)
-	}
-	return s
+	return &EventScanner{rules: rules, match: newExpressions(match)}
 }
 
 // ScanEvent returns a finding for every rule that matches the event, in rule order, with the event
@@ -65,11 +48,20 @@ func (s *EventScanner) ScanEvent(event asymptoteobserve.Event) ([]Finding, error
 // are then shared with whatever else evaluates it (StepMatcher.AnyStep).
 func (s *EventScanner) ScanPrepared(p *PreparedEvent) ([]Finding, error) {
 	var findings []Finding
-	err := s.scan(&p.in, func(r int) {
-		findings = append(findings, s.rules[r].newFinding([]asymptoteobserve.Event{p.event}))
+	var failed error
+	s.match.evaluate(&p.in, nil, func(r int, held bool, err error) bool {
+		if err != nil {
+			// The first failure ends the scan: the caller must not act on an incomplete one.
+			failed = ruleError(s.rules[r].rule.ID, err)
+			return false
+		}
+		if held {
+			findings = append(findings, s.rules[r].newFinding([]asymptoteobserve.Event{p.event}))
+		}
+		return true
 	})
-	if err != nil {
-		return nil, err
+	if failed != nil {
+		return nil, failed
 	}
 	return findings, nil
 }
@@ -88,26 +80,4 @@ func PrepareEvent(event asymptoteobserve.Event) *PreparedEvent {
 	p := &PreparedEvent{event: event}
 	p.in.event = &p.event
 	return p
-}
-
-// scan calls hit with the index of every rule that matches the event, in rule order.
-func (s *EventScanner) scan(in *eventInput, hit func(rule int)) error {
-	candidates, ok := s.byAction[in.event.Event.Action]
-	if !ok {
-		candidates = s.anyAction
-	}
-	for _, r := range candidates {
-		rule := s.rules[r]
-		act := in.activation(rule.derived)
-		matched, err := evalObserved(rule.match.program(act), act)
-		if err != nil {
-			// Name the rule: an evaluation error belongs to the rule, not to the log, and the
-			// operator needs to know which to remove.
-			return fmt.Errorf("rule %q: %w", rule.rule.ID, err)
-		}
-		if matched {
-			hit(r)
-		}
-	}
-	return nil
 }

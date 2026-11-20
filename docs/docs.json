@@ -74,6 +74,13 @@
               },
               "cloud/sessions",
               "cloud/findings",
+              {
+                "group": "Guardrails",
+                "pages": [
+                  "cloud/guardrails",
+                  "cloud/policy-library"
+                ]
+              },
               "deployment/managed-mcp",
               {
                 "group": "Lenses",
@@ -382,7 +389,8 @@
                 "pages": [
                   "cli/mcp-serve",
                   "cli/mcp-doctor",
-                  "cli/mcp-connect"
+                  "cli/mcp-connect",
+                  "cli/mcp-managed"
                 ]
               },
               "cli/memory",
@@ -396,6 +404,8 @@
                   "cli/rules-remove",
                   "cli/rules-pull",
                   "cli/rules-lint",
+                  "cli/rules-diff",
+                  "cli/rules-candidates",
                   "cli/rules-fields"
                 ]
               },
@@ -581,6 +591,13 @@
                 "expanded": true,
                 "pages": [
                   "guides/kandji-otlp-forward-mdm"
+                ]
+              },
+              {
+                "group": "Microsoft Configuration Manager",
+                "expanded": true,
+                "pages": [
+                  "guides/configmgr-windows-mdm"
                 ]
               }
             ]

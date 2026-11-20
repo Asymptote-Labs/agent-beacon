@@ -5,11 +5,11 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/detect"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
 
 type LensDataV1 = asymptoteobserve.LensDataV1
@@ -181,37 +181,32 @@ func lensFindings(records []EventRecord, opts LensDataOptions) (*asymptoteobserv
 		// Scanning nothing would report a clean scan of a trace no rule ever saw.
 		return nil, errors.New("no live events to scan")
 	}
-	compiled, skipped, err := compileActiveRules(opts.UserMode, opts.RulesDir)
-	if err != nil {
-		return nil, err
-	}
-	events := make([]asymptoteobserve.Event, 0, len(records))
-	for _, record := range records {
-		event := record.Event
-		// Only scan copies receive fallback IDs; token aggregation and source logs keep raw IDs.
-		if event.Event.ID == "" {
-			event.Event.ID = record.ID
+	report, err := detect.Scan(opts.UserMode, opts.RulesDir, func() ([]asymptoteobserve.Event, error) {
+		events := make([]asymptoteobserve.Event, 0, len(records))
+		for _, record := range records {
+			event := record.Event
+			// A finding's evidence cites trace.events[].id, which is the event's own ID or, for an
+			// event without one, its record's. Only these scan copies get the fallback; token
+			// aggregation and source logs keep raw IDs.
+			if event.Event.ID == "" {
+				event.Event.ID = record.ID
+			}
+			events = append(events, event)
 		}
-		events = append(events, event)
-	}
-	// Same reason as RunScan: the log is in append order, not the order things happened, and
-	// ordered correlation rules miss without this.
-	threatrules.SortEvents(events)
-	found, err := threatrules.ScanEvents(compiled, events)
+		return events, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	threatrules.SortFindings(found)
 
-	taxonomy := make(map[string]map[string]string, len(compiled))
-	for _, rule := range compiled {
+	taxonomy := make(map[string]map[string]string, len(report.Rules))
+	for _, rule := range report.Rules {
 		taxonomy[rule.Rule().ID] = rule.Rule().Taxonomy
 	}
-	items := make([]asymptoteobserve.LensFindingV1, 0, len(found))
-	for _, f := range found {
+	items := make([]asymptoteobserve.LensFindingV1, 0, len(report.Findings))
+	for _, f := range report.Findings {
 		ids := make([]string, 0, len(f.Events))
 		for _, event := range f.Events {
-			// The scan copy uses the same explicit ID or record fallback as trace.events[].id.
 			if id := event.Event.ID; id != "" {
 				ids = append(ids, id)
 			}
@@ -226,7 +221,11 @@ func lensFindings(records []EventRecord, opts LensDataOptions) (*asymptoteobserv
 			EventIDs: ids,
 		})
 	}
-	return &asymptoteobserve.LensFindingsV1{RulesEvaluated: len(compiled), Items: items, Skipped: skipped}, nil
+	var failed []string
+	for _, f := range report.Failed {
+		failed = append(failed, f.RuleID)
+	}
+	return &asymptoteobserve.LensFindingsV1{RulesEvaluated: len(report.Rules), Items: items, Skipped: detect.SkippedStrings(report.Skipped), Failed: failed}, nil
 }
 
 // lensTokenCoverage is the trace's own line from the token coverage join, computed over just its

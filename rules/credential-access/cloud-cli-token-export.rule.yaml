@@ -1,5 +1,6 @@
 id: cloud-cli-token-export
-version: 1
+spec: threat-rules/v2.0  # needed for predicates and args
+version: 2
 title: Cloud or forge CLI prints a live access token
 description: >
   A command asks a signed-in CLI to print a usable bearer credential: gcloud auth
@@ -9,7 +10,13 @@ description: >
   touch a credential file, so credential-file-read cannot see them, but the output
   is the same secret: a token the agent now holds in context and can send anywhere.
   Legitimate uses exist (piping into docker login, a one-off API call), so review
-  what the token was used for in the same session.
+  what the token was used for in the same session. The commands are the CLI token
+  stores of the pack's credential catalog
+  (rules/concepts/credential-stores.catalog.yaml), matched on the command line read
+  as bash, wherever it runs them (a pipeline, a substitution, an assignment), so the
+  same words in a quoted string, a search pattern or an issue title do not fire. A
+  log holds GH_TOKEN=$(gh auth token) or "Bearer $(gcloud auth print-access-token)"
+  with the CLI's name redacted, and that form is matched in the text.
 severity: medium
 status: stable
 posture: detect
@@ -20,14 +27,32 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(gcloud\\s+auth\\s+(application-default\\s+)?print-(access|identity)-token\\b|gh\\s+auth\\s+token\\b|aws\\s+configure\\s+export-credentials\\b|az\\s+account\\s+get-access-token\\b|vault\\s+print\\s+token\\b|heroku\\s+auth:token\\b|doctl\\s+auth\\s+token\\b|kubectl\\s+create\\s+token\\b)") ||
-    e.command.command.matches("(?i)(\\bauth\\s+(application-default\\s+)?print-(access|identity)-token\\b|\\baccount\\s+get-access-token\\b|\\bconfigure\\s+export-credentials\\b|\\$\\(\\s*(gh\\s+auth\\s+token|vault\\s+print\\s+token|heroku\\s+auth:token|doctl\\s+auth\\s+token)\\b|\\[REDACTED\\]\\s+(auth\\s+token|print\\s+token|auth:token)\\b)")
+    e.command.parsed_commands.exists(c, credential_command(c, "likely", "cli-token")) ||
+    credential_command_redacted(e.command.command, "likely", "cli-token")
   )
 
 emit:
   reason: "Signed-in CLI printed a live access token (gcloud/gh/aws/az/vault/heroku/doctl/kubectl) \u2014 a credential now in the agent's context"
 
 tests:
+  - name: powershell_assignment_az_token
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "$t = az account get-access-token" }
+        session: { id: s1 }
+  - name: windows_az_cmd_token
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az.cmd account get-access-token --query accessToken -o tsv" }
+        session: { id: s1 }
+  - name: pwsh_command_gcloud_token
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pwsh -c \"gcloud auth print-access-token\"" }
+        session: { id: s1 }
   - name: gcloud_access_token
     verdict: match
     events:

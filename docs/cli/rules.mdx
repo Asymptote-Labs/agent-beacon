@@ -21,19 +21,25 @@ The detection engine ships in the Beacon binary, but rules are external data loa
 
 <Columns cols={2}>
   <Card title="list" icon="list" href="/cli/rules-list">
-    List the active threat-detection rules.
+    List the active threat-detection rules and the store's definitions.
   </Card>
   <Card title="add" icon="plus" href="/cli/rules-add">
     Install local rule files into the store.
   </Card>
   <Card title="remove" icon="trash" href="/cli/rules-remove">
-    Remove a rule from the store by id.
+    Remove a rule, or a definitions file, from the store.
   </Card>
   <Card title="pull" icon="cloud-arrow-down" href="/cli/rules-pull">
     Fetch an explicit rule pack URL into the store.
   </Card>
   <Card title="lint" icon="check" href="/cli/rules-lint">
     Validate rule files and run embedded fixtures.
+  </Card>
+  <Card title="diff" icon="code-compare" href="/cli/rules-diff">
+    Show which verdicts a change to a pack, or to Beacon, changes.
+  </Card>
+  <Card title="candidates" icon="magnifying-glass" href="/cli/rules-candidates">
+    List credential-looking files agents read that the catalog lacks.
   </Card>
   <Card title="fields" icon="table-list" href="/cli/rules-fields">
     Print event fields available to CEL match expressions.
@@ -73,7 +79,7 @@ tests:
 
 ## beacon rules list
 
-List the active rules and show whether each rule came from the store or the built-in baseline. The summary line counts both.
+List the active rules and show whether each rule came from the store or the built-in baseline, then the definitions files (catalogs and predicate definitions) the store holds and the predicates each provides. The summary line counts them.
 
 ```bash title="List active rules"
 beacon rules list
@@ -97,7 +103,7 @@ beacon rules add ./rules --force
 
 ## beacon rules remove
 
-Remove one rule from the store by id.
+Remove one rule from the store by id, or one definitions file by the name `beacon rules list` shows. A definitions file is refused while a rule in the store still calls one of its predicates.
 
 ```bash title="Remove a rule"
 beacon rules remove suspicious-egress-command

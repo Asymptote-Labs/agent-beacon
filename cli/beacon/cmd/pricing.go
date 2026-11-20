@@ -21,10 +21,7 @@ var pricingOpts struct {
 }
 
 func pricingUserMode() bool {
-	if pricingOpts.systemMode {
-		return false
-	}
-	return pricingOpts.userMode
+	return flagsUserMode(pricingOpts.userMode, pricingOpts.systemMode)
 }
 
 var pricingCmd = &cobra.Command{

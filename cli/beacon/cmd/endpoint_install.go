@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -313,14 +314,14 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	} else {
 		recordSkippedBackfill(cmd.ErrOrStderr(), endpointUserMode())
 	}
-	finishCloudSetup(cmd, onboarded, connectAfterInstall, summary, func() error {
+	connected := finishCloudSetup(cmd, onboarded, connectAfterInstall, summary, func() error {
 		return connectEndpointFor(cmd, endpointUserMode(), result.LogPath, backfill != nil, summary)
 	})
 	if backfill != nil {
 		// After the connect, which decides whether these sessions stay local.
 		recordLocalTraces(telemetry.TraceSourceBackfill, endpointUserMode(), *backfill)
 	}
-	installEvents.completed(selection, backfill)
+	installEvents.completed(selection, backfill, connected)
 	return nil
 }
 
@@ -351,15 +352,16 @@ var onboardingOpenDashboard = auth.OpenBrowser
 // finishCloudSetup connects the endpoint when the wizard or --connect asked for it, and then
 // registers Beacon Cloud MCP when the wizard kept it selected. MCP is registered only once the
 // endpoint forwards to Beacon Cloud, since there is nothing for it to search otherwise. summary is
-// non-nil when the install closes on the wizard's short summary; connect fills it in.
-func finishCloudSetup(cmd *cobra.Command, onboarded onboardingOutcome, connectAfterInstall bool, summary *cloudSummary, connect func() error) {
+// non-nil when the install closes on the wizard's short summary; connect fills it in. It reports
+// whether connect ran and succeeded.
+func finishCloudSetup(cmd *cobra.Command, onboarded onboardingOutcome, connectAfterInstall bool, summary *cloudSummary, connect func() error) bool {
 	if !connectAfterInstall {
 		if onboarded.ConnectCloudMCP {
 			// An endpoint that was already connected keeps its device key and is not
 			// re-enrolled, but the person still asked for Beacon Cloud MCP.
 			connectCloudMCPFromOnboarding(cmd, false)
 		}
-		return
+		return false
 	}
 	// The install is complete and stands on its own; a failed connect is reported with the
 	// retry command rather than turning a working install into an error.
@@ -374,7 +376,7 @@ func finishCloudSetup(cmd *cobra.Command, onboarded onboardingOutcome, connectAf
 		if onboarded.ConnectCloudMCP {
 			fmt.Fprintln(cmd.ErrOrStderr(), "beacon: Beacon Cloud MCP was not registered either; run `beacon mcp connect` once the endpoint is connected.")
 		}
-		return
+		return false
 	}
 	recordDestinationAsymptote(cmd)
 	if summary != nil {
@@ -382,9 +384,10 @@ func finishCloudSetup(cmd *cobra.Command, onboarded onboardingOutcome, connectAf
 	}
 	if onboarded.ConnectCloudMCP {
 		connectCloudMCPFromOnboarding(cmd, summary != nil)
-		return
+		return true
 	}
 	suggestMCPConnect(out, onboarded.Connect)
+	return true
 }
 
 // showDashboard names the hosted dashboard and opens it, since that is where someone who just
@@ -426,7 +429,10 @@ func suggestMCPConnect(out io.Writer, chosenInWizard bool) {
 func runEndpointStatus(cmd *cobra.Command, args []string) error {
 	status := lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
 	if endpointOpts.jsonOutput {
-		return json.NewEncoder(os.Stdout).Encode(status)
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			lifecycle.Status
+			Enforcement bool `json:"enforcement"`
+		}{status, enforcementOn()})
 	}
 	fmt.Printf("Beacon Endpoint Agent %s\n", status.Version)
 	fmt.Printf("Config: %s\n", status.ConfigPath)
@@ -476,6 +482,9 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 	}
 	otherForwarders := len(status.ScriptForwarders) > 0 || status.SentinelForwarder != nil
 	if line := cloudStatusLine(status.ManagedIngest, endpointUserMode(), otherForwarders); line != "" {
+		fmt.Println(line)
+	}
+	if line := enforcementStatusLine(); line != "" {
 		fmt.Println(line)
 	}
 	fmt.Println(inventoryHeartbeatStatusLine(status.InventoryHeartbeat))
@@ -541,6 +550,12 @@ func runEndpointUninstall(cmd *cobra.Command, args []string) error {
 	}
 	if err := lifecycle.Uninstall(lifecycle.UninstallOptions{UserMode: endpointUserMode(), LogPath: endpointOpts.logPath, KeepLogs: endpointOpts.keepLogs, KeepConfig: endpointOpts.keepConfig}); err != nil {
 		return err
+	}
+	// Here rather than in lifecycle.Uninstall, which repair runs too: repairing must keep enforcement.
+	if endpointUserMode() {
+		if err := removeUserEnforcement(); err != nil {
+			return fmt.Errorf("removing user-mode enforcement: %w", err)
+		}
 	}
 	fmt.Println("Endpoint service, config, and managed files removed.")
 	return nil
@@ -668,9 +683,15 @@ func installHookTargetsFromEndpointInstall(report, out io.Writer, targets []stri
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
 	}
+	install := func(target string) error { return installEndpointHookTargetTo(report, os.Stdout, target, cfg) }
+	if bin, ok := enforcedHookBeacon(context.Background(), out, cfg); ok {
+		install = func(target string) error {
+			return installHooksWithEnterpriseBeacon(context.Background(), bin, cfg, "--harness", target)
+		}
+	}
 	var failed []string
 	for _, target := range targets {
-		if err := installEndpointHookTargetTo(report, os.Stdout, target, cfg); err != nil {
+		if err := install(target); err != nil {
 			failed = append(failed, target)
 			fmt.Fprintf(out, "Warning: %s hooks were not installed: %v\n", target, err)
 		}

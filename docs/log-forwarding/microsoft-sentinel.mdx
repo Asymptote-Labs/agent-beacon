@@ -205,7 +205,7 @@ The command:
 2. Writes Vector's config with the values in it and has Vector check it. If Vector rejects it, nothing changes, and a forwarder that was already running keeps running as it was.
 3. Starts Vector as a service that restarts on failure and after a reboot: `BeaconSentinelForwarder` on Windows, `beacon-sentinel-forwarder.service` on Linux, and `com.beacon.endpoint.sentinel-forwarder` on macOS.
 
-On its first start the forwarder sends the current runtime log once, including the sessions the install backfilled, then only new lines. Pass `--read-from end` to skip what is already in the log.
+On its first start the forwarder sends the current runtime log once, including the sessions the install backfilled, then only new lines. Pass `--read-from end` to skip what is already in the log, when another shipper has already sent it. With `end`, events written while the forwarder is stopped can be lost if the log fills up and rotates before it starts again.
 
 The host needs outbound HTTPS to `login.microsoftonline.com` and to the DCR's `*.ingest.monitor.azure.com` hostname. For Azure Government or another sovereign cloud, pass its Entra authority with `--authority-host`, such as `https://login.microsoftonline.us`.
 

@@ -1,11 +1,11 @@
 ---
 title: "beacon rules list"
-description: "List active Beacon threat-detection rules"
+description: "List active Beacon threat-detection rules and the store's definitions"
 ---
 
 ## Command overview
 
-`beacon rules list` prints the active threat-detection rules used by [`beacon scan`](/cli/scan).
+`beacon rules list` prints the active threat-detection rules used by [`beacon scan`](/cli/scan), and the definitions files the local store holds.
 
 ```bash title="Command syntax"
 beacon rules list [flags]
@@ -14,6 +14,19 @@ beacon rules list [flags]
 The output includes each rule id, severity, maturity status, and source. The source shows whether Beacon loaded the rule from the local store or the built-in baseline, and the closing line counts the rules from each.
 
 The built-in baseline stays active alongside the store. A store rule replaces a baseline rule only when it has the same id, so installing your own rules adds to the baseline rather than switching it off.
+
+After the rules, the command lists the definitions files in the store: the catalogs (`*.catalog.yaml`) and predicate definitions (`*.predicates.yaml`) that [`beacon rules add`](/cli/rules-add) and [`beacon rules pull`](/cli/rules-pull) install beside the rules that call them. Each line gives the file's name in the store, which [`beacon rules remove`](/cli/rules-remove) takes, what it declares (`catalog credential-stores`, `library credentials`), and the predicates it provides. A file that needs a newer Beacon is listed with the spec it needs instead. The closing line counts the definitions files too.
+
+```text title="Example output (abridged)"
+token-printed                    low      experimental store
+…
+
+Definitions in the store:
+tokens.catalog.yaml                      catalog tokens                   token_command
+tokens.predicates.yaml                   library tokens                   prints_token
+
+7 rule(s): 1 from the store, 6 from the built-in baseline; 2 definitions file(s) in the store. Store: ~/.beacon/endpoint/rules
+```
 
 ## Examples
 

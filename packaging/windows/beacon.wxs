@@ -130,7 +130,7 @@
     -->
     <CustomAction Id="BeaconUninstallEndpoint"
                   Directory="ScriptsFolder"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;uninstall-endpoint.ps1&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;uninstall-endpoint.ps1&quot; -UpgradingProductCode &quot;[UPGRADINGPRODUCTCODE]&quot;"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check" />
