@@ -180,6 +180,63 @@ It exits non-zero when no interactive console user is present. This is expected
 during login-window or pre-enrollment runs; let the recurring Rippling script
 retry after user login.
 
+## Push MCP servers
+
+Beacon can push MCP servers to every Claude Code and Codex user on a device,
+with nothing for people to do. People keep any MCP servers they add
+themselves. See [`beacon mcp managed`](/cli/mcp-managed) for where the servers
+go and what each runtime needs.
+
+Deploy a recurring custom Bash script that carries the complete server list.
+To push a new server, add it to the list in the script. To take one away,
+delete it from the list. Each run makes the device match the list, and a run
+with an unchanged list changes nothing.
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Beacon MCP push must run as root" >&2
+  exit 1
+fi
+
+test -x /opt/beacon/bin/beacon
+
+cat <<'JSON' | /opt/beacon/bin/beacon mcp managed apply --file -
+{
+  "servers": {
+    "linear": { "url": "https://mcp.linear.app/mcp" },
+    "corp-docs": { "url": "https://mcp.corp.example.com/mcp" }
+  }
+}
+JSON
+```
+
+The same script works on macOS and Linux devices, because the package installs
+`/opt/beacon/bin/beacon` on both. It does not need a logged-in user: the
+servers go into machine-wide configuration that applies to every account, and
+people pick them up the next time they start Claude Code or Codex.
+
+Keep these limits in mind:
+
+- Only `https` servers can be pushed, with literal header values. Claude Code
+  accepts nothing else for a managed server.
+- Every account on the device can read the pushed configuration. Use servers
+  that sign each person in with OAuth, and never put a personal credential in
+  a header.
+- Claude Code needs version 2.1.259 or later.
+- If you already deliver Claude Code settings with a Rippling configuration
+  profile (`com.anthropic.claudecode`), Claude Code ignores Beacon's file
+  unless that profile sets `managedSourcesBehavior` to `"merge"`.
+  `beacon mcp managed status` warns about this.
+
+Check a device:
+
+```bash
+/opt/beacon/bin/beacon mcp managed status
+```
+
 ## Inventory and remediation
 
 Rippling can report software install state, MDM status, Agent status, pending
@@ -252,7 +309,9 @@ not establish that removal will run Beacon's cleanup helper.
 
 Use this sequence:
 
-1. Remove the device from recurring Beacon configuration scripts.
+1. Remove the device from recurring Beacon configuration scripts. If it
+   received pushed MCP servers and should lose them, first run
+   `/opt/beacon/bin/beacon mcp managed remove` from a one-time root script.
 2. Copy the cleanup helper to a temporary root-only path while `/opt/beacon`
    still exists.
 3. Remove or unassign the Beacon custom installer so Rippling does not reinstall
