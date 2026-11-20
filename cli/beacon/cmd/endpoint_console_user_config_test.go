@@ -3,6 +3,8 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -146,5 +148,40 @@ func TestConsoleUserConfigCheckAcceptsAHookOnlyRuntime(t *testing.T) {
 
 	if got := consoleUserConfigCheck(); got.Status != diagnostics.StatusOK {
 		t.Errorf("status = %v (%s), want ok for a hook-configured runtime", got.Status, got.Message)
+	}
+}
+
+// Doctor's actions for a system endpoint name a command with the privilege it needs on this
+// platform: sudo on macOS and Linux, an elevated shell on Windows, which has no sudo. It used to
+// tell Windows users to run `sudo beacon endpoint repair --system`.
+func TestDoctorSystemActionsNameThePlatformsElevation(t *testing.T) {
+	stubConsoleUser(t, consoleUserInfo{Username: "alice", HomeDir: t.TempDir()}, true, nil)
+	var report strings.Builder
+	reportUserConfigRepair(&report, endpointUserConfigRepairResult{SkippedReason: "no_active_console_user"})
+
+	actions := map[string]string{
+		"repair":           doctorRepairCommand(false),
+		"install":          doctorInstallCommand(false),
+		"console user":     consoleUserConfigCheck().Action,
+		"user-config skip": report.String(),
+	}
+	for name, action := range actions {
+		if runtime.GOOS == "windows" {
+			if strings.Contains(action, "sudo") || !strings.Contains(action, "from an elevated shell") {
+				t.Errorf("%s action on Windows = %q, want an elevated shell and no sudo", name, action)
+			}
+			continue
+		}
+		if !strings.Contains(action, "sudo beacon endpoint ") {
+			t.Errorf("%s action = %q, want the sudo command", name, action)
+		}
+	}
+	for name, action := range map[string]string{
+		"repair --user":  doctorRepairCommand(true),
+		"install --user": doctorInstallCommand(true),
+	} {
+		if strings.Contains(action, "sudo") || strings.Contains(action, "elevated") {
+			t.Errorf("%s action = %q, want no elevation for a per-user endpoint", name, action)
+		}
 	}
 }

@@ -1363,7 +1363,7 @@ func consoleUserConfigCheck() diagnostics.Check {
 			Message: fmt.Sprintf("%s has no agent runtime pointed at this collector, so their "+
 				"sessions are not being captured (%s)", info.Username, detail),
 			Evidence: "console_user_not_configured",
-			Action:   "sudo beacon endpoint user-config repair-installed --system",
+			Action:   diagnostics.ElevatedCommand("beacon endpoint user-config repair-installed --system"),
 		}
 	}
 	return diagnostics.Check{
@@ -1578,18 +1578,21 @@ func checkCounts(checks []diagnostics.Check) (int, int) {
 	return failures, warnings
 }
 
+// doctorRepairCommand and doctorInstallCommand are the commands doctor's actions name. A system
+// endpoint's goes through diagnostics.ElevatedCommand, so Windows is told to use an elevated shell
+// rather than sudo, which it does not have.
 func doctorRepairCommand(userMode bool) string {
 	if userMode {
 		return "beacon endpoint repair --user"
 	}
-	return "sudo beacon endpoint repair --system"
+	return diagnostics.ElevatedCommand("beacon endpoint repair --system")
 }
 
 func doctorInstallCommand(userMode bool) string {
 	if userMode {
 		return "beacon endpoint install --user"
 	}
-	return "sudo beacon endpoint install --system"
+	return diagnostics.ElevatedCommand("beacon endpoint install --system")
 }
 
 type doctorFixPlan struct {
