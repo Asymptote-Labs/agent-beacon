@@ -5,10 +5,12 @@
 package selfupdate
 
 import (
-	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
 
 // SystemInstallDir is where a native package installs Beacon. Shared by the macOS .pkg and the
@@ -17,6 +19,21 @@ const (
 	SystemInstallDir = "/opt/beacon"
 	SystemBinDir     = "/opt/beacon/bin"
 )
+
+// WindowsInstallDir is where the MSI installs Beacon: ProgramFiles64Folder\Beacon
+// (packaging/windows/beacon.wxs), with beacon.exe in its bin directory. Read from %ProgramFiles%,
+// as the package's own scripts do, because a redirected install puts it elsewhere.
+//
+// classifyInstall does not count a binary there as InstallSystemPkg: the update manifest offers no
+// MSI and the scheduled updater has no Windows unit, so `beacon endpoint update` stays a download
+// on Windows. Only InstallPackage, which the enterprise install calls, installs an MSI.
+func WindowsInstallDir() string {
+	programFiles := os.Getenv("ProgramFiles")
+	if programFiles == "" {
+		programFiles = `C:\Program Files`
+	}
+	return filepath.Join(programFiles, "Beacon")
+}
 
 // SystemSupportDir holds endpoint config and self-update state for the system install.
 //
@@ -97,7 +114,11 @@ func StateDir() string {
 	return filepath.Join(SystemSupportDir(), "updates")
 }
 
-// SystemBeaconPath is the installed beacon binary the launchd updater invokes.
+// SystemBeaconPath is the beacon binary a system install puts on this machine: the native
+// package's /opt/beacon/bin/beacon, or on Windows the MSI's %ProgramFiles%\Beacon\bin\beacon.exe.
 func SystemBeaconPath() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(WindowsInstallDir(), "bin", "beacon.exe")
+	}
 	return filepath.Join(SystemBinDir, "beacon")
 }

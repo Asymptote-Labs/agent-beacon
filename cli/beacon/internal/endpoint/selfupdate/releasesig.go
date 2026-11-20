@@ -8,14 +8,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 // pinnedReleaseKeys holds the OpenPGP fingerprints, one per line, of the keys allowed to sign a
-// release's checksums.txt; two only while a key is rotated. It pins Beacon's Linux release key, so
-// a .deb or .rpm is installed only if a checksums.txt signed by one of these keys lists it, on top
-// of the manifest's SHA-256. The release copy of packaging/linux/install.sh is stamped from the
+// release's checksums.txt; two only while a key is rotated. It pins Beacon's release key (the one
+// that signs Linux releases), so a .deb, .rpm, or Windows .msi or .zip is installed only if a
+// checksums.txt signed by one of these keys lists it, on top of the SHA-256 it was offered with. The release copy of packaging/linux/install.sh is stamped from the
 // same file, so changing the pinned key is a change to release-key.fingerprint alone (published in
 // docs/platforms/linux.mdx#release-signing).
 //
@@ -39,7 +40,11 @@ var releaseSignatureRetryDelay = 5 * time.Second
 // lists the package's file name with the downloaded bytes' SHA-256. checksums.txt is beside the
 // package's URL unless pkg.Checksums says where it is. They are fetched into a new directory under
 // workDir, removed after.
+//
+// A Windows artifact (an .msi or .zip), or any package on Windows, is verified in this process
+// rather than by gpgv or sqv, which Windows does not have; see openPGPSignatures.
 func (a *Applier) verifyReleaseSignature(ctx context.Context, pkg Package, pkgPath, workDir string) error {
+	inGo := runtime.GOOS == "windows" || isWindowsArtifact(pkg.fileName())
 	links, err := checksumLinks(pkg)
 	if err != nil {
 		return err
@@ -49,7 +54,7 @@ func (a *Applier) verifyReleaseSignature(ctx context.Context, pkg Package, pkgPa
 		return err
 	}
 	defer os.RemoveAll(dir)
-	if err := a.fetchSignedChecksums(ctx, links, dir); err != nil {
+	if err := a.fetchSignedChecksums(ctx, links, dir, inGo); err != nil {
 		var mismatch *signatureMismatchError
 		if !errors.As(err, &mismatch) {
 			return err
@@ -59,7 +64,7 @@ func (a *Applier) verifyReleaseSignature(ctx context.Context, pkg Package, pkgPa
 			return err
 		case <-time.After(releaseSignatureRetryDelay):
 		}
-		if err := a.fetchSignedChecksums(ctx, links, dir); err != nil {
+		if err := a.fetchSignedChecksums(ctx, links, dir, inGo); err != nil {
 			return err
 		}
 	}
@@ -98,8 +103,9 @@ type signatureMismatchError struct{ msg string }
 func (e *signatureMismatchError) Error() string { return e.msg }
 
 // fetchSignedChecksums downloads checksums.txt, its signature and the release key into dir and
-// checks that a pinned key signed that checksums.txt.
-func (a *Applier) fetchSignedChecksums(ctx context.Context, links SignedChecksums, dir string) error {
+// checks that a pinned key signed that checksums.txt: with gpgv or sqv, or with inGo in this
+// process (openPGPSignatures), for Windows, which has neither.
+func (a *Applier) fetchSignedChecksums(ctx context.Context, links SignedChecksums, dir string, inGo bool) error {
 	for _, f := range []struct{ name, url string }{
 		{"checksums.txt", links.URL},
 		{"checksums.txt.sig", links.SignatureURL},
@@ -109,7 +115,13 @@ func (a *Applier) fetchSignedChecksums(ctx context.Context, links SignedChecksum
 			return fmt.Errorf("download %s: %w", f.name, err)
 		}
 	}
-	signers, err := goodSignatures(ctx, dir)
+	var signers []string
+	var err error
+	if inGo {
+		signers, err = openPGPSignatures(dir, releaseKeyFingerprints)
+	} else {
+		signers, err = goodSignatures(ctx, dir)
+	}
 	if err != nil {
 		return err
 	}
