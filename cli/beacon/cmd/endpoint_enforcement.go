@@ -35,10 +35,11 @@ import (
 // activateEnforcement, which enable runs instead, and adds its other subcommands to
 // endpointEnforcementCmd.
 //
-// On a Mac or Linux machine connected to its organization in system mode, run as root, the
-// edition's package (the macOS .pkg, or the .deb or .rpm on Linux) is installed into /opt/beacon.
-// On one connected to Beacon Cloud in user mode, run without root, only the edition's beacon is
-// kept, in the user's endpoint directory (userEnterpriseBeaconPath); this build then hands that
+// On a machine connected to its organization in system mode, run as root (on Windows, elevated),
+// the edition's package is installed: the macOS .pkg or the .deb or .rpm on Linux into /opt/beacon,
+// the MSI on Windows into %ProgramFiles%\Beacon. On one connected to Beacon Cloud in user mode, run
+// without root, only the edition's beacon is kept, in the user's endpoint directory
+// (userEnterpriseBeaconPath; on Windows taken from the release's zip); this build then hands that
 // binary the enforcement subcommands it lacks and, while enforcement is on, its hook installs,
 // whose enforce entries only the enterprise edition writes.
 
@@ -74,11 +75,13 @@ var endpointEnforcementCmd = &cobra.Command{
 	Long: `Policy enforcement for AI coding agents, part of Beacon's enterprise edition.
 
 enable installs the enterprise edition, if the platform this machine is connected to offers it,
-and turns enforcement on. It runs on macOS (Apple Silicon) and Linux (amd64, arm64):
+and turns enforcement on. It runs on macOS (Apple Silicon), Linux (amd64, arm64) and Windows (x64):
   - on a machine connected to Beacon Cloud in user mode (beacon endpoint connect), run without
-    sudo: for this user, with the edition kept in ~/.beacon/endpoint/enterprise
+    sudo (on Windows, from a PowerShell that is not elevated): for this user, with the edition
+    kept in ~/.beacon/endpoint/enterprise
   - on a machine connected to its organization in system mode (beacon endpoint connect --system),
-    run with sudo: for the machine, with the edition installed into /opt/beacon`,
+    run with sudo (on Windows, from an elevated PowerShell): for the machine, with the edition
+    installed into /opt/beacon, or on Windows into %ProgramFiles%\Beacon`,
 	// Unknown subcommands land here: status, update and disable come with the enterprise edition,
 	// so a user-mode install passes them, flags and all, to the one it keeps.
 	Args:               cobra.ArbitraryArgs,
@@ -88,7 +91,7 @@ and turns enforcement on. It runs on macOS (Apple Silicon) and Linux (amd64, arm
 
 var endpointEnforcementEnableCmd = &cobra.Command{
 	Use:          "enable",
-	Short:        "Turn on policy enforcement (sudo on a system-mode install)",
+	Short:        "Turn on policy enforcement (sudo, or elevated on Windows, on a system-mode install)",
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runEndpointEnforcementEnable,
@@ -116,18 +119,58 @@ var (
 )
 
 // errEnforcementPlatform is enable on a machine the enterprise edition is not built for.
-var errEnforcementPlatform = errors.New("policy enforcement is available for macOS on Apple Silicon and for Linux on amd64 and arm64 only")
+var errEnforcementPlatform = errors.New("policy enforcement is available for macOS on Apple Silicon, Linux on amd64 and arm64, and Windows on x64 only")
 
 // defaultEnforcementPlatformSupported reports whether the enterprise edition is built for this
-// machine: Apple Silicon Macs, and Linux on amd64 and arm64.
+// machine.
 func defaultEnforcementPlatformSupported() bool {
-	switch runtime.GOOS {
+	return enforcementPlatformSupportedOn(runtime.GOOS, runtime.GOARCH)
+}
+
+// enforcementPlatformSupportedOn reports whether the enterprise edition is built for goos/goarch:
+// Apple Silicon Macs, Linux on amd64 and arm64, and Windows on amd64 (there is no Windows ARM
+// build of Beacon at all).
+func enforcementPlatformSupportedOn(goos, goarch string) bool {
+	switch goos {
 	case "darwin":
-		return runtime.GOARCH == "arm64"
+		return goarch == "arm64"
 	case "linux":
-		return runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64"
+		return goarch == "amd64" || goarch == "arm64"
+	case "windows":
+		return goarch == "amd64"
 	}
 	return false
+}
+
+// enforcementGOOS is the platform enable's advice is written for. A variable so tests can ask for
+// each platform's.
+var enforcementGOOS = runtime.GOOS
+
+// privilegedCommand is how to run beacon at bin with args with the rights a system install needs:
+// under sudo, or on Windows from an elevated PowerShell (privilegeNeeded says so), where a path
+// under Program Files has to be quoted and called.
+func privilegedCommand(bin, args string) string {
+	if enforcementGOOS == "windows" {
+		return `& "` + bin + `" ` + args
+	}
+	return "sudo " + bin + " " + args
+}
+
+// privilegeNeeded introduces a privilegedCommand: what a system install needs, and on Windows where
+// to run it.
+func privilegeNeeded() string {
+	if enforcementGOOS == "windows" {
+		return "administrator rights. From an elevated PowerShell (Run as administrator):"
+	}
+	return "root:"
+}
+
+// unprivileged is how to run a user-mode command: without sudo, or on Windows not elevated.
+func unprivileged() string {
+	if enforcementGOOS == "windows" {
+		return "from a PowerShell that is not elevated"
+	}
+	return "without sudo"
 }
 
 // defaultLocateUserEnterpriseRelease asks for the package a user-mode install takes its beacon
@@ -186,9 +229,11 @@ func enforcementMode() (userMode bool, err error) {
 	case !root && enforcementUserConnected():
 		return true, nil
 	case root:
-		return false, fmt.Errorf("this machine is not connected to an organization in system mode. If Beacon runs in user mode here, run this without sudo:\n  beacon endpoint enforcement enable\nTo connect it in system mode instead:\n  sudo %s endpoint connect --system --dashboard-url https://asymptotelabs.ai", selfupdate.SystemBeaconPath())
+		return false, fmt.Errorf("this machine is not connected to an organization in system mode. If Beacon runs in user mode here, run this %s:\n  beacon endpoint enforcement enable\nTo connect it in system mode instead:\n  %s",
+			unprivileged(), privilegedCommand(selfupdate.SystemBeaconPath(), "endpoint connect --system --dashboard-url https://asymptotelabs.ai"))
 	case enforcementConnected():
-		return false, fmt.Errorf("turning on enforcement installs Beacon's enterprise edition, which needs root:\n  sudo %s endpoint enforcement enable", runningBeaconPath())
+		return false, fmt.Errorf("turning on enforcement installs Beacon's enterprise edition, which needs %s\n  %s",
+			privilegeNeeded(), privilegedCommand(runningBeaconPath(), "endpoint enforcement enable"))
 	default:
 		return false, errors.New("policy enforcement needs Beacon Cloud. Connect this machine first:\n  beacon login && beacon endpoint connect")
 	}
@@ -242,10 +287,12 @@ func checkEnforcementPrerequisites() error {
 		return errEnforcementPlatform
 	}
 	if !enforcementHasRoot() {
-		return fmt.Errorf("turning on enforcement installs Beacon's enterprise edition, which needs root:\n  sudo %s endpoint enforcement enable", runningBeaconPath())
+		return fmt.Errorf("turning on enforcement installs Beacon's enterprise edition, which needs %s\n  %s",
+			privilegeNeeded(), privilegedCommand(runningBeaconPath(), "endpoint enforcement enable"))
 	}
 	if !enforcementConnected() {
-		return fmt.Errorf("this machine is not connected to an organization in system mode. Connect it first:\n  sudo %s endpoint connect --system --dashboard-url https://asymptotelabs.ai", selfupdate.SystemBeaconPath())
+		return fmt.Errorf("this machine is not connected to an organization in system mode. Connect it first:\n  %s",
+			privilegedCommand(selfupdate.SystemBeaconPath(), "endpoint connect --system --dashboard-url https://asymptotelabs.ai"))
 	}
 	who, found, err := enforcementUserModeProbe()
 	if err != nil {
@@ -316,8 +363,8 @@ func explainEnterpriseRefusal(dashboard string, err error) error {
 	}
 	switch refused.Status {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("%s did not accept this machine's device key (revoked or expired?). Reconnect with:\n  sudo %s endpoint connect --system --dashboard-url %s",
-			dashboard, selfupdate.SystemBeaconPath(), dashboard)
+		return fmt.Errorf("%s did not accept this machine's device key (revoked or expired?). Reconnect with:\n  %s",
+			dashboard, privilegedCommand(selfupdate.SystemBeaconPath(), "endpoint connect --system --dashboard-url "+dashboard))
 	case http.StatusForbidden, http.StatusNotFound:
 		return fmt.Errorf("%s refused: %s", dashboard, firstNonEmpty(refused.Detail, "policy enforcement is not available for this organization"))
 	default:
@@ -349,19 +396,50 @@ func probeConsoleUserMode() (string, []string, error) {
 // consoleUserModeFindings is what shows one user running Beacon in user mode.
 var consoleUserModeFindings = func(info consoleUserInfo) []string {
 	var found []string
-	if runtime.GOOS == "linux" {
+	switch runtime.GOOS {
+	case "linux":
 		found = linuxUserModeUnits(info, systemdUserUnitState)
-	} else if u, err := user.Lookup(info.Username); err == nil {
-		for _, label := range []string{service.UserLabel, service.ForwarderLabel} {
-			if exec.Command("launchctl", "print", "gui/"+u.Uid+"/"+label).Run() == nil {
-				found = append(found, fmt.Sprintf("%s is loaded in %s's session", label, info.Username))
+	case "windows":
+		found = windowsUserModeFindings(info, service.SupervisedCollectorRunning)
+	default:
+		if u, err := user.Lookup(info.Username); err == nil {
+			for _, label := range []string{service.UserLabel, service.ForwarderLabel} {
+				if exec.Command("launchctl", "print", "gui/"+u.Uid+"/"+label).Run() == nil {
+					found = append(found, fmt.Sprintf("%s is loaded in %s's session", label, info.Username))
+				}
 			}
 		}
 	}
-	userLog := filepath.Join(info.HomeDir, writer.UserLogPath)
+	userLog := filepath.Join(info.HomeDir, filepath.FromSlash(writer.UserLogPath))
 	settings := filepath.Join(info.HomeDir, ".claude", "settings.json")
-	if data, err := os.ReadFile(settings); err == nil && strings.Contains(string(data), userLog) {
+	if data, err := os.ReadFile(settings); err == nil && mentionsPath(string(data), userLog) {
 		found = append(found, fmt.Sprintf("Claude Code hooks in %s write to %s", settings, userLog))
+	}
+	return found
+}
+
+// mentionsPath reports whether JSON text names path, as written or JSON-escaped: a Windows path's
+// backslashes are doubled in settings.json.
+func mentionsPath(text, path string) bool {
+	return strings.Contains(text, path) || strings.Contains(text, strings.ReplaceAll(path, `\`, `\\`))
+}
+
+// windowsUserModeFindings is what shows a user running Beacon in user mode on Windows, which has no
+// per-user service manager: the supervised collector their user-mode install started, when it is
+// still running, and a user-mode connection to Beacon Cloud, whose forwarder ships their own log.
+// The connection is reported by its files, as asymptote.Connected reads them, since no service
+// manager can say whether its forwarder runs.
+func windowsUserModeFindings(info consoleUserInfo, running func(pidfile string) bool) []string {
+	var found []string
+	base := filepath.Join(info.HomeDir, ".beacon", "endpoint")
+	if pidfile := service.SupervisedPIDFile(base); running(pidfile) {
+		found = append(found, fmt.Sprintf("a user-mode collector is running for %s (%s)", info.Username, pidfile))
+	}
+	cloud := filepath.Join(base, asymptote.DirName)
+	_, enrolled := os.Stat(filepath.Join(cloud, asymptote.EnrollmentFileName))
+	_, rendered := os.Stat(filepath.Join(cloud, asymptote.VectorConfigName))
+	if enrolled == nil && rendered == nil {
+		found = append(found, fmt.Sprintf("%s is connected to Beacon Cloud in user mode (%s)", info.Username, cloud))
 	}
 	return found
 }
@@ -437,15 +515,23 @@ func userModeActiveError(who string, found []string) error {
 	} else {
 		fmt.Fprintf(&b, "Stop user mode first. As %s:\n", who)
 	}
-	if runtime.GOOS == "linux" {
+	switch enforcementGOOS {
+	case "linux":
 		fmt.Fprintf(&b, "  systemctl --user disable --now %s\n", strings.Join(userModeSystemdUnits, " "))
-	} else {
+	case "windows":
+		// No per-user service manager: disconnect stops and removes the user-mode forwarder, and
+		// uninstall the supervised collector and the user-mode setup.
+		fmt.Fprintf(&b, "  beacon endpoint disconnect\n  beacon endpoint uninstall\n")
+	default:
 		for _, label := range []string{service.UserLabel, service.ForwarderLabel, service.InventoryLabel, service.SessionSyncLabel} {
 			fmt.Fprintf(&b, "  launchctl bootout gui/$(id -u)/%s; launchctl disable gui/$(id -u)/%s\n", label, label)
 		}
 	}
-	fmt.Fprintf(&b, "then point the hooks at system mode and run this again:\n")
-	fmt.Fprintf(&b, "  sudo %s endpoint user-config repair-installed --system --harness claude,codex", selfupdate.SystemBeaconPath())
+	fmt.Fprintf(&b, "then point the hooks at system mode and run this again")
+	if enforcementGOOS == "windows" {
+		fmt.Fprintf(&b, ", from an elevated PowerShell")
+	}
+	fmt.Fprintf(&b, ":\n  %s", privilegedCommand(selfupdate.SystemBeaconPath(), "endpoint user-config repair-installed --system --harness claude,codex"))
 	return errors.New(b.String())
 }
 
@@ -473,7 +559,8 @@ func beaconVersionLine(ctx context.Context, bin string) string {
 func defaultRunInstalledEnforcementEnable(ctx context.Context, dashboardURL string) error {
 	bin := selfupdate.SystemBeaconPath()
 	if err := runEnterpriseEnable(ctx, bin, dashboardURL); err != nil {
-		return fmt.Errorf("the enterprise edition is installed, but turning enforcement on did not finish (%v). Run it again with:\n  sudo %s endpoint enforcement enable", err, bin)
+		return fmt.Errorf("the enterprise edition is installed, but turning enforcement on did not finish (%v). Run it again with:\n  %s",
+			err, privilegedCommand(bin, "endpoint enforcement enable"))
 	}
 	return nil
 }
@@ -506,7 +593,11 @@ func defaultRunUserEnterpriseBeacon(ctx context.Context, bin string, args ...str
 }
 
 func userEnterpriseBeaconPath() string {
-	return filepath.Join(endpointconfig.BaseDir(true), userEnterpriseDirName, "beacon")
+	name := "beacon"
+	if runtime.GOOS == "windows" {
+		name = "beacon.exe"
+	}
+	return filepath.Join(endpointconfig.BaseDir(true), userEnterpriseDirName, name)
 }
 
 func userEnforcementDir() string {

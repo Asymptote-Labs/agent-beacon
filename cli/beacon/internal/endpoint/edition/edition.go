@@ -8,15 +8,17 @@
 // The platform can stop an install but never choose what gets installed: the package must match
 // the checksum, and report the expected version and edition once installed, or the install is
 // rolled back. On macOS it must also carry a Developer ID signature from the Apple team pinned in
-// selfupdate and pass Gatekeeper; on Linux it must be listed in a checksums.txt signed by Beacon's
-// pinned release key, whose links the platform's answer carries beside the package's.
+// selfupdate and pass Gatekeeper; on Linux and Windows it must be listed in a checksums.txt signed
+// by Beacon's pinned release key, whose links the platform's answer carries beside the package's.
 //
 // A user-mode install takes only the package's beacon binary instead (InstallUser), checked the
-// same way: from the macOS package, or on Linux from the release's tarball.
+// same way: from the macOS package, on Linux from the release's tarball, and on Windows from the
+// release's zip.
 package edition
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -58,6 +60,8 @@ const (
 	FormatDeb     = "deb"
 	FormatRPM     = "rpm"
 	FormatTarball = "tar.gz"
+	FormatMSI     = "msi"
+	FormatZip     = "zip"
 )
 
 // Target is the package a machine asks for: its OS and architecture, as Go names them, and the
@@ -68,30 +72,61 @@ type Target struct {
 	Format string `json:"format"`
 }
 
-// SystemTarget is the package a system install takes: the macOS package, or on Linux the native
-// package of whichever of dpkg and rpm this host has.
-func SystemTarget() Target {
-	t := Target{OS: runtime.GOOS, Arch: runtime.GOARCH, Format: FormatPkg}
-	if t.OS == "linux" {
+// SystemTarget is the package a system install takes: the macOS package, on Linux the native
+// package of whichever of dpkg and rpm this host has, and on Windows the MSI.
+func SystemTarget() Target { return systemTarget(runtime.GOOS, runtime.GOARCH) }
+
+func systemTarget(goos, goarch string) Target {
+	t := Target{OS: goos, Arch: goarch, Format: FormatPkg}
+	switch goos {
+	case "linux":
 		t.Format = FormatDeb
 		if _, err := lookPath("dpkg"); err != nil {
 			if _, err := lookPath("rpm"); err == nil {
 				t.Format = FormatRPM
 			}
 		}
+	case "windows":
+		t.Format = FormatMSI
 	}
 	return t
 }
 
 // UserTarget is the package a user-mode install takes its beacon from: the macOS package, which
-// InstallUser expands without installing, or on Linux the release's tarball, since a user cannot
-// install a .deb or .rpm.
-func UserTarget() Target {
-	t := Target{OS: runtime.GOOS, Arch: runtime.GOARCH, Format: FormatPkg}
-	if t.OS == "linux" {
+// InstallUser expands without installing, on Linux the release's tarball, since a user cannot
+// install a .deb or .rpm, and on Windows the release's zip, since an MSI installs for the machine.
+func UserTarget() Target { return userTarget(runtime.GOOS, runtime.GOARCH) }
+
+func userTarget(goos, goarch string) Target {
+	t := Target{OS: goos, Arch: goarch, Format: FormatPkg}
+	switch goos {
+	case "linux":
 		t.Format = FormatTarball
+	case "windows":
+		t.Format = FormatZip
 	}
 	return t
+}
+
+// verifiedBySignedChecksums reports whether target's packages are held to the release's signed
+// checksums.txt, whose links the platform's answer must then carry: everywhere but macOS, whose
+// packages carry Beacon's Developer ID signature instead.
+func verifiedBySignedChecksums(target Target) bool {
+	return target.OS == "linux" || target.OS == "windows"
+}
+
+// rollsBack reports whether a failed install of target's package is rolled back by reinstalling the
+// public package of the version installed now (Release.Rollback): a Linux .deb or .rpm, whose
+// package database would otherwise name the enterprise package, and a Windows MSI, whose files
+// belong to Windows Installer and are put back only by installing the previous MSI.
+func rollsBack(target Target) bool {
+	switch target.OS {
+	case "linux":
+		return target.Format == FormatDeb || target.Format == FormatRPM
+	case "windows":
+		return target.Format == FormatMSI
+	}
+	return false
 }
 
 // Release is the platform's answer: one signed package and a link to it, and on Linux links to the
@@ -174,7 +209,7 @@ func LocateFor(ctx context.Context, client *http.Client, dashboardURL, deviceKey
 		Target
 		RollbackFrom string `json:"rollback_from,omitempty"`
 	}{Version: strings.TrimPrefix(version, "v"), Target: target}
-	if target.OS == "linux" && (target.Format == FormatDeb || target.Format == FormatRPM) {
+	if rollsBack(target) {
 		ask.RollbackFrom = publicVersionInstalled(ctx)
 	}
 	body, err := json.Marshal(ask)
@@ -236,14 +271,16 @@ func LocateFor(ctx context.Context, client *http.Client, dashboardURL, deviceKey
 }
 
 // checkAnswer refuses a release that is not the package target asked for, which a platform that
-// offers only the macOS package answers with, and on Linux one without the links to its signed
-// checksums.txt, or, when rollbackFrom asked for one, without the public package of that version.
+// offers only the macOS package answers with, and on Linux or Windows one without the links to its
+// signed checksums.txt, or, when rollbackFrom asked for one, without the public package of that
+// version.
 func checkAnswer(rel Release, target Target, rollbackFrom string) error {
-	if target.OS != "linux" {
+	if !verifiedBySignedChecksums(target) {
 		return nil
 	}
 	if strings.ContainsAny(rel.Name, `/\`) || !strings.HasSuffix(rel.Name, "."+target.Format) {
-		return fmt.Errorf("the platform answered with %q, not a %s package for linux/%s; it may not offer the enterprise edition for Linux yet", rel.Name, target.Format, target.Arch)
+		return fmt.Errorf("the platform answered with %q, not a %s package for %s/%s; it may not offer the enterprise edition for %s yet",
+			rel.Name, target.Format, target.OS, target.Arch, osName(target.OS))
 	}
 	if !httpsLinks(rel.URL, rel.Checksums) {
 		return errors.New("the platform's answer has no https links to the release's signed checksums")
@@ -276,9 +313,29 @@ func httpsLinks(url string, c Checksums) bool {
 	return true
 }
 
-// publicPackageName is the public release's name for its package of version for target.
+// publicPackageName is the public release's name for its package of version for target: the
+// GoReleaser package on Linux, and on Windows the MSI release.yml builds, named for x64.
 func publicPackageName(version string, target Target) string {
+	if target.OS == "windows" {
+		arch := target.Arch
+		if arch == "amd64" {
+			arch = "x64"
+		}
+		return fmt.Sprintf("BeaconEndpointAgent-%s-%s.msi", version, arch)
+	}
 	return fmt.Sprintf("beacon_%s_linux_%s.%s", version, target.Arch, target.Format)
+}
+
+func osName(goos string) string {
+	switch goos {
+	case "linux":
+		return "Linux"
+	case "windows":
+		return "Windows"
+	case "darwin":
+		return "macOS"
+	}
+	return goos
 }
 
 // publicVersionInstalled is the version of the public edition installed here, or "" when what is
@@ -298,8 +355,8 @@ func publicVersionInstalled(ctx context.Context) string {
 func Install(ctx context.Context, rel Release, currentVersion, logPath string) (selfupdate.ApplyResult, error) {
 	a := selfupdate.NewApplier(currentVersion)
 	a.LogPath = logPath
-	if runtime.GOOS == "linux" {
-		back, err := linuxRollbackPackage(ctx, rel)
+	if runtime.GOOS == "linux" || runtime.GOOS == "windows" {
+		back, err := rollbackPackage(ctx, rel)
 		if err != nil {
 			return selfupdate.ApplyResult{}, err
 		}
@@ -308,21 +365,23 @@ func Install(ctx context.Context, rel Release, currentVersion, logPath string) (
 	return a.InstallPackage(ctx, rel.pkg())
 }
 
-// linuxRollbackPackage is the package a failed install of rel reinstalls on Linux: the public
-// package of the version installed now, from the platform's answer (Release.Rollback). The
+// rollbackPackage is the package a failed install of rel reinstalls on Linux or Windows: the public
+// package of the version installed now, from the platform's answer (Release.Rollback). On Linux the
 // enterprise package's epoch ranks it above every public release, so a rollback that only copied
 // the public files back would leave the package database naming the enterprise package, and
-// neither apt, dnf nor the next public update would ever replace it. Over an enterprise install it
-// is nil: the database then names a newer enterprise package than the files, which the next
-// enterprise update still replaces.
-func linuxRollbackPackage(ctx context.Context, rel Release) (*selfupdate.Package, error) {
+// neither apt, dnf nor the next public update would ever replace it. On Windows the files belong to
+// Windows Installer, and reinstalling the previous MSI is the only rollback there is. Over an
+// enterprise install it is nil: on Linux the database then names a newer enterprise package than
+// the files, which the next enterprise update still replaces, and on Windows the self-updater
+// reports that it had nothing to reinstall.
+func rollbackPackage(ctx context.Context, rel Release) (*selfupdate.Package, error) {
 	line := installedVersionLine(ctx)
 	if selfupdate.VersionLineEdition(line) == Enterprise {
 		return nil, nil
 	}
 	version := selfupdate.VersionLineVersion(line)
 	if !updatecheck.CanCheckVersion(version) {
-		return nil, fmt.Errorf("the installed beacon (%q) is not a public release, so a failed install could not be rolled back through the package manager", strings.TrimSpace(line))
+		return nil, fmt.Errorf("the installed beacon (%q) is not a public release, so a failed install could not be rolled back by reinstalling its package", strings.TrimSpace(line))
 	}
 	back := rel.Rollback
 	if back == nil || back.Version != version {
@@ -362,7 +421,7 @@ var (
 // InstallUser puts rel's beacon at dest, for a user-mode install, which has no root to run the
 // package's installer with and must not let its postinstall set the machine up in system mode.
 // The package is checked as Install checks it (checksum, and Beacon's pinned signing team and
-// Gatekeeper on macOS, Beacon's signed checksums.txt on Linux); the binary is then taken out of
+// Gatekeeper on macOS, Beacon's signed checksums.txt on Linux and Windows); the binary is then taken out of
 // it, and must report rel's version and the enterprise edition before it replaces dest.
 func InstallUser(ctx context.Context, rel Release, dest string) error {
 	dir := filepath.Dir(dest)
@@ -376,18 +435,26 @@ func InstallUser(ctx context.Context, rel Release, dest string) error {
 	defer os.RemoveAll(stage)
 
 	tarball := strings.HasSuffix(rel.Name, "."+FormatTarball)
+	zipped := strings.HasSuffix(rel.Name, "."+FormatZip)
 	pkgPath := filepath.Join(stage, "enterprise.pkg")
-	if tarball {
+	switch {
+	case tarball:
 		pkgPath = filepath.Join(stage, "enterprise.tar.gz")
+	case zipped:
+		pkgPath = filepath.Join(stage, "enterprise.zip")
 	}
 	if err := fetchVerifiedPackage(ctx, rel.pkg(), pkgPath); err != nil {
 		return err
 	}
 	var bin string
-	if tarball {
+	switch {
+	case tarball:
 		bin = filepath.Join(stage, "beacon")
 		err = extractBeacon(pkgPath, bin)
-	} else {
+	case zipped:
+		bin = filepath.Join(stage, "beacon.exe")
+		err = extractZipBeacon(pkgPath, bin)
+	default:
 		bin, err = expandPackageBeacon(ctx, pkgPath, filepath.Join(stage, "expanded"))
 	}
 	if err != nil {
@@ -404,7 +471,44 @@ func InstallUser(ctx context.Context, rel Release, dest string) error {
 		line, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
 		return fmt.Errorf("the package's beacon reports %q, want %s, %s edition", line, rel.Version, Enterprise)
 	}
-	return os.Rename(bin, dest)
+	return replaceBinary(bin, dest, moveRunningAside)
+}
+
+// moveRunningAside is whether replaceBinary moves the binary it replaces aside first, as Windows
+// needs: it does not let a running executable be replaced or removed, only renamed, and the kept
+// enterprise beacon.exe may be running (an agent's hook install it was handed, or its own enable).
+var moveRunningAside = runtime.GOOS == "windows"
+
+// replaceBinary puts bin at dest. With aside, a binary already at dest is first renamed to a hidden
+// file beside it (the same volume, so the rename cannot turn into a copy) and removed once replaced,
+// which fails while it still runs; the next install removes what is left. A failed replacement puts
+// it back.
+func replaceBinary(bin, dest string, aside bool) error {
+	if !aside {
+		return os.Rename(bin, dest)
+	}
+	dir, base := filepath.Dir(dest), filepath.Base(dest)
+	prefix := "." + base + ".old-"
+	if earlier, err := filepath.Glob(filepath.Join(dir, prefix+"*")); err == nil {
+		for _, path := range earlier {
+			_ = os.Remove(path)
+		}
+	}
+	if _, err := os.Lstat(dest); os.IsNotExist(err) {
+		return os.Rename(bin, dest)
+	} else if err != nil {
+		return err
+	}
+	moved := filepath.Join(dir, fmt.Sprintf("%s%d", prefix, time.Now().UnixNano()))
+	if err := os.Rename(dest, moved); err != nil {
+		return fmt.Errorf("moving the kept %s aside to replace it: %w", base, err)
+	}
+	if err := os.Rename(bin, dest); err != nil {
+		_ = os.Rename(moved, dest)
+		return err
+	}
+	_ = os.Remove(moved)
+	return nil
 }
 
 // expandPackageBeacon expands the macOS package at pkgPath into expanded with pkgutil, whose
@@ -476,6 +580,70 @@ func extractBeacon(tarball, dest string) error {
 	}
 	if !found {
 		return errors.New("the release tarball holds no beacon at its root")
+	}
+	return nil
+}
+
+// extractZipBeacon writes the beacon.exe at the root of the Windows release zip at archive to dest.
+// The zip is laid out as the public release's Windows archive is, with beacon.exe, beacon-hooks.exe
+// and beacon-otelcol.exe at its root; only beacon.exe is written, as only beacon is from the Linux
+// tarball, since it embeds the hooks binary it installs. The archive is refused whole if any entry
+// names an absolute path, climbs out with "..", or is a link, rather than skipped past: a release
+// archive carries none of them.
+func extractZipBeacon(archive, dest string) error {
+	zr, err := zip.OpenReader(archive)
+	if err != nil {
+		return fmt.Errorf("the release zip: %w", err)
+	}
+	defer zr.Close()
+	var found *zip.File
+	for _, f := range zr.File {
+		name := strings.ReplaceAll(f.Name, `\`, "/")
+		if strings.HasPrefix(name, "/") || filepath.IsAbs(f.Name) || filepath.VolumeName(f.Name) != "" || strings.Contains(name, ":") {
+			return fmt.Errorf("the release zip names an absolute path (%q)", f.Name)
+		}
+		for _, part := range strings.Split(name, "/") {
+			if part == ".." {
+				return fmt.Errorf("the release zip names a path outside itself (%q)", f.Name)
+			}
+		}
+		mode := f.Mode()
+		if mode&os.ModeSymlink != 0 || (mode.Type() != 0 && !mode.IsDir()) {
+			return fmt.Errorf("the release zip holds a link or special file (%q)", f.Name)
+		}
+		if path.Clean(strings.TrimPrefix(name, "./")) != "beacon.exe" {
+			continue
+		}
+		if found != nil {
+			return errors.New("the release zip holds more than one beacon.exe")
+		}
+		if !mode.IsRegular() || f.UncompressedSize64 > maxBeaconBytes {
+			return errors.New("the release zip's beacon.exe is not a regular file of a sensible size")
+		}
+		found = f
+	}
+	if found == nil {
+		return errors.New("the release zip holds no beacon.exe at its root")
+	}
+	in, err := found.Open()
+	if err != nil {
+		return fmt.Errorf("the release zip: %w", err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
+	if err != nil {
+		return err
+	}
+	n, err := io.Copy(out, io.LimitReader(in, maxBeaconBytes+1))
+	if closeErr := out.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil && n > maxBeaconBytes {
+		err = errors.New("the release zip's beacon.exe is larger than it says")
+	}
+	if err != nil {
+		_ = os.Remove(dest)
+		return fmt.Errorf("the release zip: %w", err)
 	}
 	return nil
 }
