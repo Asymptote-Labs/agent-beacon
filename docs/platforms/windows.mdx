@@ -151,7 +151,7 @@ See the [event schema](/telemetry-schema/event-schema) for the full field refere
 | Log permissions | `INTERACTIVE` may append to the runtime log files, and nothing more |
 | Agent runtime | Claude Code and Codex CLI settings for the interactive user, pointed at `127.0.0.1:4317` |
 
-`vector.exe` is [Vector](https://vector.dev) 0.56.0, the log forwarder the macOS and Linux packages also carry. The package only installs it: nothing runs it until you set up a forwarder.
+`vector.exe` is [Vector](https://vector.dev) 0.56.0, the log forwarder the macOS and Linux packages also carry. The package only installs it: nothing runs it until you set up a forwarder, such as [Beacon Cloud](/cli/endpoint-connect#on-windows) with `beacon endpoint connect` or the [Microsoft Sentinel forwarder](/log-forwarding/microsoft-sentinel#vector-and-the-logs-ingestion-api). An upgrade stops a forwarder's service so it can replace `vector.exe` and starts it again afterwards, keeping its connection and read position.
 
 If you run AppLocker or Windows Defender Application Control, allow the four programs in `%ProgramFiles%\Beacon\bin`. None of them is code-signed yet (see below), so a publisher rule cannot match them; use a path or file hash rule.
 
@@ -221,6 +221,8 @@ One limitation has no macOS or Linux equivalent: **Windows has no per-user servi
 - **Nothing restarts it.** If the collector exits, it stays down until you start it again.
 - **It does not survive sign-out.** Windows ends the session's processes at logoff.
 
+A user-mode endpoint connected to Beacon Cloud runs its forwarder the same way, with the same two limits. `beacon endpoint repair` starts both again; see [On Windows](/cli/endpoint-connect#on-windows).
+
 On Linux the equivalent gap is fixable with `loginctl enable-linger`. Windows has no counterpart, which is why system-mode install is the recommended path here even on a single-user machine.
 
 ## Which shell your agent uses
@@ -272,6 +274,7 @@ beacon endpoint uninstall --system
 | Gap | Status |
 |---|---|
 | The installer is unsigned | SmartScreen warns. Verify the published `.sha256`. Authenticode signing is planned |
+| The package's PowerShell scripts are unsigned | The MSI installs, upgrades and removes Beacon with them, so it fails with exit code 1603 where Group Policy sets the PowerShell execution policy to `AllSigned` or `Restricted`. Waiting on signing |
 | `beacon endpoint update --apply` | Not supported on Windows. It refuses rather than pretending. Waiting on signing |
 | `beacon ci exec` | Captures intermittently on Windows ([#320](https://github.com/asymptote-labs/agent-beacon/issues/320)). The installed-hook path on this page is unaffected |
 | User-mode collectors | Do not restart and do not survive sign-out, because Windows has no per-user service manager |

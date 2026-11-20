@@ -191,38 +191,115 @@ type CommandInfo struct {
 	// the commands it runs, so a rule can tell `curl ... | sudo bash` from the same text inside
 	// a quoted string or a here-document. It is never written or read; the engine fills it on
 	// its own copy of each event, as it does GenAIToolCallInfo.ResultText. See
-	// threatrules.ParsedCommands.
-	ParsedCommands []ParsedCommand `json:"-" cel:"parsed_commands"`
+	// threatrules.ParsedCommands. The spec tag here and on ParsedCommand's fields is the Threat
+	// Rules version that added the field; a rule that selects it must declare that version, and
+	// threatrules reads the tags for that check and for the field reference.
+	ParsedCommands []ParsedCommand `json:"-" cel:"parsed_commands" spec:"v1.2"`
+	// ParsedIncomplete is set when Command was not read to its end: it does not parse, it ends
+	// inside a quote, a here-document, a substitution or a compound command (as a cut capture
+	// does), it is longer than the engine reads, or it names more than the engine reads
+	// (hundreds of commands, a brace expansion of thousands of words). ParsedCommands then
+	// lists the commands before that point only, and none in the last case, so nothing can be
+	// concluded from a command's absence. Derived like ParsedCommands, never written or read.
+	ParsedIncomplete bool `json:"-" cel:"parsed_incomplete" spec:"v2.0"`
 }
 
 // ParsedCommand is one command of a command line, as the threat-rules engine presents it to
 // rules (e.command.parsed_commands). It is never serialized; the cel tags are the names a rule
-// uses. threatrules.ParsedCommands says how each field is derived.
+// uses, and a spec tag the Threat Rules version that added a field after parsed_commands itself
+// (CommandInfo.ParsedCommands). threatrules.ParsedCommands says how each field is derived.
 type ParsedCommand struct {
-	// Name is the base name of the command after its wrappers (sudo, env, exec, ...): rm for
-	// `sudo /bin/rm -rf x`. Empty when it is unknown.
+	// Name is the base name of the command after the wrappers that run it here unchanged
+	// (shellcmd's Command.Unwrapped says which): rm for `sudo /bin/rm -rf x`. Empty when it is
+	// unknown.
 	Name string `cel:"name"`
 	// Argv are the command's words as the shell passes them, wrappers included; a word whose
 	// value the parse cannot know (a parameter, substitution, glob or leading tilde) is "".
 	Argv []string `cel:"argv"`
 	// ArgvRaw are the same words as written, quotes and expansions included ($HOME, /*).
 	ArgvRaw []string `cel:"argv_raw"`
+	// Args are the words after the command's name as text, one per line, as Argv has them: for
+	// one regular expression to ask for whole words that follow each other, as in
+	// args.matches("(?m)^auth\ntoken$") for `sudo gh auth token`. A newline inside a word is a
+	// space here.
+	Args string `cel:"args" spec:"v2.0"`
 	// Env are the NAME=value assignments before the command; an unknown value is "".
 	Env map[string]string `cel:"env"`
 	// FileEffects are the files the command evidently writes, and how.
 	FileEffects []ParsedFileEffect `cel:"file_effects"`
+	// FileWrites are the files the command evidently writes, and how, with every path as
+	// written without its quotes, also where the value depends on an expansion (~/.bashrc,
+	// $HOME/.ssh/authorized_keys), which FileEffects leaves out. Every effect is a write.
+	FileWrites []ParsedFileEffect `cel:"file_writes" spec:"v2.0"`
+	// Cwd is the directory the command runs in when the line changed into it before the
+	// command, as a literal path with one trailing slash (`cd /tmp/probe && echo x > f`:
+	// /tmp/probe/ for echo), in line order and in the shell the command runs in: a cd inside a
+	// subshell, a substitution or a pipeline stage does not reach past it. "" when the line
+	// has not changed directory or where it did is unknown (cd alone, cd -, popd, an operand
+	// that depends on an expansion, a cd inside a loop or a function). A relative path of
+	// FileWrites is under it.
+	Cwd string `cel:"cwd" spec:"v2.0"`
+	// FileReads are the files whose content the command evidently takes in, and how: directly
+	// (what it prints, searches, copies, archives or sends), on its standard input, or written
+	// into one of its words by a substitution. A path is as written without its quotes, also
+	// where the value depends on an expansion ($HOME/.netrc, ~/.ssh/id_*).
+	FileReads []ParsedFileRead `cel:"file_reads" spec:"v2.0"`
+	// ScriptSends are the files an interpreter's inline script opens inside the arguments of a
+	// call that sends them over the network: .env for
+	// python3 -c "requests.post(url, data=open('.env'))". Each is also one of FileReads.
+	ScriptSends []string `cel:"script_sends" spec:"v2.0"`
+	// SocketRedirects are the command's redirections to or from bash's network pseudo-files
+	// (/dev/tcp/host/port, /dev/udp/host/port), its own or through a descriptor an earlier exec
+	// opened: where its output is sent, or its input comes from, without a network client.
+	SocketRedirects []ParsedSocketRedirect `cel:"socket_redirects" spec:"v2.0"`
 	// Pipeline identifies the command's pipeline: the stages of one pipeline share it. Stage
 	// is the 0-based position in it (curl ... | sh: sh is stage 1).
 	Pipeline int `cel:"pipeline"`
 	Stage    int `cel:"stage"`
-	// Nested is true for a command inside a command or process substitution, or inside the
-	// script a shell runs with -c.
+	// EarlierStages and LaterStages are the indexes, in the list this command is in
+	// (e.command.parsed_commands), of the commands at earlier and at later stages of its
+	// pipeline, in the order of the list. In `curl u | tee f | sh` the list is curl, tee, sh:
+	// curl has later stages [1, 2], tee earlier [0] and later [2], sh earlier [0, 1]. The
+	// commands inside one compound stage ({ a; b; } | c) are at the same stage and are in
+	// neither list of each other. Both are empty for a command alone in its pipeline. A rule
+	// about two stages of one pipeline asks these, not every command of the line.
+	EarlierStages []int `cel:"earlier_stages" spec:"v2.0"`
+	LaterStages   []int `cel:"later_stages" spec:"v2.0"`
+	// Nested is true for a command inside a command or process substitution, inside the
+	// script a shell runs with -c or reads from a here-document, or run by a carrier (the
+	// command of xargs, find -exec, ssh, docker exec, eval and the like).
 	Nested bool `cel:"nested"`
+	// RunsRead is true when the command hands a command line to another program to run (a
+	// shell's script, the command of xargs, find -exec, ssh, docker exec, eval and the like)
+	// and that command line was read to its end: its commands follow this one in the list.
+	RunsRead bool `cel:"runs_read" spec:"v2.0"`
+	// Span is the part of the command line that can decide what the command runs: its own
+	// words, redirections and here-documents, starting earlier when something before it on
+	// the line reaches it (an earlier stage of its pipeline, a command that wrote a file, a
+	// variable). For a rule that must match text because the command is a program it cannot
+	// see into, and wants the text that reaches that command, not the whole line.
+	Span string `cel:"span" spec:"v2.0"`
 }
 
 // ParsedFileEffect is a file a parsed command evidently writes. Op is one of write, append,
-// touch, truncate, edit, delete, move_from, move_to, link.
+// touch, truncate, edit, delete, move_from, move_to, link. In FileEffects Path is a path whose
+// value is known; in FileWrites it is the path as written.
 type ParsedFileEffect struct {
+	Path string `cel:"path"`
+	Op   string `cel:"op"`
+}
+
+// ParsedFileRead is a file whose content a parsed command takes in. Via is direct, stdin or
+// argument.
+type ParsedFileRead struct {
+	Path string `cel:"path"`
+	Via  string `cel:"via"`
+}
+
+// ParsedSocketRedirect is a redirection of a parsed command to or from a network pseudo-file.
+// Path is the pseudo-file as written (/dev/tcp/host.example/4444). Op is write, read or
+// readwrite.
+type ParsedSocketRedirect struct {
 	Path string `cel:"path"`
 	Op   string `cel:"op"`
 }

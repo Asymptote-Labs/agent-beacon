@@ -11,6 +11,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
@@ -500,6 +501,24 @@ func TestInventoryJobEnvRecordsTheOtherInventoryRootVariables(t *testing.T) {
 	}
 	if env := inventoryJobEnv(true); !reflect.DeepEqual(env, want) {
 		t.Fatalf("user mode env = %v, want %v", env, want)
+	}
+	if got := inventoryJobEnv(false); got != nil {
+		t.Fatalf("system mode env = %v, want none", got)
+	}
+}
+
+// A CLI telemetry opt-out in the install's shell holds for the scheduled jobs, which every beacon
+// command reads it in, so the jobs never write telemetry state the person turned off.
+func TestJobEnvCarriesTheTelemetryOptOut(t *testing.T) {
+	t.Setenv(telemetry.EnvTelemetry, "0")
+	t.Setenv(telemetry.EnvDoNotTrack, "1")
+	for name, env := range map[string]map[string]string{
+		"inventory":    inventoryJobEnv(true),
+		"session sync": sessionSyncJobEnv(true),
+	} {
+		if env[telemetry.EnvTelemetry] != "0" || env[telemetry.EnvDoNotTrack] != "1" {
+			t.Errorf("%s job env = %v, want the opt-out recorded", name, env)
+		}
 	}
 	if got := inventoryJobEnv(false); got != nil {
 		t.Fatalf("system mode env = %v, want none", got)

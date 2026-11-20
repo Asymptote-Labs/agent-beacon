@@ -167,7 +167,7 @@ func isCompact(text string, n *jsonNode, items []span) bool {
 // keySeparator is the text a document puts between a key and its value (": " or ":").
 func keySeparator(text string, n *jsonNode) string {
 	for _, m := range n.members {
-		between := text[m.keyStart+len(Quote(m.key)) : m.value.start]
+		between := text[m.keyEnd:m.value.start]
 		if strings.TrimSpace(between) == ":" {
 			if strings.HasPrefix(strings.TrimLeft(between, " \t"), ":") && strings.HasSuffix(between, ":") {
 				return ":"

@@ -120,12 +120,10 @@ func TestPiFamilyManagedExtensionMarkersAreStable(t *testing.T) {
 // piRenderedArgv extracts the argv the installer substituted into the extension.
 //
 // Parsed back out of the source rather than compared as a string: argv is the whole point of this
-// install shape, so the test asserts on the decoded array a host would spawn. The optional carriage
-// return is load-bearing for the same reason it is in the Cline test -- the extension source is a
-// checked-in file, and a Windows checkout converts its line endings.
+// install shape, so the test asserts on the decoded array a host would spawn.
 func piRenderedArgv(t *testing.T, source string) []string {
 	t.Helper()
-	match := regexp.MustCompile(`(?m)^const beaconArgv: string\[\] = (\[.*?\])\r?$`).FindStringSubmatch(source)
+	match := regexp.MustCompile(`(?m)^const beaconArgv: string\[\] = (\[.*?\])$`).FindStringSubmatch(source)
 	if len(match) != 2 {
 		t.Fatalf("no beaconArgv assignment in rendered extension:\n%s", source)
 	}

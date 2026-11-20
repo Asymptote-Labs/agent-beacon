@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -122,12 +123,8 @@ func runStubBinary(_ context.Context, name string, _ ...string) (string, error) 
 // A successful update installs the new binary, records the checks the artifact passed in the system
 // log, and leaves no large staging material or stale failure diagnostic behind.
 func TestApplyHappyPath(t *testing.T) {
-	// The Windows apply path is a different flow entirely (msiexec plus an Authenticode check,
-	// rather than a tarball into an install prefix), which does not exist yet. Skipped rather than
-	// adapted so the skip disappears when that flow lands instead of hiding it.
-	if runtime.GOOS == "windows" {
-		t.Skip("the POSIX apply flow stages an executable shell stub; the Windows flow is not implemented yet")
-	}
+	// The tarball seam runs on every OS: runStubBinary reads the installed stub rather than running
+	// it. The Windows MSI flow has its own tests (msi_test.go).
 	artifact, sha := makeBeaconTarball(t, "9.9.9")
 	srv := manifestServer(t, "9.9.9", sha, artifact)
 	defer srv.Close()
@@ -462,7 +459,7 @@ func TestRollbackDoesNotRemoveLiveInstallWhenRestorePreparationFails(t *testing.
 		t.Fatal(err)
 	}
 	var result ApplyResult
-	if err := a.rollback(filepath.Join(t.TempDir(), "missing-backup"), &result); err == nil {
+	if err := a.rollback(context.Background(), filepath.Join(t.TempDir(), "missing-backup"), "", &result); err == nil {
 		t.Fatal("expected rollback error for missing backup")
 	}
 	if got := string(mustRead(t, liveBin)); got != "live" {
@@ -496,7 +493,7 @@ func TestRollbackReportsCollectorRestartFailure(t *testing.T) {
 		return "launchctl failed", fmt.Errorf("exit 1")
 	}
 	var result ApplyResult
-	if err := a.rollback(backup, &result); err == nil {
+	if err := a.rollback(context.Background(), backup, "", &result); err == nil {
 		t.Fatal("expected restart failure")
 	}
 	if got := string(mustRead(t, liveBin)); got != "backup" {
@@ -507,22 +504,34 @@ func TestRollbackReportsCollectorRestartFailure(t *testing.T) {
 	}
 }
 
+func TestVersionLineVersion(t *testing.T) {
+	for out, want := range map[string]string{
+		"beacon version 1.3.63 (565aae94) built on today, enterprise edition\n": "1.3.63",
+		"beacon version v0.0.69 (abc) built on today":                           "0.0.69",
+		"garbage": "",
+	} {
+		if got := VersionLineVersion(out); got != want {
+			t.Errorf("VersionLineVersion(%q) = %q, want %q", out, got, want)
+		}
+	}
+}
+
 func TestVersionLineMatches(t *testing.T) {
 	out := "beacon version 0.0.69 (abc1234) built on 2026-01-01"
-	if !versionLineMatches(out, "0.0.69") {
+	if !VersionLineMatches(out, "0.0.69") {
 		t.Error("exact version should match")
 	}
-	if !versionLineMatches(out, "v0.0.69") {
+	if !VersionLineMatches(out, "v0.0.69") {
 		t.Error("v-prefixed want should match")
 	}
 	// The substring bug: an expected 0.0.6 must NOT match a 0.0.69 binary.
-	if versionLineMatches(out, "0.0.6") {
+	if VersionLineMatches(out, "0.0.6") {
 		t.Error("0.0.6 must not match 0.0.69 (substring)")
 	}
-	if versionLineMatches("beacon version 0.0.10 (x) built on y", "0.0.101") {
+	if VersionLineMatches("beacon version 0.0.10 (x) built on y", "0.0.101") {
 		t.Error("0.0.101 must not match 0.0.10")
 	}
-	if versionLineMatches("garbage output", "0.0.1") {
+	if VersionLineMatches("garbage output", "0.0.1") {
 		t.Error("unparseable output should not match")
 	}
 }
@@ -724,5 +733,56 @@ func TestApplyRollbackRestoresScriptForwarders(t *testing.T) {
 	}
 	if restored != 1 {
 		t.Fatalf("rollback reloaded the forwarders %d times, want 1", restored)
+	}
+}
+
+// FetchVerifiedPackage runs every check an install would, and nothing after them.
+func TestFetchVerifiedPackageChecksWithoutInstalling(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the installer signature and Gatekeeper are checked on macOS; Linux's check is TestFetchVerifiedPackageOnLinuxChecksTheSignedChecksums")
+	}
+	body := []byte("a signed package")
+	sum := sha256.Sum256(body)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(body) }))
+	defer srv.Close()
+	signed := "Status: signed by a developer certificate issued by Apple for distribution\n   1. Developer ID Installer: Asymptote Labs, Inc. (" + AppleTeamID + ")\n"
+
+	cases := map[string]struct {
+		sha, signer string
+		want        string
+	}{
+		"verified":     {hex.EncodeToString(sum[:]), signed, ""},
+		"bad checksum": {strings.Repeat("0", 64), signed, "verify checksum"},
+		"other team":   {hex.EncodeToString(sum[:]), strings.ReplaceAll(signed, AppleTeamID, "OTHERTEAM1"), "verify signature"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var ran []string
+			a := NewApplier("")
+			a.run = func(_ context.Context, name string, _ ...string) (string, error) {
+				ran = append(ran, name)
+				if name == "pkgutil" {
+					return tc.signer, nil
+				}
+				return "", nil
+			}
+			dest := filepath.Join(t.TempDir(), "p.pkg")
+			err := a.FetchVerifiedPackage(context.Background(), Package{URL: srv.URL + "/p.pkg", SHA256: tc.sha}, dest)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("err = %v", err)
+				}
+				if got := strings.Join(ran, ","); got != "pkgutil,stapler,spctl" {
+					t.Fatalf("ran %q, want only the checks", got)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if slices.Contains(ran, "installer") {
+				t.Fatal("an install ran")
+			}
+		})
 	}
 }

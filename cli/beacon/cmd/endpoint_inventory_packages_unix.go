@@ -11,6 +11,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/launchpkg"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/osuser"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 )
 
 // packagesAsUser returns a resolver that runs resolve-packages as the account uid, whose home is
@@ -35,8 +36,9 @@ func packagesAsUser(uid int, home string) (packageResolver, error) {
 		c.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{
 			Uid: uint32(uid), Gid: groups[0], Groups: groups,
 		}}
-		// None of root's environment: the request carries everything the child reads.
-		c.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}
+		// None of root's environment: the request carries everything the child reads, apart from a
+		// CLI telemetry opt-out set on the job, which must reach every beacon process it starts.
+		c.Env = append([]string{"HOME=" + home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}, append(telemetry.OptOutEnv(), telemetry.InternalChildEnv())...)
 		c.Dir = "/"
 		return resolvePackagesWith(c, env, queries)
 	}, nil

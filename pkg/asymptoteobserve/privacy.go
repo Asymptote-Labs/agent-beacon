@@ -5,7 +5,9 @@ import (
 	"maps"
 	"math"
 	"regexp"
+	"regexp/syntax"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -90,10 +92,25 @@ func quotedRules(kind quotedKind, keep func(string) bool) []redactionRule {
 		}
 		rules = append(rules, redactionRule{
 			expr: `(?i)(` + prefix + quoted[0] + `)(?P<value>` + quoted[1] + `)`, replacement: "${1}" + redactedValue,
-			keep: keep, needles: needles, start: start, runsOn: awsPairRunsOn,
+			keep: keep, value: quotedValueKind(quoted[0]), needles: needles, start: start, runsOn: awsPairRunsOn,
 		})
 	}
 	return rules
+}
+
+// quotedValueKind is the kind of a value opened with open, a quotedValues entry: in double quotes,
+// escaped or not, the shell still runs a command substitution; a single quote may close the
+// quoted text a label stands in, which leaves the value outside it (valueSingleQuoted); a value
+// in escaped single quotes is text, and a backtick-quoted value is as often a secret in prose as a
+// command.
+func quotedValueKind(open string) valueKind {
+	switch {
+	case strings.HasSuffix(open, `"`):
+		return valueDoubleQuoted
+	case open == `'`:
+		return valueSingleQuoted
+	}
+	return valueOther
 }
 
 // redactValueStops are the bytes an unquoted labeled value stops at: a quote, a comma and
@@ -170,6 +187,9 @@ type redactionRule struct {
 	replacement string
 	// keep, when set, leaves a match alone if its value (the group named value) passes.
 	keep func(value string) bool
+	// value is how the value is written, which says whether it can be a command substitution
+	// that is kept (keeps).
+	value valueKind
 	// needles are literals the pattern cannot match without: when the text holds none of them,
 	// the rule is skipped without running the pattern.
 	needles *redactNeedles
@@ -188,7 +208,7 @@ type redactionRule struct {
 	// runsOn, when set, returns the replacement of a match whose replaced text runs on past the
 	// match's end, and where that text ends; an end below 0 means the match is replaced as usual.
 	// It is a plain function of the rule, not a closure, so building the rules allocates nothing
-	// for it (TestPackageInitStaysCheap).
+	// for it.
 	runsOn func(rule *redactionRule, t string, match []int) (replacement string, end int)
 }
 
@@ -452,6 +472,9 @@ func isAuthSchemeName(word string) bool {
 //     credential can start with `-` (base64url), and a long flag that names no secret is safe to
 //     replace.
 //
+// A command substitution in the credential's place is not judged here but as any unquoted value
+// is (the rule's credential group, keeps).
+//
 // A list of auth-params, which holds a comma, is never kept: the rule takes it whole, values
 // included, so no label in it has a value left to lose.
 func keepAuthorizationValue(value string) bool {
@@ -478,33 +501,35 @@ func keepAuthorizationValue(value string) bool {
 	return false
 }
 
-// authorizationCredentialCopy is the credential after scheme, the first word of an Authorization
-// header's value, which ends at t[end], for its bare copies elsewhere in the text to be removed as
-// an assigned value's are; or "". The capture of assigned values reads a label's value only up to
-// the blank after the scheme, so without this a copy of the credential (`… ; echo <key>`) stayed.
-// A match the header rules would not make is not taken: a first word that is no scheme-shaped
-// word, such as a marker an earlier pass left, or a match the any-scheme rule keeps. Nor is a list
-// of auth-params, whose labeled values the capture already takes, nor a word of letters alone,
-// which is more likely the next word of prose than a credential.
-func authorizationCredentialCopy(t, scheme string, end int) string {
+// authorizationCredentialCopy returns where the credential after scheme starts and ends: the first
+// word of an Authorization header's value, which ends at t[end], for its bare copies elsewhere in
+// the text to be removed as an assigned value's are; or -1, -1. The capture of assigned values
+// reads a label's value only up to the blank after the scheme, so without this a copy of the
+// credential (`… ; echo <key>`) stayed. A match the header rules would not make is not taken: a
+// first word that is no scheme-shaped word, such as a marker an earlier pass left, or a match the
+// any-scheme rule keeps. Nor is a list of auth-params, whose labeled values the capture already
+// takes, nor a word of letters alone, which is more likely the next word of prose than a
+// credential.
+func authorizationCredentialCopy(t, scheme string, end int) (int, int) {
 	if !isAuthSchemeWord(scheme) {
-		return ""
+		return -1, -1
 	}
 	from := end
 	for from < len(t) && (t[from] == ' ' || t[from] == '\t') {
 		from++
 	}
 	if from == end {
-		return ""
+		return -1, -1
 	}
-	credential := t[from:redactUnquotedEnd(t, from, redactValueStops)]
+	to := redactUnquotedEnd(t, from, redactValueStops)
+	credential := t[from:to]
 	if strings.Contains(strings.TrimRight(credential, "="), "=") || onlyASCIILetters(credential) {
-		return ""
+		return -1, -1
 	}
 	if !isAuthSchemeName(scheme) && keepAuthorizationValue(scheme+" "+credential) {
-		return ""
+		return -1, -1
 	}
-	return credential
+	return from, to
 }
 
 // isAuthSchemeWord reports whether word has the shape the any-scheme rule reads as a scheme,
@@ -548,6 +573,498 @@ func isLiteralOrAuthScheme(value string) bool {
 	return isAuthScheme(value)
 }
 
+// isSubstitutionOpening reports whether a word is where a command substitution opens with the
+// name of the command it runs, or with the file it reads: `$(cat`, `$(gh`,
+// `$(/usr/bin/security`, `$(pwgen)`, `$(<~/.netrc)`. The secret is what the command prints when
+// the line runs, and is not in the text. Replacing the opening took the command's name and
+// nothing else: `TOKEN=$(cat ~/.aws/credentials)` was logged as
+// `TOKEN=[REDACTED] ~/.aws/credentials)`, which hid no secret, no longer parsed as a command
+// line, and no longer said which command read the file. isWholeSubstitution reads a
+// substitution's opening with it. Only a plain name or path is kept: with any other character in
+// it (`$((`, `$(a;b`, `$(a=b`) the value is replaced as before.
+func isSubstitutionOpening(value string) bool {
+	word, ok := strings.CutPrefix(value, "$(")
+	if !ok {
+		return false
+	}
+	word = strings.TrimRight(strings.TrimPrefix(word, "<"), ")")
+	for i := 0; i < len(word); i++ {
+		c := word[i]
+		if !(c|0x20 >= 'a' && c|0x20 <= 'z' || c >= '0' && c <= '9' || strings.IndexByte("_./~+-", c) >= 0) {
+			return false
+		}
+	}
+	return word != ""
+}
+
+// isWholeSubstitution reports whether an unquoted value, read to the parenthesis that closes its
+// substitution, is one command substitution and nothing else, opening as isSubstitutionOpening
+// says: `$(gh auth token)`, `$(cat ~/.config/gh/token)`. The parenthesis `$(` opens must be the
+// one that ends the value, so text beside the substitution (`$(a)hunter2$(b)`) is not; a
+// parenthesis inside single quotes is not counted.
+func isWholeSubstitution(value string) bool {
+	if !strings.HasPrefix(value, "$(") || !strings.HasSuffix(value, ")") {
+		return false
+	}
+	opening := value
+	if i := strings.IndexAny(value, regexpSpace); i >= 0 {
+		opening = value[:i]
+	}
+	if !isSubstitutionOpening(opening) {
+		return false
+	}
+	depth, quoted := 0, false
+	for i := 0; i < len(value); i++ {
+		switch c := value[i]; {
+		case c == '\\':
+			i++
+		case c == '\'':
+			quoted = !quoted
+		case quoted:
+		case c == '(':
+			depth++
+		case c == ')':
+			if depth--; depth == 0 && i != len(value)-1 {
+				return false
+			}
+		}
+	}
+	return depth == 0 && !quoted
+}
+
+// valueKind is how a rule's value is written, which says whether it can be a command substitution
+// the shell runs. Where it is, the text holds the command and not the secret, and the value is
+// kept (valueKind.substitution): each rule that reads a value states its kind where it is built, so
+// a new one cannot leave the command out by omission. Literal text that goes on with the value
+// after the substitution is part of the secret, however it is quoted, and the value is then
+// replaced up to where that text ends (valueTail, reopenedTail).
+type valueKind uint8
+
+const (
+	// valueOther is a value no substitution is kept in: one in escaped single quotes or
+	// backticks, a token of a fixed shape, or a rule that reads no value a command could stand in.
+	valueOther valueKind = iota
+	// valueUnquoted is a value that ends at a blank or another stop of its rule. One that opens a
+	// command substitution is read to the parenthesis that closes it, past the blanks inside, and
+	// kept where that is one substitution with a plain command name and the value ends there; with
+	// text after it, the replaced text runs on over that text (unquotedSubstitution).
+	valueUnquoted
+	// valueDoubleQuoted is a value that runs to its closing quote, escaped or not, or to the end of
+	// its line: never kept, a substitution or not, as on main, since what its words hold cannot be
+	// told from its text. Where it is one substitution and literal text goes on with its shell
+	// word after the closing quote (`TOKEN="$(cat f)"hunter2`), the replaced text runs on over it.
+	valueDoubleQuoted
+	// valueSingleQuoted is a value after a single quote, up to the next one. In single quotes a
+	// substitution is text the shell does not run, and the value is replaced. The quote may close
+	// the quoted text the label stands in (closesSingleQuote), as in
+	// `curl -d '{"token":'$(cat f)'}'`, where the shell runs the substitution: it is replaced too,
+	// as on main, and where the reopened quoted text after it goes on with the value
+	// (`'hunter2"}'`), the replaced text runs on over that literal text (reopenedTail).
+	valueSingleQuoted
+)
+
+// valueRun is how far the replaced text of a value runs past a command substitution that literal
+// text follows (valueKind.substitution). from is where the text after the substitution starts:
+// the replacement keeps the quotes between there and to (quotesOf), so the quoting of the rest of
+// the line reads as it did. word is where the literal text ends, the end of a copy of the value
+// as the line writes it (`$(cat x)hunter2` of `$(cat x)hunter2;`), or -1 where no literal text
+// follows. to is where the replaced text ends, or -1 where the value is replaced as its rule reads
+// it.
+type valueRun struct{ from, word, to int }
+
+var noValueRun = valueRun{-1, -1, -1}
+
+// substitution reads the value in group g of match, a match of re in t, written as kind says:
+// whether it is a command substitution that stays, which only an unquoted one can, and how far its
+// replaced text runs where it is not (valueRun).
+func (kind valueKind) substitution(t string, re *regexp.Regexp, match []int, g int) (bool, valueRun) {
+	start, end := match[2*g], match[2*g+1]
+	switch kind {
+	case valueUnquoted:
+		return unquotedSubstitution(t, re, match, g)
+	case valueDoubleQuoted:
+		if !isWholeSubstitution(t[start:end]) || end < len(t) && (t[end] == '\'' || t[end] == '`') {
+			return false, noValueRun
+		}
+		return false, quotedRun(match, end, valueTail(t, end))
+	case valueSingleQuoted:
+		if start == 0 || end == len(t) || t[end] != '\'' || !isWholeSubstitution(t[start:end]) || !closesSingleQuote(t, start-1) {
+			return false, noValueRun
+		}
+		return false, quotedRun(match, end, reopenedTail(t, end))
+	}
+	return false, noValueRun
+}
+
+// quotedRun is how far the replaced text of a quoted value that is one whole substitution runs,
+// where the value ends at t[end] and the literal text after it ends at word (-1 where none
+// follows): as the rule reads the value where no text follows, and otherwise on to word where the
+// value ends its match.
+func quotedRun(match []int, end, word int) valueRun {
+	switch {
+	case word < 0:
+		return noValueRun
+	case end != match[1]:
+		return valueRun{end, word, -1}
+	}
+	return valueRun{end, word, word}
+}
+
+// lineQuote returns the quote whose quoted text t[i] stands in, as the line is read from its start
+// as the shell reads quotes: a single quote opens text that is all literal up to the next one, a
+// double quote text where a backslash escapes, and a backslash outside single quotes escapes the
+// byte after it; 0 outside quotes. escaped reports whether t[i] stands in text an escaped double
+// quote (`\"`) opened, the quotes of a command held in a JSON-encoded string. A line that starts
+// more than redactSubstitutionSpan bytes back is not read, so the cost stays linear in the text,
+// and ok is false.
+func lineQuote(t string, i int) (quote byte, escaped, ok bool) {
+	lo := max(0, i-redactSubstitutionSpan)
+	redactWorked(i - lo)
+	nl := strings.LastIndexByte(t[lo:i], '\n')
+	if nl < 0 && lo > 0 {
+		return 0, false, false
+	}
+	for j := lo + nl + 1; j < i; j++ {
+		switch c := t[j]; {
+		case quote == '\'':
+			if c == '\'' {
+				quote = 0
+			}
+		case c == '\\':
+			if j++; j < i && t[j] == '"' {
+				escaped = !escaped
+			}
+		case c == '"':
+			quote ^= '"'
+		case c == '\'' && quote == 0:
+			quote = '\''
+		}
+	}
+	return quote, escaped, true
+}
+
+// closesSingleQuote reports whether the single quote at t[i] closes single-quoted text of its line
+// rather than opening it (lineQuote). Where the line is not read, it is taken to close, so that
+// the reopened text after the substitution is replaced with it: a redaction that cannot tell
+// errs towards replacing more.
+func closesSingleQuote(t string, i int) bool {
+	quote, _, ok := lineQuote(t, i)
+	return quote == '\'' || !ok
+}
+
+// redactTailStops end the literal text after a substitution (valueTail): what ends its shell word
+// apart from the quotes, which valueTail reads, and the `,`, `}` and `]` that end a value in JSON
+// (`{"token": "$(cat f)"}`).
+const redactTailStops = regexpSpace + "`;&|<>()" + ",}]"
+
+// valueTail returns where the literal text that goes on with a value's shell word at t[i], right
+// after a command substitution or the quote that closes it, ends: after its last byte that is not
+// a quote; or -1 where no literal text does. The word goes on over bytes up to one of
+// redactTailStops. A quote that closes the quoted text the value stands in (lineQuote) is not
+// literal text, and the word goes on after it (`-H "Authorization: Bearer $(cat x)"hunter2`); one
+// that opens more quoted text takes that text into the word up to its closing quote
+// (`TOKEN=$(cat f)'hunter2'`), and a quote of the other kind inside the quoted text is one of its
+// bytes. An escaped double quote is read the same way, as the quote of a command held in a
+// JSON-encoded string (`\"$(cat f)\"hunter2`), whose unescaped quote ends the text. Where the line
+// is too long to read its quotes, every quote is taken to open quoted text, which the word takes
+// in: a redaction that cannot tell errs towards replacing more. It reads at most
+// redactSubstitutionSpan bytes, so the cost stays linear in the text.
+func valueTail(t string, i int) int {
+	from, stop := i, min(len(t), i+redactSubstitutionSpan)
+	var outer, inner byte
+	known, escapedOuter, escapedInner, word := false, false, false, -1
+read:
+	for ; i < stop && t[i] != '\n'; i++ {
+		escapedQuote := t[i] == '\\' && i+1 < stop && t[i+1] == '"'
+		switch c := t[i]; {
+		case inner != 0:
+			if c == inner {
+				inner = 0
+				continue
+			}
+			if c == '\\' && inner == '"' && i+1 < stop && t[i+1] != '\n' {
+				i++
+			}
+			word = i + 1
+		case escapedInner:
+			if escapedQuote {
+				escapedInner = false
+				i++
+				continue
+			}
+			if c == '"' {
+				break read
+			}
+			if c == '\\' && i+1 < stop && t[i+1] != '\n' {
+				i++
+			}
+			word = i + 1
+		case c == '\'' || c == '"' || escapedQuote:
+			if !known {
+				quote, escaped, ok := lineQuote(t, i)
+				if !ok {
+					quote, escaped = 0, false
+				}
+				outer, escapedOuter, known = quote, escaped, true
+			}
+			switch {
+			case escapedQuote:
+				i++
+				escapedInner = !escapedOuter
+				escapedOuter = false
+			case c == outer:
+				outer = 0
+			case outer == 0:
+				inner = c
+			}
+		case c == '\\':
+			if i+1 == stop || strings.IndexByte(redactQuotes+"\n", t[i+1]) >= 0 {
+				break read
+			}
+			i++
+			word = i + 1
+		case strings.IndexByte(redactTailStops, c) >= 0:
+			break read
+		default:
+			word = i + 1
+		}
+	}
+	redactWorked(i - from)
+	return word
+}
+
+// redactReopenedStops end the literal text in the single-quoted text a substitution's closing
+// quote reopens (reopenedTail): the quote that closes it, the end of its line, and the `"`, `,`,
+// `}` and `]` that end a value in JSON. Blanks and the shell's stops are literal bytes in single
+// quotes, and part of the text.
+const redactReopenedStops = "'\"\n,}]"
+
+// reopenedTail returns where the literal text ends that goes on with a value in the single-quoted
+// text the quote at t[i] reopens after a substitution: `hunter2` of `'{"token":'$(cat f)'hunter2"}'`,
+// and `p&ss w0rd` of `'{"password":'$(cat f)'p&ss w0rd"}'`. Blanks before it are part of it; the
+// text stops at one of redactReopenedStops, or at a backslash that escapes a quote. It returns -1
+// where the reopened text goes on with no literal text first (`'}'`, `' ,'`). It reads at most
+// redactSubstitutionSpan bytes.
+func reopenedTail(t string, i int) int {
+	stop := min(len(t), i+redactSubstitutionSpan)
+	j := i + 1
+	for j < stop && (t[j] == ' ' || t[j] == '\t') {
+		j++
+	}
+	k := j
+	for k < stop && strings.IndexByte(redactReopenedStops, t[k]) < 0 {
+		if t[k] == '\\' && (k+1 == len(t) || strings.IndexByte(redactQuotes, t[k+1]) >= 0) {
+			break
+		}
+		k++
+	}
+	redactWorked(k - i)
+	if k == j {
+		return -1
+	}
+	return k
+}
+
+// quotesOf returns the quotes s holds, in order, each with the backslashes that escape it: the
+// replacement of a value whose replaced text runs on over quoted text keeps them (valueRun), so
+// the quoting of the rest of the line, and of a JSON-encoded string it is in, reads as it did.
+func quotesOf(s string) string {
+	var quotes []byte
+	for i := range len(s) {
+		if strings.IndexByte(redactQuotes, s[i]) >= 0 {
+			j := i
+			for j > 0 && s[j-1] == '\\' {
+				j--
+			}
+			quotes = append(quotes, s[j:i+1]...)
+		}
+	}
+	return string(quotes)
+}
+
+// unquotedSubstitution reads the unquoted value in group g of match, a match of re in t, where it
+// opens a command substitution: whether the value is kept, and, where it is not, how far its
+// replaced text runs (valueRun). The value stops at the first blank, which may be inside the
+// substitution, so the substitution is read to the parenthesis that closes it (substitutionEnd):
+//   - One substitution that no literal text follows (valueTail) is kept when it opens with a
+//     plain command name (isWholeSubstitution) and the value ends there: where its shell word
+//     does (endsShellWord), or where the rule reads no more of a value (valueReadEnd: `,` after
+//     a label's, `}` after a bare JSON value, `@` after a URL's password). Text the rule does not
+//     read is not the value's, unless a quote opens it, which the rule never reads past.
+//     `TOKEN=$(cat $(ls ~/.tok*)); ./run` stays as written; one with no plain command name
+//     (`$((`, `$(A=b cmd)`) is replaced as before, the value alone. An unquoted value always ended
+//     at the first blank, so only `$(cat` was replaced and the words after it were logged:
+//     keeping them adds the command's name and no secret.
+//   - With literal text after it, the replaced text runs on over the rest of the substitution and
+//     that text, quoted or not: `TOKEN=$(cat x)hunter2` was logged as `TOKEN=[REDACTED] x)hunter2`,
+//     and is now `TOKEN=[REDACTED]`; `TOKEN=$(cat x)'hunter2'` is `TOKEN=[REDACTED]”`. Unquoted
+//     text runs on as far as the rule reads a value after it (`;` of `$(cat x)hunter2;`), so what
+//     is replaced is what the rule replaces on the next pass and redaction stays idempotent; the
+//     rule's value stops at a quote the replacement keeps. A match that goes on past its value (a
+//     URL's `@`) does not run on.
+//   - One that does not close on its line within redactSubstitutionSpan bytes is kept when it
+//     opens with a plain command name (isSubstitutionOpening), as it was before.
+func unquotedSubstitution(t string, re *regexp.Regexp, match []int, g int) (bool, valueRun) {
+	start, end := match[2*g], match[2*g+1]
+	if !strings.HasPrefix(t[start:end], "$(") {
+		return false, noValueRun
+	}
+	after := substitutionEnd(t, start)
+	if after < 0 {
+		return isSubstitutionOpening(t[start:end]), noValueRun
+	}
+	read := valueReadEnd(t, re, g, after)
+	run := valueRun{from: after, word: -1, to: -1}
+	if read > after || after < len(t) && strings.IndexByte(`'"\`, t[after]) >= 0 {
+		run.word = valueTail(t, after)
+	}
+	to := read
+	switch {
+	case run.word < 0:
+		if endsShellWord(t, after) || read == after {
+			return isWholeSubstitution(t[start:after]), noValueRun
+		}
+	case strings.ContainsAny(t[after:run.word], redactQuotes):
+		to = run.word
+	default:
+		to = max(run.word, read)
+	}
+	if to > end && end == match[1] {
+		run.to = to
+	}
+	return false, run
+}
+
+// redactSubstitutionSpan is the most bytes substitutionEnd reads, so the cost stays linear in the
+// text however many substitutions open on one line. One longer than that is judged by its opening,
+// as one that does not close is.
+const redactSubstitutionSpan = 1024
+
+// substitutionEnd returns the end of the command substitution that opens at t[start] with `$(`:
+// the byte after the parenthesis that closes it, or -1 where none does on its line within
+// redactSubstitutionSpan bytes. Parentheses are counted as isWholeSubstitution counts them: not
+// inside single quotes, and not escaped, so `$(cat $(ls ~/.tok*))` ends at its last byte.
+func substitutionEnd(t string, start int) int {
+	stop := min(len(t), start+redactSubstitutionSpan)
+	depth, quoted := 0, false
+	i := start + 1
+	for ; i < stop && t[i] != '\n'; i++ {
+		switch c := t[i]; {
+		case c == '\\':
+			i++
+		case c == '\'':
+			quoted = !quoted
+		case quoted:
+		case c == '(':
+			depth++
+		case c == ')':
+			if depth--; depth == 0 {
+				redactWorked(i + 1 - start)
+				return i + 1
+			}
+		}
+	}
+	redactWorked(i - start)
+	return -1
+}
+
+// redactShellWordStops end the shell word a substitution is part of: a blank, a quote, which
+// closes the quoted text the word sits in or opens more of it, and the operators that end a word.
+const redactShellWordStops = regexpSpace + redactQuotes + ";&|<>()"
+
+// endsShellWord reports whether the shell word a substitution is part of ends at t[i]: at the end
+// of the text, at one of redactShellWordStops, or at a backslash escaping a quote, which closes a
+// value inside a JSON-encoded string. Anything else is text beside the substitution, part of the
+// same value: `$(cat x)hunter2`.
+func endsShellWord(t string, i int) bool {
+	if i == len(t) {
+		return true
+	}
+	if t[i] == '\\' {
+		return i+1 < len(t) && strings.IndexByte(redactQuotes, t[i+1]) >= 0
+	}
+	return strings.IndexByte(redactShellWordStops, t[i]) >= 0
+}
+
+// valueReadEnd returns where the value that group g of re reads from t[i] ends: the rule's own
+// reading of a value, from the place after a substitution, so what a replaced substitution runs on
+// over is what the rule replaces on the next pass, and redaction stays idempotent.
+func valueReadEnd(t string, re *regexp.Regexp, g, i int) int {
+	m := valuePattern(re.String(), g).FindStringIndex(t[i:])
+	if m == nil {
+		return i
+	}
+	redactWorked(m[1])
+	return i + m[1]
+}
+
+// valuePatterns holds, by expression and group, the patterns valuePattern built.
+var valuePatterns sync.Map
+
+type valuePatternKey struct {
+	expr  string
+	group int
+}
+
+// valuePattern is group g of expr alone, anchored where it is run.
+func valuePattern(expr string, g int) *regexp.Regexp {
+	key := valuePatternKey{expr, g}
+	if re, ok := valuePatterns.Load(key); ok {
+		return re.(*regexp.Regexp)
+	}
+	parsed, err := syntax.Parse(expr, syntax.Perl)
+	if err != nil {
+		panic(err)
+	}
+	group := captureGroup(parsed, g)
+	if group == nil {
+		panic("asymptoteobserve: no group " + strconv.Itoa(g) + " in " + expr)
+	}
+	re, _ := valuePatterns.LoadOrStore(key, regexp.MustCompile(`^(?:`+group.String()+`)`))
+	return re.(*regexp.Regexp)
+}
+
+// captureGroup returns what capture group g of re holds, or nil.
+func captureGroup(re *syntax.Regexp, g int) *syntax.Regexp {
+	if re.Op == syntax.OpCapture && re.Cap == g {
+		return re.Sub[0]
+	}
+	for _, sub := range re.Sub {
+		if found := captureGroup(sub, g); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// keeps reports whether a match of the rule stays: its value, the group named value, is a
+// command substitution its kind keeps (in the group substitutionGroup names), or passes the
+// rule's own keep. A match whose value took no part is not kept.
+func (rule *redactionRule) keeps(t string, re *regexp.Regexp, match []int) bool {
+	if rule.value == valueOther && rule.keep == nil {
+		return false
+	}
+	g := valueGroup(re, match)
+	if match[2*g] < 0 {
+		return false
+	}
+	if keep, _ := rule.value.substitution(t, re, match, substitutionGroup(re, match, g)); keep {
+		return true
+	}
+	return rule.keep != nil && rule.keep(t[match[2*g]:match[2*g+1]])
+}
+
+// substitutionGroup returns the group of match a command substitution is judged in: the group
+// named credential where the pattern has one and it took part, the part of a longer value where a
+// credential stands (an Authorization header's value is a scheme and a credential, and a
+// substitution stands in the credential's place, not the scheme's); otherwise g, the value.
+func substitutionGroup(re *regexp.Regexp, match []int, g int) int {
+	if i := re.SubexpIndex("credential"); i > 0 && match[2*i] >= 0 {
+		return i
+	}
+	return g
+}
+
 var redactionRules = concatRules([]redactionRule{
 	// A private key block. The header must be followed by key material, so source code, a diff or
 	// grep output that only names the header keeps the text after it. Without an END line (the
@@ -558,7 +1075,7 @@ var redactionRules = concatRules([]redactionRule{
 	// keeps its public `eyJ` prefix, as the shape rules below keep theirs, so `Bearer eyJ[REDACTED]`
 	// still says a token was there where `Bearer [REDACTED]` may only have been the word "token" or
 	// a `$VARIABLE`. Digest's parameters go together (redactAuthCredentials).
-	foldedRule(`(?i)(`+redactAuthorizationLabel+`(?:`+redactListedAuthSchemes+`)[ \t]+(?-i:eyJ)?)(`+redactAuthCredentials+`)()`, "${1}"+redactedValue, nil, "authorization"),
+	foldedRule(`(?i)(`+redactAuthorizationLabel+`(?:`+redactListedAuthSchemes+`)[ \t]+(?-i:eyJ)?)(`+redactAuthCredentials+`)()`, "${1}"+redactedValue, nil, "authorization").withValue(valueUnquoted),
 	foldedRule(`(?i)(\bbearer[ \t]+(?-i:eyJ)?)(?P<value>[a-z0-9._~+/=-]+)`, "${1}"+redactedValue, isRedactedJWTPrefix, "bearer"),
 	// An Authorization header with any other scheme: `ApiKey` (Elasticsearch), `SSWS` (Okta), `Bot`
 	// (Discord), `Splunk`, `Negotiate`, Hawk and AWS Signature V4's parameter lists, and whatever a
@@ -568,8 +1085,12 @@ var redactionRules = concatRules([]redactionRule{
 	// (`"Authorization": "ApiKey x"`). The first word is not kept the way a listed scheme is: a
 	// credential sent with no scheme is also one word, and kept as if it were a scheme it would stay
 	// whenever something follows it on the line. A second word that is a secret flag or a secret
-	// label is left to the rules for those (keepAuthorizationValue).
-	foldedRule(`(?i)(`+redactAuthorizationLabel+`)(?P<value>[a-z][a-z0-9_.-]*[ \t]+`+redactAuthCredentials+`)`, "${1}"+redactedValue, keepAuthorizationValue, "authorization"),
+	// label is left to the rules for those (keepAuthorizationValue). A command substitution in the
+	// credential's place is judged as an unquoted value is: kept, the first word then going to the
+	// label rule as it did before this rule existed, since it may be a credential sent with no
+	// scheme; with text beside it, the replaced text runs on over that text too
+	// (`Authorization: ApiKey $(cat x)hunter2` is logged as `Authorization: [REDACTED]`).
+	foldedRule(`(?i)(`+redactAuthorizationLabel+`)(?P<value>[a-z][a-z0-9_.-]*[ \t]+(?P<credential>`+redactAuthCredentials+`))`, "${1}"+redactedValue, keepAuthorizationValue, "authorization").withValue(valueUnquoted),
 	// A labeled assignment in prose, shell, env files, YAML, TOML or JSON: `token=x`,
 	// `export GITHUB_TOKEN="x"`, `{"api_key": "x"}`. The closing quote of a quoted label is allowed
 	// between the label and the separator. A quoted value runs to its closing quote; the unquoted
@@ -581,8 +1102,8 @@ var redactionRules = concatRules([]redactionRule{
 	// and nested objects or arrays are left for their own fields' rules.
 	{
 		expr:        `(?i)(\b` + redactLabel + `(?P<q>` + redactOpenQuote + `)\s*[:=]\s*)(?P<value>` + redactBare + `)`,
-		replacement: "${1}${q}" + redactedValue + "${q}", keep: isLiteralOrAuthScheme, needles: redactQuotedLabelNeedles, start: startLabel,
-		runsOn: awsPairRunsOn,
+		replacement: "${1}${q}" + redactedValue + "${q}", keep: isLiteralOrAuthScheme, value: valueUnquoted, needles: redactQuotedLabelNeedles,
+		start: startLabel, runsOn: awsPairRunsOn,
 	},
 	// An unquoted value. A label opened by `?` or `&` is a URL query parameter, whose value ends
 	// at the `&` of the next one or the `#` of the fragment: `?api_key=x&user=alice` keeps
@@ -592,7 +1113,7 @@ var redactionRules = concatRules([]redactionRule{
 	{
 		expr: `(?i)(?:([?&]` + redactLabel + `=)(?P<value>` + redactParamValue + `)|` +
 			`(\b` + redactLabel + `\s*[:=]\s*)(?P<value>` + redactUnquoted + `))`,
-		replacement: "${1}${3}" + redactedValue, keep: isAuthScheme, needles: redactLabelNeedles, start: startParam,
+		replacement: "${1}${3}" + redactedValue, keep: isAuthScheme, value: valueUnquoted, needles: redactLabelNeedles, start: startParam,
 		runsOn: awsPairRunsOn,
 	},
 	// A command-line flag: `--password x`, `--token=x`, `--api-key x`, and quoted, the way agents
@@ -600,31 +1121,33 @@ var redactionRules = concatRules([]redactionRule{
 	// with `=` or `:`, which is an assignment's separator after a word that only looks like a flag:
 	// a diff's removed line `-SECRET_KEY = 'x'`.
 }, quotedRules(quotedFlag, nil), []redactionRule{
-	{expr: `(?i)(` + redactFlag + `)([^\s"'=:-][^\s"']*)`, replacement: "${1}" + redactedValue, needles: redactFlagNeedles, start: startFlag, runsOn: awsPairRunsOn},
+	{expr: `(?i)(` + redactFlag + `)([^\s"'=:-][^\s"']*)`, replacement: "${1}" + redactedValue, value: valueUnquoted, needles: redactFlagNeedles, start: startFlag, runsOn: awsPairRunsOn},
 	// A flag and its value as two quoted items of an argument list, the way an MCP server's args
 	// are written in JSON, TOML and YAML: `"args": ["--api-key", "x"]`.
 	{
 		expr:        `(?i)(["']` + redactFlagName + `["']\s*,\s*["'])(?P<value>(?:[^"'\n\\]|\\[^\n])+)`,
-		replacement: "${1}" + redactedValue, keep: isRedactedValue, needles: redactListedFlagNeedles, start: startListedFlag,
-		runsOn: awsPairRunsOn,
+		replacement: "${1}" + redactedValue, keep: isRedactedValue, value: valueDoubleQuoted, needles: redactListedFlagNeedles,
+		start: startListedFlag, runsOn: awsPairRunsOn,
 	},
 	// curl's basic-auth credentials: `-u user:pass`, `-uuser:pass`, `--user user:pass` and
-	// `--proxy-user user:pass`. The user name and the colon stay. A bare `-u user` (curl prompts for
-	// the password) has nothing to redact, and the rule is limited to curl lines so `docker run -u
-	// 1000:1000` is left alone.
-	curlRule(`(?i)(\bcurl\b[^\n]*?\s(?:-[a-z]*u\s*|(?:--user|--proxy-user)(?:=|\s+))["']?[^:\s"']*:)([^\s"']+)`, "${1}"+redactedValue),
+	// `--proxy-user user:pass`. The user name and the colon stay, and so does a password that is a
+	// command substitution (`-u "ci:$(gh auth token)"`), which the rule reads up to its first blank,
+	// as an unquoted value. A bare `-u user` (curl prompts for the password) has nothing to redact,
+	// and the rule is limited to curl lines so `docker run -u 1000:1000` is left alone.
+	curlRule(`(?i)(\bcurl\b[^\n]*?\s(?:-[a-z]*u\s*|(?:--user|--proxy-user)(?:=|\s+))["']?[^:\s"']*:)([^\s"']+)`, "${1}"+redactedValue).withValue(valueUnquoted),
 	// curl's cookie flag with a cookie string: `-b 'sid=x; csrf=y'`, `--cookie sid=x`. Only a value
 	// holding `=` is cookies; anything else names a cookie file, which stays. The quotes stay.
 	curlRule(`(?i)(\bcurl\b[^\n]*?\s(?:-[a-z]*b\s*|--cookie(?:=|\s+)))(?:(')[^'\n]*=[^'\n]*(')|(")[^"\n]*=[^"\n]*(")|[^\s"'=]+=[^\s"']*)`, "${1}${2}${4}"+redactedValue+"${3}${5}"),
 	// A Cookie or Set-Cookie header: the whole value is a session credential, as the field-name rule
-	// in SanitizeMap already treats a structured `cookie` field. Only where a header or key can
-	// start (a line, a quote, curl's -H), so prose that says "cookie:" keeps its sentence.
-	foldedRule(`(?im)((?:^\s*|["']\s*|(?:-H|--header)(?:=|\s+)["']?)(?:set-)?cookie["']?\s*:\s*["']?)([^\n"'\\]+)`, "${1}"+redactedValue, isRedactedValue, "cookie").from(startLine),
+	// in SanitizeMap already treats a structured `cookie` field, unless it is one command
+	// substitution (`-H "Cookie: $(cat ~/.cookie)"`). Only where a header or key can start (a line,
+	// a quote, curl's -H), so prose that says "cookie:" keeps its sentence.
+	foldedRule(`(?im)((?:^\s*|["']\s*|(?:-H|--header)(?:=|\s+)["']?)(?:set-)?cookie["']?\s*:\s*["']?)([^\n"'\\]+)`, "${1}"+redactedValue, isRedactedValue, "cookie").from(startLine).withValue(valueDoubleQuoted),
 	// The password in a URL's userinfo: `postgres://user:pw@host`, `https://x-access-token:t@github.com`,
 	// and with no user name, the way Redis URLs carry a password: `redis://:pw@host`. The word the
 	// scheme ends can hold an `_`, which no scheme does: of `lsv2_sk_mysql://user:pw@host` the scheme
 	// is `mysql`, and the match starts with the word.
-	foldedRule(`(?i)(\b[a-z0-9_+.-]*?[a-z][a-z0-9+.-]*://[^/\s:@"'<>]*:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://").from(startScheme).runningOn(urlRunningOn),
+	foldedRule(`(?i)(\b[a-z0-9_+.-]*?[a-z][a-z0-9+.-]*://[^/\s:@"'<>]*:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://").from(startScheme).runningOn(urlRunningOn).withValue(valueUnquoted),
 	// Credentials recognizable by their own shape, wherever they appear. The type prefix is public
 	// and stays (`ghp_[REDACTED]`, `AKIA[REDACTED]`), the way secret scanners report a finding: the
 	// line still says a GitHub token or an AWS key was there, which is what detection rules match on
@@ -710,7 +1233,13 @@ func (rule redactionRule) runningOn(runsOn func(rule *redactionRule, t string, m
 	return rule
 }
 
-// apply replaces every match of the rule in the gate's text, except one whose value keep passes.
+// withValue returns the rule with its value written as kind says.
+func (rule redactionRule) withValue(kind valueKind) redactionRule {
+	rule.value = kind
+	return rule
+}
+
+// apply replaces every match of the rule in the gate's text, except one it keeps (keeps).
 func (rule redactionRule) apply(text *redactGate, slot *redactSlot) string {
 	value := text.value
 	var out []byte
@@ -719,14 +1248,20 @@ func (rule redactionRule) apply(text *redactGate, slot *redactSlot) string {
 		if match[0] < last {
 			continue // inside a match that ran on (redactionRule.runsOn)
 		}
-		if keep := use.rule.keep; keep != nil {
-			if group := 2 * valueGroup(use.pattern, match); match[group] >= 0 && keep(value[match[group]:match[group+1]]) {
-				text.hidden = text.hidden || keptLabel(value, match[group+1])
-				continue
+		if use.rule.keeps(value, use.pattern, match) {
+			text.hidden = text.hidden || keptLabel(value, match[2*valueGroup(use.pattern, match)+1])
+			// A kept flag of a whole-line rule is still the first of its line: the flags
+			// after it are redacted as they are after a replaced one.
+			if use.rule.wholeLine {
+				if more, end := use.rule.restOfLine(nil, value, match[0], match[1]); more != nil {
+					out = append(append(out, value[last:match[1]]...), more...)
+					last = end
+				}
 			}
+			continue
 		}
 		out = append(out, value[last:match[0]]...)
-		replacement, end := use.rule.replacing(value, match)
+		replacement, end := use.rule.replacing(value, use.pattern, match)
 		out = use.pattern.ExpandString(out, replacement, value, match)
 		last = end
 		if use.rule.wholeLine {
@@ -750,7 +1285,8 @@ func (rule redactionRule) apply(text *redactGate, slot *redactSlot) string {
 // ended: one search over the line, however many flags it holds. A flag must start on the line, or
 // at the newline ending it, as the rule's lazy run requires; its value can reach the next lines
 // (commandLineEnd). The rule itself cannot find the next flag: its match opens with the command
-// word, which lies before the end of the last match.
+// word, which lies before the end of the last match. A flag the rule keeps stays (keeps). It
+// returns out as it was where it replaced nothing.
 func (rule *redactionRule) restOfLine(out []byte, t string, start, last int) ([]byte, int) {
 	nl := len(t)
 	if i := strings.IndexByte(t[start:], '\n'); i >= 0 {
@@ -772,9 +1308,16 @@ func (rule *redactionRule) restOfLine(out []byte, t string, start, last int) ([]
 		if m[0] > nl {
 			break
 		}
+		if m[0] < last {
+			continue // inside a match that ran on (replacing)
+		}
+		if rule.keeps(t, re, m) {
+			continue
+		}
 		out = append(out, t[last:m[0]]...)
-		out = re.ExpandString(out, rule.replacement, t, m)
-		last = m[1]
+		replacement, replaced := rule.replacing(t, re, m)
+		out = re.ExpandString(out, replacement, t, m)
+		last = replaced
 	}
 	return out, last
 }
@@ -790,8 +1333,17 @@ func (rule *redactionRule) flagPattern() *regexp.Regexp {
 }
 
 // replacing returns the replacement of match in t, and where the text it replaces ends: the
-// match's end, unless the rule's match runs on (runsOn).
-func (rule *redactionRule) replacing(t string, match []int) (string, int) {
+// match's end, unless literal text goes on with a command substitution in the value past it
+// (valueRun), where the replacement keeps the quotes it runs on over, or the rule's match runs on
+// (runsOn).
+func (rule *redactionRule) replacing(t string, re *regexp.Regexp, match []int) (string, int) {
+	if rule.value != valueOther {
+		if g := substitutionGroup(re, match, valueGroup(re, match)); match[2*g] >= 0 {
+			if _, run := rule.value.substitution(t, re, match, g); run.to >= 0 {
+				return rule.replacement + quotesOf(t[run.from:run.to]), run.to
+			}
+		}
+	}
 	if rule.runsOn != nil {
 		if replacement, end := rule.runsOn(rule, t, match); end >= 0 {
 			return replacement, end
@@ -1235,15 +1787,30 @@ func keptLabel(t string, end int) bool {
 // that a later rule can change it, or make it long enough to remove.
 func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string]struct{}) (_ map[string]struct{}, kept bool) {
 	value := text.value
-	add := func(s string) {
-		if len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) {
-			if assigned == nil {
-				assigned = map[string]struct{}{}
+	// A substitution the rules keep is a command and not a value: its copies elsewhere in the
+	// text are other commands, and stay. Whether it is one is decided as the rule for the way
+	// the value is written decides it (valueKind); one it replaces is captured as far as the
+	// replaced text runs on, and, where literal text after it ends its shell word before that
+	// (`$(cat x)hunter2;`), as far as that text too, the way a copy of it is written (valueRun).
+	add := func(kind valueKind, re *regexp.Regexp, match []int, g int) {
+		keep, run := kind.substitution(value, re, match, g)
+		if keep {
+			return
+		}
+		start, end := match[2*g], match[2*g+1]
+		if run.to >= 0 {
+			end = run.to
+		}
+		for _, s := range [2]string{value[start:end], value[start:max(start, run.word)]} {
+			if len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) {
+				if assigned == nil {
+					assigned = map[string]struct{}{}
+				}
+				assigned[s] = struct{}{}
 			}
-			assigned[s] = struct{}{}
 		}
 	}
-	for match := range redactAssignedRule().matches(text, &engine.assigned) {
+	for match, use := range redactAssignedRule().matches(text, &engine.assigned) {
 		// The value is in one group: each way of writing it is an alternative.
 		g := 2
 		for g+1 < len(match) && match[g] < 0 {
@@ -1253,18 +1820,41 @@ func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string
 			continue
 		}
 		unquoted := g+2 == len(match)
-		kept = kept || unquoted && strings.ContainsAny(value[match[0]:match[g]], redactQuotes)
+		// The URL parameter (the first group) and the unquoted value (the last) are unquoted; the
+		// others are quotedValues in order.
+		kind := valueUnquoted
+		if i := g/2 - 2; i >= 0 && i < len(quotedValues) {
+			kind = quotedValueKind(quotedValues[i][0])
+		}
+		quotedLabel := unquoted && strings.ContainsAny(value[match[0]:match[g]], redactQuotes)
+		kept = kept || quotedLabel
 		// A value that is itself a label hides the assignment it begins from the capture, as a kept
 		// one does from the label rules.
 		text.hidden = text.hidden || keptLabel(value, match[g+1])
-		s := value[match[g]:match[g+1]]
-		add(s)
+		if quotedLabel {
+			// After a quoted label the rule reads a bare value, which stops at the structure
+			// around it, where the capture runs on: a substitution is judged as that rule judges it.
+			add(kind, compiledPattern(redactBareCopy), []int{match[g], match[g+1], match[g], match[g+1]}, 1)
+		} else {
+			add(kind, use.pattern, match, g/2)
+		}
 		if unquoted && containsFold(value[match[0]:match[g]], "authorization") {
-			add(authorizationCredentialCopy(value, s, match[g+1]))
+			// The credential is read as an unquoted labeled value is.
+			if from, to := authorizationCredentialCopy(value, value[match[g]:match[g+1]], match[g+1]); from >= 0 {
+				add(valueUnquoted, compiledPattern(redactCredentialCopy), []int{from, to, from, to}, 1)
+			}
 		}
 	}
 	return assigned, kept
 }
+
+// redactCredentialCopy reads the credential after an Authorization scheme as authorizationCredentialCopy
+// does, an unquoted labeled value, in its first group; redactBareCopy a bare value after a quoted
+// label, as its rule does.
+const (
+	redactCredentialCopy = `(` + redactUnquoted + `)`
+	redactBareCopy       = `(` + redactBare + `)`
+)
 
 // replaceAssigned replaces every copy of each assigned value with redactedValue in one pass.
 // Replacing them one strings.ReplaceAll at a time scanned the text once per assignment, and both

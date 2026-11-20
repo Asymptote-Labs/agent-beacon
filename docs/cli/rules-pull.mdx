@@ -20,10 +20,10 @@ This is the only `beacon rules` command that reaches the network, and only when 
 | Input | Description |
 |-------|-------------|
 | `.rule.yaml` | One rule file |
-| `.tar.gz` | Gzipped tarball containing `.rule.yaml` files |
-| `.tgz` | Gzipped tarball containing `.rule.yaml` files |
+| `.tar.gz` | Gzipped tarball containing `.rule.yaml` files and their definitions |
+| `.tgz` | Gzipped tarball containing `.rule.yaml` files and their definitions |
 
-Downloaded tarballs only install `.rule.yaml` entries. Archive entries containing path traversal elements are rejected before install.
+Downloaded tarballs only install `.rule.yaml` entries and the definitions beside them (`*.catalog.yaml` and `*.predicates.yaml`, which say what the [predicates](/detections/yaml-schema#predicates) the rules call mean). Archive entries containing path traversal elements are rejected before install.
 
 ## Transport and integrity
 
@@ -40,7 +40,7 @@ The whole download is read and checked before anything is unpacked or written to
 | Download size | 32 MiB |
 | Tarball entries (every entry, rule or not) | 10,000 |
 | Tarball size once decompressed | 64 MiB |
-| One `.rule.yaml` file | 1 MiB |
+| One `.rule.yaml` or definitions file | 1 MiB |
 
 The published rule pack is about 50 KB compressed, with under 100 entries and about 300 KB decompressed. A source over any limit fails with an error that names the limit, and nothing is installed.
 

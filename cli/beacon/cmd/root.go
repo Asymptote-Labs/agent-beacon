@@ -15,6 +15,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/updatecheck"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
@@ -25,7 +26,8 @@ var rootCmd = &cobra.Command{
 	Long: `Beacon Endpoint Agent discovers local AI agent runtimes, configures
 local telemetry, and writes Wazuh-compatible JSON logs without requiring an
 Beacon-hosted backend.`,
-	Version: version.GetVersion(),
+	Version:          version.GetVersion(),
+	PersistentPreRun: startTelemetry,
 	Run: func(cmd *cobra.Command, args []string) {
 		maybePrintRootUpdateNotice(cmd)
 		printRootSplash(cmd)
@@ -238,8 +240,9 @@ var docsCmd = &cobra.Command{
 func Execute() {
 	startDebugStackTimer(os.Stderr)
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		exitProcess(1)
 	}
+	telemetry.Close()
 }
 
 func init() {

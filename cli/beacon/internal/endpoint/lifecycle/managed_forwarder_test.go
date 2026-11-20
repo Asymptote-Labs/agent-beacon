@@ -95,7 +95,7 @@ func TestInstallWithoutStartingServicesLeavesTheForwarderToTheCaller(t *testing.
 	installFakeInventoryJob(t, true)
 	old := reconcileManagedForwarder
 	called := false
-	reconcileManagedForwarder = func(bool, string) (asymptote.ReconcileResult, error) {
+	reconcileManagedForwarder = func(bool, string, bool) (asymptote.ReconcileResult, error) {
 		called = true
 		return asymptote.ReconcileResult{}, nil
 	}

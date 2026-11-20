@@ -1,8 +1,7 @@
 package threatrules
 
 import (
-	"path/filepath"
-	"strings"
+	"slices"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shellcmd"
@@ -11,85 +10,86 @@ import (
 // ParsedCommandsPath is the CEL path of the derived parsed command line, after the "e." prefix.
 const ParsedCommandsPath = "command.parsed_commands"
 
-// ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
-// to the retained command line, so a longer value (from an in-process caller) is cut there too.
-const ParsedCommandsLimit = asymptoteobserve.DefaultStringLimit
+// ParsedIncompletePath is the CEL path of the derived flag for a command line that was not read
+// to its end, after the "e." prefix.
+const ParsedIncompletePath = "command.parsed_incomplete"
 
-// maxShellDepth bounds how many `sh -c` scripts inside one another are read.
-const maxShellDepth = 2
+// ParsedCommandsLimit bounds how much of command.command is parsed: the limit the writers apply
+// to the retained command line, so a longer value (from an in-process caller) is cut there too
+// (shellcmd.LineLimit).
+const ParsedCommandsLimit = shellcmd.LineLimit
 
 // ParsedCommands returns what a rule sees as e.command.parsed_commands: command read as a bash
-// command line, one entry per command it runs, in the order shellcmd.Parse walks them.
-//
-//   - The first ParsedCommandsLimit bytes are parsed. A command line that ends early (an unclosed
-//     quote, here-document or substitution, as a cut capture does) yields the commands before the
-//     point where it became incomplete; one that does not parse at all yields none, and a rule
-//     falls back to matching command.command.
-//   - name is the base name of the command after its wrappers (sudo, env, command, exec, nohup,
-//     time), "" when it is unknown or a wrapper option hides it (sudo -i, env -C).
-//   - argv and argv_raw are every word, wrappers included: argv as the shell passes it on, ""
-//     for a word whose value depends on an expansion, glob or leading tilde; argv_raw as written.
-//   - env maps each NAME=value assignment before the command to its value ("" when unknown).
-//   - file_effects are shellcmd's file effects of the command: {path, op}.
-//   - pipeline, stage and nested are shellcmd's.
-//   - The script a shell (sh, bash, zsh, dash, ksh) runs with -c, when it is a known word, is
-//     read the same way, depth-limited, and its commands follow the shell's with nested true and
-//     pipeline numbers of their own. The shell may follow other words (`docker exec c sh -c ..`).
-//
-// Here-document bodies, and the strings of commands other than a shell's -c, are not read as
-// commands. The text is read as bash whatever shell ran it.
+// command line by shellcmd.Read, one entry per command it runs, the commands of the command
+// lines they hand on after them. Each entry is one shellcmd.Command with what Read worked out
+// for it: name (Command.Name, after the wrappers Command.Unwrapped looks through), args
+// (Command.ArgsText), argv and argv_raw (every word, wrappers included: its value, "" when
+// unknown, and as written), env, pipeline, stage, nested (inside a substitution or a command
+// line another command hands on), cwd (Command.Dir), file_effects, file_writes, file_reads with
+// script_sends, socket_redirects, runs_read, span, and earlier_stages and later_stages.
+// SPEC.md ("Derived fields") is the contract for each; this is its reference derivation.
 //
 // It is exported so that another engine implementing the Threat Rules contract can derive the
 // field the same way; fixtures that exercise it only conform if the derivation agrees.
 func ParsedCommands(command string) []asymptoteobserve.ParsedCommand {
-	if command == "" {
-		return nil
-	}
-	cmds, _ := shellcmd.Parse(asymptoteobserve.TruncateUTF8(command, ParsedCommandsLimit))
-	if len(cmds) == 0 {
-		return nil
-	}
-	p := parsedCommands{out: make([]asymptoteobserve.ParsedCommand, 0, len(cmds))}
-	p.add(cmds, false, 0)
-	return p.out
+	parsed, _ := ParsedCommandLine(command)
+	return parsed
 }
 
-type parsedCommands struct {
-	out       []asymptoteobserve.ParsedCommand
-	pipelines int // the highest pipeline number assigned so far
-}
-
-// add appends cmds, numbering their pipelines after every pipeline already added.
-func (p *parsedCommands) add(cmds []shellcmd.Command, nested bool, depth int) {
-	base := p.pipelines
-	for _, c := range cmds {
-		p.pipelines = max(p.pipelines, base+c.Pipeline)
-	}
-	for _, c := range cmds {
-		p.out = append(p.out, parsedCommand(c, base, nested))
-		if depth >= maxShellDepth {
-			continue
+// ParsedCommandLine returns ParsedCommands of command, and whether the command line was not read
+// to its end (e.command.parsed_incomplete): it does not parse, it ends early, it is longer
+// than ParsedCommandsLimit, or reading it passes a bound of shellcmd.Read (more than
+// shellcmd.MaxCommands commands, shellcmd.MaxWords words, or scripts past theirs), in which
+// case it has no parsed commands. A rule can then conclude nothing from what the list lacks.
+//
+// A command line is whatever an agent ran or was made to run, and every scan, the dashboard
+// and the gateway read each one. Should the reading panic, the line counts as one that was
+// not read: it has no parsed commands and is incomplete, so the rules that match a line's text
+// still see it and nothing else stops. FuzzParsedCommandLine calls the reading itself, where a
+// panic is a failure.
+func ParsedCommandLine(command string) (parsed []asymptoteobserve.ParsedCommand, incomplete bool) {
+	defer func() {
+		if recover() != nil {
+			parsed, incomplete = nil, true
 		}
-		if script, ok := shellScript(c.Argv); ok {
-			if sub, _ := shellcmd.Parse(script); len(sub) > 0 {
-				p.add(sub, true, depth+1)
-			}
-		}
-	}
+	}()
+	return readCommandLine(command)
 }
 
-func parsedCommand(c shellcmd.Command, pipelineBase int, nested bool) asymptoteobserve.ParsedCommand {
+// readCommandLine is the reading ParsedCommandLine guards; a test replaces it with one that
+// panics.
+var readCommandLine = parsedCommandLine
+
+// parsedCommandLine is shellcmd.Read of command, each command as a rule sees it.
+func parsedCommandLine(command string) (parsed []asymptoteobserve.ParsedCommand, incomplete bool) {
+	line := shellcmd.Read(command)
+	if len(line.Commands) == 0 {
+		return nil, line.Incomplete
+	}
+	out := make([]asymptoteobserve.ParsedCommand, len(line.Commands))
+	for i := range line.Commands {
+		out[i] = parsedCommand(&line, i)
+	}
+	return out, line.Incomplete
+}
+
+func parsedCommand(line *shellcmd.Line, i int) asymptoteobserve.ParsedCommand {
+	c := &line.Commands[i]
 	pc := asymptoteobserve.ParsedCommand{
 		Name:     c.Name(),
+		Args:     c.ArgsText(),
 		Argv:     make([]string, len(c.Argv)),
 		ArgvRaw:  make([]string, len(c.Argv)),
-		Pipeline: pipelineBase + c.Pipeline,
+		Pipeline: c.Pipeline,
 		Stage:    c.Stage,
-		Nested:   nested || c.Nested,
+		Cwd:      c.Dir,
+		Nested:   c.Nested || c.InScript,
+		RunsRead: c.RunsRead(),
+		Span:     line.Spans[i],
 	}
-	for i, w := range c.Argv {
-		pc.Argv[i] = w.Text
-		pc.ArgvRaw[i] = w.Raw
+	for k, w := range c.Argv {
+		pc.Argv[k] = w.Text
+		pc.ArgvRaw[k] = w.Raw
 	}
 	if len(c.Env) > 0 {
 		pc.Env = make(map[string]string, len(c.Env))
@@ -97,66 +97,39 @@ func parsedCommand(c shellcmd.Command, pipelineBase int, nested bool) asymptoteo
 			pc.Env[as.Name] = as.Value.Text
 		}
 	}
-	if effects := c.FileEffects(); len(effects) > 0 {
-		pc.FileEffects = make([]asymptoteobserve.ParsedFileEffect, len(effects))
-		for i, e := range effects {
-			pc.FileEffects[i] = asymptoteobserve.ParsedFileEffect{Path: e.Path, Op: string(e.Op)}
+	// Every effect is a write, in the same order: as many writes are the same list.
+	if pc.FileEffects = parsedFileEffects(line.Effects[i]); len(line.Writes[i]) == len(line.Effects[i]) {
+		pc.FileWrites = pc.FileEffects
+	} else {
+		pc.FileWrites = parsedFileEffects(line.Writes[i])
+	}
+	if line.Reads != nil && len(line.Reads[i]) > 0 {
+		pc.FileReads = make([]asymptoteobserve.ParsedFileRead, len(line.Reads[i]))
+		for k, r := range line.Reads[i] {
+			pc.FileReads[k] = asymptoteobserve.ParsedFileRead{Path: r.Path, Via: string(r.Via)}
+			if r.Sent && !slices.Contains(pc.ScriptSends, r.Path) {
+				pc.ScriptSends = append(pc.ScriptSends, r.Path)
+			}
 		}
+	}
+	if line.Sockets != nil {
+		for _, s := range line.Sockets[i] {
+			pc.SocketRedirects = append(pc.SocketRedirects, asymptoteobserve.ParsedSocketRedirect{Path: s.Path, Op: string(s.Op)})
+		}
+	}
+	if line.Earlier != nil {
+		pc.EarlierStages, pc.LaterStages = line.Earlier[i], line.Later[i]
 	}
 	return pc
 }
 
-// shellScript returns the script of the first shell word in words when that shell runs it with
-// -c: the first operand after an option cluster containing c. ok is false when there is no such
-// shell, the shell runs a file or stdin instead, or the script is not a known word.
-func shellScript(words []shellcmd.Word) (script string, ok bool) {
-	start := -1
-	for i, w := range words {
-		if w.Known && isShell(w.Text) {
-			start = i
-			break
-		}
+func parsedFileEffects(effects []shellcmd.FileEffect) []asymptoteobserve.ParsedFileEffect {
+	if len(effects) == 0 {
+		return nil
 	}
-	if start < 0 {
-		return "", false
+	out := make([]asymptoteobserve.ParsedFileEffect, len(effects))
+	for i, e := range effects {
+		out[i] = asymptoteobserve.ParsedFileEffect{Path: e.Path, Op: string(e.Op)}
 	}
-	command := false
-	for i := start + 1; i < len(words); i++ {
-		w := words[i]
-		if !w.Known {
-			return "", false
-		}
-		t := w.Text
-		switch {
-		case t == "--":
-			if command && i+1 < len(words) && words[i+1].Known {
-				return words[i+1].Text, true
-			}
-			return "", false
-		case t == "--rcfile" || t == "--init-file":
-			i++ // takes a file
-		case strings.HasPrefix(t, "--"):
-		case len(t) > 1 && (t[0] == '-' || t[0] == '+'):
-			if t[0] == '-' && strings.ContainsRune(t[1:], 'c') {
-				command = true
-			}
-			if last := t[len(t)-1]; last == 'o' || last == 'O' {
-				i++ // -o option / -O shopt_option takes a name
-			}
-		default:
-			if command {
-				return t, true
-			}
-			return "", false
-		}
-	}
-	return "", false
-}
-
-func isShell(word string) bool {
-	switch filepath.Base(word) {
-	case "sh", "bash", "zsh", "dash", "ksh":
-		return true
-	}
-	return false
+	return out
 }

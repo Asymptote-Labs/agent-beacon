@@ -1,0 +1,6 @@
+# Every text file is checked out with LF, on Windows too. Tests compare checked-in text with what
+# Beacon generates or writes, which is LF: golden files, the .kql pack, FIELDS.md, the lens SPEC
+# copies, generated references. Git for Windows' default core.autocrlf turned them into CRLF on
+# checkout, and each such test had to learn to undo it. Binary files are detected and left alone;
+# fxsession's recorded sessions opt out of conversion entirely (their own .gitattributes).
+* text=auto eol=lf

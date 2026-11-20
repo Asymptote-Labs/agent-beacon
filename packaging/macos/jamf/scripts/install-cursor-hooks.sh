@@ -18,7 +18,9 @@ if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ]; then
   exit 1
 fi
 
-exec sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" "$BEACON_BIN" endpoint hooks install \
+# BEACON_INTERNAL_CHILD=1 keeps the CLI's one-time telemetry notice out of the policy log, where
+# the person would never see it, so it is left for a command they run themselves.
+exec sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" BEACON_INTERNAL_CHILD=1 "$BEACON_BIN" endpoint hooks install \
   --harness "$HOOK_HARNESSES" \
   --level "$HOOK_LEVEL" \
   --log-path "$HOOK_LOG_PATH"

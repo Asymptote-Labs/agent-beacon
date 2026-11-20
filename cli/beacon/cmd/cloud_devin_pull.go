@@ -155,10 +155,7 @@ func reportDevinSweep(cmd *cobra.Command, sum devincloud.Summary) {
 }
 
 func endpointDevinUserMode() bool {
-	if devinPullOpts.systemMode {
-		return false
-	}
-	return devinPullOpts.userMode
+	return flagsUserMode(devinPullOpts.userMode, devinPullOpts.systemMode)
 }
 
 // resolveDevinStatePath always returns a non-empty path so dedup state is

@@ -1,0 +1,133 @@
+---
+title: "CLI telemetry"
+description: "The product usage events the beacon CLI sends, and how to turn them off"
+---
+
+## Overview
+
+The `beacon` CLI sends a small number of product usage events to Beacon so we can see
+whether installs succeed and which setup paths people use. They go to
+`https://beacon.sh/ingest`, Beacon's proxy to PostHog.
+
+This is separate from the agent telemetry Beacon records. CLI telemetry never contains
+session content, prompts, responses, commands, file paths, repository names, hostnames
+or error messages. Your agent sessions stay where you send them: the local log, your own
+forwarding destination, or Beacon Cloud if you chose it.
+
+The first time you, or a coding agent or script, run a `beacon` command with telemetry on,
+the CLI prints this line to stderr, once. It goes to stderr only, so a command's output stays
+machine-readable. Runs whose stderr nobody reads never print it, and leave it for a run
+someone does: scheduled jobs, the `beacon` processes Beacon starts for itself, MDM and fleet
+scripts that run `beacon` as the signed-in user through `sudo` without a terminal, and
+`beacon mcp serve` on stdio, which your coding agent starts:
+
+```text
+Beacon sends CLI usage data (never prompts, code or file paths). Turn it off with BEACON_TELEMETRY=0. Learn more: https://docs.beacon.sh/cli/telemetry
+```
+
+## Turn it off
+
+Set either variable in the environment the CLI runs in:
+
+| Variable | Effect |
+|----------|--------|
+| `BEACON_TELEMETRY=0` | Turns CLI telemetry off. `false`, `no` and `off` work too. |
+| `DO_NOT_TRACK=1` | The [cross-tool convention](https://consoledonottrack.com). Any value other than `0` or `false` turns it off. |
+
+## System mode
+
+CLI telemetry is off by default for `--system` commands and for any command run as root
+(`sudo`, package scripts, MDM, and the system scheduled jobs), so fleet installs make no
+CLI telemetry requests and write no telemetry state unless an administrator opts in with
+`BEACON_TELEMETRY=1` (`true`, `yes` and `on` work too). `DO_NOT_TRACK` still turns it off.
+On Windows, where a process is never root, this covers `--system` commands. The `beacon`
+processes such a run starts as the signed-in user are told telemetry is off too.
+
+With telemetry off, the CLI sends nothing and writes no telemetry state. A variable set
+in the shell you run `beacon endpoint install` from is also recorded in the user-mode
+scheduled jobs (inventory and session sync), and the CLI passes it on to the `beacon`
+processes it starts as another account, so they stay off too. Development
+builds (`beacon version` prints `dev`) never send telemetry.
+
+Events are sent in the background and never slow down or fail a command: on exit the CLI
+waits at most 1.5 seconds for them, and any network error is ignored. The runtime hooks
+(`beacon-hooks`), the collector, shell completion and the git hook entry points never send
+CLI telemetry.
+
+## What every event carries
+
+| Property | Value |
+|----------|-------|
+| `product` | `beacon` |
+| `surface` | `cli` |
+| `beacon_version` | The CLI version |
+| `os`, `arch` | Operating system and CPU architecture, such as `darwin` and `arm64` |
+| `install_mode` | `user`, or `system` for `--system` commands and commands run as root (only with `BEACON_TELEMETRY=1`, see [System mode](#system-mode)) |
+| `install_method` | `homebrew`, `package`, or `source` |
+| `is_ci` | Whether a CI marker such as `CI` or `GITHUB_ACTIONS` is set |
+| `invoking_agent` | The coding agent whose shell ran the command (`claude_code`, `cursor`, `codex`, `gemini_cli`, `opencode`, `cline`, a name from `AI_AGENT`), or `none` |
+
+## Identity
+
+Until the CLI knows who you are, events are sent under the machine's random install ID
+(`install_id` in `~/.beacon/profile.json`), the same ID the onboarding record uses, and
+they create no person profile.
+
+When you sign in (`beacon login` or the install wizard), or give `beacon endpoint install`
+your email with `--email`, `BEACON_EMAIL`, or the install wizard's optional email question
+(asked when you finish setup without an account), the CLI links that install ID to you. Your email is sent once as a person property, never as an event property, and the ID
+it sends events under from then on is the SHA-256 of your lower-cased email. Events from a
+work email are grouped under its domain; personal mailbox domains such as `gmail.com` are
+not. Signing out with `beacon logout` does not unlink the machine.
+
+If you are already signed in when the CLI does not know you yet, for example after signing in
+with a version that had no telemetry, the next command links the machine to that account the
+same way, once, whichever way Beacon is installed. It never replaces a person the CLI already
+knows, `beacon login` and `beacon logout` leave it to the new sign-in, and with telemetry off it
+does not read the sign-in at all.
+
+The CLI keeps this state in `~/.beacon/telemetry.json` (mode `0600`): when the notice was
+shown, the identified ID, when an install first succeeded, and where the scheduled inventory job
+stopped reading the runtime log. Deleting the file resets all of them. Updates to it take
+`~/.beacon/telemetry.lock` first, so a command and a scheduled job saving at the same moment
+never undo each other's change; an update that cannot get the lock within a second is skipped.
+
+## Events
+
+| Event | When | Properties |
+|-------|------|------------|
+| `$create_alias`, `$set` | The CLI learns your email | Your email, `has_beacon`, your Beacon account ID when signed in, and `first_product`/`first_surface` set once, all as person properties |
+| `cli_sign_in_completed` | A sign-in succeeds, sent after `$create_alias` and `$set` as the signed-in person | `trigger` (`wizard` or `login_command`) |
+| `cli_email_submitted` | `beacon endpoint install` is given an email with `--email` or `BEACON_EMAIL` and no valid sign-in, or in the wizard's optional email question, sent after `$create_alias` and `$set` as that person | `email_source` (`flag`, `env` or `prompt`), `email_domain_kind` (`work` or `free`); never the address |
+| `cli_email_prompt_skipped` | The wizard's optional email question is left blank | None |
+| `cli_install_started` | `beacon endpoint install` begins (not on `--dry-run`) | `setup_path` (`wizard`, `agent`, `ci`, `package`, or `noninteractive`), `detected_harnesses` (the runtime names discovery found), `is_first_for_device` |
+| `cli_install_completed` | `beacon endpoint install` succeeds, after hooks, skills, the session backfill and any Beacon Cloud connect | `destination` (`local` or `cloud`), `cloud_connect` (`new`, `existing` or `none`), `harnesses_configured` (the install targets), `backfill_session_count`, `duration_ms`, `is_first_for_device` |
+| `cli_trace_recorded` | A local-only endpoint records an agent session for the first time: from the install's session backfill (`backfill`), or, for sessions any collector (hooks, OTLP, session stores) wrote since the last run, from the scheduled inventory job or the scheduled session sync (`live`; session-store records count only when they happened at most three days before the last run, since the session sync writes them after the fact, so a manual sync of older sessions is not live). At most 50 a run; not sent when the endpoint forwards to Beacon Cloud | `harness` (the runtime's name, such as `claude_code`, from the fixed list of runtimes Beacon supports; any other name, such as an application's own OTLP service name, is sent as `other`), `source` (`backfill` or `live`), `is_first_for_device` |
+
+`backfill_session_count` is the number of sessions the install's [session backfill](/cli/endpoint-install#session-backfill)
+wrote records for, counted from the runtime log the backfill wrote; it is `0` when the
+backfill is off. The system packages' install scripts set `BEACON_INSTALL_SOURCE=package`,
+which is how `setup_path` tells a package install apart.
+
+`cloud_connect` is `new` when the install connected the endpoint to Beacon Cloud itself, and
+`existing` when it is a reinstall or upgrade of an endpoint an earlier run connected, which keeps
+its device key and reports no history to Beacon Cloud. It is `none` when `destination` is `local`.
+
+`is_first_for_device` on the install events is `true` only when nothing says Beacon was
+installed for this account before: no answer from the install wizard, no install manifest
+(every install writes one), and no earlier successful install recorded in
+`~/.beacon/telemetry.json`, which `beacon endpoint uninstall` leaves in place. A reinstall,
+upgrade or repair, including one an agent or script runs, is `false`.
+
+To send each session once, the CLI keeps truncated SHA-256 hashes of the sessions it has reported in
+`~/.beacon/telemetry-sessions.json` (mode `0600`, at most 5,000), and updates it under a lock
+file beside it, `telemetry-sessions.lock`, so two runs that finish together do not report the
+same session twice. A run that cannot get the lock within a second sends nothing, and a later run
+reports those sessions. It never stores or sends session IDs. The scheduled inventory job also
+keeps how far into the runtime log it has read in `~/.beacon/telemetry.json`, with a hash of the log file's first line and when it read it. Its
+first run only records where the log ends, so earlier sessions are never reported as `live`, and so
+does a run more than three days after the last one (telemetry was off, or the machine was). When
+the log has rotated since the last run, the job finds the file it was reading among the archives
+by that hash and reads on from where it stopped, then the newer archives and the live log. Only
+records a collector wrote count; the records Beacon writes about a session itself, such as a share
+or a commit link, do not. A system scheduled sync that runs without a home directory sends nothing.

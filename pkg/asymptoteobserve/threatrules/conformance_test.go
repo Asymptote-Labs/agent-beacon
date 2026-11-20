@@ -1,12 +1,18 @@
 package threatrules
 
 import (
+	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+
+	celast "github.com/google/cel-go/common/ast"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -34,6 +40,28 @@ func repoRoot(t testing.TB) string {
 }
 
 func rulesDir(t testing.TB) string { return filepath.Join(repoRoot(t), "rules") }
+
+// corpusPack loads the open corpus as a pack, its rules and its definitions, once for the test
+// binary; every file must load. Its rules are shared, so a test must not change one.
+func corpusPack(t testing.TB) *Pack {
+	t.Helper()
+	corpus.Do(func() {
+		corpus.pack, corpus.err = LoadPackDir(rulesDir(t))
+		if corpus.err == nil && len(corpus.pack.Skipped) > 0 {
+			corpus.err = fmt.Errorf("%s", corpus.pack.Skipped[0])
+		}
+	})
+	if corpus.err != nil {
+		t.Fatalf("load the corpus: %v", corpus.err)
+	}
+	return corpus.pack
+}
+
+var corpus struct {
+	sync.Once
+	pack *Pack
+	err  error
+}
 
 func specDir(t *testing.T) string { return filepath.Join(repoRoot(t), "spec", "threat-rules") }
 
@@ -100,124 +128,277 @@ func TestPackMatchesWhatTheLogHolds(t *testing.T) {
 	}
 }
 
-// TestPackSharedCredentialRead pins correlation read steps that are meant to reuse
-// credential-file-read's definition of a secret. The format has no include mechanism, so
-// the expression is copied; this fails when one copy changes without the other.
-func TestPackSharedCredentialRead(t *testing.T) {
-	rules, err := LoadDir(rulesDir(t))
-	if err != nil {
-		t.Fatalf("load rule pack: %v", err)
+// TestPackCopiesNoCatalog holds the corpus to its own definitions: no rule carries a regular
+// expression that spells out the stores of a catalog the pack ships. A rule that did would be
+// right until the catalog changed, and then wrong without anything failing. The second half
+// shows the check sees a copy: the list a rule used to carry before the catalog.
+func TestPackCopiesNoCatalog(t *testing.T) {
+	for _, rule := range corpusRules(t) {
+		for _, copied := range CatalogCopies(rule) {
+			t.Errorf("%s: %s", rule.ID, copied)
+		}
 	}
-	byID := make(map[string]*Rule, len(rules))
-	for _, r := range rules {
-		byID[r.ID] = r
+
+	lib := corpusPack(t).Library
+	decode := func(match string) *Rule {
+		rule, err := lib.DecodeRule([]byte("id: copy\nversion: 1\ntitle: t\ndescription: d\nseverity: low\nmatch: >\n  " + match + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rule
 	}
-	base := byID["credential-file-read"]
-	if base == nil {
-		t.Fatal("credential-file-read missing from the pack")
+	copies := CatalogCopies(decode(`e.event.action == "file.read" && (e.file.path.matches("(?i)\\.aws/credentials") || e.file.path.matches("(?i)(^|/)(\\.netrc|\\.pgpass)$"))`))
+	if len(copies) != 1 || copies[0].Catalog != "credential-stores" || !slices.Equal(copies[0].Stores, []string{"aws-shared-credentials", "netrc", "pgpass"}) || len(copies[0].Patterns) != 2 {
+		t.Errorf("a rule with its own list of credential files: got %+v, want one copy of aws-shared-credentials, netrc and pgpass in two patterns", copies)
 	}
-	for _, ref := range []struct{ rule, step string }{
-		{"secret-read-then-destructive", "read_secret"},
+	// One store is copied when the rule says what it is: the expression a rule carried for the
+	// SSH agent before the catalog, and a rule about another event that says again which file
+	// is the .netrc.
+	for match, store := range map[string]string{
+		`e.event.action == "command.executed" && e.command.command.matches("(?i)\\bssh-add\\b[^;&|\\n]*\\s-[A-Za-z]*[lL]")`: "ssh-agent-keys",
+		`e.event.action == "file.modified" && e.file.path.matches("(?i)(^|/)\\.netrc$")`:                                    "netrc",
 	} {
-		r := byID[ref.rule]
-		if r == nil || r.Correlation == nil {
-			t.Fatalf("%s missing or not a correlation rule", ref.rule)
+		if copies := CatalogCopies(decode(match)); len(copies) != 1 || !slices.Equal(copies[0].Stores, []string{store}) {
+			t.Errorf("%s: got %+v, want one copy of %s", match, copies, store)
 		}
-		var got string
-		for _, s := range r.Correlation.Steps {
-			if s.ID == ref.step {
-				got = s.Match
-			}
-		}
-		if normalizeCEL(got) != normalizeCEL(base.Match) {
-			t.Errorf("%s step %s drifted from credential-file-read's match:\n  got:  %s\n  want: %s",
-				ref.rule, ref.step, normalizeCEL(got), normalizeCEL(base.Match))
+	}
+	for _, match := range []string{
+		// One store named, and something else said about it.
+		`e.event.action == "file.modified" && e.file.path.matches("(?i)(^|/)\\.netrc\\.bak$")`,
+		// The catalog, called, and narrowed by the rule.
+		`e.event.action == "file.modified" && credential_path(e.file.path, "definite", "network") && e.file.path.endsWith(".netrc")`,
+		// Names in a text no predicate is asked about.
+		`e.gen_ai.tool.description.matches("(?i)read .{0,60}(\\.aws/credentials|\\.netrc)")`,
+	} {
+		if copies := CatalogCopies(decode(match)); len(copies) != 0 {
+			t.Errorf("%s: reported as a copy: %v", match, copies)
 		}
 	}
 }
 
-// The egress rules' shared definition of "this command sends data over the network", in the
-// normalized form TestPackSharedEgressSender compares. The format has no include mechanism,
-// so each rule carries a copy.
-const (
-	// egressSender: a parsed command (s) that is a network client by base name, or runs one
-	// under a wrapper the parser does not unwrap.
-	egressSenderNames = `"(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"`
-	egressSender      = `(s.name.matches(` + egressSenderNames + `) || s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") && s.argv.exists(a, a.matches(` + egressSenderNames + `)))`
-	// egressReadsStdin: the sender (s) reads what is piped or redirected into it; curl and
-	// wget only with a stdin body.
-	egressReadsStdin = `(!s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget)$")) || s.argv.exists(a, a.matches("^.*[=@<](-|/dev/stdin)$")) || s.argv.exists(a, a.matches("^(-[a-zA-Z]*T|--upload-file|--post-file|--body-file)$")) && s.argv.exists(a, a in ["-", "/dev/stdin"]))`
-	// egressDevTCP: a bash /dev/tcp or /dev/udp redirect, not a word of a non-shell command
-	// (a commit message or an echo argument).
-	egressDevTCP = `(e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/") && !e.command.parsed_commands.exists(w, !w.name.matches("(?i)^(ba|z|da|k)?sh$") && w.argv_raw.exists(a, a.matches("/dev/(tcp|udp)/"))))`
-	// egressRemoteCopy: scp/sftp/rsync with a host: operand.
-	egressRemoteCopy = `(s.name.matches("(?i)^(scp|sftp|rsync)$") && s.argv_raw.exists(a, a.matches("^[\\x27\"]?[\\w.@-]+:")))`
-)
+// TestPackWritesOutNoPredicate holds the corpus to its predicates: no rule writes out the body
+// of a predicate its pack defines. The cases show what counts: the body with the rule's own
+// variable names, alone or as an operand of something longer, and not an expression that only
+// resembles it.
+func TestPackWritesOutNoPredicate(t *testing.T) {
+	for _, rule := range corpusRules(t) {
+		for _, name := range PredicateCopies(rule) {
+			t.Errorf("%s: writes out the body of %s", rule.ID, name)
+		}
+	}
 
-// TestPackSharedEgressSender pins every egress rule to the one shared sender definition, so
-// adding a sender (or a wrapper) to one rule and not the others fails here. It also fails when
-// any rule's parsed-command check names a netcat with a list other than the shared one, or
-// carries the shared list without being in this table.
-func TestPackSharedEgressSender(t *testing.T) {
-	rules, err := LoadDir(rulesDir(t))
-	if err != nil {
-		t.Fatalf("load rule pack: %v", err)
+	lib := corpusPack(t).Library
+	const names = `"(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"`
+	sender := func(v string) string { return v + `.name.matches(` + names + `)` }
+	for match, want := range map[string][]string{
+		// The eight copies, as the egress rules carried them.
+		`e.event.action == "command.executed" && e.command.parsed_commands.exists(s, (` + sender("s") + `) && s.argv_raw.exists(a, a.matches("x")))`: {"egress_sender"},
+		// Under other names, and as operands of a longer ||.
+		`e.command.parsed_commands.exists(cmd, cmd.name == "gh" || ` + sender("cmd") + `)`: {"egress_sender"},
+		// A predicate whose body calls another.
+		`e.command.parsed_commands.exists(c, c.name == "scp" && c.file_reads.exists(x, credential_file(x.path)))`: {"command_reads_credential_file"},
+		// Called, not written out.
+		`e.command.parsed_commands.exists(s, egress_sender(s) && egress_reads_stdin(s))`: nil,
+		// Another list of names is another question.
+		`e.command.parsed_commands.exists(s, s.name.matches("(?i)^(curl|wget)$"))`: nil,
+		// More than the body allows inside it.
+		`e.command.parsed_commands.exists(c, c.file_reads.exists(x, credential_file(x.path) && x.via == "direct"))`: nil,
+	} {
+		rule, err := lib.DecodeRule([]byte("id: copy\nversion: 1\ntitle: t\nseverity: low\nmatch: >\n  " + match + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := PredicateCopies(rule); !slices.Equal(got, want) {
+			t.Errorf("%s:\n  PredicateCopies = %q, want %q", match, got, want)
+		}
 	}
-	const sender, stdin, devTCP, remoteCopy = 1, 2, 4, 8
-	uses := map[string]int{
-		"upload-to-paste-transfer-site":    sender | devTCP,
-		"secret-read-then-egress":          sender | devTCP | remoteCopy,
-		"browser-session-read-then-egress": sender | devTCP | remoteCopy,
-		"git-bundle-then-egress":           sender | devTCP | remoteCopy,
-		"env-dump-piped-to-network":        sender | stdin | devTCP,
-		"secret-read-and-egress":           sender | stdin | devTCP,
-		"archive-then-upload":              sender | stdin | devTCP,
-		"credentials-in-curl-data":         sender,
+}
+
+// TestPackListsNoSenderOfItsOwn keeps "this command sends data over the network" in one place:
+// the egress predicates of rules/concepts/egress.predicates.yaml. A rule that tests a parsed
+// command against a list that names netcat has a sender list of its own, and eight such copies
+// are what those predicates replaced. A text pattern (over e.command.command, or the text
+// unread_text binds) has to spell the senders inside a longer pattern, so it may, but then it
+// names every client egress_sender knows that sends what it reads (all but curl and wget, which
+// the pattern qualifies), as egress_sender_mention names all of them: a client added to
+// egress_sender and not to the text would be seen on a parsed line and missed in the text. The
+// rule is read as CatalogCopies reads it: the constant patterns of its matches() calls, as
+// written.
+func TestPackListsNoSenderOfItsOwn(t *testing.T) {
+	lib := corpusPack(t).Library
+	// The name as a whole alternative, not letters inside another (truncate).
+	sender := regexp.MustCompile(`(^|[^A-Za-z])(ncat|netcat)([^A-Za-z]|$)`)
+	group := regexp.MustCompile(`\(([a-z0-9]+(?:\|[a-z0-9]+)+)\)`)
+	// The senders a pattern names: every group of names that holds one, since a pattern may
+	// spell them in several groups (egress_sender_mention splits them for the prefilter).
+	senderGroup := func(text string) []string {
+		var names []string
+		for _, g := range group.FindAllStringSubmatch(text, -1) {
+			if ns := strings.Split(g[1], "|"); slices.Contains(ns, "ncat") || slices.Contains(ns, "curl") {
+				names = append(names, ns...)
+			}
+		}
+		slices.Sort(names)
+		return slices.Compact(names)
 	}
-	snippets := []struct {
-		bit  int
-		name string
-		expr string
-	}{
-		{sender, "sender", egressSender},
-		{stdin, "reads-stdin", egressReadsStdin},
-		{devTCP, "/dev/tcp", egressDevTCP},
-		{remoteCopy, "remote-copy", egressRemoteCopy},
+	all := senderGroup(lib.predicates["egress_sender"].text)
+	if !slices.Contains(all, "curl") || !slices.Contains(all, "socat") {
+		t.Fatalf("egress_sender lists no senders: %q", lib.predicates["egress_sender"].text)
 	}
-	literal := regexp.MustCompile(`([\w.]+)\.matches\(("(?:[^"\\]|\\.)*")\)`)
-	seen := map[string]bool{}
-	for _, r := range rules {
-		expr := normalizeCEL(strings.Join(ruleExpressions(r), " "))
-		want, listed := uses[r.ID]
-		if listed {
-			seen[r.ID] = true
-			for _, s := range snippets {
-				if want&s.bit != 0 && !strings.Contains(expr, s.expr) {
-					t.Errorf("%s: the shared %s check is missing or drifted; want it verbatim:\n  %s", r.ID, s.name, s.expr)
+	if got := senderGroup(lib.predicates["egress_sender_mention"].text); !slices.Equal(got, all) {
+		t.Errorf("egress_sender_mention names %q, egress_sender %q", got, all)
+	}
+	stdin := slices.DeleteFunc(slices.Clone(all), func(n string) bool { return n == "curl" || n == "wget" })
+	bound := regexp.MustCompile(`unread_text\(\s*e\s*,\s*(\w+)\s*,`)
+	// A text a rule may spell senders in: the command line, or a name unread_text binds.
+	text := func(e celast.Expr, texts map[string]bool) bool {
+		if e.Kind() == celast.IdentKind {
+			return texts[e.AsIdent()]
+		}
+		if e.Kind() != celast.SelectKind || e.AsSelect().FieldName() != "command" {
+			return false
+		}
+		op := e.AsSelect().Operand()
+		return op.Kind() == celast.SelectKind && op.AsSelect().FieldName() == "command" &&
+			op.AsSelect().Operand().Kind() == celast.IdentKind && op.AsSelect().Operand().AsIdent() == eventVar
+	}
+	// senders returns the sender lists a rule asks of a parsed command, and the ones it asks of
+	// a text, as written.
+	senders := func(r *Rule) (own, texts []matchesLiteral) {
+		names := map[string]bool{}
+		for _, m := range bound.FindAllStringSubmatch(strings.Join(ruleExpressions(r), " "), -1) {
+			names[m[1]] = true
+		}
+		for _, e := range r.written() {
+			for _, literal := range matchesLiterals(e) {
+				if !sender.MatchString(literal.pattern) {
+					continue
+				}
+				if text(literal.subject, names) {
+					texts = append(texts, literal)
+				} else {
+					own = append(own, literal)
 				}
 			}
 		}
-		for _, m := range literal.FindAllStringSubmatch(expr, -1) {
-			receiver, lit := m[1], m[2]
-			if receiver == "e.command.command" || !strings.Contains(lit, "ncat") && !strings.Contains(lit, "netcat") {
-				continue // a text fallback, or not a sender list
-			}
-			if lit != egressSenderNames {
-				t.Errorf("%s: %s.matches(%s) is a sender list other than the shared one %s", r.ID, receiver, lit, egressSenderNames)
-			} else if !listed {
-				t.Errorf("%s: uses the shared sender list; add it to TestPackSharedEgressSender so its copy is checked", r.ID)
+		return own, texts
+	}
+	for _, r := range corpusRules(t) {
+		own, texts := senders(r)
+		for _, list := range own {
+			t.Errorf("%s: %s.matches(%q) lists network senders; call egress_sender instead, so that every egress rule means the same senders", r.ID, exprText(list.subject), list.pattern)
+		}
+		for _, list := range texts {
+			names := senderGroup(list.pattern)
+			if missing := slices.DeleteFunc(slices.Clone(stdin), func(n string) bool { return slices.Contains(names, n) }); len(missing) > 0 {
+				t.Errorf("%s: %s.matches(%q) names senders without %q, which egress_sender knows; name them all or call egress_sender_mention", r.ID, exprText(list.subject), list.pattern, missing)
 			}
 		}
 	}
-	for id := range uses {
-		if !seen[id] {
-			t.Errorf("egress rule %s missing from the pack", id)
+	// The detector sees a list of senders where a parsed command is asked, and lets a text
+	// spell them only in full.
+	for match, want := range map[string]bool{
+		`e.command.parsed_commands.exists(c, c.name.matches("^(curl|ncat|wget)$"))`: true,
+		`e.command.parsed_commands.exists(c, matches(c.name, "^(nc|netcat)$"))`:     true,
+		`e.command.command.matches("\\b(ncat|netcat)\\b")`:                          false,
+		`e.command.parsed_commands.exists(c, c.name.matches("^truncate$"))`:         false,
+	} {
+		rule, err := lib.DecodeRule([]byte("id: senders\nversion: 1\ntitle: t\nseverity: low\nmatch: >\n  " + match + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if own, _ := senders(rule); (len(own) > 0) != want {
+			t.Errorf("%s: found a sender list = %v, want %v", match, len(own) > 0, want)
 		}
 	}
 }
 
-// normalizeCEL collapses whitespace so YAML indentation differences do not count.
-func normalizeCEL(expr string) string { return strings.Join(strings.Fields(expr), " ") }
+// TestPackAgentListsAgree keeps the coding agents in one list. agent_cli names them for a
+// parsed command; a text pattern that names agents (agent_cli_mention, or a rule's own text
+// half that has to spell them inside a longer pattern) names the same ones, so an agent added
+// to one half of a rule is not missed by the other.
+func TestPackAgentListsAgree(t *testing.T) {
+	lib := corpusPack(t).Library
+	want := agentNames(lib.predicates["agent_cli"].text)
+	if !slices.Contains(want, "codex") || !slices.Contains(want, "claude-code") {
+		t.Fatalf("agent_cli names no agents: %q", want)
+	}
+	check := func(where, text string) {
+		if got := agentNames(text); !slices.Equal(got, want) {
+			t.Errorf("%s names agents %q, agent_cli %q", where, got, want)
+		}
+	}
+	check("agent_cli_mention", lib.predicates["agent_cli_mention"].text)
+	literal := regexp.MustCompile(`\.matches\(("(?:[^"\\]|\\.)*")\)`)
+	for _, r := range corpusRules(t) {
+		for _, m := range literal.FindAllStringSubmatch(strings.Join(ruleExpressions(r), " "), -1) {
+			// A group of agents, and not a path such as .codex/prompts.
+			if slices.Contains(agentNames(m[1]), "codex") {
+				check(r.ID+": "+m[1], m[1])
+			}
+		}
+	}
+}
+
+// agentNames is every name of each group of alternatives that holds "codex" in a pattern, an
+// optional suffix (claude(-code)?) giving both spellings.
+func agentNames(text string) []string {
+	suffix := regexp.MustCompile(`^([a-z][a-z-]*)\(([a-z-]+)\)\?$`)
+	var names []string
+	for off := 0; ; {
+		i := strings.Index(text[off:], "codex")
+		if i < 0 {
+			break
+		}
+		i += off
+		start, end := -1, -1
+		for k, depth := i, 0; k >= 0 && start < 0; k-- {
+			switch text[k] {
+			case ')':
+				depth++
+			case '(':
+				if depth == 0 {
+					start = k
+				}
+				depth--
+			}
+		}
+		for k, depth := i, 0; k < len(text) && end < 0; k++ {
+			switch text[k] {
+			case '(':
+				depth++
+			case ')':
+				if depth == 0 {
+					end = k
+				}
+				depth--
+			}
+		}
+		if start < 0 || end < 0 {
+			break
+		}
+		depth, from := 0, start+1
+		for k := start + 1; k <= end; k++ {
+			switch {
+			case text[k] == '(':
+				depth++
+			case text[k] == ')' && k < end:
+				depth--
+			case text[k] == '|' && depth == 0 || k == end:
+				alt := text[from:k]
+				if m := suffix.FindStringSubmatch(alt); m != nil {
+					names = append(names, m[1], m[1]+m[2])
+				} else {
+					names = append(names, alt)
+				}
+				from = k + 1
+			}
+		}
+		off = end
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
+}
 
 // TestPackCategoriesMatchDirectories pins taxonomy.beacon_category to the directory each rule
 // lives in. The rule store keeps rules flat, so the category travels inside the rule: it is what
@@ -228,10 +409,7 @@ func TestPackCategoriesMatchDirectories(t *testing.T) {
 		t.Fatalf("rule files: %v, %v", paths, err)
 	}
 	for _, path := range paths {
-		rule, err := LoadRule(path)
-		if err != nil {
-			t.Fatalf("%s: %v", path, err)
-		}
+		rule := loadPackRule(t, path)
 		want := filepath.Base(filepath.Dir(path))
 		if got := rule.Taxonomy["beacon_category"]; got != want {
 			t.Errorf("%s: taxonomy.beacon_category = %q, want its directory %q", path, got, want)
@@ -239,12 +417,18 @@ func TestPackCategoriesMatchDirectories(t *testing.T) {
 	}
 }
 
-// TestBaselineRulesAreCorpusCopies keeps the embedded baseline byte-identical to the rules it was
-// taken from, so a fix to a corpus rule cannot leave a stale copy in every binary.
-func TestBaselineRulesAreCorpusCopies(t *testing.T) {
-	baseline, err := filepath.Glob(filepath.Join(repoRoot(t), "pkg", "asymptoteobserve", "rulestore", "baseline", "*.rule.yaml"))
+// update makes TestBaselineIsCorpusCopies copy the corpus files over their baseline copies.
+var update = flag.Bool("update", false, "copy the corpus files over their baseline copies")
+
+// TestBaselineIsCorpusCopies keeps the embedded baseline byte-identical to the corpus files it
+// was taken from: its rules, and the definitions embedded for them. A fix to a corpus rule or
+// catalog then cannot leave a stale copy in every binary. `go test ./threatrules -run
+// TestBaselineIsCorpusCopies -update` copies the corpus files over; a file new to the
+// baseline is copied in once by hand.
+func TestBaselineIsCorpusCopies(t *testing.T) {
+	baseline, err := filepath.Glob(filepath.Join(repoRoot(t), "pkg", "asymptoteobserve", "rulestore", "baseline", "*.yaml"))
 	if err != nil || len(baseline) == 0 {
-		t.Fatalf("baseline rules: %v, %v", baseline, err)
+		t.Fatalf("baseline files: %v, %v", baseline, err)
 	}
 	for _, path := range baseline {
 		matches, _ := filepath.Glob(filepath.Join(rulesDir(t), "*", filepath.Base(path)))
@@ -252,10 +436,50 @@ func TestBaselineRulesAreCorpusCopies(t *testing.T) {
 			t.Errorf("%s: want exactly one corpus copy, found %v", filepath.Base(path), matches)
 			continue
 		}
-		got, _ := os.ReadFile(path)
-		want, _ := os.ReadFile(matches[0])
-		if string(got) != string(want) {
-			t.Errorf("%s differs from %s; copy the corpus rule over", path, matches[0])
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
 		}
+		want, err := os.ReadFile(matches[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) == string(want) {
+			continue
+		}
+		if *update {
+			if err := os.WriteFile(path, want, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		t.Errorf("%s differs from %s; run go test ./threatrules -run TestBaselineIsCorpusCopies -update", path, matches[0])
+	}
+}
+
+// TestPackDefinitionsConformance runs the checks of the pack's definitions, as
+// TestPackConformance runs its rules': each catalog's examples, once, and each predicate
+// definition's fixtures. Every predicate has to be shown at work: a definition by a fixture of
+// its own, a catalog's predicate by the catalog's examples.
+func TestPackDefinitionsConformance(t *testing.T) {
+	lib := corpusPack(t).Library
+	type checked struct {
+		catalog bool
+		name    string
+	}
+	tested := map[checked]bool{}
+	for _, res := range lib.Check() {
+		tested[checked{res.Catalog, res.Name}] = true
+		if !res.OK() {
+			t.Error(res)
+		}
+	}
+	for _, p := range lib.Predicates() {
+		if !tested[checked{false, p.Name}] && !(p.Catalog != "" && tested[checked{true, p.Catalog}]) {
+			t.Errorf("predicate %s (%s) has no fixture", p.Name, p.Source)
+		}
+	}
+	if len(lib.Predicates()) == 0 {
+		t.Error("the pack defines no predicate")
 	}
 }

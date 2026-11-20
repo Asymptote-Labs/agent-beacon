@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beacon.dev/spec/threat-rules/v1/catalog.schema.json",
+  "title": "Beacon Threat Rules catalog",
+  "description": "A *.catalog.yaml file of a rule pack (threat-rules/v2.0): a reviewed list of stores that the predicates it names test membership of. Path-pattern syntax, unique ids, kinds that exist, at least one example per pattern, and the examples themselves are enforced by an engine, not by this structural schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["catalog", "version", "kinds", "stores"],
+  "properties": {
+    "catalog": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "The file's identity; two files of a pack must not declare the same one."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Content revision."
+    },
+    "spec": {
+      "type": "string",
+      "pattern": "^threat-rules/v[0-9]+(\\.[0-9]+)?$",
+      "description": "Minimum Threat Rules spec version the file needs. Engines set aside a file whose spec is newer than they support, as they do a rule."
+    },
+    "description": { "type": "string" },
+    "predicates": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The names a rule calls the catalog by; each is optional.",
+      "properties": {
+        "path": { "$ref": "#/$defs/predicateName", "description": "True for a path that is one of the stores of files." },
+        "command": { "$ref": "#/$defs/predicateName", "description": "True for a parsed command that reads one of the stores of commands." },
+        "mention": { "$ref": "#/$defs/predicateName", "description": "True for a text that names one of the stores of files." },
+        "redacted": { "$ref": "#/$defs/predicateName", "description": "True for a command line in which redaction replaced the name of a command that reads one of the stores of commands." }
+      }
+    },
+    "kinds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "title": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "stores": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "kind", "tier", "examples"],
+        "oneOf": [
+          { "required": ["match"], "not": { "required": ["commands"] } },
+          { "required": ["commands"], "not": { "anyOf": [{ "required": ["match"] }, { "required": ["exclude"] }] } }
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "title": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "description": "One of kinds[].id." },
+          "tier": {
+            "type": "string",
+            "enum": ["definite", "likely"],
+            "description": "definite: exists to hold what the catalog is of, or hands it over. likely: often does and often does not."
+          },
+          "match": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Path patterns of the paths that are the store."
+          },
+          "exclude": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Path patterns of the paths among them that are not."
+          },
+          "commands": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1, "description": "A pattern component for the command's name." },
+                "words": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Words that follow each other in this order after the name." },
+                "flags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Options of which one must be there." }
+              }
+            },
+            "description": "The commands that read the store."
+          },
+          "examples": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Paths or command lines that are this store; one for each match pattern and each command."
+          },
+          "counterexamples": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Paths or command lines that are no store of the catalog; one for each exclude pattern."
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "predicateName": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+  }
+}
