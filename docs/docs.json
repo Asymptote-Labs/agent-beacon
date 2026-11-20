@@ -74,6 +74,13 @@
               },
               "cloud/sessions",
               "cloud/findings",
+              {
+                "group": "Guardrails",
+                "pages": [
+                  "cloud/guardrails",
+                  "cloud/policy-library"
+                ]
+              },
               "deployment/managed-mcp",
               {
                 "group": "Lenses",
