@@ -227,60 +227,32 @@ func spanText(commands []Command, hdocs []int, source string, pieces []piece) st
 }
 
 // takesVariable reports whether a word, redirection or prefix assignment of command i takes
-// the value of a variable that text on the command line set before it.
+// the value of a variable that text on the command line may have set before it: one whose
+// name the line spells before the command, or one the shell fills in itself. Every way of
+// setting a variable by name (NAME=, declare, read, printf -v, mapfile, ${NAME:=..}, an eval
+// string) spells the name, so asking the text rather than the parse leaves none of them out,
+// while $VERSION after a commit message that never names it stays the command's own.
 func takesVariable(commands []Command, i int) bool {
 	c := &commands[i]
+	before := c.source[:c.Offset]
 	for _, ref := range c.refs {
 		if ref.name == "" || (ref.place != refArg && ref.place != refRedirect && ref.place != refEnv) {
 			continue
 		}
-		if assignedBefore(commands, i, ref.name) {
+		if setByTheShell(ref.name) || strings.Contains(before, ref.name) {
 			return true
 		}
 	}
 	return false
 }
 
-// assignedBefore reports whether a statement of the line itself, at or before command i,
-// assigns name: NAME=value on its own, a declaration, a builtin that stores into a variable
-// it is given by name (read, printf -v, mapfile, readarray, getopts), where name is one of
-// its words, or, for a positional parameter ($1, $@, $*), a set with operands.
-func assignedBefore(commands []Command, i int, name string) bool {
-	c := &commands[i]
-	for j := range commands {
-		d := &commands[j]
-		if d.shell != 0 || d.Offset > c.Offset {
-			continue
-		}
-		for _, ref := range d.refs {
-			if ref.place == refDeclares && ref.name == name {
-				return true
-			}
-		}
-		if len(d.Argv) == 0 && d.Offset < c.Offset {
-			for _, as := range d.Env {
-				if as.Name == name {
-					return true
-				}
-			}
-		}
-		if d.Offset < c.Offset && storesByName[d.unwrapped.name] &&
-			slices.ContainsFunc(d.Argv, func(w Word) bool { return w.Known && w.Text == name }) {
-			return true
-		}
-		if d.Offset < c.Offset && d.unwrapped.name == "set" && len(d.Argv) > 1 && positional(name) {
-			return true
-		}
+// setByTheShell reports whether the shell itself fills name in from earlier commands, so a
+// line can set it without spelling it: the positional parameters (by set), $_ (the last
+// word), and what read, mapfile, getopts and [[ =~ ]] store when given no name.
+func setByTheShell(name string) bool {
+	switch name {
+	case "@", "*", "_", "REPLY", "MAPFILE", "BASH_REMATCH", "OPTARG":
+		return true
 	}
-	return false
-}
-
-// storesByName are the builtins that assign a variable named by one of their words. printf
-// assigns only with -v, but a printf whose words name the variable is close enough: the span
-// is an over-approximation.
-var storesByName = map[string]bool{"read": true, "printf": true, "mapfile": true, "readarray": true, "getopts": true}
-
-// positional reports whether name is a positional parameter: a number, @ or *.
-func positional(name string) bool {
-	return name == "@" || name == "*" || name != "" && strings.Trim(name, "0123456789") == ""
+	return strings.Trim(name, "0123456789") == ""
 }
