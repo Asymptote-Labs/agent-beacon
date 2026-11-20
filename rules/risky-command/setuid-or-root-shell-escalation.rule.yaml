@@ -1,5 +1,5 @@
 id: setuid-or-root-shell-escalation
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 8
 title: Setuid bit installed or interactive root shell requested
 description: >

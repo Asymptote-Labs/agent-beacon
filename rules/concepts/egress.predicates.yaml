@@ -15,7 +15,7 @@
 # (unread_text, commands.predicates.yaml), and egress_sender_mention is who sends there.
 library: egress
 version: 4
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 description: A command that sends data over the network.
 
 definitions:

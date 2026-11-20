@@ -1,5 +1,5 @@
 id: agent-extension-installed-by-command
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 4
 title: Agent extension (MCP server, plugin, marketplace) installed by command
 description: >

@@ -1,5 +1,5 @@
 id: env-dump-piped-to-network
-spec: threat-rules/v1.3  # needed for predicates
+spec: threat-rules/v2.0  # needed for predicates
 version: 9
 title: Environment dump piped to an outbound network command
 description: >

@@ -17,7 +17,7 @@
 # would stop seeing those lines; for such a client the rule asks the text of the line.
 library: cloud-metadata
 version: 2
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 description: A text that names a cloud instance metadata service.
 
 definitions:

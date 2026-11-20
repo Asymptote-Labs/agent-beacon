@@ -150,7 +150,7 @@ func RenderFieldsMarkdown() string {
 	return b.String()
 }
 
-// specVersionOf is the version a spec tag gives the field at path (v1.3), or "" for a field that
+// specVersionOf is the version a spec tag gives the field at path (v2.0), or "" for a field that
 // carries none.
 func specVersionOf(path string) string {
 	for _, f := range specFields() {
@@ -192,7 +192,7 @@ func celTypeOf(t reflect.Type) string {
 var derivedFieldDocs = map[string]string{
 	ParsedCommandsPath: "`command.command` read as a bash command line:\n" +
 		"  one entry per command it runs, with the fields in the table below. Other here-document\n" +
-		"  bodies and strings are not commands. A declaration is one (spec v1.3):\n" +
+		"  bodies and strings are not commands. A declaration is one (spec v2.0):\n" +
 		"  `export HISTFILE=/dev/null` has the name `export` and the word `HISTFILE=/dev/null`.\n" +
 		fmt.Sprintf("  The first %d bytes are read; a cut capture yields the commands before the cut, and\n", ParsedCommandsLimit) +
 		"  one that does not parse yields an empty list.",

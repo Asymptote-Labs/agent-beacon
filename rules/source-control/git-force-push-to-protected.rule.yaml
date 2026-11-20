@@ -1,5 +1,5 @@
 id: git-force-push-to-protected
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 5
 title: Force-push directed at a protected branch
 description: >

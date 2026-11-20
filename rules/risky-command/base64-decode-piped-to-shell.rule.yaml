@@ -1,5 +1,5 @@
 id: base64-decode-piped-to-shell
-spec: threat-rules/v1.3  # needed for the commands a carrier or a pipe hands a shell
+spec: threat-rules/v2.0  # needed for the commands a carrier or a pipe hands a shell
 version: 8
 title: Base64-decoded payload piped into a shell
 description: >

@@ -1,5 +1,5 @@
 id: approval-denied-command-executed-anyway
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 4
 title: Denied dangerous command executed anyway within the session
 description: >

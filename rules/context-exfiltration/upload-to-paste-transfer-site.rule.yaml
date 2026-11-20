@@ -1,5 +1,5 @@
 id: upload-to-paste-transfer-site
-spec: threat-rules/v1.3  # needed for predicates
+spec: threat-rules/v2.0  # needed for predicates
 version: 5
 title: Upload to an anonymous paste/transfer/tunnel host or a gist
 description: >

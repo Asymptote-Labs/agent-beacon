@@ -42,7 +42,9 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 			for _, m := range s.Commands {
 				matches = append(matches, m.String())
 			}
-			fmt.Fprintf(&b, "| `%s`: %s | %s | %s | %s | `%s` |\n", s.ID, s.Title, s.Tier, code(matches), code(s.Exclude), cell(s.Examples[0]))
+			// Decode does not require an example (Check does): a catalog without one gets an empty cell.
+			example := code(s.Examples[:min(len(s.Examples), 1)])
+			fmt.Fprintf(&b, "| `%s`: %s | %s | %s | %s | %s |\n", s.ID, s.Title, s.Tier, code(matches), code(s.Exclude), example)
 		}
 	}
 	b.WriteString("\n## Generated expressions\n\n" +
@@ -56,22 +58,18 @@ func (c *Catalog) Markdown(source, regenerate string) (string, error) {
 		"is named by the characters a name is written with, a word that is also a file name\n" +
 		"(`credentials`) counts only after a directory, and a store that excludes some names is not\n" +
 		"named by a text that also holds one of those. And the commands as a log holds them when\n" +
-		"redaction took the command's name: `curl -u \"ci:$(gh auth token)\"` is logged as\n" +
-		"`curl -u \"ci:[REDACTED] auth token)\"`, and an older log holds `TOKEN=[REDACTED] auth token)`\n" +
-		"for `TOKEN=$(gh auth token)`. A command told only by its name, by one plain word or by\n" +
-		"one-letter options has no such form.\n")
+		"redaction took the command's name. A substitution that opens with an assignment still loses\n" +
+		"it: `TOKEN=$(GH_TOKEN=$(gh auth token) ./x)` is logged as `TOKEN=[REDACTED] auth token) ./x)`.\n" +
+		"Logs of older releases lost it after every secret's label: `curl -u \"ci:[REDACTED] auth token)\"`\n" +
+		"for `curl -u \"ci:$(gh auth token)\"`, `TOKEN=[REDACTED] auth token)` for `TOKEN=$(gh auth token)`.\n" +
+		"A command told only by its name, by one plain word or by one-letter options has no such form.\n")
 	if c.Predicates != (Predicates{}) {
 		b.WriteString("\nA rule of a pack that ships this catalog calls it by name instead of carrying the\nexpressions:\n\n")
-		for _, p := range []struct{ name, subject, about string }{
-			{c.Predicates.Path, "p", "a path that is a store of files"},
-			{c.Predicates.Command, "c", "a parsed command that reads a store of commands"},
-			{c.Predicates.Mention, "s", "a text that names a store of files"},
-			{c.Predicates.Redacted, "s", "a command line in which redaction took the name of a command that reads a store of commands"},
-		} {
-			if p.name != "" {
+		for _, form := range c.PredicateForms() {
+			if form.Name != "" {
 				fmt.Fprintf(&b, "- `%[1]s(%[2]s)` is true for %[3]s, of either tier. `%[1]s(%[2]s, \"definite\")` takes the\n"+
 					"  definite stores only, and kinds after the tier take those kinds only:\n"+
-					"  `%[1]s(%[2]s, \"likely\", \"%[4]s\")`.\n", p.name, p.subject, p.about, c.Kinds[0].ID)
+					"  `%[1]s(%[2]s, \"likely\", \"%[4]s\")`.\n", form.Name, form.Subject, form.About, c.Kinds[0].ID)
 			}
 		}
 	}

@@ -28,7 +28,11 @@ func conceptsDir(t *testing.T) string {
 
 func credentialStores(t *testing.T) *concepts.Catalog {
 	t.Helper()
-	c, err := concepts.Load(filepath.Join(conceptsDir(t), "credential-stores.catalog.yaml"))
+	data, err := os.ReadFile(filepath.Join(conceptsDir(t), "credential-stores.catalog.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := concepts.Decode(data)
 	if err == nil {
 		err = c.Check()
 	}

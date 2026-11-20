@@ -1,5 +1,5 @@
 id: agent-instruction-surface-modified
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 7
 title: Agent instruction surface (CLAUDE.md / AGENTS.md / rules / skills) modified
 description: >

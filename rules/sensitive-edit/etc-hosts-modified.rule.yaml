@@ -1,5 +1,5 @@
 id: etc-hosts-modified
-spec: threat-rules/v1.3  # needed for file_writes and predicates
+spec: threat-rules/v2.0  # needed for file_writes and predicates
 version: 5
 title: /etc/hosts or hosts.allow/deny modified
 description: >

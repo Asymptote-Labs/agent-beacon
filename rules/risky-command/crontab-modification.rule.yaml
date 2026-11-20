@@ -1,5 +1,5 @@
 id: crontab-modification
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 7
 title: Crontab modified (user, system, or spool)
 description: >

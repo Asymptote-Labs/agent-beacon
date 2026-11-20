@@ -11,7 +11,7 @@
 # pypi.org" (and the npm and yarn registries) because RE2 has no negative lookahead.
 library: package-sources
 version: 1
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 description: A text that installs a package from outside the default registry.
 
 definitions:

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://beacon.dev/spec/threat-rules/v1/catalog.schema.json",
   "title": "Beacon Threat Rules catalog",
-  "description": "A *.catalog.yaml file of a rule pack (threat-rules/v1.3): a reviewed list of stores that the predicates it names test membership of. Path-pattern syntax, unique ids, kinds that exist, at least one example per pattern, and the examples themselves are enforced by an engine, not by this structural schema.",
+  "description": "A *.catalog.yaml file of a rule pack (threat-rules/v2.0): a reviewed list of stores that the predicates it names test membership of. Path-pattern syntax, unique ids, kinds that exist, at least one example per pattern, and the examples themselves are enforced by an engine, not by this structural schema.",
   "type": "object",
   "additionalProperties": false,
   "required": ["catalog", "version", "kinds", "stores"],

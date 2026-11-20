@@ -1,5 +1,5 @@
 id: auth-security-code-modified
-spec: threat-rules/v1.3  # needed for file_writes and predicates
+spec: threat-rules/v2.0  # needed for file_writes and predicates
 version: 10
 title: Authentication, payment, or security source modified
 description: >

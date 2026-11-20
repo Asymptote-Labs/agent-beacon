@@ -1,5 +1,5 @@
 id: persistence-install-command
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 6
 title: Command installs scheduled-job or service persistence
 description: >
