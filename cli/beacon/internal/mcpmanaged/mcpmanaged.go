@@ -262,7 +262,7 @@ func writeSystemFile(path, text string) error {
 		return err
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := mkdirReadable(dir); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".beacon-*")
@@ -286,6 +286,34 @@ func writeSystemFile(path, text string) error {
 		return err
 	}
 	return os.Rename(tmpName, path)
+}
+
+// mkdirReadable creates dir and any missing parents as 0755 whatever the umask: a hardened root
+// umask (027, 077) would otherwise leave /etc/claude-code/managed-settings.d untraversable, and
+// Claude Code, run as each person, would silently never read Beacon's drop-in. Directories that
+// already exist keep their mode.
+func mkdirReadable(dir string) error {
+	var missing []string
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(d); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		missing = append(missing, d)
+		if filepath.Dir(d) == d {
+			break
+		}
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := os.Mkdir(missing[i], 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		if err := os.Chmod(missing[i], 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // readSystemFile returns a file's text, or "" and false when it does not exist.

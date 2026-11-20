@@ -279,3 +279,54 @@ func TestStatusReportsPushedServersAndWarnings(t *testing.T) {
 		}
 	}
 }
+
+func TestReapplyKeepsCommentsThatIntroduceTheNextTable(t *testing.T) {
+	p := testPaths(t)
+	opts := Options{Paths: p, Runtimes: []string{RuntimeCodex}}
+	Apply(opts, mustParse(t, twoServers))
+	// Another tool appends a commented table after Beacon's.
+	f, err := os.OpenFile(p.CodexConfig, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("\n# CI profile, do not remove\n# second line\n[profiles.ci]\nmodel = \"gpt-5\"\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	for i := 0; i < 2; i++ {
+		res := Apply(opts, mustParse(t, `{"servers": {"linear": {"url": "https://mcp.linear.app/mcp"}}}`))[0]
+		if res.Action == ActionFailed {
+			t.Fatalf("apply %d: %+v", i, res)
+		}
+	}
+	after := read(t, p.CodexConfig)
+	if !strings.Contains(after, "# CI profile, do not remove\n# second line\n[profiles.ci]\n") {
+		t.Fatalf("the comment above [profiles.ci] was lost:\n%s", after)
+	}
+	if strings.Contains(after, "corp-docs") {
+		t.Fatalf("a dropped server is still there:\n%s", after)
+	}
+
+	Remove(opts)
+	if got := read(t, p.CodexConfig); got != "# CI profile, do not remove\n# second line\n[profiles.ci]\nmodel = \"gpt-5\"\n" {
+		t.Fatalf("after remove:\n%q", got)
+	}
+}
+
+func TestNewDirectoriesAreReadableUnderARestrictiveUmask(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	old := syscallUmask(0o077)
+	defer syscallUmask(old)
+	p := testPaths(t)
+	Apply(Options{Paths: p}, mustParse(t, twoServers))
+	for _, dir := range []string{filepath.Dir(p.ClaudeDropIn), filepath.Dir(filepath.Dir(p.ClaudeDropIn)), filepath.Dir(p.CodexConfig)} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o755 {
+			t.Errorf("%s mode = %v, want 0755", dir, info.Mode().Perm())
+		}
+	}
+}

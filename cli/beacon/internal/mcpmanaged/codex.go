@@ -37,6 +37,60 @@ func codexOwned(text string) []string {
 	return owned
 }
 
+// removeOwnedTable removes Beacon's [mcp_servers.<name>] table and its subtables. A block runs to
+// the next header, but the comment lines directly above that header introduce the next table, not
+// Beacon's (another tool may append `# CI profile` and [profiles.ci] after Beacon's table), so they
+// are kept along with everything after them. Blank lines that only separated the blocks go with
+// Beacon's. A block at the end of the document also takes the blank lines above it, which is what
+// tomledit.Append added.
+func removeOwnedTable(text, name string) (string, bool) {
+	lines := strings.SplitAfter(text, "\n")
+	start := -1
+	for i, line := range lines {
+		if key, array, ok := tomledit.Header(line); ok && !array && len(key) == 2 && key[0] == codexTable && key[1] == name {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return text, false
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		key, _, ok := tomledit.Header(lines[i])
+		if !ok {
+			continue
+		}
+		if len(key) > 2 && key[0] == codexTable && key[1] == name {
+			continue // a subtable of Beacon's table
+		}
+		end = i
+		break
+	}
+	if end < len(lines) {
+		// Walk back over the comment and blank lines above the next header; keep from the first
+		// comment of that run that is not Beacon's marker.
+		keep := end
+		for i := end - 1; i > start; i-- {
+			trimmed := strings.TrimSpace(lines[i])
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				break
+			}
+			if strings.HasPrefix(trimmed, "#") && trimmed != CodexMarker {
+				keep = i
+			}
+		}
+		end = keep
+	}
+	out := append(append([]string{}, lines[:start]...), lines[end:]...)
+	if end == len(lines) {
+		for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+			out = out[:len(out)-1]
+		}
+	}
+	return strings.Join(out, ""), true
+}
+
 // codexBlock renders one server's table. Names are bare keys (serverName guarantees it); values
 // are TOML basic strings, which JSON string escapes are valid in.
 func codexBlock(name string, s Server, eol string) string {
@@ -105,7 +159,7 @@ func planCodex(text string, d Declaration) (updated string, written, conflicts [
 	updated = text
 	for _, name := range owned {
 		var found bool
-		if updated, found = tomledit.RemoveTable(updated, codexTable, name); !found {
+		if updated, found = removeOwnedTable(updated, name); !found {
 			return "", nil, nil, fmt.Errorf("Beacon's [%s.%s] table could not be removed", codexTable, name)
 		}
 	}
