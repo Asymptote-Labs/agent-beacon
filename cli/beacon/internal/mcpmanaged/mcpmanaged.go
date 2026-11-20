@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // Runtime names, as --harness takes them.
@@ -116,8 +117,8 @@ func checkServer(name string, s Server) error {
 		if strings.Contains(value, "${") {
 			return fmt.Errorf("server %q: header %s cannot use ${VAR}; managed servers take literal values only", name, key)
 		}
-		if strings.ContainsAny(value, "\r\n") {
-			return fmt.Errorf("server %q: header %s contains a line break", name, key)
+		if strings.ContainsFunc(value, func(r rune) bool { return r != '\t' && unicode.IsControl(r) }) {
+			return fmt.Errorf("server %q: header %s contains a control character", name, key)
 		}
 	}
 	return nil
@@ -250,6 +251,7 @@ func Status(opts Options) []RuntimeStatus {
 // manages that file.
 func writeSystemFile(path, text string) error {
 	mode := os.FileMode(0o644)
+	var owner *fileOwnerIDs
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("%s is a symlink; Beacon does not write through it", path)
@@ -258,6 +260,7 @@ func writeSystemFile(path, text string) error {
 			return fmt.Errorf("%s is not a regular file", path)
 		}
 		mode = info.Mode().Perm()
+		owner = fileOwner(info)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -281,6 +284,14 @@ func writeSystemFile(path, text string) error {
 	}
 	if err := tmp.Close(); err != nil {
 		return err
+	}
+	// The replacement keeps the file's owner and group as well as its mode: a fleet that made the
+	// Codex system config root:developers 0640 must not find it root:root after a push, unreadable
+	// to the people Codex runs as. Chown before chmod, which a chown may clear setuid bits after.
+	if owner != nil {
+		if err := chownFile(tmpName, owner.uid, owner.gid); err != nil {
+			return fmt.Errorf("keep the owner of %s: %w", path, err)
+		}
 	}
 	if err := os.Chmod(tmpName, mode); err != nil {
 		return err
@@ -315,6 +326,12 @@ func mkdirReadable(dir string) error {
 	}
 	return nil
 }
+
+// fileOwnerIDs is a file's numeric owner and group.
+type fileOwnerIDs struct{ uid, gid int }
+
+// chownFile is os.Chown; tests replace it, since only root may give a file to another account.
+var chownFile = os.Chown
 
 // readSystemFile returns a file's text, or "" and false when it does not exist.
 func readSystemFile(path string) (string, bool, error) {

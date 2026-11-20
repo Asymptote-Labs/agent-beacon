@@ -75,6 +75,8 @@ func TestParseDeclarationRefusesWhatClaudeCodeWouldRefuse(t *testing.T) {
 		"dotted name":   `{"servers": {"a.b": {"url": "https://x.example"}}}`,
 		"bad header":    `{"servers": {"a": {"url": "https://x.example", "headers": {"X Y": "1"}}}}`,
 		"newline":       `{"servers": {"a": {"url": "https://x.example", "headers": {"X": "1\n[evil]"}}}}`,
+		"DEL":           `{"servers": {"a": {"url": "https://x.example", "headers": {"X": "a\u007fb"}}}}`,
+		"NUL":           `{"servers": {"a": {"url": "https://x.example", "headers": {"X": "a\u0000b"}}}}`,
 		"two values":    `{"servers": {}} {}`,
 	}
 	for name, text := range cases {
@@ -329,4 +331,48 @@ func TestNewDirectoriesAreReadableUnderARestrictiveUmask(t *testing.T) {
 			t.Errorf("%s mode = %v, want 0755", dir, info.Mode().Perm())
 		}
 	}
+}
+
+func TestReplacingAFileKeepsItsOwnerAndGroup(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	p := testPaths(t)
+	write(t, p.CodexConfig, "model = \"gpt-5\"\n")
+	if err := os.Chmod(p.CodexConfig, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	type call struct{ uid, gid int }
+	var calls []call
+	prev := chownFile
+	t.Cleanup(func() { chownFile = prev })
+	chownFile = func(name string, uid, gid int) error {
+		calls = append(calls, call{uid, gid})
+		return nil
+	}
+	// The replacement must ask for exactly the owner and group the file has.
+	have := fileOwner(mustStat(t, p.CodexConfig))
+	if res := Apply(Options{Paths: p, Runtimes: []string{RuntimeCodex}}, mustParse(t, twoServers))[0]; res.Action != ActionWrite {
+		t.Fatalf("apply = %+v", res)
+	}
+	if len(calls) != 1 || calls[0] != (call{have.uid, have.gid}) {
+		t.Fatalf("chown calls = %v, want one with %d:%d", calls, have.uid, have.gid)
+	}
+	if mode := mustStat(t, p.CodexConfig).Mode().Perm(); mode != 0o640 {
+		t.Fatalf("mode = %v, want 0640", mode)
+	}
+
+	// A file Beacon creates has no owner to keep.
+	calls = nil
+	Apply(Options{Paths: p, Runtimes: []string{RuntimeClaude}}, mustParse(t, twoServers))
+	if len(calls) != 0 {
+		t.Fatalf("chown on a new file: %v", calls)
+	}
+}
+
+func mustStat(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info
 }
