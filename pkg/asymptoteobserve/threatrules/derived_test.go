@@ -13,7 +13,7 @@ import (
 )
 
 func TestDerivedFieldsAreReadFromTheSchema(t *testing.T) {
-	want := []string{ParsedCommandsPath, ParsedIncompletePath, SystemInstructionsTextPath, ToolResultTextPath}
+	want := []string{ParsedCommandsPath, ParsedIncompletePath, SystemInstructionsTextPath, ToolCallArgumentsTextPath, ToolResultTextPath}
 	if got := DerivedFields(); !slices.Equal(got, want) {
 		t.Fatalf("DerivedFields = %q, want %q", got, want)
 	}

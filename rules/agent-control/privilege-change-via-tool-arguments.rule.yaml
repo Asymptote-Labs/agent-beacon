@@ -1,0 +1,101 @@
+id: privilege-change-via-tool-arguments
+version: 1
+title: Agent asks a tool to grant or set an admin role
+description: >
+  A tool call asks for a privilege change: its arguments carry an UPDATE or a GRANT
+  together with an admin role. The arguments are what the agent asked the tool to do,
+  read through the derived arguments_text field, so this fires on the call itself,
+  before the tool runs, rather than on the result. It is narrow on purpose: the
+  operation must be UPDATE or GRANT, and the privilege must be admin. A call that
+  updates a non-admin role, grants a non-admin privilege, or only reads an admin role
+  does not fire.
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  beacon_category: agent-control
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0051
+
+match: >
+  (e.event.action == "mcp.tool_invoked" || e.event.action == "tool.invoked") &&
+  e.gen_ai.tool.call.arguments_text != "" &&
+  e.gen_ai.tool.call.arguments_text.matches("(?i)\\badmin\\b") &&
+  e.gen_ai.tool.call.arguments_text.matches("(?i)\\b(UPDATE|GRANT)\\b")
+
+emit:
+  reason: "Tool call asks for an admin role change (UPDATE or GRANT with admin)"
+
+tests:
+  - name: grant_admin_role_json
+    verdict: match
+    events:
+      - event: { action: mcp.tool_invoked }
+        mcp: { server: "iam", tool: "grant_role" }
+        gen_ai:
+          tool:
+            name: "mcp__iam_grant_role"
+            call:
+              id: "call-1"
+              arguments: '{"action":"GRANT","role":"admin","user":"bob"}'
+        session: { id: s1 }
+  - name: update_role_to_admin_sql
+    verdict: match
+    events:
+      - event: { action: tool.invoked }
+        gen_ai:
+          tool:
+            name: "db_query"
+            call:
+              id: "call-2"
+              arguments: "UPDATE users SET role = 'admin' WHERE id = 7"
+        session: { id: s1 }
+  - name: update_non_admin_role
+    verdict: no_match
+    events:
+      - event: { action: mcp.tool_invoked }
+        mcp: { server: "iam", tool: "update_role" }
+        gen_ai:
+          tool:
+            name: "mcp__iam_update_role"
+            call:
+              id: "call-3"
+              arguments: '{"action":"UPDATE","role":"viewer","user":"bob"}'
+        session: { id: s1 }
+  - name: grant_non_admin_privilege
+    verdict: no_match
+    events:
+      - event: { action: mcp.tool_invoked }
+        mcp: { server: "db", tool: "grant" }
+        gen_ai:
+          tool:
+            name: "mcp__db_grant"
+            call:
+              id: "call-4"
+              arguments: '{"action":"GRANT","privilege":"SELECT","table":"orders"}'
+        session: { id: s1 }
+  - name: read_admin_role_only
+    verdict: no_match
+    events:
+      - event: { action: mcp.tool_invoked }
+        mcp: { server: "iam", tool: "get_role" }
+        gen_ai:
+          tool:
+            name: "mcp__iam_get_role"
+            call:
+              id: "call-5"
+              arguments: '{"role":"admin","user":"bob"}'
+        session: { id: s1 }
+  - name: same_arguments_on_result_event
+    verdict: no_match
+    events:
+      - event: { action: mcp.tool_invoked }
+        mcp: { server: "iam", tool: "grant_role" }
+        gen_ai:
+          tool:
+            name: "mcp__iam_grant_role"
+            call:
+              id: "call-6"
+              arguments: '{"action":"GRANT","role":"admin","user":"bob"}'
+              result: "ok"
+        session: { id: s1 }

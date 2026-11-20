@@ -513,6 +513,16 @@ type GenAIToolCallInfo struct {
 	// its own copy of each event, from the retained Result, just before evaluation.
 	// See threatrules.ToolResultText for exactly which events get a value.
 	ResultText string `json:"-" cel:"result_text"`
+	// ArgumentsText is Arguments as text, for the threat-rules engine only. Arguments is
+	// interface{} (a runtime may report a string or an object), and CEL cannot address an
+	// interface{} field, so without this no rule could match on what the agent asked a tool
+	// to do.
+	//
+	// It is never written or read: `json:"-"` keeps it off the wire, so the JSONL
+	// contract is unchanged and a log line cannot assert it. The engine fills it on
+	// its own copy of each event, from the retained Arguments, just before evaluation.
+	// See threatrules.ToolCallArgumentsText for exactly which events get a value.
+	ArgumentsText string `json:"-" cel:"arguments_text"`
 }
 
 type GenAIToolInfo struct {
