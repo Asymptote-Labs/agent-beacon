@@ -30,6 +30,11 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
+// packageUpgradeEnv set to 1 says this uninstall is the first half of a package upgrade: the
+// Windows MSI's uninstall script sets it when Windows Installer removes the old product to install
+// the new one ([UPGRADINGPRODUCTCODE]), and not for a removal.
+const packageUpgradeEnv = "BEACON_PACKAGE_UPGRADE"
+
 var (
 	writeCollectorConfig = endpointcollector.WriteConfig
 	// collectorReadyTimeout is how long Install waits for a started collector to answer on all of
@@ -72,10 +77,11 @@ var (
 	reconcileManagedForwarder = func(userMode bool, logPath string, start bool) (asymptote.ReconcileResult, error) {
 		return asymptote.ReconcileForwarder(asymptote.ReconcileOptions{UserMode: userMode, LogPath: logPath, Restart: start, NoStart: !start})
 	}
-	// managedForwarderKeptByPackageUninstall says a system `endpoint uninstall --keep-config` keeps
-	// the Beacon Cloud connection and removes only its service. On Windows, where the MSI runs that
-	// command at the start of every upgrade to free vector.exe; elsewhere the package upgrade never
-	// uninstalls, and --keep-config keeps only the credentials, as it always has.
+	// managedForwarderKeptByPackageUninstall says a system `endpoint uninstall --keep-config` that is
+	// the first half of a package upgrade (packageUpgradeEnv) keeps the Beacon Cloud connection and
+	// removes only its service. On Windows, where the MSI runs that command at the start of every
+	// upgrade to free vector.exe; elsewhere the package upgrade never uninstalls. Any other
+	// uninstall, a removal of the MSI included, keeps only the credentials, as it always has.
 	managedForwarderKeptByPackageUninstall = runtime.GOOS == "windows"
 	// reconcileSentinelForwarder and removeSentinelForwarder are the seams for the managed Sentinel
 	// forwarder. Install always restarts it: an install or repair may have replaced the log with a
@@ -975,7 +981,7 @@ func Uninstall(opts UninstallOptions) error {
 			UserMode:           cfg.UserMode,
 			LogPath:            cfg.LogPath,
 			KeepCredentials:    opts.KeepConfig,
-			KeepForwarderState: opts.KeepConfig && !cfg.UserMode && managedForwarderKeptByPackageUninstall,
+			KeepForwarderState: opts.KeepConfig && !cfg.UserMode && managedForwarderKeptByPackageUninstall && os.Getenv(packageUpgradeEnv) == "1",
 		}))
 	}
 	manifest, _ := ReadManifest(cfg.UserMode)

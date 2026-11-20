@@ -151,9 +151,12 @@ account therefore cannot read the connection, as `0700` keeps it from other acco
 Linux. An MSI upgrade runs the old package's uninstall first, which must stop Vector to replace
 `vector.exe`: it removes the service and keeps the rest of the connection (key, enrollment,
 `vector.toml`, checkpoints and buffer), and the new package's install registers the service again
-and starts it where it left off, without a re-connect. Removing the package without `BEACON_PURGE=1`
-keeps the same state, and a later install resumes forwarding; `beacon endpoint disconnect --system`
-or a purge removes it.
+and starts it where it left off, without a re-connect. The package tells an upgrade from a removal
+(Windows Installer's `UPGRADINGPRODUCTCODE`), so removing the package removes the forwarder and its
+config as on other platforms, keeping only the enrollment record and device key unless
+`BEACON_PURGE=1` is set; a later install does not resume forwarding until you connect again. A
+user-mode collector or forwarder still running the package's binaries is stopped by the upgrade
+and comes back at that person's next `beacon endpoint repair`.
 
 A **user** endpoint (`beacon endpoint connect`, unelevated) has no service manager to use: Windows
 has no per-user one. The forwarder runs as a supervised Vector process, like the user-mode
@@ -241,7 +244,7 @@ Beacon Cloud: connected to Beacon Test as device 807c6a11-…; forwarder loaded=
 
 ## Revocation and disconnect
 
-Revoke a device, or every device a person approved, from the dashboard's **Beacon Endpoints** page. The ingest service rejects the key within about a minute. `disconnect` is the local half: it stops and removes the forwarder and its config and, unless `--keep-credentials` is given, the enrollment record and device key. `beacon endpoint uninstall` removes the forwarder and the `asymptote/` directory as part of removing the endpoint, except that `--keep-config` keeps the enrollment record and device key (and, for a system endpoint on Windows, the whole connection, removing only the service; see [On Windows](#on-windows)). Neither revokes the device server-side; the CLI tells you where to do that.
+Revoke a device, or every device a person approved, from the dashboard's **Beacon Endpoints** page. The ingest service rejects the key within about a minute. `disconnect` is the local half: it stops and removes the forwarder and its config and, unless `--keep-credentials` is given, the enrollment record and device key. `beacon endpoint uninstall` removes the forwarder and the `asymptote/` directory as part of removing the endpoint, except that `--keep-config` keeps the enrollment record and device key (and, for a system endpoint on Windows during a package upgrade, the whole connection, removing only the service; see [On Windows](#on-windows)). Neither revokes the device server-side; the CLI tells you where to do that.
 
 ## Offline behavior
 
