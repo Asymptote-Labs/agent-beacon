@@ -127,8 +127,6 @@ func TestJSONLWriterOutputIsPinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A Windows checkout turns the golden file's line endings into CRLF; the exporter writes LF.
-	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(got, want) {
 		gotLines, wantLines := bytes.Split(got, []byte("\n")), bytes.Split(want, []byte("\n"))
 		for i := range wantLines {

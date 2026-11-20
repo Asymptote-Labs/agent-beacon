@@ -96,6 +96,71 @@ func TestScanNamesTheRuleThatExceededTheCostLimit(t *testing.T) {
 	}
 }
 
+// A failed evaluation is the failure of one rule on one event: every other rule still judges the
+// event, the rule still judges the other events, and a correlation rule takes the failed step not
+// to hold there and goes on to the events after it.
+func TestScanGoesOnPastAFailedEvaluation(t *testing.T) {
+	lowerCostLimit(t)
+	runaway := `e.event.action == "c" && ` + nestedAll(7)
+	curl := `e.event.action == "command.executed" && e.command.parsed_commands.exists(c, c.name == "curl")`
+	single := func(id, match string) *CompiledRule {
+		c, err := Compile(&Rule{
+			ID: id, Spec: SupportedSpec, Version: 1, Title: id,
+			Severity: asymptoteobserve.SeverityHigh, Status: StatusExperimental, Posture: PostureDetect,
+			Emit: Emit{Reason: "x"}, Match: match,
+			Tests: []Fixture{{Name: "x", Verdict: VerdictNoMatch, Events: []FixtureEvent{{Event: corrEvent("", "x", "s", nil)}}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	rules := []*CompiledRule{
+		single("runaway", runaway),
+		single("curl-alone", curl),
+		stepRule(t, "b-then-send", "", "30s", CorrelationStep{ID: "b", Match: `e.event.action == "b"`},
+			CorrelationStep{ID: "send", Match: runaway + " || " + curl}),
+	}
+	event := func(id, action, session string, mut func(*asymptoteobserve.Event)) asymptoteobserve.Event {
+		e := corrEvent("", action, session, mut)
+		e.Event.ID = id
+		return e
+	}
+	// In s2 the send step is never asked about, since no b comes before it.
+	events := []asymptoteobserve.Event{
+		event("e1", "b", "s1", nil),
+		event("e2", "c", "s1", nil),
+		event("e3", "command.executed", "s1", withCurl),
+		event("e4", "c", "s2", nil),
+	}
+	result := Scan(rules, events)
+	var found, failed []string
+	for _, f := range result.Findings {
+		var ids []string
+		for _, e := range f.Events {
+			ids = append(ids, e.Event.ID)
+		}
+		found = append(found, f.RuleID+"@"+strings.Join(ids, ","))
+	}
+	for _, f := range result.Failures {
+		if !strings.Contains(f.Err.Error(), "cost limit exceeded") {
+			t.Errorf("%s on %s failed with %v, want the cost limit", f.RuleID, f.EventID, f.Err)
+		}
+		failed = append(failed, f.RuleID+"@"+f.EventID+"/"+f.SessionID)
+	}
+	if want := []string{"curl-alone@e3", "b-then-send@e1,e3"}; !reflect.DeepEqual(found, want) {
+		t.Errorf("found %v, want %v", found, want)
+	}
+	if want := []string{"runaway@e2/s1", "runaway@e4/s2", "b-then-send@e2/s1"}; !reflect.DeepEqual(failed, want) {
+		t.Errorf("failed %v, want %v", failed, want)
+	}
+
+	// A caller that must not act on an incomplete scan gets no findings and the first failure.
+	if got, err := ScanEvents(rules, events); got != nil || err == nil || !strings.HasPrefix(err.Error(), `rule "runaway": `) {
+		t.Errorf("ScanEvents = %v, %v; want no findings and the runaway rule's error", got, err)
+	}
+}
+
 // corpusRules loads the open corpus and the embedded baseline.
 func corpusRules(t testing.TB) []*Rule {
 	t.Helper()
@@ -108,17 +173,6 @@ func corpusRules(t testing.TB) []*Rule {
 		all = append(all, rules...)
 	}
 	return all
-}
-
-func ruleExpressions(r *Rule) []string {
-	if r.Correlation == nil {
-		return []string{r.Match}
-	}
-	var exprs []string
-	for _, s := range r.Correlation.Steps {
-		exprs = append(exprs, s.Match)
-	}
-	return exprs
 }
 
 // fillStrings sets every empty string field reachable from v (allocating nil sub-objects)
@@ -163,9 +217,9 @@ func TestCorpusStaysUnderEvalCostLimit(t *testing.T) {
 	var maxFixtureID, maxPessimisticID string
 	for _, r := range corpusRules(t) {
 		for _, expr := range ruleExpressions(r) {
-			ast, iss := env.Compile(expr)
-			if iss != nil && iss.Err() != nil {
-				t.Fatalf("%s: %v", r.ID, iss.Err())
+			_, ast, err := r.lib.compileMatch(expr)
+			if err != nil {
+				t.Fatalf("%s: %v", r.ID, err)
 			}
 			prog, err := env.Program(ast, cel.EvalOptions(cel.OptTrackCost))
 			if err != nil {
@@ -217,12 +271,19 @@ func manyAnchors(n int) []asymptoteobserve.Event {
 	return events
 }
 
+// loadPackRule loads one rule file of the corpus with the definitions the corpus ships.
+func loadPackRule(t *testing.T, path string) *Rule {
+	t.Helper()
+	rule, err := corpusPack(t).Library.LoadRule(path)
+	if err != nil {
+		t.Fatalf("load %s: %v", path, err)
+	}
+	return rule
+}
+
 func loadCorpusRule(t *testing.T, rel string) *CompiledRule {
 	t.Helper()
-	rule, err := LoadRule(filepath.Join(rulesDir(t), rel))
-	if err != nil {
-		t.Fatalf("load %s: %v", rel, err)
-	}
+	rule := loadPackRule(t, filepath.Join(rulesDir(t), rel))
 	c, err := Compile(rule)
 	if err != nil {
 		t.Fatalf("compile %s: %v", rel, err)
@@ -249,14 +310,14 @@ func TestOrderedCorrelationIsLinearInTheSession(t *testing.T) {
 
 	// The same session with the external MCP call at the end, out of window from every
 	// anchor but the last few: still linear, and still finds the in-window alignment.
-	end, _ := eventTime(events[n-1])
+	end, _ := eventTime(&events[n-1])
 	events = append(events, corrEvent(end.Add(10*time.Second).Format(time.RFC3339), "mcp.tool_invoked", "s1", func(e *asymptoteobserve.Event) {
 		e.MCP = &asymptoteobserve.MCPInfo{Server: "https://api.example.com", Tool: "x"}
 	}))
 	*evals = 0
-	findings, err := c.Findings(events)
-	if err != nil || len(findings) != 1 {
-		t.Fatalf("Findings = %v, %v; want one finding", findings, err)
+	findings := findingsOf(t, c, events)
+	if len(findings) != 1 {
+		t.Fatalf("findings = %v; want one finding", findingKeys(findings))
 	}
 	if got := findings[0].Events[0].Timestamp; got == events[0].Timestamp {
 		t.Fatalf("finding anchored at the first read (%s), which is outside the window", got)
@@ -270,19 +331,19 @@ func TestOrderedCorrelationIsLinearInTheSession(t *testing.T) {
 // anchor it re-scans every later event. It is the oracle for the equivalence test.
 func (c *CompiledRule) matchSessionInSequenceReference(events []asymptoteobserve.Event) ([]asymptoteobserve.Event, error) {
 	for start := range events {
-		matched, err := c.eval(c.steps[0], events[start])
+		matched, err := evalAlone(c.steps[0], events[start])
 		if err != nil {
 			return nil, err
 		}
 		if !matched {
 			continue
 		}
-		startTime, startKnown := eventTime(events[start])
+		startTime, startKnown := eventTime(&events[start])
 		final := len(c.steps) - 1
 		stepIdx := 1
 		seq := []asymptoteobserve.Event{events[start]}
 		for j := start + 1; j < len(events); j++ {
-			matched, err := c.eval(c.steps[stepIdx], events[j])
+			matched, err := evalAlone(c.steps[stepIdx], events[j])
 			if err != nil {
 				return nil, err
 			}
@@ -291,7 +352,7 @@ func (c *CompiledRule) matchSessionInSequenceReference(events []asymptoteobserve
 			}
 			seq = append(seq, events[j])
 			if stepIdx == final {
-				t, known := eventTime(events[j])
+				t, known := eventTime(&events[j])
 				if startKnown && known && t.Sub(startTime) > c.window {
 					seq = nil
 				}
@@ -344,11 +405,18 @@ func TestOrderedCorrelationMatchesExhaustiveSearch(t *testing.T) {
 			}
 			events[i] = corrEvent(ts, actions[rng.Intn(len(actions))], "s", nil)
 		}
+		session := &sessionEvents{all: events}
+		for i := range events {
+			session.at = append(session.at, i)
+		}
 		for ri, c := range rules {
-			got, err := c.matchSessionInSequence(events)
-			if err != nil {
-				t.Fatal(err)
-			}
+			got := c.matchSessionInSequence(session, func(step, event int) bool {
+				held, err := evalAlone(c.steps[step], events[event])
+				if err != nil {
+					t.Fatal(err)
+				}
+				return held
+			})
 			want, err := c.matchSessionInSequenceReference(events)
 			if err != nil {
 				t.Fatal(err)

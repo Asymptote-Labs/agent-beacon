@@ -1,12 +1,18 @@
 id: cloud-metadata-endpoint-access
-version: 1
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 4
 title: Cloud instance metadata endpoint accessed via HTTP client
 description: >
   A command uses curl/wget to reach a cloud instance metadata service — the IMDS
-  link-local address 169.254.169.254 or a provider metadata host
-  (metadata.google.internal, metadata.goog, *.metadata.azure / Azure IMDS). These
-  endpoints vend short-lived instance credentials and are the canonical SSRF /
-  cloud-credential-theft target.
+  link-local address 169.254.169.254, the ECS task-role address 169.254.170.2, or a
+  provider metadata host (metadata.google.internal, metadata.goog, *.metadata.azure /
+  Azure IMDS). These endpoints vend short-lived instance credentials and are the
+  canonical SSRF / cloud-credential-theft target. The client is found by what the
+  line runs and the target (see cloud_metadata_target) must be one of its words, so
+  curl under sudo, inside `bash -c` or by its path fires, and the address in a commit
+  message, a here-document or the words of another command does not. Where the
+  parser cannot see into a command, the text that reaches that command is matched
+  instead (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -15,10 +21,12 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
-match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\b(curl|wget)\\b") &&
-  e.command.command.matches("(?i)(169\\.254\\.169\\.254|metadata\\.google\\.internal|metadata\\.goog\\b|metadata\\.azure\\.com|/latest/meta-data|/computeMetadata/)")
+# The target is looked for in the words as written (argv_raw): a word with a variable
+# ("http://169.254.169.254/latest/meta-data/$ROLE") has no known value. Where the words of
+# the client do not show what it fetches (see client_target_unseen:
+# `H=169.254.169.254; curl http://$H/`) and the target is elsewhere on the line, the text
+# decides. The read step of cloud-metadata-then-egress asks the same (cloud_metadata_fetch).
+match: cloud_metadata_fetch(e)
 
 emit:
   reason: "HTTP client request to a cloud instance metadata endpoint (IMDS)"
@@ -53,5 +61,97 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "curl -s http://169.254.10.20/status" }
+        session: { id: s1 }
+  - name: ecs_task_role_address
+    # New in version 2: the list of targets is shared with imds-access-via-noncurl-client,
+    # which already had this address.
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://169.254.170.2/v2/metadata" }
+        session: { id: s1 }
+  - name: curl_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo curl -s http://169.254.169.254/latest/meta-data/iam/info" }
+        session: { id: s1 }
+  - name: wget_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'wget -qO- http://metadata.google.internal/computeMetadata/v1/project/project-id'" }
+        session: { id: s1 }
+  - name: curl_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/curl -s http://169.254.169.254/latest/dynamic/instance-identity/document" }
+        session: { id: s1 }
+  - name: curl_inside_a_substitution
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ROLE=$(curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/); echo \"$ROLE\"" }
+        session: { id: s1 }
+  - name: path_with_a_variable_in_the_same_word
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s \"http://169.254.169.254/latest/meta-data/iam/security-credentials/$ROLE\"" }
+        session: { id: s1 }
+  - name: address_held_by_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "export IMDS=169.254.169.254; curl -s \"http://$IMDS/latest/dynamic/instance-identity/document\"" }
+        session: { id: s1 }
+  - name: curl_through_a_remote_shell_the_parser_does_not_read
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'curl -s http://169.254.169.254/latest/meta-data/'" }
+        session: { id: s1 }
+  - name: address_in_a_config_on_standard_input
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -sK - <<'EOF'\nurl = \"http://169.254.169.254/latest/user-data\"\nEOF" }
+        session: { id: s1 }
+  - name: curl_run_by_xargs
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo iam/info | xargs -I{} curl -s http://169.254.169.254/latest/meta-data/{}" }
+        session: { id: s1 }
+  - name: endpoint_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: curl http://169.254.169.254/latest/meta-data/ is blocked by the proxy'" }
+        session: { id: s1 }
+  - name: endpoint_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nNever run curl http://169.254.169.254/latest/meta-data/ from a build.\nEOF" }
+        session: { id: s1 }
+  - name: address_searched_for_beside_an_unrelated_curl
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s https://example.com/health && grep -rn 'metadata.google.internal' deploy/" }
+        session: { id: s1 }
+  - name: endpoint_fetched_inside_an_interpreter
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import os; os.system('curl http://169.254.169.254/latest/meta-data/')\"" }
+        session: { id: s1 }
+  - name: endpoint_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'block curl http://169.254.169.254/latest/meta-data/' && ./run-tests.sh" }
         session: { id: s1 }
 

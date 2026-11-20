@@ -47,6 +47,44 @@ func TestAnyStepErrors(t *testing.T) {
 	}
 }
 
+// A step's text means what its pack's predicates say. Two packs that define p(e) differently
+// write two steps with one text, and an event only the second definition matches is one a
+// caller keeping events for the second pack's rule must keep.
+func TestStepMatcherTellsPacksApart(t *testing.T) {
+	pack := func(action string) *Library {
+		return testLibrary(t, DefinitionFile{Name: "p.predicates.yaml", Data: []byte(definitions(
+			definition("p", "e", `e.event.action == "`+action+`"`, "p(e)")))})
+	}
+	rule := func(id string, lib *Library) *CompiledRule {
+		c, err := Compile(&Rule{
+			ID: id, Spec: SupportedSpec, Version: 1, Title: id,
+			Severity: asymptoteobserve.SeverityHigh, Status: StatusExperimental, Posture: PostureDetect,
+			Emit: Emit{Reason: "x"},
+			Correlation: &Correlation{Scope: ScopeSession, Window: "60s", Steps: []CorrelationStep{
+				{ID: "p", Match: "p(e)"}, {ID: "z", Match: `e.event.action == "z"`},
+			}},
+			Tests: []Fixture{{Name: "x", Verdict: VerdictNoMatch, Events: []FixtureEvent{{Event: corrEvent("", "y", "s", nil)}}}},
+			lib:   lib,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	m, err := NewStepMatcher([]*CompiledRule{rule("on-a", pack("a")), rule("on-b", pack("b"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"a", "b"} {
+		if ok, err := m.AnyStep(PrepareEvent(corrEvent("", action, "s", nil))); !ok || err != nil {
+			t.Errorf("AnyStep on %q = %v, %v; want the step of the pack that defines p(e) as that action", action, ok, err)
+		}
+	}
+	if ok, err := m.AnyStep(PrepareEvent(corrEvent("", "c", "s", nil))); ok || err != nil {
+		t.Errorf(`AnyStep on "c" = %v, %v; want no step`, ok, err)
+	}
+}
+
 // BenchmarkPreparedSteps judges one event with the single-event rules and asks whether it matches a
 // step of a correlation rule, three ways: the single-event rules alone (ScanEvent); those, then
 // every distinct step evaluated on its own (ScanEvent+steps, each step binding and deriving the
@@ -78,11 +116,11 @@ func BenchmarkPreparedSteps(b *testing.B) {
 		step matcher
 	}
 	var each []distinct
-	seen := map[string]bool{}
+	seen := map[stepKey]bool{}
 	for _, c := range corr {
 		for i, st := range c.rule.Correlation.Steps {
-			if !seen[st.Match] {
-				seen[st.Match] = true
+			if key := (stepKey{c.rule.lib, st.Match}); !seen[key] {
+				seen[key] = true
 				each = append(each, distinct{c, c.steps[i]})
 			}
 		}
@@ -105,7 +143,7 @@ func BenchmarkPreparedSteps(b *testing.B) {
 					b.Fatal(err)
 				}
 				for _, d := range each {
-					if _, err := d.rule.eval(d.step, bc.event); err != nil {
+					if _, err := evalAlone(d.step, bc.event); err != nil {
 						b.Fatal(err)
 					}
 				}

@@ -1,0 +1,180 @@
+---
+title: "Guardrails"
+description: "Write a rule once in plain English, and Beacon holds Claude Code, Codex and Cursor to it as they work"
+---
+
+Guardrails (policies, in the dashboard) are rules for your coding agents, written in plain English:
+
+> Agents must not run INSERT, UPDATE, DELETE or DROP statements against production databases.
+
+Beacon checks your agents' prompts and tool calls against your rules while they work, in **Claude
+Code, Codex and Cursor**. When an agent is about to break one, Beacon can steer it, ask you first,
+or block it. Or it can just watch and record what it would have done. One rule covers every agent
+on every machine you've connected.
+
+Guardrails are part of [Beacon Cloud](/deployment/managed) and are on every plan.
+
+## Get started
+
+<Steps>
+  <Step title="Connect Beacon 1.3.67 or newer">
+    Check with `beacon version`. If Beacon isn't set up yet, follow the
+    [quickstart](/get-started/quickstart) and connect the machine to Beacon Cloud. On a Mac with
+    Homebrew, upgrade with `brew update && brew upgrade beacon`.
+  </Step>
+  <Step title="Turn on enforcement">
+    Paste this into Claude Code, Codex or Cursor, and the agent does the rest:
+
+    ```text
+    Read https://beacon.sh/enforcement.md then turn on Beacon policy enforcement on this machine
+    ```
+
+    Or run it yourself:
+
+    ```bash
+    beacon endpoint enforcement enable
+    ```
+
+    This installs Beacon's signed enforcement hooks for the agents on the machine. If Beacon was
+    installed for the whole machine (by an administrator, MDM or `--system`), run it with `sudo`,
+    or on Windows from an elevated PowerShell.
+  </Step>
+  <Step title="Add a guardrail">
+    Open the [Policy Library](/cloud/policy-library) at
+    [beacon.sh/dashboard/policy-library](https://beacon.sh/dashboard/policy-library) and click
+    **Add** on a rule, or choose **New policy** under **Policies** to write your own. Start it in
+    **Monitor only**.
+  </Step>
+  <Step title="Start a new agent session">
+    Sessions that were already open don't pick up enforcement. Start a new one, and check what's
+    covered with `beacon endpoint enforcement status`.
+  </Step>
+</Steps>
+
+Enforcement runs on macOS on Apple Silicon, Linux on x86-64 and Arm, and Windows on x64.
+
+## How a guardrail works
+
+Each guardrail has a **rule** and three settings.
+
+### Mode
+
+| Mode | What happens |
+| --- | --- |
+| **Monitor only** | Beacon checks and records what it would have done, but lets everything through. Use it to try a rule before enforcing it. |
+| **Enforce** | Beacon carries out the actions below. |
+
+### When a prompt breaks the rule
+
+| Action | What happens |
+| --- | --- |
+| **Off** | Prompts aren't checked against this rule. |
+| **Steer** | The agent gets the prompt but declines the part that breaks the rule, and says why. |
+| **Block** | The prompt is rejected before it reaches the agent, and you see which rule and why. |
+
+### When a tool call breaks the rule
+
+| Action | What happens |
+| --- | --- |
+| **Off** | Tool calls aren't checked against this rule. |
+| **Ask the developer** | The agent pauses and asks you to approve the call, showing the reason. |
+| **Block** | The call is stopped, and the agent is told which rule blocked it, so it doesn't try another way. |
+
+A rule with both checks off isn't checked live, but Beacon Cloud still cites it when it
+[reviews your sessions](/cloud/findings).
+
+Every decision, in either mode, becomes a [finding](/cloud/findings) that links to the session it
+came from.
+
+## What each agent does
+
+Each agent carries out a decision with its own controls, so a few results differ:
+
+| | Claude Code | Codex | Cursor |
+| --- | --- | --- | --- |
+| Prompt: **Block** | Blocked | Blocked | Blocked |
+| Prompt: **Steer** | Steered | Steered | Blocked, with a note to send it again without the prohibited part |
+| Tool call: **Block** | Blocked | Blocked | Blocked |
+| Tool call: **Ask** | Claude Code asks for approval | Codex can't show an approval from Beacon, so the call runs and the finding records that nobody was asked | Cursor shows its approval card; with Run Everything on, it runs the call without asking |
+
+## What's checked
+
+- **Prompts** you send to the agent.
+- **MCP tool calls**, such as Slack, GitHub, Linear, databases and cloud providers.
+
+Built-in tools, like shell commands and file edits, aren't checked live yet. Beacon Cloud still
+reviews them in your recorded sessions.
+
+## Write a good rule
+
+The rule is what each prompt and tool call is judged against, so write it the way you'd explain it
+to a teammate:
+
+- **Say what's off limits, and where.** "Agents must not post to public Slack channels" catches
+  less by accident than "Don't share things".
+- **Name the tools, environments or data you mean.** "production databases", "#general", "AWS".
+- **Say what's still allowed** when that matters: "Read-only queries are allowed."
+- **Keep it short.** A rule can be 2,400 characters, but a rule that checks prompts is limited to
+  400, the part a prompt check reads.
+
+Try a new rule in **Monitor only** for a few days, read what it caught under **Findings**, then
+tighten the wording or switch it to **Enforce**.
+
+## Personal and organization guardrails
+
+- **Your guardrails** apply to your own devices.
+- **Organization guardrails** apply to every member's devices. They need the organization to be on
+  [Beacon Cloud Team](/deployment/plans). Members can read them, and only admins can change them.
+  With an organization active, switch between its guardrails and yours at the top of the
+  **Policies** page.
+
+## Plans
+
+| | Beacon Cloud | Pro | Team | Enterprise |
+| --- | --- | --- | --- | --- |
+| Your own guardrails | 5 | Unlimited | Unlimited | Unlimited |
+| Enforced actions | 50, over the account's lifetime | Unlimited | Unlimited | Unlimited |
+| Organization guardrails | — | — | ✓ | ✓ |
+
+An **enforced action** is a steer, ask or block that Beacon carried out. Monitor-only rules don't
+use any. On the free plan, after 50 enforced actions your guardrails stop being enforced until you
+upgrade. See [Plans and pricing](/deployment/plans#policies).
+
+## Manage enforcement
+
+| Task | Command |
+| --- | --- |
+| Check what's on, which agents are covered and which rules apply | `beacon endpoint enforcement status` |
+| Update to the latest enforcement release | `beacon endpoint enforcement update` |
+| Turn enforcement off on this machine | `beacon endpoint enforcement disable` |
+
+Use `sudo` (or an elevated PowerShell on Windows) for each of these if Beacon was installed for
+the whole machine. Turning enforcement off removes Beacon's hooks from Claude Code, Codex and
+Cursor; telemetry keeps flowing as before.
+
+If you install another agent later, run `beacon endpoint enforcement enable` again to cover it.
+
+## Limits
+
+- Guardrails run through each agent's hooks. They're a safety net for everyday use, not a sandbox:
+  someone with administrator rights on the machine can turn them off.
+- If Beacon can't reach Beacon Cloud, prompts and calls go through, and Beacon records that the
+  check couldn't run.
+- Cloud agents and the Cursor CLI aren't covered yet.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Policy Library" icon="book" href="/cloud/policy-library">
+    Ready-made guardrails you can add in one click.
+  </Card>
+  <Card title="Findings" icon="magnifying-glass" href="/cloud/findings">
+    Where every guardrail decision is recorded.
+  </Card>
+  <Card title="Plans and pricing" icon="tag" href="/deployment/plans">
+    What each plan includes.
+  </Card>
+  <Card title="Connect devices" icon="laptop" href="/cloud/devices">
+    Enroll a machine in Beacon Cloud.
+  </Card>
+</Columns>

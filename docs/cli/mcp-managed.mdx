@@ -1,0 +1,159 @@
+---
+title: "beacon mcp managed"
+description: "Push MCP servers to every Claude Code and Codex user on a machine from MDM"
+---
+
+## Command overview
+
+`beacon mcp managed` pushes MCP servers an administrator chooses to every account on a Mac or
+Linux machine, for Claude Code and Codex CLI. People do not have to do anything, and they keep
+every MCP server they add themselves.
+
+```bash title="Command syntax"
+sudo beacon mcp managed apply --file <servers.json | -> [--harness claude,codex] [--dry-run] [--json]
+sudo beacon mcp managed remove [--harness claude,codex] [--dry-run] [--json]
+beacon mcp managed status [--harness claude,codex] [--json]
+```
+
+It is built for MDM: a recurring root script hands `apply` the complete list of servers, and each
+run makes the machine match it. Adding a server to the list pushes it, and taking one out removes
+it. Running `apply` again with the same list changes nothing.
+
+`apply` and `remove` need root. `status` does not. None of the three makes a network request or
+reads a Beacon account token.
+
+## Server list
+
+The list is a JSON object with one entry per server under `servers`:
+
+```json title="servers.json"
+{
+  "servers": {
+    "linear": { "url": "https://mcp.linear.app/mcp" },
+    "corp-docs": {
+      "url": "https://mcp.corp.example.com/mcp",
+      "headers": { "X-Team": "platform" }
+    }
+  }
+}
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `servers.<name>` | yes | The server's name in both runtimes: 1 to 64 letters, digits, hyphens or underscores. |
+| `url` | yes | The server's URL. It must be `https`. |
+| `headers` | no | HTTP headers sent with every request, as literal values. |
+
+An empty list, `{"servers": {}}`, removes every server Beacon pushed. Any other field is refused,
+so a typo fails the script instead of pushing a server without it.
+
+Only remote servers are supported. Claude Code's managed server setting accepts nothing else: no
+`command` (stdio) servers and no `${VAR}` expansion, so `apply` refuses both.
+
+<Warning>
+  Both runtimes' machine-wide files are readable by every account on the machine. Never put a
+  personal credential in `headers`. Use servers that sign each person in with OAuth (the runtime
+  asks the first time the server is used), or a shared, low-privilege value.
+</Warning>
+
+## Where the servers go
+
+Each runtime gets the servers through its own machine-wide configuration. In both, the pushed
+servers are added to what people configure. They do not replace it.
+
+| Runtime | File | What Beacon writes |
+|---|---|---|
+| Claude Code | macOS: `/Library/Application Support/ClaudeCode/managed-settings.d/beacon-mcp-servers.json`<br />Linux: `/etc/claude-code/managed-settings.d/beacon-mcp-servers.json` | The whole file: a `managedMcpServers` object. |
+| Codex CLI | `/etc/codex/config.toml` (macOS and Linux) | One `[mcp_servers.org-<name>]` table per server, each marked with a `# Pushed by beacon mcp managed` comment. |
+
+**Claude Code** reads `managedMcpServers` from its managed settings, in version 2.1.259 or later.
+Earlier versions ignore it. People cannot remove a pushed server with `claude mcp remove`, but
+they can turn it off for themselves in `/mcp`. Beacon does not use `managed-mcp.json`, which takes
+exclusive control and stops every server people add themselves from loading.
+
+**Codex CLI** reads `/etc/codex/config.toml` as its system configuration layer. Codex merges it
+with each person's `~/.codex/config.toml` table by table, so the pushed servers load next to
+people's own. In Codex, every pushed server's name starts with `org-`: `linear` in the list is
+`org-linear` in Codex. Because of the table-by-table merge, a pushed `[mcp_servers.linear]` would
+merge into a person's own `linear` server. If theirs runs a local command, the merged entry has
+both a command and a URL, and Codex then refuses to load that person's whole configuration. The
+prefix keeps pushed servers separate, so someone with their own `linear` sees both.
+
+A person's own settings take precedence: they can turn off a pushed server with
+`enabled = false` in their own `[mcp_servers.org-<name>]` table. Beacon changes only the tables
+that carry its marker comment. Everything else in the file, including servers someone else wrote
+and comments around Beacon's tables, is kept byte for byte. If the file already has an `org-`
+server of the same name that Beacon did not write, `apply` leaves it alone and reports it.
+
+People pick up a change the next time they start Claude Code or Codex.
+
+## Output
+
+`apply` and `remove` print one row per runtime:
+
+```text
+RUNTIME      ACTION     SERVERS           PATH
+Claude Code  write      corp-docs,linear  /Library/Application Support/ClaudeCode/managed-settings.d/beacon-mcp-servers.json
+Codex CLI    unchanged  org-corp-docs,org-linear  /etc/codex/config.toml
+```
+
+| Action | Meaning |
+|---|---|
+| `write` | The file now holds the list. |
+| `unchanged` | It already did. |
+| `remove` | Beacon's servers were removed. |
+| `absent` | There was nothing of Beacon's to remove. |
+| `failed` | The file could not be updated. The detail line says why. |
+
+The command exits non-zero when a runtime failed, so the MDM script reports it. The other runtime
+is still updated. A Codex config that is not valid TOML, or a file that is a symlink, is left
+unchanged and reported as `failed`.
+
+`status` lists the servers Beacon pushed to each runtime, and warns about settings that stop them
+from loading:
+
+- On macOS, a configuration profile that delivers Claude Code managed preferences
+  (`com.anthropic.claudecode`). Claude Code then reads only that profile and ignores
+  managed-settings files, Beacon's included, unless the profile sets `managedSourcesBehavior` to
+  `"merge"`. Server-managed settings from the Claude admin console have the same effect, and
+  Beacon cannot detect them.
+- An `[mcp_servers]` allowlist in `/etc/codex/requirements.toml`. Codex disables every server it
+  does not list, pushed servers included.
+
+## Examples
+
+Push a list from a file:
+
+```bash
+sudo beacon mcp managed apply --file /etc/beacon/mcp-servers.json
+```
+
+Push a list embedded in an MDM script:
+
+```bash
+cat <<'JSON' | sudo beacon mcp managed apply --file -
+{"servers": {"linear": {"url": "https://mcp.linear.app/mcp"}}}
+JSON
+```
+
+Preview a change without writing anything:
+
+```bash
+beacon mcp managed apply --file servers.json --dry-run
+```
+
+Push to Codex only, and stop pushing to Claude Code:
+
+```bash
+sudo beacon mcp managed apply --file servers.json --harness codex
+sudo beacon mcp managed remove --harness claude
+```
+
+For a recurring Rippling script, see
+[Rippling: push MCP servers](/mdm/rippling#push-mcp-servers).
+
+## Uninstall
+
+Uninstalling Beacon leaves pushed servers in place, because they are the runtimes' own
+configuration. To take them away, stop the MDM script that runs `apply` first, so it cannot push
+them again, then run `sudo beacon mcp managed remove` and uninstall.

@@ -14,6 +14,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -129,38 +130,46 @@ func (o onboardingOutcome) briefClose() bool {
 func maybeRunOnboarding(cmd *cobra.Command) (onboardingOutcome, error) {
 	profile := onboardingLoad()
 
-	// Legacy pending attribution remains retryable, but new interactive installs use
-	// the signed-in account and never create another email/usage submission.
 	if profile.Prompted() {
+		// Legacy pending attribution remains retryable, but new interactive installs use
+		// the signed-in account and never create another email/usage submission.
 		resendPendingOnboarding(&profile)
-		if profile.Onboarding.Destination != "" {
-			return onboardingOutcome{}, nil
-		}
-		if !onboardingEnabledByEnv() {
-			return onboardingOutcome{}, nil
-		}
-		if _, skipped := destinationSkipReason(profile); skipped {
-			return onboardingOutcome{}, nil
-		}
-		return runAccountOnboarding(cmd, &profile, true)
-	}
-
-	// Preserve the explicit unattended attribution contract for MDM rollouts. It is
-	// the only path that still uses the legacy submission endpoint.
-	if email, usage, ok := onboardingAnswersFromEnv(cmd.ErrOrStderr()); ok {
+	} else if email, usage, ok := onboardingAnswersFromEnv(cmd.ErrOrStderr()); ok {
+		// Preserve the explicit unattended attribution contract for MDM rollouts. It is
+		// the only path that still uses the legacy submission endpoint.
 		completeOnboarding(cmd, &profile, email, usage, nil, "")
 		return onboardingOutcome{}, nil
 	}
 
-	if _, skipped := onboardingSkipReason(profile); skipped {
+	run, destinationOnly := onboardingWizardPlan(profile)
+	if !run {
 		return onboardingOutcome{}, nil
 	}
-	return runAccountOnboarding(cmd, &profile, false)
+	return runAccountOnboarding(cmd, &profile, destinationOnly)
+}
+
+// onboardingWizardPlan reports whether maybeRunOnboarding shows the wizard for this profile, and
+// whether only its destination question. It has no side effects, so the install can say which
+// setup path it is taking before the wizard runs.
+func onboardingWizardPlan(profile onboarding.Profile) (run, destinationOnly bool) {
+	if profile.Prompted() {
+		if profile.Onboarding.Destination != "" || !onboardingEnabledByEnv() {
+			return false, true
+		}
+		_, skipped := destinationSkipReason(profile)
+		return !skipped, true
+	}
+	if _, _, ok := onboardingAnswersFromEnv(io.Discard); ok {
+		return false, false
+	}
+	_, skipped := onboardingSkipReason(profile)
+	return !skipped, false
 }
 
 func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, destinationOnly bool) (onboardingOutcome, error) {
 	now := onboardingClock()
 	status := onboardingAccountInspect(now)
+	identifySignedIn(status)
 	preset := ""
 	switch {
 	case endpointOpts.connect:
@@ -178,11 +187,14 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		PresetDestination: preset,
 		PresetPrivacyMode: profile.Onboarding.PrivacyMode,
 		OfferAgentTools:   true,
-		BackfillDays:      endpointBackfillDays(),
-		NoBrowser:         endpointOpts.noBrowser,
-		NoDisplay:         onboardingDisplayCheck(),
-		Now:               onboardingClock,
-		SignInTimeout:     account.LoginWait,
+		// Only for a person who finishes without an account, and not when this install was
+		// already given an email (--email, BEACON_EMAIL, recorded in the profile).
+		AskEmail:      profile.Onboarding.Email == "" && !installEmailGiven(),
+		BackfillDays:  endpointBackfillDays(),
+		NoBrowser:     endpointOpts.noBrowser,
+		NoDisplay:     onboardingDisplayCheck(),
+		Now:           onboardingClock,
+		SignInTimeout: account.LoginWait,
 		// Signing in happens inside the wizard so the full-screen UI is never torn
 		// down around it. The wizard itself stays free of network code: this is the
 		// only place onboarding reaches beacon.sh, and it hands back an email, never
@@ -208,6 +220,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 			if err := onboardingAccountSave(*session); err != nil {
 				return onboarding.Account{}, fmt.Errorf("store Beacon session: %w", err)
 			}
+			recordSignIn(telemetry.TriggerWizard, session.User)
 			return onboarding.Account{Email: session.User.Email}, nil
 		},
 	}
@@ -227,6 +240,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		if err := onboardingAccountSave(*session); err != nil {
 			return onboardingOutcome{}, fmt.Errorf("store Beacon session: %w", err)
 		}
+		recordSignIn(telemetry.TriggerWizard, session.User)
 		status = account.Status{SignedIn: true, User: session.User}
 		options.SignedIn = true
 		options.Email = status.User.Email
@@ -248,6 +262,14 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		// user -- and recording it would name someone who did not authorize this
 		// run, under an outcome that says they did.
 		status = account.Status{}
+		if result.Email != "" {
+			// Saved now, not by Persist after the install: the address is sent below, so a
+			// retry after a failed install must neither ask for it again nor send it twice.
+			// Only the email is written; the record stays open until Persist completes it.
+			profile.Onboarding.Email = result.Email
+			saveWizardEmail(cmd.ErrOrStderr(), *profile)
+		}
+		recordWizardEmail(result)
 	}
 
 	privacyMode := ""
@@ -284,6 +306,10 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 	}
 	skillsAnswer := onboarding.AgentToolAnswer(result.InstallSkills)
 	email := status.User.Email
+	if email == "" {
+		// An email given to this install (--email, BEACON_EMAIL) when no account names anyone.
+		email = profile.Onboarding.Email
+	}
 	// A run that never signed in is recorded as skipped, not authenticated.
 	outcome := onboarding.OutcomeAuthenticated
 	if result.WithoutAccount {
@@ -427,12 +453,7 @@ func onboardingEnabledByEnv() bool {
 // check already catches most of them; this is belt and braces for runners that
 // allocate a pty.
 func isCIEnvironment() bool {
-	for _, key := range []string{"CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "JENKINS_URL", "TEAMCITY_VERSION"} {
-		if strings.TrimSpace(os.Getenv(key)) != "" {
-			return true
-		}
-	}
-	return false
+	return onboarding.IsCIEnvironment(os.Getenv)
 }
 
 // onboardingAnswersFromEnv reads pre-supplied answers for a headless rollout.

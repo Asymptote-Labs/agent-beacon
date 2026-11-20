@@ -28,8 +28,6 @@ func TestInstallClaudeSettingsUnchangedWithoutExtensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A Windows checkout turns the golden file's line endings into CRLF; Beacon writes LF.
-	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(got, want) {
 		t.Fatalf("settings changed without extensions:\ngot:\n%s\nwant:\n%s", got, want)
 	}

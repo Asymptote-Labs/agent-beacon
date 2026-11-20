@@ -49,10 +49,7 @@ func confirmLensInstall(errOut io.Writer, src string, manifest asymptoteobserve.
 }
 
 func lensesUserMode() bool {
-	if lensesOpts.systemMode {
-		return false
-	}
-	return lensesOpts.userMode
+	return flagsUserMode(lensesOpts.userMode, lensesOpts.systemMode)
 }
 
 var lensesCmd = &cobra.Command{

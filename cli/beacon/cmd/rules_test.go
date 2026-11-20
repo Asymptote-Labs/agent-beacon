@@ -19,6 +19,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/detect"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 	"github.com/spf13/cobra"
 )
 
@@ -88,10 +89,10 @@ func TestRulesLintFailsOnFixtureMismatch(t *testing.T) {
 }
 
 // newerSpecRuleYAML declares a spec newer than this binary supports.
-var newerSpecRuleYAML = strings.Replace(strings.Replace(validRuleYAML, "id: cli-test-rule\n", "id: cli-future-rule\nspec: threat-rules/v1.9\n", 1),
+var newerSpecRuleYAML = strings.Replace(strings.Replace(validRuleYAML, "id: cli-test-rule\n", "id: cli-future-rule\nspec: "+testenv.FutureSpec()+"\n", 1),
 	"emit:", "future_field: true\nemit:", 1)
 
-const upgradeMessage = `rule "cli-future-rule" requires threat-rules/v1.9, but this Beacon supports up to threat-rules/v1.2; upgrade Beacon to load it`
+var upgradeMessage = `rule "cli-future-rule" requires ` + testenv.FutureSpec() + `, but this Beacon supports up to ` + threatrules.SupportedSpec + `; upgrade Beacon to load it`
 
 func TestRulesLintReportsNewerSpecAsSkip(t *testing.T) {
 	dir := t.TempDir()
@@ -523,5 +524,292 @@ func TestRulesListAndRemoveShowBaseline(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "baseline copy is active again") {
 		t.Fatalf("want the baseline note, got:\n%s", buf.String())
+	}
+}
+
+// A pack whose rule calls a predicate: a catalog, a predicate defined over it, and the rule.
+var packWithDefinitions = map[string]string{
+	"rules/concepts/tokens.catalog.yaml": `
+catalog: tokens
+version: 1
+predicates: {command: token_command}
+kinds:
+  - {id: cli, title: CLI tokens}
+stores:
+  - id: gh-token
+    title: GitHub CLI token
+    kind: cli
+    tier: definite
+    commands: [{name: gh, words: [auth, token]}]
+    examples: ["gh auth token"]
+`,
+	"rules/concepts/tokens.predicates.yaml": `
+library: tokens
+version: 1
+definitions:
+  - name: prints_token
+    params: [e]
+    description: The event is a command that prints a token.
+    body: e.event.action == "command.executed" && e.command.parsed_commands.exists(c, token_command(c))
+    tests:
+      - name: gh
+        verdict: match
+        events: [{event: {action: command.executed}, command: {command: "gh auth token"}}]
+      - name: status
+        verdict: no_match
+        events: [{event: {action: command.executed}, command: {command: "gh auth status"}}]
+`,
+	"rules/credential-access/token-printed.rule.yaml": `
+id: token-printed
+spec: threat-rules/v2.0
+version: 1
+title: T
+severity: low
+status: experimental
+posture: detect
+match: prints_token(e)
+emit:
+  reason: ok
+tests:
+  - name: p
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gh auth token" }
+`,
+}
+
+func writePack(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		writeRuleFile(t, filepath.Join(dir, filepath.Dir(name)), filepath.Base(name), body)
+	}
+	return dir
+}
+
+// `rules lint` on a pack runs the pack's definitions as well as its rules, and a rule that calls
+// a predicate is linted through the pack, not on its own.
+func TestRulesLintRunsAPacksDefinitions(t *testing.T) {
+	dir := writePack(t, packWithDefinitions)
+	cmd, buf := newCmd()
+	if err := lintRulesPath(cmd, dir); err != nil {
+		t.Fatalf("lint: %v\n%s", err, buf.String())
+	}
+	for _, want := range []string{
+		"ok   predicate prints_token(e) (2 fixtures)",
+		"ok   catalog tokens (rules/concepts/tokens.catalog.yaml): token_command",
+		"ok   token-printed (1 fixtures)",
+		"1 rule(s), 2 predicate(s), 3 fixture(s), 0 failure(s)",
+	} {
+		if !strings.Contains(filepath.ToSlash(buf.String()), want) {
+			t.Errorf("want %q in:\n%s", want, buf.String())
+		}
+	}
+
+	cmd, buf = newCmd()
+	err := lintRulesPath(cmd, filepath.Join(dir, "rules", "credential-access", "token-printed.rule.yaml"))
+	if err == nil || !strings.Contains(err.Error(), "prints_token is not a predicate of the definitions this rule was loaded with") {
+		t.Errorf("lint of the rule file alone: want the missing-definitions error, got %v\n%s", err, buf.String())
+	}
+
+	wrong := map[string]string{}
+	for name, body := range packWithDefinitions {
+		wrong[name] = strings.Replace(body, "      - name: status\n        verdict: no_match", "      - name: status\n        verdict: match", 1)
+	}
+	cmd, buf = newCmd()
+	if err := lintRulesPath(cmd, writePack(t, wrong)); err == nil || !strings.Contains(buf.String(), "FAIL predicate prints_token/status: expected match, got no_match") {
+		t.Errorf("lint of a pack whose predicate fixture is wrong: %v\n%s", err, buf.String())
+	}
+}
+
+// `rules list` shows the definitions the store holds, by the name `rules remove` takes, and
+// `rules remove` refuses definitions an installed rule still calls, saying which.
+func TestRulesListAndRemoveDefinitions(t *testing.T) {
+	pullTestSetup(t)
+	cmd, buf := newCmd()
+	if err := rulesAddCmd.RunE(cmd, []string{writePack(t, packWithDefinitions)}); err != nil {
+		t.Fatalf("rules add: %v", err)
+	}
+	buf.Reset()
+	if err := rulesListCmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("rules list: %v", err)
+	}
+	for _, want := range []string{
+		"Definitions in the store:",
+		"tokens.catalog.yaml",
+		"catalog tokens",
+		"token_command",
+		"tokens.predicates.yaml",
+		"library tokens",
+		"prints_token",
+		"; 2 definitions file(s) in the store.",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("want %q in:\n%s", want, buf.String())
+		}
+	}
+	err := rulesRemoveCmd.RunE(cmd, []string{"tokens.predicates.yaml"})
+	if err == nil || !strings.Contains(err.Error(), `the rule "token-printed" calls prints_token`) {
+		t.Errorf("rules remove of definitions a rule calls: %v", err)
+	}
+	for _, name := range []string{"token-printed", "tokens.predicates.yaml", "tokens.catalog.yaml"} {
+		buf.Reset()
+		if err := rulesRemoveCmd.RunE(cmd, []string{name}); err != nil || !strings.Contains(buf.String(), "removed "+name) {
+			t.Errorf("rules remove %s: %v\n%s", name, err, buf.String())
+		}
+	}
+}
+
+// `rules lint` fails a rule that spells out a catalog's stores in a regular expression of its
+// own instead of calling the catalog: the copy would drift from it.
+func TestRulesLintFailsARuleThatCopiesItsPacksCatalog(t *testing.T) {
+	pack := map[string]string{
+		"rules/concepts/tokens.catalog.yaml": `
+catalog: tokens
+version: 1
+predicates: {command: token_command}
+kinds:
+  - {id: cli, title: CLI tokens}
+stores:
+  - id: gh-token
+    title: GitHub CLI token
+    kind: cli
+    tier: definite
+    commands: [{name: gh, words: [auth, token]}]
+    examples: ["gh auth token"]
+  - id: vault-token
+    title: Vault token
+    kind: cli
+    tier: definite
+    commands: [{name: vault, words: [print, token]}]
+    examples: ["vault print token"]
+`,
+		"rules/credential-access/token-printed.rule.yaml": `
+id: token-printed
+spec: threat-rules/v2.0
+version: 1
+title: T
+severity: low
+status: experimental
+posture: detect
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)\\b(gh\\s+auth\\s+token|vault\\s+print\\s+token)\\b")
+emit:
+  reason: ok
+tests:
+  - name: p
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gh auth token" }
+`,
+	}
+	cmd, buf := newCmd()
+	err := lintRulesPath(cmd, writePack(t, pack))
+	if err == nil || !strings.Contains(buf.String(), "FAIL token-printed: its regular expressions spell out gh-token, vault-token of catalog tokens") {
+		t.Fatalf("lint of a rule that copies the catalog: %v\n%s", err, buf.String())
+	}
+
+	pack["rules/credential-access/token-printed.rule.yaml"] = strings.Replace(pack["rules/credential-access/token-printed.rule.yaml"],
+		`e.command.command.matches("(?i)\\b(gh\\s+auth\\s+token|vault\\s+print\\s+token)\\b")`, `e.command.parsed_commands.exists(c, token_command(c))`, 1)
+	cmd, buf = newCmd()
+	if err := lintRulesPath(cmd, writePack(t, pack)); err != nil {
+		t.Fatalf("lint of the rule calling the catalog: %v\n%s", err, buf.String())
+	}
+}
+
+// `rules diff` shows what a change to a pack does to verdicts, per rule, over the fixture events
+// of both sides; a snapshot stands in for a side that is no longer there to load.
+func TestRulesDiffShowsChangedVerdicts(t *testing.T) {
+	rule := func(pattern string) string {
+		return `
+id: sender
+version: 1
+title: T
+severity: low
+status: experimental
+posture: detect
+match: 'e.event.action == "command.executed" && e.command.command.matches("` + pattern + `")'
+emit:
+  reason: ok
+tests:
+  - name: curl
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl https://example.com" }
+  - name: wget
+    verdict: ` + map[bool]string{true: "match", false: "no_match"}[strings.Contains(pattern, "wget")] + `
+    events:
+      - event: { action: command.executed }
+        command: { command: "wget https://example.com" }
+`
+	}
+	before := writePack(t, map[string]string{"sender.rule.yaml": rule("^curl ")})
+	after := writePack(t, map[string]string{"sender.rule.yaml": rule("^(curl|wget) ")})
+	t.Cleanup(func() { rulesDiffOpts.exitCode = false })
+
+	cmd, buf := newCmd()
+	if err := diffRulesPaths(cmd, before, after); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"sender: +1 -0", "  + command.executed wget https://example.com", "1 rule(s) or step(s) changed over 2 event(s)"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("want %q in:\n%s", want, buf.String())
+		}
+	}
+
+	cmd, buf = newCmd()
+	if err := diffRulesPaths(cmd, before, before); err != nil || !strings.Contains(buf.String(), "0 rule(s) or step(s) changed over 2 event(s)") {
+		t.Errorf("a pack against itself: %v\n%s", err, buf.String())
+	}
+
+	// A snapshot of the earlier pack gives the same answer as the pack.
+	cmd, buf = newCmd()
+	if err := rulesSnapshotCmd.RunE(cmd, []string{before}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := filepath.Join(t.TempDir(), "before.json")
+	if err := os.WriteFile(snapshot, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rulesDiffOpts.exitCode = true
+	cmd, buf = newCmd()
+	err := diffRulesPaths(cmd, snapshot, after)
+	if err == nil || !strings.Contains(buf.String(), "sender: +1 -0") || !strings.Contains(buf.String(), "changed over 2 event(s)") {
+		t.Errorf("a snapshot against the later pack, with --exit-code: %v\n%s", err, buf.String())
+	}
+}
+
+// A pulled tarball is installed with the definitions it carries, so its rules mean in the store
+// what they mean in the pack.
+func TestRulesPullInstallsAPacksDefinitions(t *testing.T) {
+	pullTestSetup(t)
+	pack := makeTarGz(t, packWithDefinitions)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(pack) }))
+	t.Cleanup(srv.Close)
+	rulesPullTransport = srv.Client().Transport
+
+	cmd, buf := newCmd()
+	if err := runRulesPull(cmd, []string{srv.URL + "/threat-rules.tar.gz"}); err != nil {
+		t.Fatalf("pull: %v\n%s", err, buf.String())
+	}
+	for _, want := range []string{"installed definitions tokens -> ", "installed token-printed -> ", "1 rule(s) installed, with 2 definitions file(s)."} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("want %q in:\n%s", want, buf.String())
+		}
+	}
+	loaded, skipped, err := detect.LoadActiveSkipping(true, "")
+	if err != nil || len(skipped) != 0 {
+		t.Fatalf("load the store: %v, skipped %v", err, skipped)
+	}
+	found := false
+	for _, lr := range loaded {
+		found = found || lr.Rule.ID == "token-printed" && lr.Source == detect.SourceStore
+	}
+	if !found {
+		t.Error("the pulled rule is not among the active rules")
 	}
 }

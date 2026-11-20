@@ -904,6 +904,9 @@ func parseToolCalls(raw string) []toolCall {
 
 func classifyTool(name string, args, result map[string]interface{}) (string, string, schema.Severity, string) {
 	lower := strings.ToLower(strings.TrimSpace(name))
+	if strings.Contains(lower, "__") || strings.HasPrefix(lower, "mcp_") {
+		return "mcp.tool_invoked", "mcp", schema.SeverityInfo, "Hermes MCP tool invoked"
+	}
 	failed := firstString(result, "error") != "" || boolArg(result, "error") || boolArg(result, "failed")
 	if lower == "terminal" || strings.Contains(lower, "shell") || strings.Contains(lower, "bash") || stringArg(args, "command", "cmd") != "" {
 		return "command.executed", "command", schema.SeverityInfo, "Hermes command executed"
@@ -916,9 +919,6 @@ func classifyTool(name string, args, result map[string]interface{}) (string, str
 	}
 	if isFileEditTool(lower) {
 		return "file.modified", "file", schema.SeverityInfo, "Hermes file modified"
-	}
-	if strings.Contains(lower, "__") || strings.HasPrefix(lower, "mcp_") {
-		return "mcp.tool_invoked", "mcp", schema.SeverityInfo, "Hermes MCP tool invoked"
 	}
 	if failed {
 		return "tool.failed", "tool", schema.SeverityHigh, "Hermes tool failed"

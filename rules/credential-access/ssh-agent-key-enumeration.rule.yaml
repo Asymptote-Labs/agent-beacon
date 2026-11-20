@@ -1,11 +1,14 @@
 id: ssh-agent-key-enumeration
-version: 2
+spec: threat-rules/v2.0  # needed for predicates and args
+version: 3
 title: SSH agent key enumeration
 description: >
   A command lists the private keys loaded in the running ssh-agent (`ssh-add -l`
   / `ssh-add -L`) or sets SSH_AUTH_SOCK to probe an agent socket. The agent holds
   decrypted private keys in memory; enumerating them is a reconnaissance step
-  toward using them for lateral movement.
+  toward using them for lateral movement. Listing is the SSH agent store of the
+  pack's credential catalog (rules/concepts/credential-stores.catalog.yaml),
+  matched on the command line read as bash.
 severity: medium
 status: stable
 posture: detect
@@ -15,15 +18,20 @@ taxonomy:
   mitre_atlas: AML.T0024
 
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\bssh-add\\b[^;&|\\n]*\\s-[A-Za-z]*[lL]") ||
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)SSH_AUTH_SOCK=\\S+\\s+ssh-add\\b")
+  e.event.action == "command.executed" && e.command.parsed_commands.exists(c,
+    credential_command(c, "likely", "ssh") ||
+    c.name == "ssh-add" && "SSH_AUTH_SOCK" in c.env)
 
 emit:
   reason: "SSH agent private-key list enumerated (ssh-add -l/-L)"
 
 tests:
+  - name: windows_ssh_add_exe_list
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh-add.exe -l" }
+        session: { id: s1 }
   - name: ssh_add_list
     verdict: match
     events:

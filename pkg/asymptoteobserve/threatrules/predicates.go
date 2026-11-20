@@ -1,0 +1,374 @@
+package threatrules
+
+import (
+	"fmt"
+	"maps"
+	"regexp"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common"
+	celast "github.com/google/cel-go/common/ast"
+	"github.com/google/cel-go/common/operators"
+	"github.com/google/cel-go/common/types"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/concepts"
+)
+
+// A predicate is a named expression a rule calls like a function: credential_path(e.file.path).
+// It is expanded where it is called, before the expression is checked, so the engine evaluates,
+// indexes and bounds a rule that calls one exactly as it would the same rule with the
+// predicate's body written out. Nothing about a predicate exists at evaluation time.
+//
+// A predicate is defined in one of two ways. A definition (a *.predicates.yaml file) gives a
+// body over named parameters. A catalog (a *.catalog.yaml file) provides one for its paths, one
+// for its commands and one for a text that mentions its paths, whose body is generated from the
+// catalog's stores.
+type predicate struct {
+	name string
+	// source says where the predicate is defined, for error messages, and spec is the spec that
+	// file declares (v2.0 at least): what a rule that calls the predicate needs.
+	source string
+	spec   specVersion
+	// params and text are a definition's parameters and body as written, and written the body
+	// read as written (asWritten); body is the body parsed, with its own variables renamed (see
+	// hygienic). binds are the parameters the body binds for its caller, and uses the predicates
+	// the body calls.
+	params  []string
+	text    string
+	written celast.Expr
+	body    celast.Expr
+	binds   []string
+	uses    []string
+	// catalog and render are set for a catalog's predicate: render writes a selection of the
+	// catalog's stores as an expression over a subject.
+	catalog *concepts.Catalog
+	render  func(concepts.Selection, string) string
+	// selections caches the catalog predicate's parsed body for each tier and kinds it is
+	// called with.
+	mu         sync.Mutex
+	selections map[string]celast.Expr
+}
+
+// parameterPattern is the form of a definition's parameter. A predicate's name has the form of
+// concepts.PredicateNamePattern.
+var parameterPattern = regexp.MustCompile(`^[a-z_][a-zA-Z0-9_]*$`)
+
+// celsOwn reports whether name is CEL's own, which no predicate may take: the event variable, a
+// function or macro of the environment rules are checked in, or a word CEL reserves, which does
+// not parse as a name (loop, null). It is false when the environment cannot be built, which
+// NewLibrary reports when it builds it.
+func celsOwn(name string) bool {
+	env, err := Env()
+	if err != nil {
+		return false
+	}
+	if name == eventVar || env.HasFunction(name) || slices.ContainsFunc(env.Macros(), func(m cel.Macro) bool { return m.Function() == name }) {
+		return true
+	}
+	parsed, iss := env.Parse(name)
+	return iss.Err() != nil || parsed.NativeRep().Expr().Kind() != celast.IdentKind
+}
+
+// subjectParam is the parameter of a catalog predicate's generated body: what it is asked about.
+const subjectParam = "subject"
+
+// macro returns the predicate as a CEL macro for every argument count, so that a call with the
+// wrong number of arguments is told so rather than reported as an unknown function.
+func (p *predicate) macro() cel.Macro {
+	return cel.GlobalVarArgMacro(p.name, func(eh cel.MacroExprFactory, _ celast.Expr, args []celast.Expr) (celast.Expr, *common.Error) {
+		fail := func(format string, a ...any) (celast.Expr, *common.Error) {
+			var id int64
+			if len(args) > 0 {
+				id = args[0].ID()
+			}
+			return nil, eh.NewError(id, p.name+": "+fmt.Sprintf(format, a...))
+		}
+		if p.catalog != nil {
+			if len(args) == 0 {
+				return fail("takes what it is asked about, then optionally a tier and kinds")
+			}
+			tier := concepts.TierLikely
+			var kinds []string
+			for i, arg := range args[1:] {
+				text, ok := stringLiteral(arg)
+				if !ok {
+					return fail("a tier and a kind are written as string literals, so that the rule says which stores it means")
+				}
+				if i == 0 {
+					tier = concepts.Tier(text)
+				} else {
+					kinds = append(kinds, text)
+				}
+			}
+			body, err := p.selection(tier, kinds)
+			if err != nil {
+				return fail("%v", err)
+			}
+			return substitute(eh, body, []string{subjectParam}, args[:1]), nil
+		}
+		if len(args) != len(p.params) {
+			return fail("takes %d argument(s) (%s), got %d", len(p.params), strings.Join(p.params, ", "), len(args))
+		}
+		if p.body == nil {
+			return fail("is not resolved: its definition did not load")
+		}
+		for k, param := range p.params {
+			if !slices.Contains(p.binds, param) {
+				continue
+			}
+			if args[k].Kind() != celast.IdentKind || args[k].AsIdent() == eventVar {
+				return fail("binds its %q: pass a name for it (not %s), and use that name in the arguments after it", param, eventVar)
+			}
+		}
+		return substitute(eh, p.body, p.params, args), nil
+	})
+}
+
+// selection returns the body of a catalog predicate for a tier and kinds: the catalog's
+// expression for that selection, over subjectParam.
+func (p *predicate) selection(tier concepts.Tier, kinds []string) (celast.Expr, error) {
+	key := string(tier) + "\x00" + strings.Join(kinds, "\x00")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if body, ok := p.selections[key]; ok {
+		return body, nil
+	}
+	selection, err := p.catalog.Select(tier, kinds...)
+	if err != nil {
+		return nil, err
+	}
+	text := p.render(selection, subjectParam)
+	env, err := Env()
+	if err != nil {
+		return nil, err
+	}
+	parsed, iss := env.Parse(text)
+	if iss != nil && iss.Err() != nil {
+		return nil, fmt.Errorf("the expression generated from catalog %s does not parse: %w", p.catalog.Name, iss.Err())
+	}
+	body := parsed.NativeRep().Expr()
+	if p.selections == nil {
+		p.selections = map[string]celast.Expr{}
+	}
+	p.selections[key] = body
+	return body, nil
+}
+
+// substitute returns body built anew at the call, with each parameter replaced by a copy of its
+// argument. An argument is put in place and not read again, so one that names another parameter
+// is not replaced in turn. Every expression of the body is made where the call is, so an error
+// inside it is reported at the call rather than at whatever part of the calling expression
+// happens to share a number with it.
+func substitute(eh cel.MacroExprFactory, body celast.Expr, params []string, args []celast.Expr) celast.Expr {
+	var build func(e celast.Expr) celast.Expr
+	all := func(exprs []celast.Expr) []celast.Expr {
+		out := make([]celast.Expr, len(exprs))
+		for i, e := range exprs {
+			out[i] = build(e)
+		}
+		return out
+	}
+	build = func(e celast.Expr) celast.Expr {
+		switch e.Kind() {
+		case celast.IdentKind:
+			if k := slices.Index(params, e.AsIdent()); k >= 0 {
+				return eh.Copy(args[k])
+			}
+			return eh.NewIdent(e.AsIdent())
+		case celast.LiteralKind:
+			return eh.NewLiteral(e.AsLiteral())
+		case celast.SelectKind:
+			sel := e.AsSelect()
+			if sel.IsTestOnly() {
+				return eh.NewPresenceTest(build(sel.Operand()), sel.FieldName())
+			}
+			return eh.NewSelect(build(sel.Operand()), sel.FieldName())
+		case celast.CallKind:
+			call := e.AsCall()
+			if call.IsMemberFunction() {
+				return eh.NewMemberCall(call.FunctionName(), build(call.Target()), all(call.Args())...)
+			}
+			args := all(call.Args())
+			// Two string literals joined with + are one literal: a body may write a pattern as
+			// its fixed part plus a parameter (git_args), and the call passes the rest as a
+			// literal, so the engine sees one constant pattern, compiled and prefiltered once.
+			if call.FunctionName() == operators.Add && len(args) == 2 {
+				if a, ok := stringLiteral(args[0]); ok {
+					if b, ok := stringLiteral(args[1]); ok {
+						return eh.NewLiteral(types.String(a + b))
+					}
+				}
+			}
+			return eh.NewCall(call.FunctionName(), args...)
+		case celast.ListKind:
+			return eh.NewList(all(e.AsList().Elements())...)
+		case celast.MapKind:
+			entries := e.AsMap().Entries()
+			out := make([]celast.EntryExpr, len(entries))
+			for i, entry := range entries {
+				m := entry.AsMapEntry()
+				out[i] = eh.NewMapEntry(build(m.Key()), build(m.Value()), m.IsOptional())
+			}
+			return eh.NewMap(out...)
+		case celast.StructKind:
+			fields := e.AsStruct().Fields()
+			out := make([]celast.EntryExpr, len(fields))
+			for i, field := range fields {
+				f := field.AsStructField()
+				out[i] = eh.NewStructField(f.Name(), build(f.Value()), f.IsOptional())
+			}
+			return eh.NewStruct(e.AsStruct().TypeName(), out...)
+		case celast.ComprehensionKind:
+			// A variable named like a parameter is one the predicate binds for its caller:
+			// it takes the name the caller passed (hygienic).
+			c := e.AsComprehension()
+			name := func(variable string) string {
+				if k := slices.Index(params, variable); k >= 0 && args[k].Kind() == celast.IdentKind {
+					return args[k].AsIdent()
+				}
+				return variable
+			}
+			return eh.NewComprehensionTwoVar(build(c.IterRange()), name(c.IterVar()), name(c.IterVar2()), c.AccuVar(),
+				build(c.AccuInit()), build(c.LoopCondition()), build(c.LoopStep()), build(c.Result()))
+		}
+		return eh.Copy(e)
+	}
+	return build(body)
+}
+
+// hygienic prepares a definition's parsed body for expansion. It renames the variables the body
+// binds itself (the c of x.exists(c, ..)) to names no rule can write, so that an argument
+// substituted under them is never captured: with reads(pc) defined as pc.file_reads.exists(f, ..),
+// the call reads(f) inside a rule's own exists(f, ..) still means the rule's f. It returns the
+// names the body reads without binding them, which must be its parameters.
+//
+// A variable the body binds under the name of one of params is the exception, and is left as
+// it is: the predicate binds that parameter for its caller, who passes a name and may use it
+// in the arguments the body puts under the binding. With some(xs, x, cond) defined as
+// xs.exists(x, cond), the call some(e.file.paths, p, p.endsWith(".env")) means what
+// e.file.paths.exists(p, p.endsWith(".env")) does. binds are those parameters.
+func hygienic(name string, body celast.Expr, params []string) (free, binds []string) {
+	r := renamer{prefix: "@" + name + "_", fac: celast.NewExprFactory(), free: map[string]bool{}, params: params, binds: map[string]bool{}}
+	r.rename(body, nil)
+	free = slices.Collect(maps.Keys(r.free))
+	slices.Sort(free)
+	binds = slices.Collect(maps.Keys(r.binds))
+	slices.Sort(binds)
+	return free, binds
+}
+
+type renamer struct {
+	prefix string
+	next   int
+	fac    celast.ExprFactory
+	free   map[string]bool
+	// params are the definition's parameters, and binds the ones the body binds.
+	params []string
+	binds  map[string]bool
+}
+
+func (r *renamer) fresh() string {
+	r.next++
+	return fmt.Sprintf("%s%d", r.prefix, r.next)
+}
+
+// bind returns what a variable the body binds is renamed to: a name no rule can write, or the
+// variable itself when it is a parameter the predicate binds for its caller.
+func (r *renamer) bind(variable string) string {
+	if slices.Contains(r.params, variable) {
+		r.binds[variable] = true
+		return variable
+	}
+	return r.fresh()
+}
+
+// rename walks e with bound, the variables in scope and what each is renamed to.
+func (r *renamer) rename(e celast.Expr, bound map[string]string) {
+	switch e.Kind() {
+	case celast.IdentKind:
+		if to, ok := bound[e.AsIdent()]; ok {
+			e.SetKindCase(r.fac.NewIdent(e.ID(), to))
+		} else {
+			r.free[e.AsIdent()] = true
+		}
+	case celast.ComprehensionKind:
+		c := e.AsComprehension()
+		// The range and the accumulator's initial value are outside the comprehension's scope; the
+		// condition and the step see the iteration variables and the accumulator; the result sees
+		// the accumulator.
+		r.rename(c.IterRange(), bound)
+		r.rename(c.AccuInit(), bound)
+		outer := maps.Clone(bound)
+		if outer == nil {
+			outer = map[string]string{}
+		}
+		outer[c.AccuVar()] = c.AccuVar()
+		inner := maps.Clone(outer)
+		iterVar, iterVar2 := r.bind(c.IterVar()), ""
+		inner[c.IterVar()] = iterVar
+		if c.HasIterVar2() {
+			iterVar2 = r.bind(c.IterVar2())
+			inner[c.IterVar2()] = iterVar2
+		}
+		r.rename(c.LoopCondition(), inner)
+		r.rename(c.LoopStep(), inner)
+		r.rename(c.Result(), outer)
+		e.SetKindCase(r.fac.NewComprehensionTwoVar(e.ID(), c.IterRange(), iterVar, iterVar2, c.AccuVar(), c.AccuInit(), c.LoopCondition(), c.LoopStep(), c.Result()))
+	default:
+		children(e, func(child celast.Expr) { r.rename(child, bound) })
+	}
+}
+
+// walkExpr calls visit for e and every expression under it.
+func walkExpr(e celast.Expr, visit func(celast.Expr)) {
+	visit(e)
+	children(e, func(child celast.Expr) { walkExpr(child, visit) })
+}
+
+// children calls visit for each expression directly under e.
+func children(e celast.Expr, visit func(celast.Expr)) {
+	switch e.Kind() {
+	case celast.CallKind:
+		call := e.AsCall()
+		if call.IsMemberFunction() {
+			visit(call.Target())
+		}
+		for _, arg := range call.Args() {
+			visit(arg)
+		}
+	case celast.ComprehensionKind:
+		c := e.AsComprehension()
+		for _, part := range []celast.Expr{c.IterRange(), c.AccuInit(), c.LoopCondition(), c.LoopStep(), c.Result()} {
+			visit(part)
+		}
+	case celast.ListKind:
+		for _, element := range e.AsList().Elements() {
+			visit(element)
+		}
+	case celast.MapKind:
+		for _, entry := range e.AsMap().Entries() {
+			visit(entry.AsMapEntry().Key())
+			visit(entry.AsMapEntry().Value())
+		}
+	case celast.StructKind:
+		for _, field := range e.AsStruct().Fields() {
+			visit(field.AsStructField().Value())
+		}
+	case celast.SelectKind:
+		visit(e.AsSelect().Operand())
+	}
+}
+
+// calls returns the names of the global functions e calls, each once, in the order met.
+func calls(e celast.Expr) []string {
+	var names []string
+	walkExpr(e, func(e celast.Expr) {
+		if e.Kind() == celast.CallKind && !e.AsCall().IsMemberFunction() && !slices.Contains(names, e.AsCall().FunctionName()) {
+			names = append(names, e.AsCall().FunctionName())
+		}
+	})
+	return names
+}

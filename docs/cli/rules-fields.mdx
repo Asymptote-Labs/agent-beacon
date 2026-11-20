@@ -21,7 +21,8 @@ Threat-rule expressions bind each Beacon event as `e`. Field paths mirror the ev
 |------------|-------------|
 | `e.event.action` | Match event type, such as `command.executed` or `file.read` |
 | `e.command.command` | Match executed command text |
-| `e.command.parsed_commands` | Match the commands a command line runs (name, argv, pipeline stage, file effects) rather than its text (derived by the engine; needs `spec: threat-rules/v1.2`) |
+| `e.command.parsed_commands` | Match the commands a command line runs rather than its text (derived by the engine; needs `spec: threat-rules/v1.2`, and some of each entry's fields need a later spec: `--markdown` lists them with the version each needs) |
+| `e.command.parsed_incomplete` | Tell a command line that was not read to its end, so a missing command proves nothing (derived by the engine; needs `spec: threat-rules/v2.0`) |
 | `e.file.path` | Match a file path |
 | `e.prompt.text` | Match prompt text when retained |
 | `e.prompt.id` | Group the events of one turn: the prompt and everything the agent did for it |
@@ -48,7 +49,7 @@ beacon rules fields --markdown
 
 | Flag | Description |
 |------|-------------|
-| `--markdown` | Render as a markdown reference table |
+| `--markdown` | Render as a markdown reference table, with the fields of a parsed command and the spec version each needs |
 
 ## Related
 
