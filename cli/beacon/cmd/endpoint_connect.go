@@ -46,10 +46,14 @@ ingest key, stores that key in a private secrets file, and starts a Vector
 forwarder. The account token is never given to Vector or copied into endpoint
 configuration. System mode retains browser device approval.
 
-Requires Vector 0.50 or newer: the signed macOS package installs it at
-/opt/beacon/bin/vector, Homebrew provides it as "vector", and Linux packages are
-at https://vector.dev. Revoke a device from the dashboard's Beacon Endpoints
-page; run "beacon endpoint disconnect" to stop forwarding locally.`,
+Requires Vector 0.50 or newer: the signed macOS package and the Linux .deb and
+.rpm install it at /opt/beacon/bin/vector, Homebrew provides it, and the Windows
+MSI installs vector.exe beside beacon.exe in %ProgramFiles%\Beacon\bin. On
+Windows a system endpoint runs the forwarder as the BeaconAsymptoteForwarder
+service; a user endpoint runs it as a supervised process, like its collector,
+which nothing restarts and which stops at sign-out (install or repair starts it
+again). Revoke a device from the dashboard's Beacon Endpoints page; run
+"beacon endpoint disconnect" to stop forwarding locally.`,
 	SilenceUsage: true,
 	RunE:         runEndpointConnect,
 }
@@ -73,7 +77,7 @@ func init() {
 	}
 	endpointConnectCmd.Flags().StringVar(&connectOpts.dashboardURL, "dashboard-url", "", "Beacon service URL (defaults to "+auth.DefaultDashboardURL+", or "+auth.DashboardURLEnv+")")
 	endpointConnectCmd.Flags().BoolVar(&connectOpts.noBrowser, "no-browser", false, "System mode: print the device approval URL instead of opening a browser")
-	endpointConnectCmd.Flags().StringVar(&connectOpts.vectorBin, "vector-bin", "", "Vector binary to run (defaults to "+asymptote.VectorBinEnv+", "+asymptote.PackagedVectorPath+", Homebrew, then PATH)")
+	endpointConnectCmd.Flags().StringVar(&connectOpts.vectorBin, "vector-bin", "", "Vector binary to run (defaults to "+asymptote.VectorBinEnv+", the packaged Vector ("+asymptote.PackagedVectorPath+`, or vector.exe beside beacon.exe on Windows), Homebrew, then PATH)`)
 	endpointConnectCmd.Flags().BoolVar(&endpointOpts.noBackfill, "no-backfill", false, "Do not upload the last 30 days of agent sessions read from their local session stores (also "+endpointBackfillEnv+"=0)")
 	endpointConnectCmd.Flags().StringVar(&connectOpts.privacyMode, "privacy-mode", "", "Beacon Cloud forwarding privacy: standard or metadata-only (defaults to onboarding choice)")
 	endpointDisconnectCmd.Flags().BoolVar(&connectOpts.keepCredentials, "keep-credentials", false, "Keep the enrollment record and device key so a later connect can reuse this device")
@@ -286,7 +290,9 @@ func deviceIDOrEmpty(e *asymptote.Enrollment, err error) string {
 
 // connectBrowserOpener returns the browser opener for enrollment. A system-mode connect runs
 // as root, where opening a browser would start it as root (or fail under launchd); it opens
-// as the active console user instead, which is the person sitting at the machine.
+// as the active console user instead, which is the person sitting at the machine. On Windows
+// Geteuid is -1, so the default opener runs: an elevated connect there is run by the person at
+// the desktop, in their own session, and the browser opens for them.
 func connectBrowserOpener(userMode bool) func(string) error {
 	if userMode || os.Geteuid() != 0 {
 		return nil
