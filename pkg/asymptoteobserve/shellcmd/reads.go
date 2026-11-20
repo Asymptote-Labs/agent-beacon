@@ -49,6 +49,40 @@ var (
 		script: []string{"e", "f", "--regexp", "--file"},
 	}
 
+	// gzipReader covers gzip, gunzip and zcat.
+	gzipReader = reader{optionTable: optionTable{values: optionSpec{short: "S", long: []string{"--suffix"}}}}
+
+	// xzReader covers xz, unxz, xzcat and the lzma family xz-utils installs beside them.
+	// --files and --files0 are left out of values: their bare form's value is an operand
+	// already, and inputs() adds the attached --files=f form.
+	xzReader = reader{
+		optionTable: optionTable{
+			values: optionSpec{short: "MSFCT", long: []string{
+				"--suffix", "--format", "--check", "--threads", "--memlimit", "--memory",
+				"--block-size", "--block-list", "--memlimit-compress", "--memlimit-decompress",
+				"--memlimit-mt-decompress", "--flush-timeout",
+			}},
+		},
+	}
+
+	// zstdReader covers zstd, unzstd and zstdcat. Its dictionary options are left out of values
+	// on purpose: -D and --patch-from name a file zstd reads, the dictionary or the reference,
+	// so their values are operands like any other file it takes in.
+	zstdReader = reader{
+		optionTable: optionTable{
+			values: optionSpec{short: "oTMB", long: []string{"--threads", "--memory", "--block-size"}},
+		},
+	}
+
+	// brotliReader leaves -D, --dictionary out of values for the reason zstdReader does.
+	brotliReader = reader{
+		optionTable: optionTable{
+			values: optionSpec{short: "oqwSC", long: []string{
+				"--output", "--quality", "--lgwin", "--large_window", "--suffix", "--comment",
+			}},
+		},
+	}
+
 	// readers are the commands whose operands are the files they read. The options listed are the
 	// ones that take a value, so that the value is not taken for a file.
 	readers = map[string]reader{
@@ -83,7 +117,36 @@ var (
 		}}}},
 		// GNU -i ignores garbage and BSD -i names the input: either way the file is an operand.
 		"base64": {optionTable: optionTable{values: optionSpec{short: "wbo", long: []string{"--wrap", "--break", "--output"}}}},
-		"grep":   grepReader,
+		"base32": {optionTable: optionTable{values: optionSpec{short: "wbo", long: []string{"--wrap", "--break", "--output"}}}},
+
+		// The stream compressors and decompressors read their operands: the file compress turns
+		// into an archive, and the archive decompress turns back. They are the pipe-reading
+		// counterpart of the printers above, so a credential file compressed into a pipeline's
+		// first stage is a read the egress rules can follow.
+		"gzip":    gzipReader,
+		"gunzip":  gzipReader,
+		"zcat":    gzipReader,
+		"lzma":    xzReader,
+		"unlzma":  xzReader,
+		"lzcat":   xzReader,
+		"bzip2":   {},
+		"bunzip2": {},
+		"bzcat":   {},
+		"xz":      xzReader,
+		"unxz":    xzReader,
+		"xzcat":   xzReader,
+		"zstd":    zstdReader,
+		"unzstd":  zstdReader,
+		"zstdcat": zstdReader,
+		// lz4's and unlz4's second operand is the file they write.
+		"lz4":        {},
+		"unlz4":      {},
+		"lz4cat":     {},
+		"brotli":     brotliReader,
+		"compress":   {optionTable: optionTable{values: optionSpec{short: "b"}}},
+		"uncompress": {optionTable: optionTable{values: optionSpec{short: "b"}}},
+
+		"grep": grepReader,
 		"rg": {
 			optionTable: optionTable{
 				values: optionSpec{short: "efgtTmABCjMEdr", long: []string{
@@ -186,6 +249,23 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 		}
 	case "socat":
 		return socatFiles(args), data
+	case "xz", "unxz", "xzcat", "lzma", "unlzma", "lzcat":
+		files = unquoted(readers[name].files(args))
+		// --files[=f] and --files0[=f] name a file whose lines are the paths xz compresses or
+		// decompresses. The bare form's value is already an operand; the attached form's value
+		// is not, and is added here.
+		for _, w := range args {
+			t := w.Unquoted
+			if t == "--" {
+				break
+			}
+			for _, p := range []string{"--files0=", "--files="} {
+				if strings.HasPrefix(t, p) && len(t) > len(p) && !slices.Contains(files, t[len(p):]) {
+					files = append(files, t[len(p):])
+				}
+			}
+		}
+		return files, data
 	default:
 		r, ok := readers[name]
 		if !ok {
@@ -193,7 +273,7 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 		}
 		operands := r.files(args)
 		switch {
-		case name == "xxd" && len(operands) > 1:
+		case (name == "xxd" || name == "lz4" || name == "unlz4") && len(operands) > 1:
 			operands = operands[:1]
 		case name == "awk":
 			operands = withoutAssignments(operands)
