@@ -1,5 +1,6 @@
 id: etc-hosts-modified
-version: 2
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 5
 title: /etc/hosts or hosts.allow/deny modified
 description: >
   The agent modified a system name resolution file: /etc/hosts (the
@@ -20,16 +21,36 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0011
 
+# Which file is one definition (hosts_file, rules/concepts/sensitive-files.predicates.yaml),
+# asked of a file event's path and of every path a shell command writes (c.file_writes: a
+# redirection, tee, sed -i, cp, mv).
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] && (
-    e.file.path.matches("(?i)(^|/)etc/hosts$") ||
-    e.file.path.matches("(?i)(^|/)etc/hosts\\.(allow|deny)$")
-  )
+  file_changed(e, p, hosts_file(p)) ||
+  e.event.action == "command.executed" && hosts_file_redirect(e.command.command) &&
+    unread_text(e, t, hosts_file_redirect(t))
 
 emit:
   reason: "/etc/hosts or hosts.allow/deny modified (local DNS hijack or ACL change)"
 
 tests:
+  - name: entry_added_through_sudo_tee
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo '10.0.0.5 registry.npmjs.org' | sudo tee -a /etc/hosts" }
+        session: { id: s1 }
+  - name: entry_added_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sh -c 'echo \"10.0.0.5 pypi.org\" >> /etc/hosts'" }
+        session: { id: s1 }
+  - name: table_only_searched
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -n localhost /etc/hosts" }
+        session: { id: s1 }
   - name: modify_etc_hosts
     verdict: match
     events:
@@ -71,4 +92,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: "/etc/hosts" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh \"echo '10.0.0.5 pypi.org' | sudo tee -a /etc/hosts\"" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never echo 10.0.0.5 pypi.org | sudo tee -a /etc/hosts\" && ./run-tests.sh" }
         session: { id: s1 }

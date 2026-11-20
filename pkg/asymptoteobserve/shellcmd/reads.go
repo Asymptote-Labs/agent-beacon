@@ -26,7 +26,7 @@ type reader struct {
 
 // files returns the operands the command reads.
 func (r reader) files(args []Word) []Word {
-	opts := r.parse(args, true)
+	opts := r.parse(args)
 	files := opts.operands
 	if r.script == nil || len(files) == 0 {
 		return files
@@ -153,9 +153,7 @@ var (
 		"compress":   {optionTable: optionTable{values: optionSpec{short: "b"}}},
 		"uncompress": {optionTable: optionTable{values: optionSpec{short: "b"}}},
 
-		"grep":  grepReader,
-		"egrep": grepReader,
-		"fgrep": grepReader,
+		"grep": grepReader,
 		"rg": {
 			optionTable: optionTable{
 				values: optionSpec{short: "efgtTmABCjMEdr", long: []string{
@@ -191,8 +189,8 @@ var (
 		}}}},
 	}
 
-	// tarOptions are tar's options that take a value, and the ones that say what it does: only c,
-	// r and u read the files named.
+	// tarOptions are tar's options that take a value, and the ones that say what it does: c, r
+	// and u read the files named (tarFiles), and x extracts (tarExtractDirectory).
 	tarOptions = optionTable{
 		values: optionSpec{short: "bCfFgHIKLNTVX", long: []string{
 			"--file", "--directory", "--exclude", "--exclude-from", "--files-from", "--transform",
@@ -204,15 +202,15 @@ var (
 			"--warning", "--quoting-style", "--rmt-command", "--rsh-command", "--volno-file",
 			"--index-file", "--owner-map", "--group-map", "--hole-detection",
 		}},
-		flags: optionSpec{short: "cru", long: []string{"--create", "--append", "--update"}},
+		flags: optionSpec{short: "crux", long: []string{"--create", "--append", "--update", "--extract", "--get"}},
 	}
 
 	ghGistCreateOptions = optionTable{values: optionSpec{short: "df", long: []string{"--desc", "--filename"}}}
 )
 
 // inputs returns the files the command's own words name as its input, and which of its words
-// carry data. name and args are what the command runs (Command.run). An interpreter's inline
-// script is read by scriptReads instead.
+// carry data. name and args are what the command runs (Command.program). An interpreter's
+// inline script is read by scriptReads instead.
 func (c *Command) inputs(name string, args []Word) (files []string, data dataWords) {
 	if name == "" {
 		return nil, data
@@ -220,7 +218,7 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 	// base is the index in Argv of the first of args.
 	base := len(c.Argv) - len(args)
 	switch name {
-	case "sed", "gsed":
+	case "sed":
 		// In place, sed writes the files it reads back, which is an edit, not a read.
 		if files, inPlace := scriptFiles(name, args); !inPlace {
 			return unquoted(files), data
@@ -228,7 +226,9 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 	case "jq":
 		return unquoted(jqFiles(args)), data
 	case "cp", "install":
-		return unquoted(copySources(name, args)), data
+		if p, ok := copyOperands(name, args); ok {
+			return unquoted(p.sources), data
+		}
 	case "scp", "rsync":
 		operands := readers[name].files(args)
 		if len(operands) < 2 {
@@ -251,8 +251,8 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 	case "http", "https", "httpie", "xh", "xhs":
 		return httpieInputs(args, base)
 	case "gh":
-		if len(args) >= 2 && args[0].Known && args[0].Text == "gist" && args[1].Known && args[1].Text == "create" {
-			return unquoted(ghGistCreateOptions.parse(args[2:], true).operands), data
+		if isSub(args, "gist", "create") {
+			return unquoted(ghGistCreateOptions.parse(args[2:]).operands), data
 		}
 	case "socat":
 		return socatFiles(args), data
@@ -328,26 +328,6 @@ func withoutPlusWords(words []Word) []Word {
 	return files
 }
 
-// copySources returns what cp or install copies: every operand with -t, every operand but the
-// last, the destination, otherwise.
-func copySources(name string, args []Word) []Word {
-	opts := optionTable{valueOptions[name], flagOptions[name], longOptions[name]}.parse(args, true)
-	if opts.flags["d"] || opts.flags["--directory"] {
-		return nil // install -d creates its operands as directories
-	}
-	sources := opts.operands
-	if _, ok := opts.values["t"]; ok {
-		return sources
-	}
-	if _, ok := opts.values["--target-directory"]; ok {
-		return sources
-	}
-	if len(sources) < 2 {
-		return nil
-	}
-	return sources[:len(sources)-1]
-}
-
 // remotePath reports whether an scp or rsync operand names a file on another host: host:path,
 // user@host:path, host::module or a URL.
 func remotePath(operand string) bool {
@@ -358,27 +338,12 @@ func remotePath(operand string) bool {
 // tarFiles returns the files tar puts into an archive: its operands when it creates, appends or
 // updates (c, r, u), and none when it extracts, lists or compares.
 func tarFiles(args []Word) []Word {
-	reads := false
-	// The first word may be option letters without a dash (tar czf out.tgz src): each letter that
-	// takes a value takes the next word, in order.
-	if len(args) > 0 {
-		if bundle := args[0].Unquoted; bundle != "" && isLetters(bundle) {
-			values := 1
-			for i := 0; i < len(bundle); i++ {
-				if strings.IndexByte(tarOptions.flags.short, bundle[i]) >= 0 {
-					reads = true
-				}
-				if strings.IndexByte(tarOptions.values.short, bundle[i]) >= 0 {
-					values++
-				}
-			}
-			if values > len(args) {
-				return nil
-			}
-			args = args[values:]
-		}
+	letters, _, args, ok := tarBundle(args)
+	if !ok {
+		return nil
 	}
-	opts := tarOptions.parse(args, true)
+	opts := tarOptions.parse(args)
+	reads := strings.ContainsAny(letters, "cru")
 	for _, mode := range []string{"c", "r", "u", "--create", "--append", "--update"} {
 		reads = reads || opts.flags[mode]
 	}
@@ -386,6 +351,31 @@ func tarFiles(args []Word) []Word {
 		return nil
 	}
 	return opts.operands
+}
+
+// tarBundle reads tar's first word when it is option letters without a dash (tar czf out.tgz
+// src): the letters, the value each letter that takes one takes, which is the next word in
+// order, and the words after those. When the first word is no bundle, letters is "" and rest is
+// args. ok is false when the letters take more words than follow them.
+func tarBundle(args []Word) (letters string, values map[byte]Word, rest []Word, ok bool) {
+	if len(args) == 0 || args[0].Unquoted == "" || !isLetters(args[0].Unquoted) {
+		return "", nil, args, true
+	}
+	letters, next := args[0].Unquoted, 1
+	for i := 0; i < len(letters); i++ {
+		if strings.IndexByte(tarOptions.values.short, letters[i]) < 0 {
+			continue
+		}
+		if next >= len(args) {
+			return "", nil, nil, false
+		}
+		if values == nil {
+			values = map[byte]Word{}
+		}
+		values[letters[i]] = args[next]
+		next++
+	}
+	return letters, values, args[next:], true
 }
 
 func isLetters(s string) bool {
@@ -467,6 +457,9 @@ scan:
 		case strings.HasPrefix(t, "--"):
 		case isOption(args[i]):
 			for j := 1; j < len(t); j++ {
+				if !args[i].Known && (t[j] == '$' || t[j] == '`') {
+					break // what follows in an unknown word is not option letters
+				}
 				if t[j] == 'f' {
 					scripted = true
 				}
@@ -487,78 +480,16 @@ scan:
 	return append(operands, loaded...)
 }
 
-// curlValueOptions are curl's short options that take a value.
-const curlValueOptions = "AbcCdDeEFHKmoPQrtTuUwxXyYz"
-
-// What the value of a curl option is to the request body.
-const (
-	curlData      = iota + 1 // the body, or @file
-	curlURLEncode            // content, name=content, @file or name@file
-	curlForm                 // name=content, name=@file or name=<file
-	curlRaw                  // the body as written
-	curlUpload               // a file
-)
-
-// curlInputs returns the files curl sends and the words whose value it sends as the request body.
-// The files are the @file of -d, --data, --data-binary, --data-ascii, --data-urlencode and --json,
-// the @file or <file of a -F field, and the file of -T. The words are the values of those options
-// where they are content rather than a file, and of --data-raw and --form-string. A header, a
-// URL, a credential and an output file are neither.
+// curlInputs returns the files curl sends and the words whose value it sends as the request body
+// (readCurl). The files are the @file of -d, --data, --data-binary, --data-ascii,
+// --data-urlencode and --json, the @file or <file of a -F field, and the file of -T. The words
+// are the values of those options where they are content rather than a file, and of --data-raw
+// and --form-string. A header, a URL, a credential and an output file are neither.
 func curlInputs(args []Word, base int) (files []string, data dataWords) {
 	data.listed = true
-	for i := 0; i < len(args); i++ {
-		t := args[i].Unquoted
-		if len(t) < 2 || t[0] != '-' {
-			continue // a URL
-		}
-		var value string
-		sends, attached := 0, false
-		if t[1] == '-' {
-			var name string
-			name, value, attached = strings.Cut(t, "=")
-			switch name {
-			case "--data", "--data-binary", "--data-ascii", "--json":
-				sends = curlData
-			case "--data-urlencode":
-				sends = curlURLEncode
-			case "--data-raw", "--form-string":
-				sends = curlRaw
-			case "--form":
-				sends = curlForm
-			case "--upload-file":
-				sends = curlUpload
-			default:
-				continue
-			}
-		} else {
-			j := 1
-			for j < len(t) && t[j] != '$' && t[j] != '`' && strings.IndexByte(curlValueOptions, t[j]) < 0 {
-				j++
-			}
-			if j == len(t) || t[j] == '$' || t[j] == '`' {
-				continue // only options without a value
-			}
-			switch t[j] {
-			case 'd':
-				sends = curlData
-			case 'F':
-				sends = curlForm
-			case 'T':
-				sends = curlUpload
-			}
-			value, attached = t[j+1:], j+1 < len(t)
-		}
-		if !attached {
-			if i+1 == len(args) {
-				break
-			}
-			i++
-			value = args[i].Unquoted
-		}
-		file := ""
-		switch sends {
-		case 0:
-			continue
+	for _, s := range readCurl(args).sends {
+		value, file := s.value.Unquoted, ""
+		switch s.kind {
 		case curlData:
 			if strings.HasPrefix(value, "@") {
 				file = value[1:]
@@ -577,7 +508,7 @@ func curlInputs(args []Word, base int) (files []string, data dataWords) {
 		}
 		// Content, or a file that is the output of a process substitution, is the word's own value.
 		if file == "" || strings.HasPrefix(file, "<(") {
-			data.index = append(data.index, base+i)
+			data.index = append(data.index, base+s.index)
 			continue
 		}
 		files = append(files, file)
@@ -586,26 +517,14 @@ func curlInputs(args []Word, base int) (files []string, data dataWords) {
 }
 
 // wgetInputs returns the files wget sends (--post-file, --body-file) and the words whose value it
-// sends as the request body (--post-data, --body-data).
+// sends as the request body (--post-data, --body-data), as readWget reads them.
 func wgetInputs(args []Word, base int) (files []string, data dataWords) {
 	data.listed = true
-	for i := 0; i < len(args); i++ {
-		name, value, attached := strings.Cut(args[i].Unquoted, "=")
-		file := name == "--post-file" || name == "--body-file"
-		if !file && name != "--post-data" && name != "--body-data" {
-			continue
-		}
-		if !attached {
-			if i+1 == len(args) {
-				break
-			}
-			i++
-			value = args[i].Unquoted
-		}
-		if file {
-			files = append(files, value)
+	for _, p := range readWget(args).posts {
+		if p.file {
+			files = append(files, p.value.Unquoted)
 		} else {
-			data.index = append(data.index, base+i)
+			data.index = append(data.index, base+p.index)
 		}
 	}
 	return files, data

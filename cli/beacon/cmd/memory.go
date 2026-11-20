@@ -703,7 +703,7 @@ func memoryLogPath() string {
 }
 
 func memoryUserMode() bool {
-	return memoryOpts.userMode && !memoryOpts.systemMode
+	return flagsUserMode(memoryOpts.userMode, memoryOpts.systemMode)
 }
 
 func parseMemoryTime(name, value string) (time.Time, error) {

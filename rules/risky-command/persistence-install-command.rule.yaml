@@ -1,5 +1,6 @@
 id: persistence-install-command
-version: 2
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 6
 title: Command installs scheduled-job or service persistence
 description: >
   A command installs persistence that runs outside any agent sandbox at login,
@@ -7,7 +8,13 @@ description: >
   file), enabling a systemd service or timer (systemctl enable, with or without
   options such as --user, --now or -q before the verb),
   or loading a launchd agent/daemon (launchctl load / bootstrap / enable). These
-  survive the session and re-execute later with no further prompt.
+  survive the session and re-execute later with no further prompt. The command is
+  found by what the line runs: crontab that edits or installs (a file operand, `-`, or
+  no operand at all, which reads standard input), systemctl with the word enable, or
+  launchctl with one of those subcommands, also under sudo, by absolute path or inside
+  `bash -c`, so the same words in a commit message or a here-document do not fire. The
+  text patterns are asked of the text that reaches a command the parser cannot see into
+  (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -16,11 +23,18 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
+# crontab installs when its words are an optional `-u user` and at most one operand
+# (crontab_installs, rules/concepts/scheduling.predicates.yaml).
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)\\bcrontab\\b\\s+(-($|[\\s|])|-e\\b|[^-\\s])") ||
-    e.command.command.matches("(?i)\\bsystemctl\\b(\\s+--?[a-z][a-z-]*(=\\S+)?)*\\s+enable\\b") ||
-    e.command.command.matches("(?i)\\blaunchctl\\b\\s+(load|bootstrap|enable)\\b")
+    e.command.parsed_commands.exists(c,
+      crontab_installs(c) ||
+      c.name == "systemctl" && c.args.matches("(?m)^enable$") ||
+      c.name == "launchctl" && c.args.matches("\\A(load|bootstrap|enable)(\\n|\\z)")
+    ) ||
+    unread_text(e, t, (crontab_installs_text(t) ||
+      t.matches("(?i)\\bsystemctl\\b(\\s+--?[a-z][a-z-]*(=\\S+)?)*\\s+enable\\b") ||
+      t.matches("(?i)\\blaunchctl\\b\\s+(load|bootstrap|enable)\\b")))
   )
 
 emit:
@@ -86,5 +100,96 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "systemctl status nginx" }
+        session: { id: s1 }
+  - name: systemctl_enable_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo bash -c 'cp job.service /etc/systemd/system/ && systemctl enable job.service'" }
+        session: { id: s1 }
+  - name: systemctl_enable_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/systemctl enable --now job.timer" }
+        session: { id: s1 }
+  - name: systemctl_enable_after_an_option_with_a_value
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl -H build@host.example enable job.service" }
+        session: { id: s1 }
+  - name: launchctl_bootstrap_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo launchctl bootstrap system /Library/LaunchDaemons/com.example.job.plist" }
+        session: { id: s1 }
+  - name: crontab_from_a_here_document
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab <<'EOF'\n*/5 * * * * /srv/job.sh\nEOF" }
+        session: { id: s1 }
+  - name: crontab_edit_for_another_user_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo crontab -u deploy -e" }
+        session: { id: s1 }
+  - name: systemctl_enable_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'systemctl enable --now job.timer'" }
+        session: { id: s1 }
+  - name: systemctl_enable_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git add rules && git commit -q -m 'rules: accept --opt=value before systemctl enable'" }
+        session: { id: s1 }
+  - name: persistence_commands_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nTo start it at boot: sudo systemctl enable job.service\nOn macOS: launchctl load ~/Library/LaunchAgents/job.plist\nOld hosts: crontab jobs.cron\nEOF" }
+        session: { id: s1 }
+  - name: systemctl_is_enabled_query
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl is-enabled job.service" }
+        session: { id: s1 }
+  - name: launchctl_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "launchctl list | grep com.example" }
+        session: { id: s1 }
+  - name: crontab_remove_is_not_an_install
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab -r" }
+        session: { id: s1 }
+  - name: enable_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./provision.sh 'systemctl enable backdoor.service'" }
+        session: { id: s1 }
+  - name: enable_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: systemctl enable is not needed here' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half asked for an operand after crontab until version 6.
+  - name: crontab_from_stdin_in_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh 'printf \"* * * * * /tmp/x.sh\\n\" | crontab'" }
         session: { id: s1 }
 

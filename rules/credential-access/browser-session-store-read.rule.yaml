@@ -1,6 +1,6 @@
 id: browser-session-store-read
 spec: threat-rules/v1.3  # needed for predicates and file_reads
-version: 4
+version: 5
 title: Agent read a browser session/cookie store
 description: >
   The agent read a browser cookie jar or saved-login store (cookies.sqlite /
@@ -11,8 +11,10 @@ description: >
   browser-dir requirement keeps a non-browser file named "cookies" from firing. The files
   are the browser stores of the pack's credential catalog
   (rules/concepts/credential-stores.catalog.yaml), which the read step of the
-  browser-session-read-then-egress correlation also uses. The read is a file read or a
-  shell command that takes the file in (cp, cat, base64, an upload).
+  browser-session-read-then-egress correlation also uses (browser_store_read). The read is
+  a file read or a shell command that takes the file in (cp, cat, base64, an upload);
+  where the parser cannot see into a command, the text that reaches it counts when it
+  names a browser store and runs a program that reads files.
 severity: high
 status: stable
 posture: detect
@@ -21,10 +23,7 @@ taxonomy:
   owasp_llm: LLM02
   mitre_atlas: AML.T0024
 
-match: >
-  (e.event.action == "file.read" && credential_path(e.file.path, "likely", "browser")) ||
-  (e.event.action == "command.executed" && e.command.parsed_commands.exists(c,
-    c.file_reads.exists(f, credential_path(f.path, "likely", "browser"))))
+match: browser_store_read(e)
 
 emit:
   reason: "Agent read a browser session/cookie store (session-hijack material)"
@@ -115,4 +114,16 @@ tests:
       - timestamp: "2026-06-23T10:21:00Z"
         event: { action: command.executed }
         command: { command: "ls -la ~/.mozilla/firefox/abc123.default-release/cookies.sqlite" }
+        session: { id: s1 }
+  - name: cookies_copied_by_a_script_handed_the_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./run.sh 'cp ~/.mozilla/firefox/abc.default/cookies.sqlite /tmp/c.db'" }
+        session: { id: s1 }
+  - name: cookies_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'never cp ~/.mozilla/firefox/abc.default/cookies.sqlite' && ./run-tests.sh" }
         session: { id: s1 }

@@ -1,14 +1,22 @@
 id: path-injection-into-login-file
-version: 2
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 8
 title: PATH shadowing entry written to a shell startup file
 description: >
   A command writes a PATH line into a shell startup or login file, by redirecting or
-  tee-ing into it, and that line adds a directory anyone can plant binaries in: /tmp,
+  tee-ing into it or editing it in place, and that line adds a directory anyone can
+  plant binaries in: /tmp,
   /var/tmp or /dev/shm, the current directory (`.` or an empty entry such as
   `PATH=:$PATH`), or a relative path. Such an entry shadows system binaries on every
   new shell or login, outside any agent sandbox and with no further prompt. Ordinary
   tool directories (`$HOME/.local/bin`, `.cargo/bin`, `/usr/local/go/bin`) do not fire:
-  a command alone cannot tell them from an attacker's absolute directory.
+  a command alone cannot tell them from an attacker's absolute directory. The write is
+  found by what the line runs: a command, also under sudo or inside `bash -c`, whose
+  written files (file_writes) include a startup file, so the same words in a commit
+  message or in a here-document written to another file do not fire. Where the parser
+  cannot see into a command, the text that reaches that command is matched instead
+  (unread_text). The PATH line is text
+  the command writes, not a command of the line, and is matched as text.
 severity: high
 status: stable
 posture: detect
@@ -17,13 +25,21 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
+# Which file is a startup file is one definition (shell_startup_file,
+# rules/concepts/sensitive-files.predicates.yaml), and so is a redirection into one written
+# in text (shell_startup_file_redirect). The writes are the ones that put the line's text into
+# the file (a write, an append, an edit), not every changing_write: a move or a link puts
+# another file there, whose text the line does not hold.
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)(>>?|\\btee\\b)\\s*([^|;&]*[\\s/])?(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|profile\\.d/[^\\s;&|\"']+)([\"'\\s]|$)") && (
+  e.event.action == "command.executed" && (
     e.command.command.matches("(?i)\\bPATH\\s*\\+?=\\s*[\"']?([^\\s;&|\"']*:)?(/tmp|/var/tmp|/dev/shm)(/[^\\s:;&|\"']*)?(:|[\"'\\s]|$)") ||
     e.command.command.matches("(?i)\\bPATH\\s*\\+?=\\s*[\"']?(\\.?:|[^\\s;&|\"']*:\\.?(:|[\"'\\s]|$))") ||
     e.command.command.matches("(?i)\\bPATH\\s*\\+?=\\s*[\"']?([^\\s;&|\"']*:)?([A-Za-z0-9_]|\\.\\.?/|\\.[A-Za-z0-9_])[^\\s:;&|\"']*(:|[\"'\\s]|$)") ||
     e.command.command.matches("(?i)\\bset\\s+-[gxU]+\\s+PATH\\b[^;&|]*\\s((/tmp|/var/tmp|/dev/shm)(/[^\\s;&|\"']*)?|\\.)([\"'\\s]|$)")
+  ) && (
+    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
+      f.op in ["write", "append", "edit"] && shell_startup_file(f.path))) ||
+    unread_text(e, t, shell_startup_file_redirect(t))
   )
 
 emit:
@@ -35,6 +51,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc" }
+        session: { id: s1 }
+  - name: export_path_into_the_system_bashrc
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=/tmp/x:$PATH' | sudo tee -a /etc/bash.bashrc" }
+        session: { id: s1 }
+  - name: path_line_into_the_system_zshrc_through_a_script_the_parser_cannot_read
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./provision.sh \"echo 'PATH=/tmp/bin:$PATH' >> /etc/zshrc\"" }
         session: { id: s1 }
   - name: path_assign_into_zshrc
     verdict: match
@@ -131,5 +159,77 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "grep PATH ~/.bashrc" }
+        session: { id: s1 }
+  - name: path_line_under_sudo_tee
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=/var/tmp/tools:$PATH' | sudo tee -a /etc/profile > /dev/null" }
+        session: { id: s1 }
+  - name: path_line_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sh -c 'echo PATH=/dev/shm/bin:$PATH >> /etc/profile.d/tools.sh'" }
+        session: { id: s1 }
+  - name: path_line_into_a_quoted_home_variable_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/bin/echo 'export PATH=.:$PATH' >> \"$HOME/.zshenv\"" }
+        session: { id: s1 }
+  - name: path_line_then_source
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc; source ~/.bashrc" }
+        session: { id: s1 }
+  - name: path_line_in_a_here_document_written_to_a_login_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat >> ~/.zshrc <<'EOF'\nexport PATH=/tmp/bin:$PATH\nEOF" }
+        session: { id: s1 }
+  - name: path_line_edited_in_place
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i 's|^export PATH=.*|export PATH=/tmp/bin:$PATH|' ~/.bashrc" }
+        session: { id: s1 }
+  - name: path_line_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example \"echo 'export PATH=/tmp/bin:\\$PATH' >> ~/.bashrc\"" }
+        session: { id: s1 }
+  - name: path_line_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"docs: the installer no longer runs echo 'export PATH=/tmp/bin:\\$PATH' >> ~/.bashrc\"" }
+        session: { id: s1 }
+  - name: path_line_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nThe installer used to run: echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc\nEOF" }
+        session: { id: s1 }
+  - name: path_line_written_to_a_copy_of_a_login_file
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc.bak" }
+        session: { id: s1 }
+  - name: path_line_written_inside_an_interpreter
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import os; os.system('echo PATH=/tmp/bin >> ~/.bashrc')\"" }
+        session: { id: s1 }
+  - name: path_line_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'drop echo PATH=/tmp/bin >> ~/.bashrc from installer' && ./run-tests.sh" }
         session: { id: s1 }
 

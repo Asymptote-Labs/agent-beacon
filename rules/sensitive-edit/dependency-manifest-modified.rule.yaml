@@ -1,5 +1,6 @@
 id: dependency-manifest-modified
-version: 3
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 8
 title: Dependency manifest or lockfile modified
 description: >
   The agent modified a dependency manifest or lockfile (package.json, lockfiles,
@@ -13,14 +14,71 @@ taxonomy:
   beacon_category: sensitive-edit
   owasp_llm: LLM03
 
+# Which file is one definition (dependency_manifest_file,
+# rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
+# path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv). A write
+# that lands in a temporary directory is left out (write_outside_scratch): agents stage
+# copies and throwaway projects there all the time, and moving one back into the project is
+# a write of its own. A package manager rewriting its own manifest (npm install, go mod
+# tidy) is not a write the parser reports. Where the parser cannot see into a command, the
+# text that reaches it counts when it redirects or tees into a manifest
+# (dependency_manifest_file_redirect), unless every such command runs in a temporary
+# directory (opaque_commands_in_scratch) or the text writes into one: a text does not say
+# which directory a relative path is in.
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] &&
-  e.file.path.matches("(?i)(^|/)(package\\.json|package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml|cargo\\.toml|cargo\\.lock|requirements\\.txt|pipfile|pipfile\\.lock|poetry\\.lock|pyproject\\.toml|go\\.mod|go\\.sum|gemfile|gemfile\\.lock|composer\\.json|composer\\.lock)$")
+  file_edited(e) && dependency_manifest_file(e.file.path) ||
+  e.event.action == "command.executed" && (
+    write_outside_scratch(e, f, changing_write(f) && dependency_manifest_file(f.path)) ||
+    dependency_manifest_file_redirect(e.command.command) && !opaque_commands_in_scratch(e) &&
+      unread_text(e, t, dependency_manifest_file_redirect(t) &&
+      !t.matches("(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(/private)?/(tmp|var/tmp|var/folders)/")))
 
 emit:
   reason: "Dependency manifest or lockfile modified (supply-chain edge change)"
 
 tests:
+  - name: requirement_appended_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'reqeusts==2.31.0' >> requirements.txt" }
+        session: { id: s1 }
+  - name: manifest_moved_into_place
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mv /tmp/package.json ./package.json" }
+        session: { id: s1 }
+  - name: manifest_copied_to_a_scratch_directory
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp go.mod /tmp/gomod.bak && echo '{\"type\":\"module\"}' > /tmp/probe/package.json" }
+        session: { id: s1 }
+  - name: requirement_appended_before_a_cd_into_tmp
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'evil==1.0' >> requirements.txt; cd /tmp/x" }
+        session: { id: s1 }
+  - name: manifest_written_after_a_cd_inside_a_subshell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "(cd /tmp/x && make) ; echo '{}' > package.json" }
+        session: { id: s1 }
+  - name: manifest_written_after_a_cd_into_tmp_itself
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /tmp && echo '{}' > package.json" }
+        session: { id: s1 }
+  - name: install_from_the_manifest
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install -r requirements.txt && cat package.json | jq .dependencies" }
+        session: { id: s1 }
   - name: package_json_edit
     verdict: match
     events:
@@ -62,4 +120,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: "frontend/package.json" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh \"echo 'evil==1.0' >> requirements.txt\"" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never echo 'evil==1.0' >> requirements.txt\" && ./run-tests.sh" }
         session: { id: s1 }

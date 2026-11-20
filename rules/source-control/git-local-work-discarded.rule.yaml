@@ -1,11 +1,17 @@
 id: git-local-work-discarded
-version: 1
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 5
 title: Local Git work discarded
 description: >
   An agent hard-resets Git, force-cleans directories or ignored files, restores
   the whole working tree, or clears every stash. The command expresses intent
   to discard work; telemetry alone cannot establish whether uncommitted work
   existed. Dry-run clean, branch checkout and staged-only restores are excluded.
+  The command is found by what the line runs: a git command, also under sudo, by
+  path, inside `bash -c` or after git's own options, whose subcommand and words
+  say so. The same words in a commit message, an echo or a here-document do not
+  fire. The text patterns are asked of the text that reaches a command the parser
+  cannot see into (unread_text).
 severity: medium
 status: experimental
 posture: detect
@@ -13,18 +19,33 @@ taxonomy:
   beacon_category: source-control
   owasp_llm: LLM06
 
-# Command prefixes accept environment assignments, relative executable paths, and
-# sudo execution options. Value-taking sudo options consume their argument;
-# inspection modes such as sudo -l/-v are not execution prefixes.
+# Parsed: the subcommand is the first word after git's own options (git_subcommand). clean
+# matches when every option is one of -d -f -x -X -q (so -n, --dry-run, -i and -e are out),
+# one forces and one names directories or ignored files. checkout and restore match when the
+# only path is the
+# whole tree (`.` or `:/`), and restore when the working tree is among what it restores;
+# -q beside them changes nothing.
+#
+# Text: the text patterns of version 1 as one pattern: a command prefix through `git` and
+# its -C options, then what the subcommand is, one alternative for each of the seven
+# patterns it was. Each of them began with the same prefix, and a pattern is charged for
+# its length each time it is asked, so the prefix is written once. A text matches the one
+# pattern exactly when it matched one of the seven. The prefix accepts environment
+# assignments, relative executable paths, and sudo execution options. Value-taking sudo
+# options consume their argument; inspection modes such as sudo -l/-v are not execution
+# prefixes.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+reset\\b[^;&|\\n#]*[ \\t]--hard(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+clean[ \\t]+(?:-[dfxXq]+[ \\t]+)*(?:-[dxXq]*f[dfxXq]*[dxX][dfxXq]*|-[dfxXq]*[dxX][dfxXq]*f[dfxXq]*|-[dfxXq]*f[dfxXq]*[ \\t]+(?:-[dfxXq]+[ \\t]+)*-[dfxXq]*[dxX][dfxXq]*|-[dfxXq]*[dxX][dfxXq]*[ \\t]+(?:-[dfxXq]+[ \\t]+)*-[dfxXq]*f[dfxXq]*)(?:[ \\t]+-[dfxXq]+)*(?:[ \\t]+--)?(?:[ \\t]+[^\\s;&|<>#-][^\\s;&|<>#]*)*[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+checkout[ \\t]+(?:HEAD[ \\t]+)?(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+checkout[ \\t]+(?:-f|--force)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+restore[ \\t]+(?:(?:(?:--source|-s)(?:=|[ \\t]+)[^\\s;&|]+|--worktree|-W)[ \\t]+)*(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+restore[ \\t]+(?:(?:--staged|-S)[ \\t]+)?(?:--worktree|-W|-SW|-WS)[ \\t]+(?:(?:--staged|-S)[ \\t]+)?(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+stash[ \\t]+clear(?:[ \\t]|$|[;&|\\n<>#])")
+    e.command.parsed_commands.exists(c, c.name == "git" && (
+      git_subcommand(c, "(?:reset\\n(?:[^\\n]*\\n)*?--hard|stash\\nclear|checkout\\n(?:(?:[^\\n-][^\\n]*|--?[A-Za-z0-9][^\\n]*)?\\n)*?(?:-[qmtdl]*f[qmtdl]*|--force))(?:\\n|\\z)") ||
+      git_subcommand(c, "checkout\\n(?:(?:-q|--quiet)\\n)*(?:HEAD\\n)?(?:--\\n)?(?:\\.|:/)\\z") ||
+      git_subcommand(c, "clean(?:\\n(?:-[dfxXq]+|--force|--quiet|[^\\n-][^\\n]*)?)*(?:\\n--(?:\\n[^\\n]*)*)?\\z") &&
+        c.args.matches("(?m)^(-[dfxXq]*f[dfxXq]*|--force)$") && c.args.matches("(?m)^-[dfxXq]*[dxX][dfxXq]*$") ||
+      git_subcommand(c, "restore\\n(?:(?:--source|-s)\\n[^\\n]*\\n|(?:--source=[^\\n]*|--worktree|--staged|--quiet|-[SWq]+)?\\n)*(?:--\\n)?(?:\\.|:/)\\z") &&
+        (c.args.matches("(?m)^(--worktree|-[SWq]*W[SWq]*)$") || !c.args.matches("(?m)^(--staged|-[SWq]*S[SWq]*)$"))
+    )) ||
+    unread_text(e, t,
+      t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+(?:reset\\b[^;&|\\n#]*[ \\t]--hard(?:[ \\t]|$|[;&|\\n<>#])|clean[ \\t]+(?:-[dfxXq]+[ \\t]+)*(?:-[dxXq]*f[dfxXq]*[dxX][dfxXq]*|-[dfxXq]*[dxX][dfxXq]*f[dfxXq]*|-[dfxXq]*f[dfxXq]*[ \\t]+(?:-[dfxXq]+[ \\t]+)*-[dfxXq]*[dxX][dfxXq]*|-[dfxXq]*[dxX][dfxXq]*[ \\t]+(?:-[dfxXq]+[ \\t]+)*-[dfxXq]*f[dfxXq]*)(?:[ \\t]+-[dfxXq]+)*(?:[ \\t]+--)?(?:[ \\t]+[^\\s;&|<>#-][^\\s;&|<>#]*)*[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)|checkout[ \\t]+(?:HEAD[ \\t]+)?(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)|checkout[ \\t]+(?:-f|--force)(?:[ \\t]|$|[;&|\\n<>#])|restore[ \\t]+(?:(?:(?:--source|-s)(?:=|[ \\t]+)[^\\s;&|]+|--worktree|-W)[ \\t]+)*(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)|restore[ \\t]+(?:(?:--staged|-S)[ \\t]+)?(?:--worktree|-W|-SW|-WS)[ \\t]+(?:(?:--staged|-S)[ \\t]+)?(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)|stash[ \\t]+clear(?:[ \\t]|$|[;&|\\n<>#]))"))
   )
 
 emit:
@@ -402,4 +423,100 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "sudo -u deploy echo \"git reset --hard\"" }
+        session: { id: s1 }
+  - name: reset_hard_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo git reset --hard origin/main" }
+        session: { id: s1 }
+  - name: reset_hard_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'cd /srv/app && git reset -q --hard origin/main'" }
+        session: { id: s1 }
+  - name: reset_hard_by_absolute_path_after_git_options
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/git --git-dir=/srv/app/.git --work-tree=/srv/app reset --hard HEAD" }
+        session: { id: s1 }
+  - name: checkout_forced_after_another_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git checkout -q -f main" }
+        session: { id: s1 }
+  - name: clean_forced_by_the_long_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "timeout 60 git clean --force -d -- build" }
+        session: { id: s1 }
+  - name: restore_of_the_whole_tree_from_a_variable_source
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore --source=$BASE --worktree -- ." }
+        session: { id: s1 }
+  - name: reset_hard_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'cd /srv/app && git reset --hard origin/main && git clean -fd'" }
+        session: { id: s1 }
+  - name: reset_hard_at_the_start_of_a_commit_message_line
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"docs: how to start over\n\ngit reset --hard HEAD~1\ngit clean -fd\"" }
+        session: { id: s1 }
+  - name: reset_hard_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\ngit reset --hard HEAD~1\ngit clean -fdx\ngit stash clear\nEOF" }
+        session: { id: s1 }
+  - name: clean_with_an_exclude_pattern_is_left_out
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -fd -e '*.log'" }
+        session: { id: s1 }
+  - name: checkout_of_a_new_tracking_branch
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git checkout -t -b fix/force-flag origin/fix/force-flag" }
+        session: { id: s1 }
+  - name: stash_pushed_with_a_message_that_says_clear
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git stash push -m 'clear the cache before reset --hard' && git stash list" }
+        session: { id: s1 }
+  - name: checkout_of_the_whole_tree_quietly
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "go test ./... 2>&1 | tail -3; git checkout -q -- . ; git status --short" }
+        session: { id: s1 }
+  - name: restore_of_one_file_from_another_commit
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore -q --source=HEAD~1 -- internal/app/main.go" }
+        session: { id: s1 }
+  - name: hard_reset_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./cleanup.sh 'cd repo; git reset --hard HEAD~1'" }
+        session: { id: s1 }
+  - name: hard_reset_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: never run cd repo; git reset --hard here' && ./run-tests.sh" }
         session: { id: s1 }

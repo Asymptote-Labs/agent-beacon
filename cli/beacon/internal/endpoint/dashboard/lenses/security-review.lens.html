@@ -29,6 +29,7 @@
   th { color: var(--beacon-muted, #6b7280); }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   .alert { border: 1px solid var(--beacon-danger, #b91c1c); border-radius: 4px; padding: 8px 10px; color: var(--beacon-danger, #b91c1c); }
+  .incomplete { color: var(--beacon-warn, #92400e); }
   .sev-critical, .sev-high { color: var(--beacon-danger, #b91c1c); }
   .sev-medium { color: var(--beacon-warn, #92400e); }
   .finding { padding: 8px 0; border-bottom: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); }
@@ -126,8 +127,21 @@
       (byGroup[g] = byGroup[g] || []).push(f);
     });
 
-    root.appendChild(el("p", (items.length ? number.format(items.length) + (items.length === 1 ? " finding" : " findings") : "No rule matched") +
+    // A rule that failed on some event, or was skipped, has no verdict there: with either, an empty
+    // result is "no findings", not "no rule matched", and the scan says what it did not judge.
+    var failed = Array.isArray(scan.failed) ? scan.failed : [];
+    var skipped = Array.isArray(scan.skipped) ? scan.skipped : [];
+    var none = failed.length || skipped.length ? "No findings" : "No rule matched";
+    root.appendChild(el("p", (items.length ? number.format(items.length) + (items.length === 1 ? " finding" : " findings") : none) +
       " across " + number.format(scan.rules_evaluated || 0) + " rules evaluated."));
+    if (failed.length) {
+      root.appendChild(el("p", "The scan is incomplete: " + failed.join(", ") +
+        " could not be evaluated on some events (most often a command line past a rule's cost limit), so the verdict there is unknown.", "incomplete"));
+    }
+    if (skipped.length) {
+      root.appendChild(el("p", number.format(skipped.length) + (skipped.length === 1 ? " rule was" : " rules were") +
+        " skipped because " + (skipped.length === 1 ? "it needs" : "they need") + " a newer Beacon.", "incomplete"));
+    }
     if (GROUPS.every(function (g) { return byGroup[g.id]; })) {
       root.appendChild(el("p", "This trace combines untrusted input, sensitive access and a consequential action. Review it first: that combination is how an injected instruction turns into stolen data.", "alert"));
     }
@@ -155,9 +169,6 @@
       found.forEach(function (f) { section.appendChild(renderFinding(f, byId)); });
     });
 
-    if (scan.skipped && scan.skipped.length) {
-      root.appendChild(el("p", number.format(scan.skipped.length) + " rules were skipped because they need a newer Beacon.", "muted"));
-    }
     if (data.truncated) root.appendChild(el("p", "This trace was truncated; some evidence may be outside the bundle.", "muted"));
     finish();
   }

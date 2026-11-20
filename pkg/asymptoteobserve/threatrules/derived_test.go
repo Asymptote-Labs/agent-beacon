@@ -13,7 +13,7 @@ import (
 )
 
 func TestDerivedFieldsAreReadFromTheSchema(t *testing.T) {
-	want := []string{ParsedCommandsPath, SystemInstructionsTextPath, ToolResultTextPath}
+	want := []string{ParsedCommandsPath, ParsedIncompletePath, SystemInstructionsTextPath, ToolResultTextPath}
 	if got := DerivedFields(); !slices.Equal(got, want) {
 		t.Fatalf("DerivedFields = %q, want %q", got, want)
 	}
@@ -104,6 +104,8 @@ func setDerived(t *testing.T, v reflect.Value, segments []string, value string) 
 			field.SetString(value)
 		case reflect.Slice:
 			field.Set(reflect.MakeSlice(field.Type(), 1, 1))
+		case reflect.Bool:
+			field.SetBool(true)
 		default:
 			t.Fatalf("derived field %q is a %s", segments[0], field.Kind())
 		}

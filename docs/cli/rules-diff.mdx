@@ -16,9 +16,9 @@ Use it before merging a change to a rule, to a [predicate or catalog](/detection
 
 ## What is compared
 
-Each single-event rule, and each step of each correlation rule, is evaluated on every event on its own. For each one whose answer changed, the output lists the events it matches now and did not (`+`) and the ones it matched and no longer does (`-`).
+Rules are evaluated as `beacon scan` evaluates them. Each single-event rule, and each step of each correlation rule, is evaluated on every event on its own, and each correlation rule is matched over each fixture, and over the log, as a whole. For each one whose answer changed, the output lists the events (for a correlation rule, the findings, named by the fixture and the evidence events) it matches now and did not (`+`) and the ones it matched and no longer does (`-`). An evaluation that fails, most often an expression stopped at the cost limit, leaves the verdict unknown, and that is a change too: `!` lists the events a rule can no longer be evaluated on, and `?` those it can be again.
 
-The events are the fixture events of both packs. With `--log-path`, the events of that telemetry log are added, which shows what the change does on real activity.
+The events are the fixture events of both packs and the fixtures of their predicates. With `--log-path`, the events of that telemetry log are added, in the order a scan reads them, which shows what the change does on real activity.
 
 ```text title="Example output"
 secret-read-then-egress#read_secret: +2 -1
@@ -26,8 +26,10 @@ secret-read-then-egress#read_secret: +2 -1
   + file.read /home/u/.npmrc
   - file.read /home/u/.aws/config
 
-1 rule(s) or step(s) changed over 1581 event(s)
+1 rule(s) or step(s) changed over 2534 event(s) and 2494 fixture(s) or log(s)
 ```
+
+With `--json`, each event of a change carries its `ID`, which identifies it by its content.
 
 ## A change to the rules
 
@@ -46,9 +48,9 @@ beacon-old rules snapshot ./rules > before.json
 beacon rules diff before.json ./rules
 ```
 
-A snapshot holds, for each event, a label (its action and its command, path or tool) and the rules that matched it. One taken with `--log-path` therefore holds the commands and paths of that log.
+A snapshot holds, for each event, a label (its action and its command, path or tool), the rules that matched it and those that could not be evaluated on it, and what each correlation rule found in each fixture and in the log. One taken with `--log-path` therefore holds the commands and paths of that log.
 
-Two sides are compared on the events both were asked about. Events only one side has are counted and not compared.
+Two sides are compared on the events, and fixtures, both were asked about. Events only one side has are counted and not compared. A snapshot written by a Beacon before this one has no fixture findings and is compared on its events.
 
 ## Flags
 

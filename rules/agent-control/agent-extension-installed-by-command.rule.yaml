@@ -1,5 +1,6 @@
 id: agent-extension-installed-by-command
-version: 1
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 4
 title: Agent extension (MCP server, plugin, marketplace) installed by command
 description: >
   A command registers new code that an agent runtime will load on every later
@@ -10,7 +11,12 @@ description: >
   own extensions has widened what every future session can do, and a malicious skill
   or injected instruction needs exactly this one step to persist.
   agent-control-surface-modified catches the same outcome when the config file is
-  written directly; this rule catches the runtime's own installer doing it.
+  written directly; this rule catches the runtime's own installer doing it. The
+  installer is found by what the line runs (the runtime by its command name, also
+  behind sudo, by absolute path, inside `bash -c` or launched by npx, bunx or
+  pnpm dlx, and the subcommand as its first words), so the same words in a commit
+  message or a here-document do not fire. The text pattern is asked only of the text
+  that reaches a command the parser cannot see into (unread_text).
 severity: medium
 status: stable
 posture: detect
@@ -19,10 +25,20 @@ taxonomy:
   owasp_llm: LLM03
   mitre_atlas: AML.T0011
 
+# Which command is an agent is the pack's one definition (agent_cli,
+# rules/concepts/agents.predicates.yaml). The subcommand follows the runtime directly:
+# `claude`, `mcp`, `add`, or, behind a launcher, `npx`, `-y`, `@anthropic-ai/claude-code`,
+# `mcp`, `add`.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?((npx|bunx|pnpm\\s+dlx)\\s+(-y\\s+)?)?([^\\s;&|]*/)?(claude(-code)?|codex|gemini(-cli)?|qwen(-code)?|opencode(-ai)?|kiro-cli|amp|cursor-agent|copilot)\\s+(mcp\\s+(add|add-json|add-from-claude-desktop|install)\\b|plugins?\\s+(install|add|i)\\b|plugins?\\s+marketplace\\s+add\\b|extensions?\\s+(install|link)\\b)") ||
-    e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?([^\\s;&|]*/)?code(-insiders)?(\\.exe|\\.cmd)?\\s+([^;&|\\n]*\\s)?--(add-mcp|install-extension)\\b")
+    e.command.parsed_commands.exists(c,
+      agent_cli(c) && (c.name.matches("(?i)^(npx|bunx|pnpm)$") ?
+        c.args.matches("(?mi)\\A(dlx\\n)?(-y\\n)?[^\\n]+\\n(mcp\\n(add|add-json|add-from-claude-desktop|install)|plugins?\\n(install|add|i)|plugins?\\nmarketplace\\nadd|extensions?\\n(install|link))$") :
+        c.args.matches("(?mi)\\A(mcp\\n(add|add-json|add-from-claude-desktop|install)|plugins?\\n(install|add|i)|plugins?\\nmarketplace\\nadd|extensions?\\n(install|link))$")) ||
+      c.name.matches("(?i)^code(-insiders)?(\\.exe|\\.cmd)?$") && c.args.matches("(?m)^--(add-mcp|install-extension)(=.*)?$")
+    ) ||
+    unread_text(e, t, (t.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?((npx|bunx|pnpm\\s+dlx)\\s+(-y\\s+)?)?([^\\s;&|]*/)?(claude(-code)?|codex|cursor-agent|aider|goose|opencode(-ai)?|gemini(-cli)?|qwen(-code)?|kiro-cli|amp|copilot)\\s+(mcp\\s+(add|add-json|add-from-claude-desktop|install)\\b|plugins?\\s+(install|add|i)\\b|plugins?\\s+marketplace\\s+add\\b|extensions?\\s+(install|link)\\b)") ||
+      t.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?([^\\s;&|]*/)?code(-insiders)?(\\.exe|\\.cmd)?\\s+([^;&|\\n]*\\s)?--(add-mcp|install-extension)\\b")))
   )
 
 emit:
@@ -142,4 +158,83 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "code src/main.go" }
+        session: { id: s1 }
+  - name: mcp_add_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u dev claude mcp add helper -- npx -y helper-mcp" }
+        session: { id: s1 }
+  - name: plugin_install_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'claude plugin install deploy@acme-tools'" }
+        session: { id: s1 }
+  - name: mcp_add_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/opt/homebrew/bin/codex mcp add docs -- uvx docs-mcp" }
+        session: { id: s1 }
+  - name: extension_install_under_timeout
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "timeout 60 gemini extensions install https://github.com/someone/gemini-ext" }
+        session: { id: s1 }
+  - name: pnpm_dlx_wrapped_plugin_install
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pnpm dlx @anthropic-ai/claude-code plugin install deploy@acme-tools" }
+        session: { id: s1 }
+  - name: vscode_extension_install_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u dev bash -c 'code --force --install-extension someone.helper'" }
+        session: { id: s1 }
+  - name: mcp_add_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh dev@host.example 'cd /srv/app && claude mcp add helper -- npx -y helper-mcp'" }
+        session: { id: s1 }
+  - name: mcp_add_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: after cloning, cd tools && claude mcp add helper -- npx -y helper-mcp'" }
+        session: { id: s1 }
+  - name: mcp_add_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nTo register the server: cd tools && claude mcp add helper -- npx -y helper-mcp\nEOF" }
+        session: { id: s1 }
+  - name: mcp_config_flag_is_not_the_mcp_subcommand
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "claude --mcp-config servers.json -p 'add the plugin to the list'" }
+        session: { id: s1 }
+  - name: mcp_add_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'cd tools && claude mcp add helper -- npx -y helper-mcp'" }
+        session: { id: s1 }
+  - name: mcp_add_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: cd tools && claude mcp add helper -- npx -y helper-mcp' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half lacked aider and goose until version 4.
+  - name: goose_extension_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh 'cd tools && goose extensions install helper'" }
         session: { id: s1 }

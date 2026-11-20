@@ -44,7 +44,7 @@ func SortEvents(events []asymptoteobserve.Event) {
 	keys := make([]keyed, len(events))
 	var carried time.Time
 	for i := range events {
-		if at, ok := eventTime(events[i]); ok {
+		if at, ok := eventTime(&events[i]); ok {
 			carried = at
 		}
 		keys[i] = keyed{event: events[i], at: carried, seq: events[i].Sequence, idx: i}
