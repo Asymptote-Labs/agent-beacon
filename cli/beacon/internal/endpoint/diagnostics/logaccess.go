@@ -16,20 +16,27 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
 
-// repairSystemAction repairs a system install with the privilege it needs on this platform.
-var repairSystemAction = func() string {
-	if runtime.GOOS == "windows" {
-		return "beacon endpoint repair --system (from an elevated shell)"
+// ElevatedCommand is command written the way a person runs it with the privilege a system install
+// needs on this platform: after sudo, or, on Windows, which has no sudo, from an elevated shell.
+// Every action that names a system-mode command goes through it, so Windows is never told to run
+// sudo.
+func ElevatedCommand(command string) string {
+	return elevatedCommandFor(runtime.GOOS, command)
+}
+
+func elevatedCommandFor(goos, command string) string {
+	if goos == "windows" {
+		return command + " (from an elevated shell)"
 	}
-	return "sudo beacon endpoint repair --system"
-}()
+	return "sudo " + command
+}
+
+// repairSystemAction repairs a system install with the privilege it needs on this platform.
+var repairSystemAction = ElevatedCommand("beacon endpoint repair --system")
 
 // repairSystemWith is repairSystemAction with more flags.
 func repairSystemWith(flags string) string {
-	if runtime.GOOS == "windows" {
-		return "beacon endpoint repair --system " + flags + " (from an elevated shell)"
-	}
-	return "sudo beacon endpoint repair --system " + flags
+	return ElevatedCommand("beacon endpoint repair --system " + flags)
 }
 
 // elevated says how to run doctor with the privilege a restricted log needs on this platform.
