@@ -64,7 +64,7 @@ servers are added to what people configure. They do not replace it.
 | Runtime | File | What Beacon writes |
 |---|---|---|
 | Claude Code | macOS: `/Library/Application Support/ClaudeCode/managed-settings.d/beacon-mcp-servers.json`<br />Linux: `/etc/claude-code/managed-settings.d/beacon-mcp-servers.json` | The whole file: a `managedMcpServers` object. |
-| Codex CLI | `/etc/codex/config.toml` (macOS and Linux) | One `[mcp_servers.<name>]` table per server, each marked with a `# Pushed by beacon mcp managed` comment. |
+| Codex CLI | `/etc/codex/config.toml` (macOS and Linux) | One `[mcp_servers.org-<name>]` table per server, each marked with a `# Pushed by beacon mcp managed` comment. |
 
 **Claude Code** reads `managedMcpServers` from its managed settings, in version 2.1.259 or later.
 Earlier versions ignore it. People cannot remove a pushed server with `claude mcp remove`, but
@@ -73,11 +73,17 @@ exclusive control and stops every server people add themselves from loading.
 
 **Codex CLI** reads `/etc/codex/config.toml` as its system configuration layer. Codex merges it
 with each person's `~/.codex/config.toml` table by table, so the pushed servers load next to
-people's own. A person's own settings take precedence: they can turn off a pushed server with
-`enabled = false` in their own `[mcp_servers.<name>]` table. Beacon changes only the tables that
-carry its marker comment. Everything else in the file, including servers someone else wrote, is
-kept byte for byte. If the file already has a server of the same name that Beacon did not write,
-`apply` leaves it alone and reports it.
+people's own. In Codex, every pushed server's name starts with `org-`: `linear` in the list is
+`org-linear` in Codex. Because of the table-by-table merge, a pushed `[mcp_servers.linear]` would
+merge into a person's own `linear` server. If theirs runs a local command, the merged entry has
+both a command and a URL, and Codex then refuses to load that person's whole configuration. The
+prefix keeps pushed servers separate, so someone with their own `linear` sees both.
+
+A person's own settings take precedence: they can turn off a pushed server with
+`enabled = false` in their own `[mcp_servers.org-<name>]` table. Beacon changes only the tables
+that carry its marker comment. Everything else in the file, including servers someone else wrote
+and comments around Beacon's tables, is kept byte for byte. If the file already has an `org-`
+server of the same name that Beacon did not write, `apply` leaves it alone and reports it.
 
 People pick up a change the next time they start Claude Code or Codex.
 
@@ -88,7 +94,7 @@ People pick up a change the next time they start Claude Code or Codex.
 ```text
 RUNTIME      ACTION     SERVERS           PATH
 Claude Code  write      corp-docs,linear  /Library/Application Support/ClaudeCode/managed-settings.d/beacon-mcp-servers.json
-Codex CLI    unchanged  corp-docs,linear  /etc/codex/config.toml
+Codex CLI    unchanged  org-corp-docs,org-linear  /etc/codex/config.toml
 ```
 
 | Action | Meaning |
@@ -149,4 +155,5 @@ For a recurring Rippling script, see
 ## Uninstall
 
 Uninstalling Beacon leaves pushed servers in place, because they are the runtimes' own
-configuration. To take them away, run `sudo beacon mcp managed remove` before you uninstall.
+configuration. To take them away, stop the MDM script that runs `apply` first, so it cannot push
+them again, then run `sudo beacon mcp managed remove` and uninstall.

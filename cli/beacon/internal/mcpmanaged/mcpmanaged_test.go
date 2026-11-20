@@ -116,10 +116,10 @@ func TestApplyWritesBothRuntimesAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	servers := codex[codexTable].(map[string]any)
-	if servers["linear"].(map[string]any)["url"] != "https://mcp.linear.app/mcp" {
-		t.Fatalf("codex linear = %#v", servers["linear"])
+	if servers["org-linear"].(map[string]any)["url"] != "https://mcp.linear.app/mcp" {
+		t.Fatalf("codex org-linear = %#v", servers["org-linear"])
 	}
-	if h := servers["corp-docs"].(map[string]any)["http_headers"].(map[string]any); h["X-Team"] != `eng "core"` {
+	if h := servers["org-corp-docs"].(map[string]any)["http_headers"].(map[string]any); h["X-Team"] != `eng "core"` {
 		t.Fatalf("codex corp-docs headers = %#v", h)
 	}
 
@@ -156,22 +156,22 @@ model = "gpt-5-mini"
 	if !strings.HasPrefix(after, before[:len(before)-1]) {
 		t.Fatalf("the existing content was not kept verbatim:\n%s", after)
 	}
-	if owned := codexOwned(after); !reflect.DeepEqual(owned, []string{"corp-docs", "linear"}) {
+	if owned := codexOwned(after); !reflect.DeepEqual(owned, []string{"org-corp-docs", "org-linear"}) {
 		t.Fatalf("owned = %v", owned)
 	}
 
 	// The next declaration drops linear and changes corp-docs.
 	res := Apply(Options{Paths: p, Runtimes: []string{RuntimeCodex}}, mustParse(t, `{"servers": {"corp-docs": {"url": "https://mcp2.corp.example/mcp"}}}`))
-	if res[0].Action != ActionWrite || !reflect.DeepEqual(res[0].Servers, []string{"corp-docs"}) {
+	if res[0].Action != ActionWrite || !reflect.DeepEqual(res[0].Servers, []string{"org-corp-docs"}) {
 		t.Fatalf("second apply = %+v", res[0])
 	}
 	doc, _ := parseTOML(read(t, p.CodexConfig))
 	servers := doc[codexTable].(map[string]any)
-	if _, ok := servers["linear"]; ok {
+	if _, ok := servers["org-linear"]; ok {
 		t.Fatal("a server dropped from the declaration was not removed")
 	}
-	if servers["corp-docs"].(map[string]any)["url"] != "https://mcp2.corp.example/mcp" {
-		t.Fatalf("corp-docs = %#v", servers["corp-docs"])
+	if servers["org-corp-docs"].(map[string]any)["url"] != "https://mcp2.corp.example/mcp" {
+		t.Fatalf("org-corp-docs = %#v", servers["org-corp-docs"])
 	}
 	if _, ok := servers["admin-own"]; !ok {
 		t.Fatal("a table Beacon did not write was removed")
@@ -191,14 +191,14 @@ model = "gpt-5-mini"
 
 func TestCodexLeavesASameNamedServerItDidNotWrite(t *testing.T) {
 	p := testPaths(t)
-	before := "[mcp_servers.linear]\nurl = \"https://someone-else.example/mcp\"\n"
+	before := "[mcp_servers.org-linear]\nurl = \"https://someone-else.example/mcp\"\n"
 	write(t, p.CodexConfig, before)
 	res := Apply(Options{Paths: p, Runtimes: []string{RuntimeCodex}}, mustParse(t, twoServers))[0]
-	if !reflect.DeepEqual(res.Conflicts, []string{"linear"}) || !reflect.DeepEqual(res.Servers, []string{"corp-docs"}) {
+	if !reflect.DeepEqual(res.Conflicts, []string{"org-linear"}) || !reflect.DeepEqual(res.Servers, []string{"org-corp-docs"}) {
 		t.Fatalf("result = %+v", res)
 	}
 	doc, _ := parseTOML(read(t, p.CodexConfig))
-	if doc[codexTable].(map[string]any)["linear"].(map[string]any)["url"] != "https://someone-else.example/mcp" {
+	if doc[codexTable].(map[string]any)["org-linear"].(map[string]any)["url"] != "https://someone-else.example/mcp" {
 		t.Fatal("a server Beacon did not write was changed")
 	}
 }
@@ -268,12 +268,15 @@ func TestStatusReportsPushedServersAndWarnings(t *testing.T) {
 	write(t, p.ClaudeManagedPrefs, "plist")
 	write(t, p.CodexRequirements, "[mcp_servers.other.identity]\nurl = \"https://other.example\"\n")
 
-	want := []Pushed{{Name: "corp-docs", URL: "https://mcp.corp.example/mcp"}, {Name: "linear", URL: "https://mcp.linear.app/mcp"}}
+	want := map[string][]Pushed{
+		RuntimeClaude: {{Name: "corp-docs", URL: "https://mcp.corp.example/mcp"}, {Name: "linear", URL: "https://mcp.linear.app/mcp"}},
+		RuntimeCodex:  {{Name: "org-corp-docs", URL: "https://mcp.corp.example/mcp"}, {Name: "org-linear", URL: "https://mcp.linear.app/mcp"}},
+	}
 	for _, st := range Status(Options{Paths: p}) {
 		if st.Error != "" {
 			t.Fatalf("%s: %s", st.Runtime, st.Error)
 		}
-		if !reflect.DeepEqual(st.Servers, want) {
+		if !reflect.DeepEqual(st.Servers, want[st.Runtime]) {
 			t.Errorf("%s servers = %+v", st.Runtime, st.Servers)
 		}
 		if len(st.Warnings) != 1 {
@@ -375,4 +378,61 @@ func mustStat(t *testing.T, path string) os.FileInfo {
 		t.Fatal(err)
 	}
 	return info
+}
+
+func TestReapplyKeepsCommentsAfterBeaconsLastTable(t *testing.T) {
+	p := testPaths(t)
+	opts := Options{Paths: p, Runtimes: []string{RuntimeCodex}}
+	write(t, p.CodexConfig, "model = \"gpt-5\"\n")
+	Apply(opts, mustParse(t, twoServers))
+	f, err := os.OpenFile(p.CodexConfig, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("\n# managed by puppet\n# [profiles.ci] disabled for now\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	for i := 0; i < 2; i++ {
+		if res := Apply(opts, mustParse(t, `{"servers": {"linear": {"url": "https://mcp.linear.app/mcp"}}}`))[0]; res.Action == ActionFailed {
+			t.Fatalf("apply %d: %+v", i, res)
+		}
+		if after := read(t, p.CodexConfig); !strings.Contains(after, "# managed by puppet\n# [profiles.ci] disabled for now\n") {
+			t.Fatalf("apply %d lost the trailing comments:\n%s", i, after)
+		}
+	}
+	Remove(opts)
+	if got := read(t, p.CodexConfig); got != "model = \"gpt-5\"\n\n# managed by puppet\n# [profiles.ci] disabled for now\n" {
+		t.Fatalf("after remove:\n%q", got)
+	}
+}
+
+// A person's own [mcp_servers.linear] in ~/.codex/config.toml is merged with the system file table
+// by table. A pushed table of the same name would give their stdio server a `url`, and Codex then
+// refuses to load their whole config, so pushed servers never take a declared name in Codex.
+func TestCodexNamesCannotMergeIntoAPersonsOwnServer(t *testing.T) {
+	p := testPaths(t)
+	Apply(Options{Paths: p, Runtimes: []string{RuntimeCodex}}, mustParse(t, twoServers))
+	doc, err := parseTOML(read(t, p.CodexConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range doc[codexTable].(map[string]any) {
+		if !strings.HasPrefix(name, CodexPrefix) {
+			t.Errorf("pushed Codex server %q has no %q prefix", name, CodexPrefix)
+		}
+	}
+}
+
+func TestCodexReplacesTablesFromBeforeThePrefix(t *testing.T) {
+	p := testPaths(t)
+	write(t, p.CodexConfig, "[mcp_servers.linear]\n"+CodexMarker+"\nurl = \"https://mcp.linear.app/mcp\"\n")
+	res := Apply(Options{Paths: p, Runtimes: []string{RuntimeCodex}}, mustParse(t, twoServers))[0]
+	if res.Action != ActionWrite || len(res.Conflicts) != 0 {
+		t.Fatalf("apply = %+v", res)
+	}
+	if owned := codexOwned(read(t, p.CodexConfig)); !reflect.DeepEqual(owned, []string{"org-corp-docs", "org-linear"}) {
+		t.Fatalf("owned = %v", owned)
+	}
 }

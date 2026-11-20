@@ -46,7 +46,9 @@ themselves rather than replacing it:
 
   Claude Code  managedMcpServers in a Beacon-owned managed-settings.d drop-in
                (Claude Code 2.1.259 or later)
-  Codex CLI    [mcp_servers.<name>] tables in /etc/codex/config.toml, marked as Beacon's
+  Codex CLI    [mcp_servers.org-<name>] tables in /etc/codex/config.toml, marked as
+               Beacon's (the org- prefix keeps them from merging into a person's own
+               server of the same name)
 
 The server list is JSON:
 

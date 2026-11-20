@@ -61,7 +61,11 @@ func TestMCPManagedApplyFromStdinThenStatusAndRemove(t *testing.T) {
 		t.Fatalf("status = %+v", status)
 	}
 	for _, rt := range status.Runtimes {
-		if len(rt.Servers) != 1 || rt.Servers[0].Name != "linear" {
+		want := "linear"
+		if rt.Runtime == mcpmanaged.RuntimeCodex {
+			want = "org-linear"
+		}
+		if len(rt.Servers) != 1 || rt.Servers[0].Name != want {
 			t.Errorf("%s servers = %+v", rt.Runtime, rt.Servers)
 		}
 	}

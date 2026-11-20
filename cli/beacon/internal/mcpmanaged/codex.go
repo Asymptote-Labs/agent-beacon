@@ -16,6 +16,17 @@ import (
 
 const codexTable = "mcp_servers"
 
+// CodexPrefix goes in front of every pushed server's name in Codex. Codex merges the system config
+// into each person's ~/.codex/config.toml table by table, so a pushed [mcp_servers.linear] would
+// merge into a person's own stdio [mcp_servers.linear], and a table with both `command` and `url`
+// makes Codex refuse to load that person's whole config ("url is not supported for stdio"). A name
+// of Beacon's own keeps pushed tables apart from anything a person configured. Claude Code keeps the
+// plain name: it ranks a managed server above a same-named personal one instead of merging them.
+const CodexPrefix = "org-"
+
+// CodexName is the name a declared server has in Codex.
+func CodexName(name string) string { return CodexPrefix + name }
+
 // codexOwned returns the [mcp_servers.<name>] tables in text that carry Beacon's marker.
 func codexOwned(text string) []string {
 	var owned []string
@@ -40,9 +51,9 @@ func codexOwned(text string) []string {
 // removeOwnedTable removes Beacon's [mcp_servers.<name>] table and its subtables. A block runs to
 // the next header, but the comment lines directly above that header introduce the next table, not
 // Beacon's (another tool may append `# CI profile` and [profiles.ci] after Beacon's table), so they
-// are kept along with everything after them. Blank lines that only separated the blocks go with
-// Beacon's. A block at the end of the document also takes the blank lines above it, which is what
-// tomledit.Append added.
+// are kept along with everything after them, as are comments after Beacon's last table. Blank
+// lines that only separated the blocks go with Beacon's. A block at the end of the document also
+// takes the blank lines above it, which is what tomledit.Append added.
 func removeOwnedTable(text, name string) (string, bool) {
 	lines := strings.SplitAfter(text, "\n")
 	start := -1
@@ -67,23 +78,21 @@ func removeOwnedTable(text, name string) (string, bool) {
 		end = i
 		break
 	}
-	if end < len(lines) {
-		// Walk back over the comment and blank lines above the next header; keep from the first
-		// comment of that run that is not Beacon's marker.
-		keep := end
-		for i := end - 1; i > start; i-- {
-			trimmed := strings.TrimSpace(lines[i])
-			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-				break
-			}
-			if strings.HasPrefix(trimmed, "#") && trimmed != CodexMarker {
-				keep = i
-			}
+	// Walk back over the comment and blank lines that end the block; keep from the first comment of
+	// that run that is not Beacon's marker. Before a header they introduce the next table, and at
+	// the end of the document they are someone's notes; either way they are not Beacon's.
+	keep := end
+	for i := end - 1; i > start; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			break
 		}
-		end = keep
+		if strings.HasPrefix(trimmed, "#") && trimmed != CodexMarker {
+			keep = i
+		}
 	}
-	out := append(append([]string{}, lines[:start]...), lines[end:]...)
-	if end == len(lines) {
+	out := append(append([]string{}, lines[:start]...), lines[keep:]...)
+	if keep == len(lines) {
 		for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
 			out = out[:len(out)-1]
 		}
@@ -136,9 +145,10 @@ func parseTOML(text string) (map[string]any, error) {
 	return parsed, nil
 }
 
-// planCodex returns the new text of the Codex system config, the servers written, and the
-// declared servers left out because the file already has a table of that name Beacon did not
-// write.
+// planCodex returns the new text of the Codex system config, the Codex names written, and those
+// left out because the file already has a table of that name Beacon did not write. Every table
+// Beacon wrote before is removed first, whatever its name, so a table from before CodexPrefix
+// existed is replaced too.
 func planCodex(text string, d Declaration) (updated string, written, conflicts []string, err error) {
 	parsed, err := parseTOML(text)
 	if err != nil {
@@ -167,13 +177,14 @@ func planCodex(text string, d Declaration) (updated string, written, conflicts [
 		updated = tomledit.EndWithNewline(updated, eol)
 	}
 	var blocks []string
-	for _, name := range d.Names() {
+	for _, declared := range d.Names() {
+		name := CodexName(declared)
 		if _, taken := servers[name]; taken && !isOwned[name] {
 			conflicts = append(conflicts, name)
 			continue
 		}
 		written = append(written, name)
-		blocks = append(blocks, codexBlock(name, d.Servers[name], eol))
+		blocks = append(blocks, codexBlock(name, d.Servers[declared], eol))
 	}
 	if len(blocks) > 0 {
 		updated = tomledit.Append(updated, strings.Join(blocks, eol), eol)
@@ -204,7 +215,7 @@ func verifyCodex(before map[string]any, after string, removed, written []string,
 			want[codexTable] = servers
 		}
 		for _, name := range written {
-			servers[name] = normalizeValue(codexEntry(d.Servers[name]))
+			servers[name] = normalizeValue(codexEntry(d.Servers[strings.TrimPrefix(name, CodexPrefix)]))
 		}
 	}
 	got := normalize(a)

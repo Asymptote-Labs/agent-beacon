@@ -226,6 +226,9 @@ Keep these limits in mind:
   that sign each person in with OAuth, and never put a personal credential in
   a header.
 - Claude Code needs version 2.1.259 or later.
+- In Codex, pushed servers are named with an `org-` prefix (`linear` becomes
+  `org-linear`), so they never merge with a server of the same name that
+  someone added themselves.
 - If you already deliver Claude Code settings with a Rippling configuration
   profile (`com.anthropic.claudecode`), Claude Code ignores Beacon's file
   unless that profile sets `managedSourcesBehavior` to `"merge"`.
@@ -309,9 +312,12 @@ not establish that removal will run Beacon's cleanup helper.
 
 Use this sequence:
 
-1. Remove the device from recurring Beacon configuration scripts. If it
-   received pushed MCP servers and should lose them, first run
-   `/opt/beacon/bin/beacon mcp managed remove` from a one-time root script.
+1. Remove the device from recurring Beacon configuration scripts, including
+   the MCP push script. If it received pushed MCP servers and should lose
+   them, then run `/opt/beacon/bin/beacon mcp managed remove` from a one-time
+   root script. Run it only after the device is out of the push script's
+   scope, so a scheduled run cannot push the servers again, and confirm it
+   succeeded before the next step removes `/opt/beacon`.
 2. Copy the cleanup helper to a temporary root-only path while `/opt/beacon`
    still exists.
 3. Remove or unassign the Beacon custom installer so Rippling does not reinstall
