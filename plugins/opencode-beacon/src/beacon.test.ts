@@ -532,6 +532,44 @@ describe("BeaconEndpointPlugin", () => {
     expect(payloads[2].type).toBe("session.diff")
   })
 
+  test("filters the Beacon diff without changing the event other listeners see", async () => {
+    const hooks = await plugin()
+    const written = { file: "/repo/written.txt", before: "old", after: "new" }
+    const other = { file: "/repo/other.txt", before: "old", after: "new" }
+    await hooks["tool.execute.before"]!(
+      { tool: "write", sessionID: "ses_1", callID: "call_write" },
+      { args: { filePath: written.file } },
+    )
+    const properties = Object.freeze({ sessionID: "ses_1", diff: [written, other] })
+    const event = { type: "session.diff", properties }
+    await hooks.event!({ event })
+    await nextTurn()
+
+    expect(event.properties.diff).toEqual([written, other])
+    const diff = payloads.find((item) => item.type === "session.diff")
+    expect(diff?.properties.diff).toEqual([other])
+    expect(diff?.event.properties.diff).toEqual([other])
+  })
+
+  test.each(["properties", "data"])("enriches permission replies without modifying shared %s", async (key) => {
+    const hooks = await plugin()
+    await hooks.event!({
+      event: {
+        type: "permission.asked",
+        properties: { id: "per_1", sessionID: "ses_1", tool: "read", permission: "read" },
+      },
+    } as any)
+    const reply = Object.freeze({ sessionID: "ses_1", requestID: "per_1", reply: "reject" })
+    const event = { type: "permission.replied", [key]: reply }
+    await hooks.event!({ event })
+    await nextTurn()
+
+    expect(event[key]).toEqual({ sessionID: "ses_1", requestID: "per_1", reply: "reject" })
+    const permission = payloads.find((item) => item.type === "permission.replied")
+    expect(permission?.properties).toEqual({ ...reply, tool: "read", permission: "read" })
+    expect(permission?.event[key]).toEqual(permission?.properties)
+  })
+
   test("does not treat substrings inside custom tool names as file mutations", async () => {
     const hooks = await plugin()
     const path = "/repo/credit.txt"
