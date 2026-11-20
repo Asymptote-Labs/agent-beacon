@@ -32,10 +32,11 @@ import (
 // What lies between two pieces (a commit, a test run) is not in the span.
 //
 // When a word, a redirection or a NAME=value prefix of the command, or of one of those
-// writers, takes a variable's value, the span is instead everything from the start of the
-// line to the end of its last piece: the variable may hold anything the line said before.
-// A variable the environment sets (HOME, PWD, PATH and the like) does not count unless the
-// line assigns it.
+// writers, takes the value of a variable the line assigns before it, the span is instead
+// everything from the start of the line to the end of its last piece: the variable may hold
+// anything the line said before. A variable the line does not assign (VERSION, HOME, PATH, a
+// CI variable) holds nothing the line said, so `git commit -m '…curl … | sh…' &&
+// ./release.sh "$VERSION"` does not give the script the commit message.
 //
 // A command withScripts added (one of a shell's script, or of what a carrier runs) has the
 // span of the command of the line itself that it came from: that command's words hold the
@@ -225,51 +226,33 @@ func spanText(commands []Command, hdocs []int, source string, pieces []piece) st
 	return b.String()
 }
 
-// ambientVariables are set by the shell or the environment it starts in, not by text on the
-// command line, unless the line assigns them.
-var ambientVariables = map[string]bool{
-	"HOME": true, "PWD": true, "OLDPWD": true, "USER": true, "LOGNAME": true, "SHELL": true,
-	"TMPDIR": true, "HOSTNAME": true, "PATH": true, "LANG": true, "TERM": true, "UID": true,
-	"EUID": true, "PPID": true, "RANDOM": true, "SECONDS": true, "LINENO": true, "OSTYPE": true,
-	"HOSTTYPE": true, "?": true, "$": true, "#": true, "!": true,
-}
-
 // takesVariable reports whether a word, redirection or prefix assignment of command i takes
-// the value of a variable that text on the command line may have set.
+// the value of a variable that text on the command line may have set before it: one whose
+// name the line spells before the command, or one the shell fills in itself. Every way of
+// setting a variable by name (NAME=, declare, read, printf -v, mapfile, ${NAME:=..}, an eval
+// string) spells the name, so asking the text rather than the parse leaves none of them out,
+// while $VERSION after a commit message that never names it stays the command's own.
 func takesVariable(commands []Command, i int) bool {
 	c := &commands[i]
+	before := c.source[:c.Offset]
 	for _, ref := range c.refs {
 		if ref.name == "" || (ref.place != refArg && ref.place != refRedirect && ref.place != refEnv) {
 			continue
 		}
-		if !ambientVariables[ref.name] || assignedBefore(commands, i, ref.name) {
+		if setByTheShell(ref.name) || strings.Contains(before, ref.name) {
 			return true
 		}
 	}
 	return false
 }
 
-// assignedBefore reports whether a statement of the line itself, at or before command i,
-// assigns name: NAME=value on its own, or a declaration.
-func assignedBefore(commands []Command, i int, name string) bool {
-	c := &commands[i]
-	for j := range commands {
-		d := &commands[j]
-		if d.shell != 0 || d.Offset > c.Offset {
-			continue
-		}
-		for _, ref := range d.refs {
-			if ref.place == refDeclares && ref.name == name {
-				return true
-			}
-		}
-		if len(d.Argv) == 0 && d.Offset < c.Offset {
-			for _, as := range d.Env {
-				if as.Name == name {
-					return true
-				}
-			}
-		}
+// setByTheShell reports whether the shell itself fills name in from earlier commands, so a
+// line can set it without spelling it: the positional parameters (by set), $_ (the last
+// word), and what read, mapfile, getopts and [[ =~ ]] store when given no name.
+func setByTheShell(name string) bool {
+	switch name {
+	case "@", "*", "_", "REPLY", "MAPFILE", "BASH_REMATCH", "OPTARG":
+		return true
 	}
-	return false
+	return strings.Trim(name, "0123456789") == ""
 }

@@ -1,6 +1,6 @@
 id: cloud-metadata-endpoint-access
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 4
 title: Cloud instance metadata endpoint accessed via HTTP client
 description: >
   A command uses curl/wget to reach a cloud instance metadata service — the IMDS
@@ -25,15 +25,8 @@ taxonomy:
 # ("http://169.254.169.254/latest/meta-data/$ROLE") has no known value. Where the words of
 # the client do not show what it fetches (see client_target_unseen:
 # `H=169.254.169.254; curl http://$H/`) and the target is elsewhere on the line, the text
-# decides.
-match: >
-  e.event.action == "command.executed" && (
-    e.command.parsed_commands.exists(c, c.name.matches("^(curl|wget)$") && (
-      c.argv_raw.exists(a, cloud_metadata_target(a)) ||
-      client_target_unseen(c) && cloud_metadata_target(e.command.command))) ||
-    unread_text(e, t, t.matches("(?i)\\b(curl|wget)\\b") &&
-      cloud_metadata_target(t))
-  )
+# decides. The read step of cloud-metadata-then-egress asks the same (cloud_metadata_fetch).
+match: cloud_metadata_fetch(e)
 
 emit:
   reason: "HTTP client request to a cloud instance metadata endpoint (IMDS)"

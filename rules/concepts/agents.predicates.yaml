@@ -4,9 +4,9 @@
 # Four rules ask it: agent-permission-bypass-spawn, permission-scope-expansion-via-env,
 # handoff-to-second-agent-with-credentials and agent-extension-installed-by-command. Three of
 # them listed seven agents and the fourth nine, with five names on one side only; a new agent
-# CLI is added here.
+# CLI is added here, to agent_cli and to its text twin agent_cli_mention alike.
 library: agents
-version: 1
+version: 2
 spec: threat-rules/v1.3
 description: A command that runs a coding agent's CLI.
 
@@ -69,3 +69,59 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "npx -y prettier --check ." }
+
+  - name: agent_cli_mention
+    params: [text]
+    description: >
+      The text runs one of the coding agents agent_cli knows, by the same names: a name at a
+      command's position (the start, after ; & | ( ` or $(, after sudo, env, npx, bunx, pnpm
+      dlx, timeout and its duration, nohup or exec, or after an assignment), by any path or
+      package scope (not a URL's), and the name ends the word. It is for the text of a command
+      line the parser cannot see into (unread_text), so a name added to agent_cli is added
+      here too. A name inside a word (~/.claude, codex.md, codex-tui.log), after a quote
+      ("Codex Desktop", a string in a script), in prose, in a URL or HTML's &amp; is not one.
+    body: >
+      text.matches("(?i)(^|[;&|(`]|\\$\\(|\\b(sudo|env|npx|bunx|dlx|nohup|exec|timeout\\s+\\S+)\\s+|[A-Za-z_][A-Za-z0-9_]*\\s*=\\S*\\s+)\\s*((npx|bunx|pnpm\\s+dlx)\\s+(-y\\s+)?)?([^\\s;&|'\":]*/)?(claude(-code)?|codex|cursor-agent|aider|goose|opencode(-ai)?|gemini(-cli)?|qwen(-code)?|kiro-cli|amp|copilot)(\\s|$|[|&)'\"`])")
+    tests:
+      - name: an_agent_handed_to_a_script
+        match: agent_cli_mention(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./spawn.sh 'cd repo && claude --dangerously-skip-permissions -p fix'" }
+      - name: an_agent_through_npx_by_its_package
+        match: agent_cli_mention(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./run.sh 'cd repo && npx -y @google/gemini-cli --yolo'" }
+      - name: an_agent_after_an_assignment_and_a_timeout
+        match: agent_cli_mention(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./run.sh 'CODEX_HOME=/tmp/c timeout 600 /usr/local/bin/aider --yes'" }
+      - name: amp_with_words
+        match: agent_cli_mention(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./run.sh 'cd repo; amp --dangerously-allow-all'" }
+      - name: a_directory_named_for_an_agent
+        match: agent_cli_mention(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./run.sh 'ls -la ~/.claude && cat codex.md'" }
+      - name: an_html_entity
+        match: agent_cli_mention(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./post.sh 'a &amp; b'" }
+      - name: a_quoted_path_or_file_named_for_an_agent
+        match: agent_cli_mention(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "python3 - <<'EOF'\nfor p in ['codex-tui.log', \"$H/.config/opencode\"]: print(p)\nEOF" }

@@ -1,20 +1,20 @@
 id: fork-bomb-pattern
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+version: 5
 title: Fork-bomb pattern executed in a command
 description: >
   A command.executed event invokes a known fork-bomb shape — a function whose whole
   body pipes one bare command into another in the background and that is then
   called, such as the canonical `:(){ :|:& };:` under any name or spacing, the
-  `while true; do ... & done` recursive spawn loop, or a perl/python/ruby fork
-  loop. A fork bomb is a denial-of-
+  `while true; do ... & done` recursive spawn loop, or a fork loop in an inline
+  python, perl or ruby script (python3 included). A fork bomb is a denial-of-
   service primitive that recursively spawns processes to exhaust PID and
   process-table resources; running one from an agent session is a strong
   resource-DoS or destructive-escalation signal (OWASP LLM10). The rule is
   anchored to a command boundary and matches the well-known shapes; ordinary
   long-running but bounded loops do not fire because they do not recursively
   spawn. The shell shapes are matched on the text of the line. The interpreter
-  loop is found by what the line runs, a perl, python or ruby command whose -e or
+  loop is found by what the line runs, an interpreter (script_interpreter) whose -e or
   -c script holds the loop, so one in a commit message or a here-document does
   not fire and `sudo python -c` or one inside `bash -c` does; its text pattern is asked
   of the text that reaches a command the parser cannot see into (unread_text).
@@ -31,15 +31,21 @@ taxonomy:
 # a `for(;;)` loop. The parsed commands list the commands a line runs, not that one was
 # defined as a function, put in the background, or repeated by a loop, so those stay text.
 # The interpreter loop is a command and its script word, and is asked of the parsed commands.
+# The interpreter is script_interpreter (rules/concepts/commands.predicates.yaml), so python3
+# and perl5.30 count; versions before 5 named perl, python and ruby only. The script must
+# fork: a call to .fork() (os.fork, Process.fork), or a bare fork and an endless loop in
+# either order (perl's `fork while 1`, ruby's `while true do fork end`). Versions before
+# 5 also took an endless loop with no fork in it (`while True:`, `iter(int, 1)`), which is
+# no fork bomb; python3 made that common.
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)[\\w:.-]+\\s*\\(\\s*\\)\\s*\\{?\\s*[\\w:.-]+\\s*\\|\\s*[\\w:.-]+\\s*&\\s*;?\\s*\\}?[ \\t]*[;\\n]\\s*[\\w:.-]+") ||
     e.command.command.matches("(?i)\\bwhile\\s+true\\s*;?\\s*do\\b[^;&|]*&\\s*\\S") ||
     e.command.command.matches("(?i)\\bfor\\s*\\(\\s*;\\s*;\\s*\\)\\s*[;{]") ||
     e.command.parsed_commands.exists(c,
-      c.name.matches("^(perl|python|ruby)$") &&
-      c.args.matches("(?mi)^-[ec]\\n.*(\\.fork\\(\\)|for\\s+_\\s+in\\s+iter\\(\\s*int\\s*,\\s*1\\s*\\)|\\bwhile\\s+(1|True)\\b)")) ||
-    unread_text(e, t, t.matches("(?i)\\b(perl|python|ruby)\\s+-[ec]\\s+['\"][^'\"]*(\\.fork\\(\\)|for\\s+_\\s+in\\s+iter\\(\\s*int\\s*,\\s*1\\s*\\)|\\bwhile\\s+(1|True)\\b)"))
+      script_interpreter(c) &&
+      c.args.matches("(?mi)^-[ec]\\n.*(\\.fork\\(\\)|\\bfork\\b[^\\n]*\\bwhile\\s+(1|True)\\b|\\bwhile\\s+(1|True)\\b[^\\n]*\\bfork\\b)")) ||
+    unread_text(e, t, t.matches("(?i)\\b(python[0-9.]*|nodejs|node|deno|bun|ruby|perl[0-9.]*|php)\\s+-[ec]\\s+['\"][^'\"]*(\\.fork\\(\\)|\\bfork\\b[^'\"]*\\bwhile\\s+(1|True)\\b|\\bwhile\\s+(1|True)\\b[^'\"]*\\bfork\\b)"))
   )
 
 emit:
@@ -52,6 +58,12 @@ tests:
       - timestamp: "2026-06-23T10:00:00Z"
         event: { action: command.executed }
         command: { command: ":(){ :|:& };:" }
+        session: { id: s1 }
+  - name: ruby_fork_in_a_loop_written_loop_first
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ruby -e 'while true do fork end'" }
         session: { id: s1 }
   - name: while_true_fork_loop
     verdict: match
@@ -197,4 +209,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git commit -m 'test: perl -e \"fork while 1\" is a fork bomb' && ./run-tests.sh" }
+        session: { id: s1 }
+  - name: python3_fork_loop
+    # python3 is the python most systems have; versions before 5 named python only.
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c 'import os; [os.fork() for _ in iter(int, 1)]'" }
+        session: { id: s1 }
+  - name: python3_endless_loop_without_a_fork
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tail -f log.jsonl | python3 -c 'import sys\nwhile True: print(sys.stdin.readline())'" }
         session: { id: s1 }

@@ -1,6 +1,6 @@
 id: container-or-iac-file-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 3
+version: 5
 title: Container or IaC file modified (Dockerfile / compose / Terraform / K8s / Helm)
 description: >
   The agent modified a container, orchestration, or infrastructure-as-code
@@ -26,15 +26,9 @@ taxonomy:
 # rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
 # path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv).
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    container_or_iac_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      container_or_iac_file(f.path)))
-  )
+  file_changed(e, p, container_or_iac_file(p)) ||
+  e.event.action == "command.executed" && container_or_iac_file_redirect(e.command.command) &&
+    unread_text(e, t, container_or_iac_file_redirect(t))
 
 emit:
   reason: "Container or IaC file modified (Dockerfile / compose / Terraform / K8s manifest / Helm values)"
@@ -135,4 +129,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: "app/Dockerfile" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh \"echo 'RUN curl x | sh' >> Dockerfile\"" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never echo 'RUN curl x | sh' >> Dockerfile\" && ./run-tests.sh" }
         session: { id: s1 }

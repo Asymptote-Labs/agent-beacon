@@ -1,6 +1,6 @@
 id: gpg-keyring-access
 spec: threat-rules/v1.3  # needed for predicates, file_reads and args
-version: 3
+version: 4
 title: Agent read a GPG private key or exported a secret key
 description: >
   The agent either read GnuPG private key material (a file under
@@ -15,7 +15,10 @@ description: >
   public keyring (pubring.gpg, *.asc public keys) and the trust database
   (trustdb.gpg) hold no secret and do not match: reading public keys is a
   routine signature-verification operation. The command is read as bash, so
-  the words in a quoted string or after echo are not an invocation.
+  the words in a quoted string or after echo are not an invocation; where the
+  parser cannot see into a command, the text that reaches it counts when it
+  names a private key file and runs a program that reads files
+  (credential_store_read).
 severity: high
 status: experimental
 posture: detect
@@ -25,15 +28,15 @@ taxonomy:
   mitre_atlas: AML.T0024
 
 match: >
-  (e.event.action == "file.read" && credential_path(e.file.path, "likely", "gpg")) ||
-  (e.event.action == "command.executed" && (
+  credential_store_read(e, p, credential_path(p, "likely", "gpg"), t,
+    credential_mention(t, "likely", "gpg")) ||
+  e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
-      c.file_reads.exists(f, credential_path(f.path, "likely", "gpg")) ||
       credential_command(c, "likely", "gpg") ||
       c.name.matches("(?i)^gpg2?$") && (
         c.args.matches("(?im)^--gen-key$") ||
         c.args.matches("(?im)^--card-status$") && c.args.matches("(?im)^--with-keygrip$"))) ||
-    credential_command_redacted(e.command.command, "likely", "gpg")))
+    credential_command_redacted(e.command.command, "likely", "gpg"))
 
 emit:
   reason: "Agent accessed a GPG private key (file read or secret-export invocation)"
@@ -140,4 +143,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "SIGNING_KEY=$(gpg --armor --export-secret-keys 0xDEADBEEF) ./release.sh" }
+        session: { id: s1 }
+  - name: a_read_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./run.sh 'cat ~/.gnupg/private-keys-v1.d/ABC.key'" }
+        session: { id: s1 }
+  - name: a_read_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'never cat ~/.gnupg/private-keys-v1.d/ABC.key' && ./run-tests.sh" }
         session: { id: s1 }

@@ -1,6 +1,6 @@
 id: git-local-work-discarded
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+version: 5
 title: Local Git work discarded
 description: >
   An agent hard-resets Git, force-cleans directories or ignored files, restores
@@ -19,36 +19,33 @@ taxonomy:
   beacon_category: source-control
   owasp_llm: LLM06
 
-# Parsed: the subcommand is the first word after git's own options, of which -C, -c,
-# --git-dir, --work-tree and --namespace take the next word as their value; a word whose
-# value is unknown (`git $OPTS reset`) is passed over as an option. clean matches when every
-# option is one of -d -f -x -X -q (so -n, --dry-run, -i and -e are out), one forces and one
-# names directories or ignored files. checkout and restore match when the only path is the
+# Parsed: the subcommand is the first word after git's own options (git_subcommand). clean
+# matches when every option is one of -d -f -x -X -q (so -n, --dry-run, -i and -e are out),
+# one forces and one names directories or ignored files. checkout and restore match when the
+# only path is the
 # whole tree (`.` or `:/`), and restore when the working tree is among what it restores;
 # -q beside them changes nothing.
 #
-# Text: command prefixes accept environment assignments, relative executable paths, and
-# sudo execution options. Value-taking sudo options consume their argument;
-# inspection modes such as sudo -l/-v are not execution prefixes.
+# Text: the text patterns of version 1 as one pattern: a command prefix through `git` and
+# its -C options, then what the subcommand is, one alternative for each of the seven
+# patterns it was. Each of them began with the same prefix, and a pattern is charged for
+# its length each time it is asked, so the prefix is written once. A text matches the one
+# pattern exactly when it matched one of the seven. The prefix accepts environment
+# assignments, relative executable paths, and sudo execution options. Value-taking sudo
+# options consume their argument; inspection modes such as sudo -l/-v are not execution
+# prefixes.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c, c.name == "git" && (
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*(?:reset\\n(?:[^\\n]*\\n)*?--hard|stash\\nclear|checkout\\n(?:(?:[^\\n-][^\\n]*|--?[A-Za-z0-9][^\\n]*)?\\n)*?(?:-[qmtdl]*f[qmtdl]*|--force))(?:\\n|\\z)") ||
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*checkout\\n(?:(?:-q|--quiet)\\n)*(?:HEAD\\n)?(?:--\\n)?(?:\\.|:/)\\z") ||
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*clean(?:\\n(?:-[dfxXq]+|--force|--quiet|[^\\n-][^\\n]*)?)*(?:\\n--(?:\\n[^\\n]*)*)?\\z") &&
+      git_subcommand(c, "(?:reset\\n(?:[^\\n]*\\n)*?--hard|stash\\nclear|checkout\\n(?:(?:[^\\n-][^\\n]*|--?[A-Za-z0-9][^\\n]*)?\\n)*?(?:-[qmtdl]*f[qmtdl]*|--force))(?:\\n|\\z)") ||
+      git_subcommand(c, "checkout\\n(?:(?:-q|--quiet)\\n)*(?:HEAD\\n)?(?:--\\n)?(?:\\.|:/)\\z") ||
+      git_subcommand(c, "clean(?:\\n(?:-[dfxXq]+|--force|--quiet|[^\\n-][^\\n]*)?)*(?:\\n--(?:\\n[^\\n]*)*)?\\z") &&
         c.args.matches("(?m)^(-[dfxXq]*f[dfxXq]*|--force)$") && c.args.matches("(?m)^-[dfxXq]*[dxX][dfxXq]*$") ||
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*restore\\n(?:(?:--source|-s)\\n[^\\n]*\\n|(?:--source=[^\\n]*|--worktree|--staged|--quiet|-[SWq]+)?\\n)*(?:--\\n)?(?:\\.|:/)\\z") &&
+      git_subcommand(c, "restore\\n(?:(?:--source|-s)\\n[^\\n]*\\n|(?:--source=[^\\n]*|--worktree|--staged|--quiet|-[SWq]+)?\\n)*(?:--\\n)?(?:\\.|:/)\\z") &&
         (c.args.matches("(?m)^(--worktree|-[SWq]*W[SWq]*)$") || !c.args.matches("(?m)^(--staged|-[SWq]*S[SWq]*)$"))
     )) ||
-    unread_text(e, t, (
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+reset\\b[^;&|\\n#]*[ \\t]--hard(?:[ \\t]|$|[;&|\\n<>#])") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+clean[ \\t]+(?:-[dfxXq]+[ \\t]+)*(?:-[dxXq]*f[dfxXq]*[dxX][dfxXq]*|-[dfxXq]*[dxX][dfxXq]*f[dfxXq]*|-[dfxXq]*f[dfxXq]*[ \\t]+(?:-[dfxXq]+[ \\t]+)*-[dfxXq]*[dxX][dfxXq]*|-[dfxXq]*[dxX][dfxXq]*[ \\t]+(?:-[dfxXq]+[ \\t]+)*-[dfxXq]*f[dfxXq]*)(?:[ \\t]+-[dfxXq]+)*(?:[ \\t]+--)?(?:[ \\t]+[^\\s;&|<>#-][^\\s;&|<>#]*)*[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+checkout[ \\t]+(?:HEAD[ \\t]+)?(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+checkout[ \\t]+(?:-f|--force)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+restore[ \\t]+(?:(?:(?:--source|-s)(?:=|[ \\t]+)[^\\s;&|]+|--worktree|-W)[ \\t]+)*(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+restore[ \\t]+(?:(?:--staged|-S)[ \\t]+)?(?:--worktree|-W|-SW|-WS)[ \\t]+(?:(?:--staged|-S)[ \\t]+)?(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+stash[ \\t]+clear(?:[ \\t]|$|[;&|\\n<>#])")
-    ))
+    unread_text(e, t,
+      t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+(?:reset\\b[^;&|\\n#]*[ \\t]--hard(?:[ \\t]|$|[;&|\\n<>#])|clean[ \\t]+(?:-[dfxXq]+[ \\t]+)*(?:-[dxXq]*f[dfxXq]*[dxX][dfxXq]*|-[dfxXq]*[dxX][dfxXq]*f[dfxXq]*|-[dfxXq]*f[dfxXq]*[ \\t]+(?:-[dfxXq]+[ \\t]+)*-[dfxXq]*[dxX][dfxXq]*|-[dfxXq]*[dxX][dfxXq]*[ \\t]+(?:-[dfxXq]+[ \\t]+)*-[dfxXq]*f[dfxXq]*)(?:[ \\t]+-[dfxXq]+)*(?:[ \\t]+--)?(?:[ \\t]+[^\\s;&|<>#-][^\\s;&|<>#]*)*[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)|checkout[ \\t]+(?:HEAD[ \\t]+)?(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)|checkout[ \\t]+(?:-f|--force)(?:[ \\t]|$|[;&|\\n<>#])|restore[ \\t]+(?:(?:(?:--source|-s)(?:=|[ \\t]+)[^\\s;&|]+|--worktree|-W)[ \\t]+)*(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)|restore[ \\t]+(?:(?:--staged|-S)[ \\t]+)?(?:--worktree|-W|-SW|-WS)[ \\t]+(?:(?:--staged|-S)[ \\t]+)?(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)|stash[ \\t]+clear(?:[ \\t]|$|[;&|\\n<>#]))"))
   )
 
 emit:

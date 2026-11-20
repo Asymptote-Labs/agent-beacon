@@ -1,6 +1,6 @@
 id: cicd-pipeline-file-modified
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 4
+version: 6
 title: CI/CD or deployment manifest modified
 description: >
   The agent modified a CI/CD or deployment manifest (GitHub Actions workflow,
@@ -19,15 +19,9 @@ taxonomy:
 # rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
 # path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv).
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    cicd_pipeline_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      cicd_pipeline_file(f.path)))
-  )
+  file_changed(e, p, cicd_pipeline_file(p)) ||
+  e.event.action == "command.executed" && cicd_pipeline_file_redirect(e.command.command) &&
+    unread_text(e, t, cicd_pipeline_file_redirect(t))
 
 emit:
   reason: "CI/CD or deployment manifest modified"
@@ -98,4 +92,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: ".github/workflows/deploy.yml" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh 'cat /tmp/ci.yml > .github/workflows/release.yml'" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never cat /tmp/ci.yml > .github/workflows/release.yml\" && ./run-tests.sh" }
         session: { id: s1 }

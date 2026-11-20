@@ -11,6 +11,8 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common"
 	celast "github.com/google/cel-go/common/ast"
+	"github.com/google/cel-go/common/operators"
+	"github.com/google/cel-go/common/types"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/concepts"
 )
@@ -181,7 +183,18 @@ func substitute(eh cel.MacroExprFactory, body celast.Expr, params []string, args
 			if call.IsMemberFunction() {
 				return eh.NewMemberCall(call.FunctionName(), build(call.Target()), all(call.Args())...)
 			}
-			return eh.NewCall(call.FunctionName(), all(call.Args())...)
+			args := all(call.Args())
+			// Two string literals joined with + are one literal: a body may write a pattern as
+			// its fixed part plus a parameter (git_args), and the call passes the rest as a
+			// literal, so the engine sees one constant pattern, compiled and prefiltered once.
+			if call.FunctionName() == operators.Add && len(args) == 2 {
+				if a, ok := stringLiteral(args[0]); ok {
+					if b, ok := stringLiteral(args[1]); ok {
+						return eh.NewLiteral(types.String(a + b))
+					}
+				}
+			}
+			return eh.NewCall(call.FunctionName(), args...)
 		case celast.ListKind:
 			return eh.NewList(all(e.AsList().Elements())...)
 		case celast.MapKind:

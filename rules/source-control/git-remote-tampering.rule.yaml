@@ -1,6 +1,6 @@
 id: git-remote-tampering
 spec: threat-rules/v1.3  # needed for args and predicates
-version: 7
+version: 8
 title: Git remote repointed or force-push to remote
 description: >
   A command repoints a git remote (remote set-url / remote add, the config-key form
@@ -21,10 +21,8 @@ taxonomy:
   beacon_category: source-control
   owasp_llm: LLM03
 
-# The subcommand is the first word after git's own options, of which -C, -c, --git-dir,
-# --work-tree and --namespace take the next word as their value; a word whose value is
-# unknown (`git $OPTS push`) is passed over as an option. A config key and a force
-# option are read as written (argv_raw) where a variable may be part of the word
+# The subcommand is the first word after git's own options (git_subcommand). A config key
+# and a force option are read as written (argv_raw) where a variable may be part of the word
 # (`url."https://$HOST/".insteadOf`, `--force-with-lease=topic:$old`, `"+$branch"`), since
 # args leaves such a word empty. `git config KEY` alone prints the key, so a key that is
 # the last word is a read. Any word that begins --force counts, as it did in the text: git
@@ -33,14 +31,14 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c, c.name == "git" && (
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*remote\\n(set-url|add)(\\n|\\z)") ||
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*config\\n") &&
+      git_subcommand(c, "remote\\n(set-url|add)(\\n|\\z)") ||
+      git_subcommand(c, "config\\n") &&
         !c.args.matches("(?m)^(--get(-all|-regexp|-urlmatch)?|--unset(-all)?|--list|-l)$|^config\\n(-[^\\n]*\\n)*(get|unset|list)$") &&
         c.argv_raw.exists(a, a.matches("(?i)^[\"']?(remote\\..+\\.(push)?url|url\\..+\\.insteadof)[\"']?$")) &&
         !c.argv_raw[size(c.argv_raw) - 1].matches("(?i)^[\"']?(remote\\..+\\.(push)?url|url\\..+\\.insteadof)[\"']?$") ||
       c.args.matches("(?m)^-c$") &&
         c.argv_raw.exists(a, a.matches("(?i)^[\"']?(remote\\.[^\\s=]+\\.(push)?url|url\\.[^\\s=]+\\.insteadof)=")) ||
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*push(\\n|\\z)") && (
+      git_subcommand(c, "push(\\n|\\z)") && (
         c.args.matches("(?m)^-[vqnud46]*f[vqnud46]*$") ||
         c.argv_raw.exists(a, a.matches("^[\"']?(--force\\b|\\+)")))
     )) ||

@@ -1,6 +1,6 @@
 id: sudoers-nopasswd-tampering
 spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 4
+version: 5
 title: Sudoers / NOPASSWD privilege rule tampered or probed
 description: >
   A command writes to the sudoers configuration (/etc/sudoers or /etc/sudoers.d/),
@@ -31,12 +31,15 @@ taxonomy:
 
 # sudo is a wrapper the parser looks through, and a sudo that only lists runs no command,
 # so the probe is the command without a name whose words hold sudo, -n and -l (`sudo -n ls
-# -l` is named ls and is not one).
+# -l` is named ls and is not one). A write to /etc/sudoers is a changing_write
+# (rules/concepts/sensitive-files.predicates.yaml); under /etc/sudoers.d any access counts.
+# A grant staged in a file with no dot keeps its own shorter list, a write, an append or a
+# move: the ways a new file is made, which is what staging is.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
       c.file_writes.exists(f,
-        f.op in ["write", "append", "edit", "truncate", "move_to", "link"] && f.path.matches("(?i)/etc/sudoers$") ||
+        changing_write(f) && f.path.matches("(?i)/etc/sudoers$") ||
         f.path.matches("(?i)/etc/sudoers\\.d/.")) ||
       c.file_reads.exists(f, f.path.matches("(?i)/etc/sudoers\\.d/.")) ||
       c.argv_raw.exists(a, a.matches("(?i)^\\S*/etc/sudoers\\.d/[^\\s\"']\\S*$")) ||
