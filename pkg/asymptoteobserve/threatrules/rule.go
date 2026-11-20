@@ -244,15 +244,10 @@ func (r *Rule) validateExpression(expr string) error {
 	if used := r.lib.uses(expr); len(used) > 0 && specV1_3.newerThan(v) {
 		return fmt.Errorf("the predicate %s requires spec: threat-rules/v1.3 or later (engines before v1.3 do not expand predicates)", used[0])
 	}
-	if specV1_3.newerThan(v) {
-		for _, field := range v1_3Fields {
-			if selectsField(ast, field) {
-				return fmt.Errorf("e.%s[].%s requires spec: threat-rules/v1.3 or later (engines before v1.3 reject the field)", ParsedCommandsPath, field)
-			}
+	for _, f := range specFields() {
+		if f.since.newerThan(v) && selectsField(ast, f.name) {
+			return fmt.Errorf("e.%s requires spec: %s or later (engines before %s reject the field)", f.path, f.spec, f.version)
 		}
-	}
-	if specV1_2.newerThan(v) && selectsField(ast, "parsed_commands") {
-		return fmt.Errorf("e.%s requires spec: threat-rules/v1.2 or later (engines before v1.2 reject the field)", ParsedCommandsPath)
 	}
 	return nil
 }

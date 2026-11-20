@@ -1,6 +1,7 @@
 package shellcmd
 
 import (
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,15 +32,16 @@ type FileRead struct {
 	Sent bool
 }
 
-// FileReads returns, for each command of a parsed command line, the files whose content it
-// evidently takes in. The result is parallel to commands, or nil when no command takes a file in.
+// fileReads returns, for each command of a command line, the files whose content it evidently
+// takes in (Line.Reads). The result is parallel to commands, or nil when no command takes a
+// file in.
 //
 // A command takes a file in directly when its own words name it as input: what cat, head, base64
 // and the other printers print, what grep, rg, awk, sed and jq search or filter, the sources of
 // cp, install, scp and rsync, what tar and zip put into an archive, what curl, wget, httpie,
 // `gh gist create` and socat send, and the files an inline python, node, ruby or php script opens
-// by a literal path. The command is found behind the wrappers Unwrapped skips and behind timeout,
-// nice, ionice, stdbuf, doas, torsocks and proxychains.
+// by a literal path. The command is the one its wrappers run (Unwrapped), by its program
+// (programOf).
 //
 // What one command read follows the data to the commands that receive it:
 //
@@ -56,7 +58,7 @@ type FileRead struct {
 //     (`cp .env /tmp/x; curl -T /tmp/x ..`, `cat .env > /tmp/x`, `{ cat .env; } > /tmp/x`, `mv`,
 //     `tee`);
 //   - across the boundary of a shell's script, when commands has the script's commands
-//     (WithScripts): the shell writes what its script's commands write (`bash -c 'cat .env' |
+//     (withScripts): the shell writes what its script's commands write (`bash -c 'cat .env' |
 //     nc ..`), they read what it is given on its standard input (`cat .env | bash -c 'nc ..'`),
 //     and the script sees the variables of the shell's NAME=value prefix and the ones the
 //     command line exported, and the shell's operands as its positional parameters ($0, $1,
@@ -80,8 +82,11 @@ type FileRead struct {
 // The literal text of a here-document is not read; what its body expands is (the here-string and
 // here-document cases of stdin). What a script does with a file once it has opened it is not
 // followed, beyond opening it inside a call that sends it (FileRead.Sent).
-func FileReads(commands []Command) [][]FileRead {
-	f := flow{commands: commands}
+//
+// writes are each command's writes (Command.writes), when the caller has them already; nil
+// asks each command. pipes is the index of commands by pipeline (indexPipelines).
+func fileReads(commands []Command, writes [][]write, pipes *pipelineIndex) [][]FileRead {
+	f := flow{commands: commands, ws: writes, pipes: pipes}
 	for i := range commands {
 		if !f.done(i) {
 			f.command(i)
@@ -96,6 +101,8 @@ func FileReads(commands []Command) [][]FileRead {
 // allocation: every slice and map here is made when it first has something to hold.
 type flow struct {
 	commands []Command
+	ws       [][]write
+	pipes    *pipelineIndex
 	reads    [][]FileRead
 	// out are, for each command, the files whose content it may write to its standard output.
 	out [][]string
@@ -104,9 +111,9 @@ type flow struct {
 	next  int
 	early []bool
 	// vars are the variables assigned from a substitution so far, and files the files written so
-	// far, each with the files whose content went into it. A variable belongs to the shell that
-	// assigned it: the command line's, or a script's (WithScripts). exported are the ones the
-	// shell's commands, a script among them, are given.
+	// far, each with the files whose content went into it, by fileKey. A variable belongs to the
+	// shell that assigned it: the command line's, or a script's (withScripts). exported are the
+	// ones the shell's commands, a script among them, are given.
 	vars     map[varKey][]string
 	exported map[varKey]bool
 	files    map[string][]string
@@ -161,13 +168,14 @@ func (f *flow) command(i int) {
 			f.exported[varKey{c.shell, ref.name}] = true
 		}
 	}
-	name, args := c.run()
+	name, args := c.program()
 	var (
 		files, sent []string
 		data        dataWords
 	)
 	if language, ok := scriptLanguage(name); ok {
-		files, sent = scriptReads(language, inlineScript(language, c, args))
+		script, _ := inlineScript(language, c, args)
+		files, sent = scriptReads(language, script)
 	} else {
 		files, data = c.inputs(name, args)
 	}
@@ -184,15 +192,27 @@ func (f *flow) command(i int) {
 	}
 	// What the command writes to its standard output is what it took in. A shell whose script
 	// was read writes what the script's commands write, and the script runs with the shell's
-	// NAME=value prefix as its variables and its operands as its positional parameters.
+	// NAME=value prefix as its variables and its operands as its positional parameters. An
+	// interpreter whose inline script runs commands writes what they write as well as what it
+	// took in itself.
 	taken := f.taken(i)
-	if c.scripted {
+	if c.handed.how != handsNothing {
 		for k := range c.Env {
 			value, _ := f.wordValue(c, refEnv, k)
 			f.assign(int32(i+1), c.Env[k].Name, value)
 		}
 		f.positional(i)
-		taken = f.scriptOutput(i)
+		ran := f.scriptOutput(i)
+		switch c.handed.how {
+		case handsAll:
+			taken = ran
+		case handsSome:
+			for _, path := range ran {
+				if !slices.Contains(taken, path) {
+					taken = append(slices.Clip(taken), path)
+				}
+			}
+		}
 	}
 	if len(taken) > 0 && !slices.Contains(digests, name) && !c.outputElsewhere() {
 		if f.out == nil {
@@ -208,16 +228,22 @@ func (f *flow) command(i int) {
 			f.assign(c.shell, c.Env[k].Name, value)
 		}
 	}
-	f.writes(c, name, f.withInner(i, taken))
+	var ws []write
+	if f.ws != nil {
+		ws = f.ws[i]
+	} else {
+		ws = c.writes()
+	}
+	f.writes(ws, f.withInner(i, taken))
 }
 
 // positional gives the script of the shell at i its positional parameters: each operand of the
-// shell from the script's $0 on (Command.scriptZero) is $0, $1 and so on, and $@ and $* are all
+// shell from the script's $0 on (handOff.zero) is $0, $1 and so on, and $@ and $* are all
 // of them from $1. Only an operand that holds a substitution or a variable can carry a file, so
 // only those are assigned (`bash -c 'echo "$1"' _ "$(cat .env)"`).
 func (f *flow) positional(i int) {
 	c := &f.commands[i]
-	zero := int(c.scriptZero) - 1
+	zero := int(c.handed.zero) - 1
 	if zero < 0 {
 		return
 	}
@@ -262,7 +288,7 @@ func (f *flow) withInner(i int, taken []string) []string {
 		written := f.written(j)
 		// A statement of the compound itself writes to it, and so does the last stage of a
 		// pipeline inside it.
-		if inner.Pipeline != c.Pipeline && !f.lastStage(j) {
+		if inner.Pipeline != c.Pipeline && !f.pipes.last(j) {
 			continue
 		}
 		for _, path := range written {
@@ -303,7 +329,7 @@ func (f *flow) inside(i, k int) bool {
 // in the line.
 func (f *flow) read(i int, path string, via Via, sent bool) {
 	// Standard input, a device, and a process substitution, whose commands are followed instead.
-	if path == "" || path == "-" || isDevice(path) || strings.HasPrefix(path, "<(") {
+	if !isFile(path) || strings.HasPrefix(path, "<(") {
 		return
 	}
 	if !f.take(i, path, via, sent) {
@@ -312,7 +338,7 @@ func (f *flow) read(i int, path string, via Via, sent bool) {
 	// f.files holds every file that went into path, through any number of copies, as it was when
 	// path was written. Following those files' own sources again would read what they hold now:
 	// in `cat a > y; cp y x; cat b > y; curl -T x`, x holds a, not b.
-	for _, source := range f.files[path] {
+	for _, source := range f.files[fileKey(path)] {
 		f.take(i, source, via, sent)
 	}
 }
@@ -330,13 +356,6 @@ func (f *flow) take(i int, path string, via Via, sent bool) bool {
 	}
 	f.reads[i] = append(f.reads[i], FileRead{Path: path, Via: via, Sent: sent})
 	return true
-}
-
-// isDevice reports whether path names a device or a descriptor rather than a file: /dev/null,
-// /dev/stdin, /dev/fd/3. /dev/shm is a directory of ordinary files, which a line can stage a
-// file in as it can in /tmp.
-func isDevice(path string) bool {
-	return strings.HasPrefix(path, "/dev/") && !strings.HasPrefix(path, "/dev/shm/")
 }
 
 // taken are the files command i takes in, by any way, each once.
@@ -357,13 +376,9 @@ func (f *flow) taken(i int) []string {
 // names, or else what the stage before it in its pipeline writes.
 func (f *flow) stdin(i int) {
 	c := &f.commands[i]
-	for k := len(c.Redirects) - 1; k >= 0; k-- {
-		r := &c.Redirects[k]
-		if r.Fd != "" && r.Fd != "0" {
-			continue
-		}
-		switch r.Op {
-		case "<", "<>":
+	if r, k := c.stdinRedirect(); r != nil {
+		switch r.kind() {
+		case redirIn, redirInOut:
 			// The target is a file, or a process substitution whose commands write it.
 			if value, substituted := f.wordValue(c, refRedirect, k); substituted {
 				for _, path := range value {
@@ -372,24 +387,21 @@ func (f *flow) stdin(i int) {
 			} else {
 				f.read(i, r.Target.Unquoted, ViaStdin, false)
 			}
-			return
-		case "<<<", "<<", "<<-":
+		case redirHereString, redirHereDoc:
 			// A here-string, or a here-document: what the substitutions and variables in it
 			// write is what the command reads.
 			value, _ := f.wordValue(c, refRedirect, k)
 			for _, path := range value {
 				f.read(i, path, ViaStdin, false)
 			}
-			return
-		case "<&":
-			return
 		}
+		return
 	}
 	if c.Stage == 0 {
 		// A command of a script reads the standard input of the shell that runs the script,
 		// unless the shell read the script from it, or the command is inside a substitution,
 		// which has none of its own to read.
-		if c.shell != 0 && c.within == 0 && f.reads != nil && !f.commands[c.shell-1].scriptOnStdin {
+		if c.shell != 0 && c.within == 0 && f.reads != nil && !f.commands[c.shell-1].handed.stdin {
 			for _, r := range f.reads[c.shell-1] {
 				if r.Via == ViaStdin {
 					f.read(i, r.Path, ViaStdin, false)
@@ -398,11 +410,12 @@ func (f *flow) stdin(i int) {
 		}
 		return
 	}
-	for j := range f.commands {
-		if before := &f.commands[j]; before.Pipeline == c.Pipeline && before.Stage == c.Stage-1 && f.reaches(j, i) {
-			for _, path := range f.written(j) {
-				f.read(i, path, ViaStdin, false)
-			}
+	for _, j := range f.pipes.at(i, c.Stage-1) {
+		if !f.reaches(j, i) {
+			continue
+		}
+		for _, path := range f.written(j) {
+			f.read(i, path, ViaStdin, false)
 		}
 	}
 }
@@ -410,17 +423,7 @@ func (f *flow) stdin(i int) {
 // outputElsewhere reports whether the command's standard output is redirected, so that it reaches
 // neither the next stage of its pipeline nor the substitution it is in.
 func (c *Command) outputElsewhere() bool {
-	for _, r := range c.Redirects {
-		switch r.Op {
-		case "&>", "&>>":
-			return true
-		case ">", ">>", ">|", ">&":
-			if r.Fd == "" || r.Fd == "1" {
-				return true
-			}
-		}
-	}
-	return false
+	return slices.ContainsFunc(c.Redirects, func(r Redirect) bool { return r.ofStdout() })
 }
 
 // wordValue returns the files whose content the substitutions and variables in one word of c
@@ -463,7 +466,7 @@ func (f *flow) value(c *Command, ref wordRef) []string {
 			continue
 		}
 		written := f.written(j)
-		if !f.lastStage(j) || !f.reaches(j, -1) {
+		if !f.pipes.last(j) || !f.reaches(j, -1) {
 			continue
 		}
 		for _, path := range written {
@@ -484,7 +487,7 @@ func (f *flow) scriptOutput(i int) []string {
 			continue
 		}
 		written := f.written(k)
-		if !f.lastStage(k) {
+		if !f.pipes.last(k) {
 			continue
 		}
 		for _, path := range written {
@@ -494,17 +497,6 @@ func (f *flow) scriptOutput(i int) []string {
 		}
 	}
 	return out
-}
-
-// lastStage reports whether no later stage of command j's pipeline takes its output.
-func (f *flow) lastStage(j int) bool {
-	c := &f.commands[j]
-	for k := range f.commands {
-		if later := &f.commands[k]; later.Pipeline == c.Pipeline && later.Stage > c.Stage {
-			return false
-		}
-	}
-	return true
 }
 
 // assign records the files whose content a variable of a shell holds, as a substitution or
@@ -523,69 +515,73 @@ func (f *flow) assign(shell int32, name string, value []string) {
 	}
 }
 
-// writes records the files c writes with what it took in: the target of a redirection of its
-// standard output, and the files its own words name (cp's and install's destination, tee's files,
-// mv's destination, which holds what its sources held). Writing nothing that was read into a file
-// clears it, and so does deleting or truncating it.
-func (f *flow) writes(c *Command, name string, taken []string) {
+// writes records the files a command writes (ws, its Command.writes) with what it took in: the
+// target of a redirection of its standard output, and the files its own words name (cp's and
+// install's destination, tee's files, mv's destination, which holds what its sources held).
+// Writing nothing that was read into a file clears it, and so does deleting or truncating it.
+func (f *flow) writes(ws []write, taken []string) {
 	// With nothing taken in and no file holding anything, only a move leaves something to follow.
-	if len(taken) == 0 && f.files == nil && name != "mv" && name != "git" {
-		return
-	}
-	for _, r := range c.Redirects {
-		if path, op, ok := redirectTarget(r); ok && (r.Fd == "" || r.Fd == "1" || r.Op == "&>" || r.Op == "&>>") {
-			f.write(path, taken, op == OpAppend)
-		}
-	}
-	effects := c.commandTargets()
-	if len(effects) == 0 {
+	if len(taken) == 0 && f.files == nil && !slices.ContainsFunc(ws, func(w write) bool { return w.Op == OpMoveFrom }) {
 		return
 	}
 	moved := taken
-	for _, e := range effects {
-		if e.Op == OpMoveFrom {
-			if !slices.Contains(moved, e.Path) {
-				moved = append(slices.Clip(moved), e.Path)
+	for _, w := range ws {
+		if w.Op == OpMoveFrom {
+			if !slices.Contains(moved, w.Path) {
+				moved = append(slices.Clip(moved), w.Path)
 			}
-			for _, source := range f.files[e.Path] {
+			for _, source := range f.files[fileKey(w.Path)] {
 				if !slices.Contains(moved, source) {
 					moved = append(slices.Clip(moved), source)
 				}
 			}
 		}
 	}
-	for _, e := range effects {
-		switch e.Op {
-		case OpWrite:
-			f.write(e.Path, taken, false)
-		case OpAppend:
-			f.write(e.Path, taken, true)
-		case OpMoveTo:
-			f.write(e.Path, moved, false)
-		case OpMoveFrom, OpDelete, OpTruncate:
-			delete(f.files, e.Path)
+	for _, w := range ws {
+		switch {
+		case w.redirect && !w.stdout:
+			// What another descriptor gets is not what the command took in.
+		case w.Op == OpWrite:
+			f.write(w.Path, taken, false)
+		case w.Op == OpAppend:
+			f.write(w.Path, taken, true)
+		case w.Op == OpMoveTo:
+			f.write(w.Path, moved, false)
+		case w.Op == OpMoveFrom, w.Op == OpDelete, w.Op == OpTruncate:
+			delete(f.files, fileKey(w.Path))
 		}
 	}
 }
 
+// fileKey is a path as the files written are kept by: as written, but for the ./ and the
+// slashes that name the same file twice (./stage/.env and stage/.env, out/ and out). A path
+// with .. in it is kept as written, since what .. leaves depends on what came before it ($X/..).
+func fileKey(p string) string {
+	if strings.Contains(p, "..") {
+		return p
+	}
+	return path.Clean(p)
+}
+
 func (f *flow) write(path string, content []string, appends bool) {
+	key := fileKey(path)
 	switch {
 	case path == "":
 	case len(content) == 0:
 		if !appends {
-			delete(f.files, path)
+			delete(f.files, key)
 		}
 	case f.files == nil:
-		f.files = map[string][]string{path: content}
+		f.files = map[string][]string{key: content}
 	case appends:
-		held := f.files[path]
+		held := f.files[key]
 		for _, source := range content {
 			if !slices.Contains(held, source) {
 				held = append(slices.Clip(held), source)
 			}
 		}
-		f.files[path] = held
+		f.files[key] = held
 	default:
-		f.files[path] = content
+		f.files[key] = content
 	}
 }

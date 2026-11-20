@@ -1,5 +1,6 @@
 id: auth-security-code-modified
-version: 5
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 10
 title: Authentication, payment, or security source modified
 description: >
   The agent modified a source file in the auth / payment / security surface (basename
@@ -16,17 +17,51 @@ taxonomy:
   beacon_category: sensitive-edit
   owasp_llm: LLM06
 
+# Which file is one definition (auth_security_code_file,
+# rules/concepts/sensitive-files.predicates.yaml), asked of a file event's path and of every
+# path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv). A write
+# that lands in a temporary directory is left out (write_outside_scratch): agents stage
+# copies there all the time, and moving one back into the project is a write of its own.
+# Where the parser cannot see into a command, the text that reaches it counts when it
+# redirects or tees into such a file (auth_security_code_file_redirect), unless every such
+# command runs in a temporary directory (opaque_commands_in_scratch) or the text writes into
+# one: a text does not say which directory a relative path is in.
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] &&
-  e.file.path.matches("(?i)[^/]*(auth|login|session|password|passwd|credential|payment|billing|charge|stripe|checkout|security|crypto|token|oauth|jwt|rbac|permission)[^/]*\\.[a-z0-9]+$") &&
-  !e.file.path.matches("(?i)\\.(md|txt|lock)$") &&
-  !e.file.path.matches("(?i)\\.github/workflows/[^/]*\\.ya?ml$") &&
-  !e.file.path.matches("(?i)(^|/)credentials\\.(json|toml)$")
+  file_edited(e) && auth_security_code_file(e.file.path) ||
+  e.event.action == "command.executed" && (
+    write_outside_scratch(e, f, changing_write(f) && auth_security_code_file(f.path)) ||
+    auth_security_code_file_redirect(e.command.command) && !opaque_commands_in_scratch(e) &&
+      unread_text(e, t, auth_security_code_file_redirect(t) &&
+      !t.matches("(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(/private)?/(tmp|var/tmp|var/folders)/")))
 
 emit:
   reason: "Authentication, payment, or security source file modified"
 
 tests:
+  - name: handler_edited_in_place_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i 's/verify=True/verify=False/' src/auth/session.py" }
+        session: { id: s1 }
+  - name: handler_overwritten_by_a_copy
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp /tmp/patched/login.go internal/login.go" }
+        session: { id: s1 }
+  - name: handler_copied_to_a_scratch_directory
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mkdir -p /tmp/bak && cp internal/session.go /tmp/bak/session.go" }
+        session: { id: s1 }
+  - name: handler_only_tested
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "go test ./internal/auth/ -run TestSessionToken && git commit -m 'fix session.go token check'" }
+        session: { id: s1 }
   - name: edit_login_handler
     verdict: match
     events:
@@ -92,4 +127,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: "src/auth/login.ts" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh \"echo 'return true' >> src/auth/session.go\"" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never echo 'return true' >> src/auth/session.go\" && ./run-tests.sh" }
         session: { id: s1 }

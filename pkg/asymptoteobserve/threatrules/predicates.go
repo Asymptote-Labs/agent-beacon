@@ -11,6 +11,8 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common"
 	celast "github.com/google/cel-go/common/ast"
+	"github.com/google/cel-go/common/operators"
+	"github.com/google/cel-go/common/types"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/concepts"
 )
@@ -29,10 +31,12 @@ type predicate struct {
 	// source says where the predicate is defined, for error messages.
 	source string
 	// params and text are a definition's parameters and body as written; body is the body parsed,
-	// with its own variables renamed (see hygienic). uses are the predicates the body calls.
+	// with its own variables renamed (see hygienic). binds are the parameters the body binds
+	// for its caller, and uses the predicates the body calls.
 	params []string
 	text   string
 	body   celast.Expr
+	binds  []string
 	uses   []string
 	// catalog and render are set for a catalog's predicate: render writes a selection of the
 	// catalog's stores as an expression over a subject.
@@ -103,6 +107,14 @@ func (p *predicate) macro() cel.Macro {
 		if p.body == nil {
 			return fail("is not resolved: its definition did not load")
 		}
+		for k, param := range p.params {
+			if !slices.Contains(p.binds, param) {
+				continue
+			}
+			if args[k].Kind() != celast.IdentKind || args[k].AsIdent() == eventVar {
+				return fail("binds its %q: pass a name for it (not %s), and use that name in the arguments after it", param, eventVar)
+			}
+		}
 		return substitute(eh, p.body, p.params, args), nil
 	})
 }
@@ -171,7 +183,18 @@ func substitute(eh cel.MacroExprFactory, body celast.Expr, params []string, args
 			if call.IsMemberFunction() {
 				return eh.NewMemberCall(call.FunctionName(), build(call.Target()), all(call.Args())...)
 			}
-			return eh.NewCall(call.FunctionName(), all(call.Args())...)
+			args := all(call.Args())
+			// Two string literals joined with + are one literal: a body may write a pattern as
+			// its fixed part plus a parameter (git_args), and the call passes the rest as a
+			// literal, so the engine sees one constant pattern, compiled and prefiltered once.
+			if call.FunctionName() == operators.Add && len(args) == 2 {
+				if a, ok := stringLiteral(args[0]); ok {
+					if b, ok := stringLiteral(args[1]); ok {
+						return eh.NewLiteral(types.String(a + b))
+					}
+				}
+			}
+			return eh.NewCall(call.FunctionName(), args...)
 		case celast.ListKind:
 			return eh.NewList(all(e.AsList().Elements())...)
 		case celast.MapKind:
@@ -191,8 +214,16 @@ func substitute(eh cel.MacroExprFactory, body celast.Expr, params []string, args
 			}
 			return eh.NewStruct(e.AsStruct().TypeName(), out...)
 		case celast.ComprehensionKind:
+			// A variable named like a parameter is one the predicate binds for its caller:
+			// it takes the name the caller passed (hygienic).
 			c := e.AsComprehension()
-			return eh.NewComprehensionTwoVar(build(c.IterRange()), c.IterVar(), c.IterVar2(), c.AccuVar(),
+			name := func(variable string) string {
+				if k := slices.Index(params, variable); k >= 0 && args[k].Kind() == celast.IdentKind {
+					return args[k].AsIdent()
+				}
+				return variable
+			}
+			return eh.NewComprehensionTwoVar(build(c.IterRange()), name(c.IterVar()), name(c.IterVar2()), c.AccuVar(),
 				build(c.AccuInit()), build(c.LoopCondition()), build(c.LoopStep()), build(c.Result()))
 		}
 		return eh.Copy(e)
@@ -205,12 +236,20 @@ func substitute(eh cel.MacroExprFactory, body celast.Expr, params []string, args
 // substituted under them is never captured: with reads(pc) defined as pc.file_reads.exists(f, ..),
 // the call reads(f) inside a rule's own exists(f, ..) still means the rule's f. It returns the
 // names the body reads without binding them, which must be its parameters.
-func hygienic(name string, body celast.Expr) (free []string) {
-	r := renamer{prefix: "@" + name + "_", fac: celast.NewExprFactory(), free: map[string]bool{}}
+//
+// A variable the body binds under the name of one of params is the exception, and is left as
+// it is: the predicate binds that parameter for its caller, who passes a name and may use it
+// in the arguments the body puts under the binding. With some(xs, x, cond) defined as
+// xs.exists(x, cond), the call some(e.file.paths, p, p.endsWith(".env")) means what
+// e.file.paths.exists(p, p.endsWith(".env")) does. binds are those parameters.
+func hygienic(name string, body celast.Expr, params []string) (free, binds []string) {
+	r := renamer{prefix: "@" + name + "_", fac: celast.NewExprFactory(), free: map[string]bool{}, params: params, binds: map[string]bool{}}
 	r.rename(body, nil)
 	free = slices.Collect(maps.Keys(r.free))
 	slices.Sort(free)
-	return free
+	binds = slices.Collect(maps.Keys(r.binds))
+	slices.Sort(binds)
+	return free, binds
 }
 
 type renamer struct {
@@ -218,11 +257,24 @@ type renamer struct {
 	next   int
 	fac    celast.ExprFactory
 	free   map[string]bool
+	// params are the definition's parameters, and binds the ones the body binds.
+	params []string
+	binds  map[string]bool
 }
 
 func (r *renamer) fresh() string {
 	r.next++
 	return fmt.Sprintf("%s%d", r.prefix, r.next)
+}
+
+// bind returns what a variable the body binds is renamed to: a name no rule can write, or the
+// variable itself when it is a parameter the predicate binds for its caller.
+func (r *renamer) bind(variable string) string {
+	if slices.Contains(r.params, variable) {
+		r.binds[variable] = true
+		return variable
+	}
+	return r.fresh()
 }
 
 // rename walks e with bound, the variables in scope and what each is renamed to.
@@ -247,10 +299,10 @@ func (r *renamer) rename(e celast.Expr, bound map[string]string) {
 		}
 		outer[c.AccuVar()] = c.AccuVar()
 		inner := maps.Clone(outer)
-		iterVar, iterVar2 := r.fresh(), ""
+		iterVar, iterVar2 := r.bind(c.IterVar()), ""
 		inner[c.IterVar()] = iterVar
 		if c.HasIterVar2() {
-			iterVar2 = r.fresh()
+			iterVar2 = r.bind(c.IterVar2())
 			inner[c.IterVar2()] = iterVar2
 		}
 		r.rename(c.LoopCondition(), inner)

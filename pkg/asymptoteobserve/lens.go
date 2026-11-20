@@ -75,6 +75,9 @@ type LensFindingsV1 struct {
 	Items          []LensFindingV1 `json:"items"`
 	// Skipped names rules that were not evaluated because they need a newer spec.
 	Skipped []string `json:"skipped,omitempty"`
+	// Failed names rules that could not be evaluated on some events of the trace (most often
+	// one past its cost limit): their verdict there is unknown, and Items leaves it out.
+	Failed []string `json:"failed,omitempty"`
 }
 
 // LensFindingV1 is one rule match. Evidence is referenced by trace event ID rather than copied, so

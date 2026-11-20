@@ -279,6 +279,82 @@ func TestPredicateExpansionIsHygienic(t *testing.T) {
 	}
 }
 
+// A predicate binds a parameter for its caller when its body uses the parameter as the variable
+// of a comprehension: the caller passes a name, and the arguments the body puts under that
+// comprehension may use it. Every other variable of the body stays out of the caller's reach.
+func TestPredicateBindsAParameterForItsCaller(t *testing.T) {
+	lib := testLibrary(t, DefinitionFile{"p.predicates.yaml", []byte(definitions(
+		definition("some_word", "c, w, cond", `c.argv.exists(w, cond)`, `e.command.parsed_commands.exists(c, some_word(c, w, w == "x"))`),
+		// Twice, once in a list of one: the form a predicate gives a value a name with.
+		definition("line_or_name", "e, t, cond", `[e.command.command].exists(t, cond) && e.command.parsed_commands.exists(c, [c.name].exists(t, cond))`, `line_or_name(e, t, t.startsWith("x"))`),
+		// A predicate that calls one: the name it passes is its own body's.
+		definition("has_flag", "c, flag", `some_word(c, w, w == flag)`, `e.command.parsed_commands.exists(c, has_flag(c, "-x"))`),
+	))})
+	for _, tc := range []struct {
+		match   string
+		command string
+		want    bool
+	}{
+		{`e.command.parsed_commands.exists(c, some_word(c, w, w.startsWith("--force")))`, "git push --force-with-lease", true},
+		{`e.command.parsed_commands.exists(c, some_word(c, w, w.startsWith("--force")))`, "git push origin main", false},
+		// The name is the caller's: the condition may use the caller's other variables too.
+		{`e.command.parsed_commands.exists(c, some_word(c, word, word == c.name))`, "echo echo", true},
+		{`e.command.parsed_commands.exists(c, some_word(c, c2, e.command.parsed_commands.exists(d, d.name == c2 && d.stage > c.stage)))`, "echo tail | tail", true},
+		// The body's own c is not the caller's t, and not reachable under any name.
+		{`line_or_name(e, t, t.startsWith("cu"))`, "curl x", true},
+		{`line_or_name(e, t, t.startsWith("cu"))`, "sudo curl x", false},
+		{`line_or_name(e, c, c.startsWith("cu"))`, "curl x", true},
+		{`e.command.parsed_commands.exists(c, has_flag(c, "-rf"))`, "rm -rf x", true},
+		{`e.command.parsed_commands.exists(w, has_flag(w, w.name))`, "rm rm", true},
+	} {
+		prog, err := lib.CompileMatch(tc.match)
+		if err != nil {
+			t.Errorf("%s: %v", tc.match, err)
+			continue
+		}
+		if got, err := EvalMatch(prog, commandEvent(tc.command)); err != nil || got != tc.want {
+			t.Errorf("%s on %q = %v, %v; want %v", tc.match, tc.command, got, err, tc.want)
+		}
+	}
+	for match, want := range map[string]string{
+		`e.command.parsed_commands.exists(c, some_word(c, "w", true))`:      `some_word: binds its "w": pass a name for it`,
+		`e.command.parsed_commands.exists(c, some_word(c, c.name, true))`:   `some_word: binds its "w": pass a name for it`,
+		`e.command.parsed_commands.exists(c, some_word(c, e, e == "x"))`:    `some_word: binds its "w": pass a name for it (not e)`,
+		`e.command.parsed_commands.exists(c, some_word(c, w, w)) && w == 1`: "undeclared reference to 'w'",
+	} {
+		err := libraryRule(t, lib, "spec: "+SupportedSpec, match).Validate()
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: Validate = %v, want an error about %q", match, err, want)
+		}
+	}
+}
+
+// A body that joins a fixed pattern to a parameter gives the call's literal one pattern: the
+// expansion is the expression with the joined literal written out, so the engine compiles and
+// prefilters it as a constant. A non-literal argument is left as the join.
+func TestPredicateJoinsLiteralPatterns(t *testing.T) {
+	lib := testLibrary(t, DefinitionFile{"p.predicates.yaml", []byte(definitions(
+		definition("sub", "c, rest", `c.args.matches("\\A(?:-[a-z]\\n)*" + rest)`, `e.command.parsed_commands.exists(c, sub(c, "push"))`),
+	))})
+	for call, written := range map[string]string{
+		`e.command.parsed_commands.exists(c, sub(c, "push"))`:    `e.command.parsed_commands.exists(c, c.args.matches("\\A(?:-[a-z]\\n)*push"))`,
+		`e.command.parsed_commands.exists(c, sub(c, c.name))`:    `e.command.parsed_commands.exists(c, c.args.matches("\\A(?:-[a-z]\\n)*" + c.name))`,
+		`e.command.parsed_commands.exists(c, sub(c, "a" + "b"))`: `e.command.parsed_commands.exists(c, c.args.matches("\\A(?:-[a-z]\\n)*" + ("a" + "b")))`,
+	} {
+		_, called, err := lib.compileMatch(call)
+		if err != nil {
+			t.Fatalf("%s: %v", call, err)
+		}
+		_, want, err := compileMatch(written)
+		if err != nil {
+			t.Fatalf("%s: %v", written, err)
+		}
+		if got, want := shape(called), shape(want); got != want {
+			t.Errorf("%s compiles to\n%s\nwant\n%s", call, got, want)
+		}
+	}
+}
+
 func TestPredicateCallErrors(t *testing.T) {
 	lib := testLibrary(t)
 	for match, want := range map[string]string{
@@ -333,6 +409,9 @@ func TestNewLibraryRefuses(t *testing.T) {
 		"an unused param": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
 			definition("curl", "c, e", `c.name == "curl"`, `e.command.parsed_commands.exists(c, curl(c, e))`)))}},
 			`predicate curl: param "e" is not used`},
+		"a param bound by the body and read outside the binding": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+			definition("any_word", "c, w", `c.argv.exists(w, w == "x") && w == "y"`, `e.command.parsed_commands.exists(c, any_word(c, w))`)))}},
+			`predicate any_word: param "w" is bound by the body and also read outside that binding`},
 		"a predicate that calls itself": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
 			definition("again", "c", `c.name == "x" || again(c)`, `e.command.parsed_commands.exists(c, again(c))`)))}},
 			"predicate again calls itself: again -> again"},

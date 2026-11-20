@@ -1,6 +1,7 @@
 package threatrules
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -168,23 +169,18 @@ func TestPackWritesOutNoPredicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	const names = `"(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"`
-	const wrapped = `"(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$"`
-	sender := func(v, w string) string {
-		return v + `.name.matches(` + names + `) || ` + v + `.name.matches(` + wrapped + `) && ` + v + `.argv.exists(` + w + `, ` + w + `.matches(` + names + `))`
-	}
+	sender := func(v string) string { return v + `.name.matches(` + names + `)` }
 	for match, want := range map[string][]string{
 		// The eight copies, as the egress rules carried them.
-		`e.event.action == "command.executed" && e.command.parsed_commands.exists(s, (` + sender("s", "a") + `) && s.argv_raw.exists(a, a.matches("x")))`: {"egress_sender"},
+		`e.event.action == "command.executed" && e.command.parsed_commands.exists(s, (` + sender("s") + `) && s.argv_raw.exists(a, a.matches("x")))`: {"egress_sender"},
 		// Under other names, and as operands of a longer ||.
-		`e.command.parsed_commands.exists(cmd, cmd.name == "gh" || ` + sender("cmd", "word") + `)`: {"egress_sender"},
+		`e.command.parsed_commands.exists(cmd, cmd.name == "gh" || ` + sender("cmd") + `)`: {"egress_sender"},
 		// A predicate whose body calls another.
 		`e.command.parsed_commands.exists(c, c.name == "scp" && c.file_reads.exists(x, credential_file(x.path)))`: {"command_reads_credential_file"},
 		// Called, not written out.
 		`e.command.parsed_commands.exists(s, egress_sender(s) && egress_reads_stdin(s))`: nil,
-		// The sender list without the wrappers is another question (TestPackListsNoSenderOfItsOwn asks it).
-		`e.command.parsed_commands.exists(s, s.name.matches(` + names + `))`: nil,
-		// The same shape about two different commands is not one predicate's body.
-		`e.command.parsed_commands.exists(s, e.command.parsed_commands.exists(t, s.name.matches(` + names + `) || t.name.matches(` + wrapped + `) && t.argv.exists(a, a.matches(` + names + `))))`: nil,
+		// Another list of names is another question.
+		`e.command.parsed_commands.exists(s, s.name.matches("(?i)^(curl|wget)$"))`: nil,
 		// More than the body allows inside it.
 		`e.command.parsed_commands.exists(c, c.file_reads.exists(x, credential_file(x.path) && x.via == "direct"))`: nil,
 	} {
@@ -201,18 +197,152 @@ func TestPackWritesOutNoPredicate(t *testing.T) {
 // TestPackListsNoSenderOfItsOwn keeps "this command sends data over the network" in one place:
 // the egress predicates of rules/concepts/egress.predicates.yaml. A rule that tests a parsed
 // command against a list that names netcat has a sender list of its own, and eight such copies
-// are what those predicates replaced. A text fallback for a command line that does not parse
-// matches e.command.command and is the rule's own.
+// are what those predicates replaced. A text pattern (over e.command.command, or the text
+// unread_text binds) has to spell the senders inside a longer pattern, so it may, but then it
+// names every client egress_sender knows that sends what it reads (all but curl and wget, which
+// the pattern qualifies), as egress_sender_mention names all of them: a client added to
+// egress_sender and not to the text would be seen on a parsed line and missed in the text.
 func TestPackListsNoSenderOfItsOwn(t *testing.T) {
+	lib, _, err := LoadLibraryDir(rulesDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The name as a whole alternative, not letters inside another (truncate).
+	sender := regexp.MustCompile(`(^|[^A-Za-z])(ncat|netcat)([^A-Za-z]|$)`)
+	group := regexp.MustCompile(`\(([a-z0-9]+(?:\|[a-z0-9]+)+)\)`)
+	// The senders a pattern names: every group of names that holds one, since a pattern may
+	// spell them in several groups (egress_sender_mention splits them for the prefilter).
+	senderGroup := func(text string) []string {
+		var names []string
+		for _, g := range group.FindAllStringSubmatch(text, -1) {
+			if ns := strings.Split(g[1], "|"); slices.Contains(ns, "ncat") || slices.Contains(ns, "curl") {
+				names = append(names, ns...)
+			}
+		}
+		slices.Sort(names)
+		return slices.Compact(names)
+	}
+	all := senderGroup(lib.predicates["egress_sender"].text)
+	if !slices.Contains(all, "curl") || !slices.Contains(all, "socat") {
+		t.Fatalf("egress_sender lists no senders: %q", lib.predicates["egress_sender"].text)
+	}
+	if got := senderGroup(lib.predicates["egress_sender_mention"].text); !slices.Equal(got, all) {
+		t.Errorf("egress_sender_mention names %q, egress_sender %q", got, all)
+	}
+	stdin := slices.DeleteFunc(slices.Clone(all), func(n string) bool { return n == "curl" || n == "wget" })
 	literal := regexp.MustCompile(`([\w.]+)\.matches\(("(?:[^"\\]|\\.)*")\)`)
+	bound := regexp.MustCompile(`unread_text\(\s*e\s*,\s*(\w+)\s*,`)
 	for _, r := range corpusRules(t) {
-		for _, m := range literal.FindAllStringSubmatch(strings.Join(ruleExpressions(r), " "), -1) {
+		expr := strings.Join(ruleExpressions(r), " ")
+		texts := map[string]bool{"e.command.command": true}
+		for _, m := range bound.FindAllStringSubmatch(expr, -1) {
+			texts[m[1]] = true
+		}
+		for _, m := range literal.FindAllStringSubmatch(expr, -1) {
 			receiver, list := m[1], m[2]
-			if receiver != "e.command.command" && (strings.Contains(list, "ncat") || strings.Contains(list, "netcat")) {
+			if !sender.MatchString(list) {
+				continue
+			}
+			if !texts[receiver] {
 				t.Errorf("%s: %s.matches(%s) lists network senders; call egress_sender instead, so that every egress rule means the same senders", r.ID, receiver, list)
+				continue
+			}
+			names := senderGroup(list)
+			if missing := slices.DeleteFunc(slices.Clone(stdin), func(n string) bool { return slices.Contains(names, n) }); len(missing) > 0 {
+				t.Errorf("%s: %s.matches(%s) names senders without %q, which egress_sender knows; name them all or call egress_sender_mention", r.ID, receiver, list, missing)
 			}
 		}
 	}
+}
+
+// TestPackAgentListsAgree keeps the coding agents in one list. agent_cli names them for a
+// parsed command; a text pattern that names agents (agent_cli_mention, or a rule's own text
+// half that has to spell them inside a longer pattern) names the same ones, so an agent added
+// to one half of a rule is not missed by the other.
+func TestPackAgentListsAgree(t *testing.T) {
+	lib, _, err := LoadLibraryDir(rulesDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := agentNames(lib.predicates["agent_cli"].text)
+	if !slices.Contains(want, "codex") || !slices.Contains(want, "claude-code") {
+		t.Fatalf("agent_cli names no agents: %q", want)
+	}
+	check := func(where, text string) {
+		if got := agentNames(text); !slices.Equal(got, want) {
+			t.Errorf("%s names agents %q, agent_cli %q", where, got, want)
+		}
+	}
+	check("agent_cli_mention", lib.predicates["agent_cli_mention"].text)
+	literal := regexp.MustCompile(`\.matches\(("(?:[^"\\]|\\.)*")\)`)
+	for _, r := range corpusRules(t) {
+		for _, m := range literal.FindAllStringSubmatch(strings.Join(ruleExpressions(r), " "), -1) {
+			// A group of agents, and not a path such as .codex/prompts.
+			if slices.Contains(agentNames(m[1]), "codex") {
+				check(r.ID+": "+m[1], m[1])
+			}
+		}
+	}
+}
+
+// agentNames is every name of each group of alternatives that holds "codex" in a pattern, an
+// optional suffix (claude(-code)?) giving both spellings.
+func agentNames(text string) []string {
+	suffix := regexp.MustCompile(`^([a-z][a-z-]*)\(([a-z-]+)\)\?$`)
+	var names []string
+	for off := 0; ; {
+		i := strings.Index(text[off:], "codex")
+		if i < 0 {
+			break
+		}
+		i += off
+		start, end := -1, -1
+		for k, depth := i, 0; k >= 0 && start < 0; k-- {
+			switch text[k] {
+			case ')':
+				depth++
+			case '(':
+				if depth == 0 {
+					start = k
+				}
+				depth--
+			}
+		}
+		for k, depth := i, 0; k < len(text) && end < 0; k++ {
+			switch text[k] {
+			case '(':
+				depth++
+			case ')':
+				if depth == 0 {
+					end = k
+				}
+				depth--
+			}
+		}
+		if start < 0 || end < 0 {
+			break
+		}
+		depth, from := 0, start+1
+		for k := start + 1; k <= end; k++ {
+			switch {
+			case text[k] == '(':
+				depth++
+			case text[k] == ')' && k < end:
+				depth--
+			case text[k] == '|' && depth == 0 || k == end:
+				alt := text[from:k]
+				if m := suffix.FindStringSubmatch(alt); m != nil {
+					names = append(names, m[1], m[1]+m[2])
+				} else {
+					names = append(names, alt)
+				}
+				from = k + 1
+			}
+		}
+		off = end
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 // TestPackCategoriesMatchDirectories pins taxonomy.beacon_category to the directory each rule
@@ -232,9 +362,14 @@ func TestPackCategoriesMatchDirectories(t *testing.T) {
 	}
 }
 
+// update makes TestBaselineIsCorpusCopies copy the corpus files over their baseline copies.
+var update = flag.Bool("update", false, "copy the corpus files over their baseline copies")
+
 // TestBaselineIsCorpusCopies keeps the embedded baseline byte-identical to the corpus files it
 // was taken from: its rules, and the definitions embedded for them. A fix to a corpus rule or
-// catalog then cannot leave a stale copy in every binary.
+// catalog then cannot leave a stale copy in every binary. `go test ./threatrules -run
+// TestBaselineIsCorpusCopies -update` copies the corpus files over; a file new to the
+// baseline is copied in once by hand.
 func TestBaselineIsCorpusCopies(t *testing.T) {
 	baseline, err := filepath.Glob(filepath.Join(repoRoot(t), "pkg", "asymptoteobserve", "rulestore", "baseline", "*.yaml"))
 	if err != nil || len(baseline) == 0 {
@@ -246,11 +381,24 @@ func TestBaselineIsCorpusCopies(t *testing.T) {
 			t.Errorf("%s: want exactly one corpus copy, found %v", filepath.Base(path), matches)
 			continue
 		}
-		got, _ := os.ReadFile(path)
-		want, _ := os.ReadFile(matches[0])
-		if string(got) != string(want) {
-			t.Errorf("%s differs from %s; copy the corpus file over", path, matches[0])
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
 		}
+		want, err := os.ReadFile(matches[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) == string(want) {
+			continue
+		}
+		if *update {
+			if err := os.WriteFile(path, want, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		t.Errorf("%s differs from %s; run go test ./threatrules -run TestBaselineIsCorpusCopies -update", path, matches[0])
 	}
 }
 

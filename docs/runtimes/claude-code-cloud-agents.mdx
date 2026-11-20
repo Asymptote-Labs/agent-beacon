@@ -132,9 +132,19 @@ beacon cloud gcs setup \
   --print
 ```
 
-<Frame caption="Review the bucket, service account, and IAM commands before applying them.">
-  <img src="/images/claude-code-on-the-web/beacon-cloud-setup-print.png" width="720" alt="Terminal showing beacon cloud gcs setup --print output with gcloud commands for creating the bucket, service account, and IAM binding." />
-</Frame>
+It prints the `gcloud` commands for you to review and changes nothing:
+
+```text
+gcloud services enable storage.googleapis.com iam.googleapis.com --project your-gcp-project
+gcloud storage buckets describe gs://your-beacon-cloud-agent-traces --project your-gcp-project
+gcloud storage buckets create gs://your-beacon-cloud-agent-traces --project your-gcp-project --location us-central1 --uniform-bucket-level-access
+gcloud iam service-accounts describe beacon-cloud-trace-uploader@your-gcp-project.iam.gserviceaccount.com --project your-gcp-project
+gcloud iam service-accounts create beacon-cloud-trace-uploader --project your-gcp-project --display-name 'Beacon cloud trace uploader'
+gcloud storage buckets add-iam-policy-binding gs://your-beacon-cloud-agent-traces --member serviceAccount:beacon-cloud-trace-uploader@your-gcp-project.iam.gserviceaccount.com --role roles/storage.objectUser
+```
+
+When you apply them, the `describe` commands check for an existing bucket and
+service account, and the `create` commands run only for what is missing.
 
 Apply the setup and print the Claude environment variables:
 
@@ -149,12 +159,22 @@ beacon cloud gcs setup \
   --print-env
 ```
 
-Copy the printed values. Redact `BEACON_CLOUD_GCS_CREDENTIALS_B64` anywhere you
-share screenshots or logs.
+It prints three values for step 2:
 
-<Frame caption="Copy the printed BEACON_CLOUD_GCS_* variables into the Claude cloud environment.">
-  <img src="/images/claude-code-on-the-web/beacon-cloud-setup-print-env.png" alt="Terminal showing beacon cloud gcs setup --apply --print-env output with bucket, prefix, and credentials environment variables." />
-</Frame>
+```text
+BEACON_CLOUD_GCS_BUCKET=your-beacon-cloud-agent-traces
+BEACON_CLOUD_GCS_PREFIX=agent-traces/customer=my-team
+BEACON_CLOUD_GCS_CREDENTIALS_B64=<base64-encoded service account key>
+```
+
+Each `--print-env` run creates a new key for the uploader service account.
+Redact `BEACON_CLOUD_GCS_CREDENTIALS_B64` anywhere you share logs or screenshots.
+
+If your organization blocks service account key creation with the
+`iam.disableServiceAccountKeyCreation` policy, which Google turns on by default
+for organizations created since 2024, `--print-env` cannot create the key. The
+cloud VM has no other way to sign in to GCS, so ask an organization policy
+administrator to exempt the project, or send logs to S3 or Beacon Cloud instead.
 
 The helper creates a dedicated uploader service account and grants it
 `roles/storage.objectUser` on the selected bucket, which can read, list,

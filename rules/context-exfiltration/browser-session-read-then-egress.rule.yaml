@@ -1,6 +1,6 @@
 id: browser-session-read-then-egress
 spec: threat-rules/v1.3  # needed for predicates and file_reads
-version: 7
+version: 9
 title: Browser session store read followed by network egress
 description: >
   Within one session, the agent read a browser cookie/login store and then issued an
@@ -11,13 +11,14 @@ description: >
   logins.json by name, or the ambiguous basenames cookies / "login data" only inside
   a known browser profile directory (Chrome/Chromium/Brave/Edge/Firefox/Safari,
   including their real on-disk dir names) so a project file named "cookies" does not
-  trip it, read with a file tool or by a shell command that takes the file in. The
-  egress command is read as bash: a network client
-  the egress rules share (curl, wget, httpie, xh, nc, ncat, netcat, socat, by any
-  path, under sudo, timeout or torsocks, or inside bash -c), a /dev/tcp redirect, a
-  remote copy, a gist, a cloud storage upload or an inline script request; the same
-  words inside a quoted string or a here-document are not egress. A command line
-  that does not parse falls back to matching its text.
+  trip it, read with a file tool or by a shell command that takes the file in, or
+  named in the text that reaches a command the parser cannot see into beside a
+  program that reads files (browser_store_read). The egress command is read as bash:
+  a network client the egress rules share (curl, wget, httpie, xh, nc, ncat, netcat,
+  socat, by any path, under sudo, timeout or torsocks, or inside bash -c), a /dev/tcp
+  redirect, a remote copy, a gist, a cloud storage upload or an inline script
+  request; the same words inside a quoted string or a here-document are not egress.
+  A command line that does not parse falls back to matching its text.
 severity: high
 status: stable
 posture: detect
@@ -31,42 +32,11 @@ correlation:
   window: 300s
   steps:
     - id: read_browser_store
-      match: >
-        (e.event.action == "file.read" && credential_path(e.file.path, "likely", "browser")) ||
-        (e.event.action == "command.executed" && e.command.parsed_commands.exists(c,
-          c.file_reads.exists(f, credential_path(f.path, "likely", "browser"))))
-    # Who sends, a remote copy and a /dev/tcp redirect are the egress rules' shared
-    # predicates (rules/concepts/egress.predicates.yaml).
+      match: browser_store_read(e)
+    # Any outbound command: the egress rules' shared definition
+    # (egress_command, rules/concepts/egress.predicates.yaml).
     - id: egress
-      match: >
-        e.event.action == "command.executed" && (
-          e.command.parsed_commands.exists(s,
-            egress_sender(s) ||
-            egress_remote_copy(s) ||
-            s.name == "gh" && s.argv.exists(a, a == "gist") && s.argv.exists(a, a == "create") ||
-            s.name.matches("(?i)^(python[0-9.]*|node|deno|bun|ruby|perl|php)$") &&
-              s.argv.exists(a, a in ["-c", "-e", "-r"]) &&
-              s.argv.exists(a, a.matches("(?i)(requests\\.(post|put|get|patch|request)\\(|urllib\\.request|urlopen\\(|http\\.client\\.|socket\\.create_connection\\(|\\.connect\\(\\(|fetch\\(|https?\\.(request|get)\\(|net::http\\.(get|post|start)|lwp::|fsockopen\\()")) ||
-            s.name == "aws" && s.argv.exists(a, a == "s3") && s.argv.exists(a, a in ["cp", "sync", "mv"]) ||
-            s.name == "gsutil" && s.argv.exists(a, a in ["cp", "rsync", "mv"]) ||
-            s.name == "gcloud" && s.argv.exists(a, a == "storage") && s.argv.exists(a, a in ["cp", "rsync", "mv"]) ||
-            s.name == "az" && s.argv.exists(a, a == "storage") && s.argv.exists(a, a == "blob") && s.argv.exists(a, a == "upload") ||
-            s.name.matches("(?i)^(pwsh|powershell)(\\.exe)?$") &&
-              s.argv.exists(a, a.matches("(?i)\\b(invoke-webrequest|invoke-restmethod|iwr|irm)\\b[^\\n]*https?://"))) ||
-          egress_dev_tcp(e) ||
-          (size(e.command.parsed_commands) == 0 && (
-            e.command.command.matches("(?i)\\bcurl\\s") ||
-            e.command.command.matches("(?i)\\b(curl|wget)\\b[^\\n]*https?://") ||
-            e.command.command.matches("(?i)\\bwget\\s") ||
-            e.command.command.matches("(?i)(^|[;&|(`'\"]|\\$\\()\\s*((sudo|doas|nohup|exec|env|command|nice|time)\\s+|timeout\\s+\\S+\\s+)*([^\\s;&|'\"]*/)?(nc|ncat|netcat|socat)\\s+\\S") ||
-            e.command.command.matches("(?i)\\b(nc|ncat|netcat|socat)\\s+-") ||
-            e.command.command.matches("/dev/(tcp|udp)/") ||
-            e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(scp|sftp|rsync)\\s([^;&|\\n]*\\s)?[\\w.@-]+:") ||
-            e.command.command.matches("(?i)\\b(python[0-9.]*|node|deno|bun|ruby|perl|php)\\s+(-c|-e|-r)\\s[\\s\\S]*(requests\\.(post|put|get|patch|request)\\(|urllib\\.request|urlopen\\(|http\\.client\\.|socket\\.create_connection\\(|\\.connect\\(\\(|fetch\\(|https?\\.(request|get)\\(|net::http\\.(get|post|start)|lwp::|fsockopen\\()") ||
-            e.command.command.matches("(?i)\\bgh\\s+gist\\s+create\\b") ||
-            e.command.command.matches("(?i)\\b(aws\\s+s3\\s+(cp|sync|mv)|gsutil\\s+(-m\\s+)?(cp|rsync|mv)|gcloud\\s+storage\\s+(cp|rsync|mv)|az\\s+storage\\s+blob\\s+upload)\\b") ||
-            e.command.command.matches("(?i)\\b(invoke-webrequest|invoke-restmethod|iwr|irm)\\b[^\\n]*https?://")))
-        )
+      match: egress_command(e)
 
 emit:
   reason: "Browser session store read then network egress within one session"

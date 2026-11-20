@@ -35,20 +35,21 @@ const releaseKeyAsset = "beacon-release-key.gpg"
 // checksums.txt and a signature from different uploads; a second fetch gets a matching pair.
 var releaseSignatureRetryDelay = 5 * time.Second
 
-// verifyReleaseSignature checks that checksums.txt beside the package is signed by a pinned key
-// and lists the package's file name with the downloaded bytes' SHA-256.
-func (a *Applier) verifyReleaseSignature(ctx context.Context, pkgURL, pkgPath string) error {
-	i := strings.LastIndex(pkgURL, "/")
-	if i < 0 {
-		return fmt.Errorf("package URL %q has no file name", pkgURL)
+// verifyReleaseSignature checks that the release's checksums.txt is signed by a pinned key and
+// lists the package's file name with the downloaded bytes' SHA-256. checksums.txt is beside the
+// package's URL unless pkg.Checksums says where it is. They are fetched into a new directory under
+// workDir, removed after.
+func (a *Applier) verifyReleaseSignature(ctx context.Context, pkg Package, pkgPath, workDir string) error {
+	links, err := checksumLinks(pkg)
+	if err != nil {
+		return err
 	}
-	base, name := pkgURL[:i], pkgURL[i+1:]
-	dir, err := os.MkdirTemp(a.stageDir(), "verify-")
+	dir, err := os.MkdirTemp(workDir, "verify-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	if err := a.fetchSignedChecksums(ctx, base, dir); err != nil {
+	if err := a.fetchSignedChecksums(ctx, links, dir); err != nil {
 		var mismatch *signatureMismatchError
 		if !errors.As(err, &mismatch) {
 			return err
@@ -58,15 +59,36 @@ func (a *Applier) verifyReleaseSignature(ctx context.Context, pkgURL, pkgPath st
 			return err
 		case <-time.After(releaseSignatureRetryDelay):
 		}
-		if err := a.fetchSignedChecksums(ctx, base, dir); err != nil {
+		if err := a.fetchSignedChecksums(ctx, links, dir); err != nil {
 			return err
 		}
 	}
-	want, err := checksumFor(filepath.Join(dir, "checksums.txt"), name)
+	want, err := checksumFor(filepath.Join(dir, "checksums.txt"), pkg.fileName())
 	if err != nil {
 		return err
 	}
 	return verifySHA256(pkgPath, want)
+}
+
+// checksumLinks is where each file fetchSignedChecksums needs is: pkg.Checksums, all three or
+// none, and otherwise beside the package's URL.
+func checksumLinks(pkg Package) (SignedChecksums, error) {
+	if c := pkg.Checksums; c != (SignedChecksums{}) {
+		if c.URL == "" || c.SignatureURL == "" || c.KeyURL == "" {
+			return SignedChecksums{}, errors.New("the package names only some of its signed checksums' links")
+		}
+		return c, nil
+	}
+	i := strings.LastIndex(pkg.URL, "/")
+	if i < 0 {
+		return SignedChecksums{}, fmt.Errorf("package URL %q has no file name", pkg.URL)
+	}
+	base := pkg.URL[:i]
+	return SignedChecksums{
+		URL:          base + "/checksums.txt",
+		SignatureURL: base + "/checksums.txt.sig",
+		KeyURL:       base + "/" + releaseKeyAsset,
+	}, nil
 }
 
 // signatureMismatchError is a checksums.txt whose signature does not verify, the one failure a
@@ -77,10 +99,14 @@ func (e *signatureMismatchError) Error() string { return e.msg }
 
 // fetchSignedChecksums downloads checksums.txt, its signature and the release key into dir and
 // checks that a pinned key signed that checksums.txt.
-func (a *Applier) fetchSignedChecksums(ctx context.Context, base, dir string) error {
-	for _, f := range []string{"checksums.txt", "checksums.txt.sig", releaseKeyAsset} {
-		if err := a.download(ctx, base+"/"+f, filepath.Join(dir, f)); err != nil {
-			return fmt.Errorf("download %s: %w", f, err)
+func (a *Applier) fetchSignedChecksums(ctx context.Context, links SignedChecksums, dir string) error {
+	for _, f := range []struct{ name, url string }{
+		{"checksums.txt", links.URL},
+		{"checksums.txt.sig", links.SignatureURL},
+		{releaseKeyAsset, links.KeyURL},
+	} {
+		if err := a.download(ctx, f.url, filepath.Join(dir, f.name)); err != nil {
+			return fmt.Errorf("download %s: %w", f.name, err)
 		}
 	}
 	signers, err := goodSignatures(ctx, dir)

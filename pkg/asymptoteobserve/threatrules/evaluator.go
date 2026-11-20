@@ -28,35 +28,9 @@ type CompiledRule struct {
 	anyOrder bool          // correlation steps may match in any order
 	// derived is set when any of the rule's expressions references an engine-derived field
 	// (see withDerivedFields). Only those rules pay to derive it, so the rest of a pack runs
-	// exactly as it did before the field existed.
+	// exactly as it did before the field existed. Compile gives every expression of the rule
+	// this form (matcher.derived).
 	derived bool
-}
-
-// evalObserver, when set, is called once per expression evaluation. It is nil outside tests,
-// which set it to count how much work a rule does without timing it.
-var evalObserver func()
-
-// eval evaluates one compiled expression against one event, deriving fields first only for
-// rules that reference them. An expression that cannot be true for the event's action is not
-// evaluated (see eventActions).
-func (c *CompiledRule) eval(m matcher, event asymptoteobserve.Event) (bool, error) {
-	if m.excludes(event.Event.Action) {
-		return false, nil
-	}
-	if c.derived {
-		event = withDerivedFields(event)
-	}
-	act := newEventActivation(event)
-	return evalObserved(m.program(act), act)
-}
-
-// evalObserved evaluates one compiled expression against an activation whose event the caller
-// has already derived, if the rule needs it.
-func evalObserved(prog cel.Program, act *eventActivation) (bool, error) {
-	if evalObserver != nil {
-		evalObserver()
-	}
-	return evalMatch(prog, act)
 }
 
 // Compile validates a rule and compiles its CEL expressions into a reusable evaluator.
@@ -76,6 +50,9 @@ func Compile(rule *Rule) (*CompiledRule, error) {
 			}
 			c.steps[i] = m
 			c.derived = c.derived || m.derived
+		}
+		for i := range c.steps {
+			c.steps[i].derived = c.derived
 		}
 		window, err := rule.Correlation.ParseWindow()
 		if err != nil {
@@ -112,23 +89,23 @@ func (c *CompiledRule) CheckedExpressions() []*cel.Ast {
 	return asts
 }
 
-// Evaluate reports whether the rule fires over the given ordered event sequence.
+// Evaluate reports whether the rule fires over the given ordered event sequence: whether Scan
+// finds it there.
 //
 // A single-event rule matches if any event in the sequence satisfies its expression. A
 // correlation rule matches if any session (events grouped by session.id) satisfies the
 // windowed steps, in listed order unless the rule declares order: any.
+//
+// An evaluation that fails is the rule's failure on that event alone, as in a scan: the rule
+// still matches when another event or session does. When nothing matches and an evaluation
+// failed, the verdict is unknown, and the first failure is returned instead of one.
 func (c *CompiledRule) Evaluate(events []asymptoteobserve.Event) (Verdict, error) {
-	if c.steps != nil {
-		return c.evaluateCorrelation(events)
-	}
-	for i := range events {
-		matched, err := c.eval(c.match, events[i])
-		if err != nil {
-			return "", err
-		}
-		if matched {
-			return VerdictMatch, nil
-		}
+	result := Scan([]*CompiledRule{c}, events)
+	switch {
+	case len(result.Findings) > 0:
+		return VerdictMatch, nil
+	case len(result.Failures) > 0:
+		return "", result.Failures[0].Err
 	}
 	return VerdictNoMatch, nil
 }
