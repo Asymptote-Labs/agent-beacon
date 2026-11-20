@@ -2,6 +2,9 @@ package threatrules
 
 import (
 	"fmt"
+	"math"
+	"strings"
+	"sync/atomic"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker"
@@ -12,27 +15,38 @@ import (
 
 // matcher is one compiled match expression and the event actions it can be true for.
 type matcher struct {
-	prog    cel.Program
+	prog cel.Program
+	// ast is the checked expression prog was built from.
+	ast     *cel.Ast
 	actions map[string]bool // nil: the expression does not limit the action
+	// derived is set when the expression reads the event with its derived fields filled:
+	// compileMatcher sets it when the expression selects one, and Compile when its rule does
+	// anywhere, which is the form a rule has always read every expression on.
+	derived bool
 	// untracked, when set, is the expression without cost tracking, for events within a tier of
 	// sizes where its cost cannot reach the limit (matcher.go).
 	untracked *untracked
 }
 
-func compileMatcher(expr string) (matcher, error) {
-	prog, ast, err := compileMatch(expr)
-	if err != nil {
-		return matcher{}, err
+// compileMatcher compiles expr against lib's environment: the program, the program without cost
+// tracking, the actions it can be true for and whether it reads derived fields.
+//
+// The result is kept (matchCache). Loading a rule validates its expressions, compiling a rule
+// validates it again and then compiles them, and each of those parsed, type-checked and
+// planned the same text: three times over for every expression of a pack, which was most of
+// what starting a scan cost before its first event. Rules that share an expression share its
+// matcher.
+func compileMatcher(lib *Library, expr string) (matcher, error) {
+	if strings.TrimSpace(expr) == "" {
+		return matcher{}, fmt.Errorf("empty match expression")
 	}
-	env, err := Env()
-	if err != nil {
-		return matcher{}, err
+	cache, key := lib.matchCache(), matchKey{expr: expr, limit: evalCostLimit}
+	if m, ok := cache.get(key); ok {
+		return m.match, m.err
 	}
-	u, err := newUntracked(env, ast, evalCostLimit)
-	if err != nil {
-		return matcher{}, fmt.Errorf("build CEL program: %w", err)
-	}
-	return matcher{prog: prog, actions: eventActions(ast.NativeRep().Expr()), untracked: u}, nil
+	m, err := lib.compileMatcherUncached(expr)
+	cache.put(key, cachedMatch{match: m, err: err})
+	return m, err
 }
 
 // excludes reports whether the expression is false for every event with this action.
@@ -194,11 +208,11 @@ func stringLiteral(e celast.Expr) (string, bool) {
 	return s, ok
 }
 
-// program returns the program to evaluate on the activation's event: untracked where its tier
-// lets it, tracked otherwise.
+// program returns the program to evaluate on the activation's event: untracked where the
+// event's size class lets it, tracked otherwise.
 func (m matcher) program(act *eventActivation) cel.Program {
 	if m.untracked != nil {
-		if s, l, ok := act.tier(); ok && m.untracked.fits[s][l] {
+		if c, ok := act.class(); ok && m.untracked.fits(c) {
 			return m.untracked.prog
 		}
 	}
@@ -208,37 +222,168 @@ func (m matcher) program(act *eventActivation) cel.Program {
 // Tracking an evaluation's cost wraps every step of it and was, once the rest of the fast path was
 // in place, most of the time a rule took. The cost limit (MaxEvalCost) only has to stop an
 // evaluation that would exceed it, and cel-go can bound an expression's cost before it runs: its
-// static estimate, given the largest size any string, bytes, list or map it reads can have, is an
-// upper bound of the cost the tracker would count. So an expression is evaluated untracked on an
-// event when that bound, for sizes the event is within, fits under the limit: tracked, it could
-// not have reached the limit, and its result and errors are the same either way.
+// static estimate, given the largest size each string, bytes, list or map it reads can have, is
+// an upper bound of the cost the tracker would count. So an expression is evaluated untracked on
+// an event when that bound, for sizes the event is within, fits under the limit: tracked, it
+// could not have reached the limit, and its result and errors are the same either way.
 //
-// The bound is only as good as the sizes it is given, so it is used only where every value the
-// expression can see is as large as the event's own values or its literals at most:
+// The bound is only as good as the sizes it is given, so it is used only where the size of every
+// value the expression can see is known:
 //
 //   - every operation is one whose cost cel-go estimates from its inputs' sizes and whose result is
 //     no larger than its inputs (untrackedOverloads); concatenation, replace, format, join, split
 //     and anything else that can build a larger string or list keeps the tracker;
 //   - every comprehension accumulates a bool or a number, so none builds a list or a map;
-//   - the sizes are a tier at least as large as the event's largest string and list, and as its
-//     largest literal.
+//   - a literal has its own size, a value read from the event the size its class allows
+//     (eventSizes), and anything else the size of what it is made of (classSizes).
 //
-// The estimate is worked out for a few tiers of sizes when the expression is compiled, and an event
-// takes the smallest tier that holds it; an event beyond every tier is evaluated tracked.
+// The sizes are a class: a tier for each of the four measures of eventSizes, the smallest that
+// holds the event. The tiers of the two list measures are close together, because a rule's
+// cost grows with their product (and with the square of the number of commands, for a rule
+// that asks of each command something about the others), and most command lines run a
+// handful of commands of a handful of words. An expression's bound for a class is worked out
+// the first time an event of that class is evaluated, so a process pays for the classes its
+// events are in and not for all of them; an event beyond every tier is evaluated tracked.
 // TestUntrackedCostIsBounded checks the bound against the tracked cost on the corpus, and the
 // scan equivalence tests (fastpath_test.go) compare results and errors with tracked evaluation,
 // down to cost limits low enough that rules fail.
 var (
-	stringTiers = [...]int{1 << 10, 4 << 10, 16 << 10, 64 << 10}
-	listTiers   = [...]int{16, 64, 256, 1024}
+	longTiers   = [...]int{1 << 10, 4 << 10, 16 << 10, 64 << 10}
+	wordTiers   = [...]int{64, 128, 256, 1 << 10, 4 << 10, 64 << 10}
+	topTiers    = [...]int{2, 4, 8, 16, 32, 64, 256, 1024}
+	nestedTiers = [...]int{4, 8, 16, 32, 64, 256, 1024}
 )
 
-// untracked is an expression's program without cost tracking, and for each tier of sizes whether
-// its estimated cost there fits under the limit.
+// measure is one of the four sizes of an event a size class bounds (eventSizes).
+type measure uint8
+
+const (
+	measureLong   measure = iota // the longest string in no list, or in the entries of one
+	measureWord                  // the longest string deeper
+	measureTop                   // the longest list or map in no other
+	measureNested                // the longest list or map inside the entries of another
+	measures
+)
+
+// measureOf returns the measure a value counts in: a string or bytes value (text), or a list or
+// map, inside depth lists or maps. An event is measured with it (eventSizes) and cel-go's
+// estimator told with it (classSizes), so the two cannot put a value in different measures: if
+// they did, an evaluation would run untracked on a bound worked out for the wrong size.
+func measureOf(text bool, depth int) measure {
+	switch {
+	case text && depth <= longDepth:
+		return measureLong
+	case text:
+		return measureWord
+	case depth == 0:
+		return measureTop
+	}
+	return measureNested
+}
+
+// sizeClass is one tier of each measure, as one index; noSizeClass is an event beyond a tier.
+type sizeClass int
+
+const (
+	sizeClasses           = len(longTiers) * len(wordTiers) * len(topTiers) * len(nestedTiers)
+	noSizeClass sizeClass = -1
+)
+
+// classTiers is a size class as the tier of each measure.
+type classTiers [measures]uint8
+
+var measureTiers = [measures][]int{
+	measureLong:   longTiers[:],
+	measureWord:   wordTiers[:],
+	measureTop:    topTiers[:],
+	measureNested: nestedTiers[:],
+}
+
+// widerTiers gives, for each tier of each measure, the tier a class is widened to before its
+// cost is estimated (untracked.resolve): strings in a list up to 256 bytes, 4 KiB or 64 KiB,
+// lists up to 16, 64 or 1024 entries.
+var widerTiers = [measures][]uint8{
+	measureLong:   {0, 1, 2, 3},
+	measureWord:   {2, 2, 2, 4, 4, 5},
+	measureTop:    {3, 3, 3, 3, 5, 5, 7, 7},
+	measureNested: {2, 2, 2, 4, 4, 6, 6},
+}
+
+// classOf returns the smallest class that holds sizes.
+func classOf(z eventSizes) sizeClass {
+	var t classTiers
+	for m, n := range z {
+		tier := -1
+		for i, size := range measureTiers[m] {
+			if n <= size {
+				tier = i
+				break
+			}
+		}
+		if tier < 0 {
+			return noSizeClass
+		}
+		t[m] = uint8(tier)
+	}
+	return t.class()
+}
+
+func (t classTiers) class() sizeClass {
+	c := 0
+	for m, tier := range t {
+		c = c*len(measureTiers[m]) + int(tier)
+	}
+	return sizeClass(c)
+}
+
+func (c sizeClass) tiers() classTiers {
+	var t classTiers
+	i := int(c)
+	for m := len(t) - 1; m >= 0; m-- {
+		t[m], i = uint8(i%len(measureTiers[m])), i/len(measureTiers[m])
+	}
+	return t
+}
+
+// sizes returns the largest sizes of the class.
+func (t classTiers) sizes() classSizes {
+	var z classSizes
+	for m, tier := range t {
+		z[m] = uint64(measureTiers[m][tier])
+	}
+	return z
+}
+
+func (c sizeClass) sizes() classSizes { return c.tiers().sizes() }
+
+// within reports whether every event of the class is an event of o: no tier of it is above o's.
+func (t classTiers) within(o classTiers) bool {
+	for m := range t {
+		if t[m] > o[m] {
+			return false
+		}
+	}
+	return true
+}
+
+// widened returns the class with each tier raised to its wider tier.
+func (t classTiers) widened() classTiers {
+	for m := range t {
+		t[m] = widerTiers[m][t[m]]
+	}
+	return t
+}
+
+// untracked is an expression's program without cost tracking, and what bounds its cost.
 type untracked struct {
-	prog cel.Program
-	max  [len(stringTiers)][len(listTiers)]uint64 // estimated cost; 0 where a tier is not usable
-	fits [len(stringTiers)][len(listTiers)]bool
+	prog  cel.Program
+	env   *cel.Env
+	ast   *cel.Ast
+	limit uint64
+	// cost holds, for each size class, one more than bound's result for it, and 0 until that
+	// has been worked out; learned is what the estimates behind those results have shown.
+	cost    [sizeClasses]atomic.Uint32
+	learned atomic.Pointer[learned]
 }
 
 // untrackedOverloads are the operations an expression evaluated untracked may use: cel-go
@@ -261,68 +406,156 @@ var untrackedOverloads = map[string]bool{
 	"starts_with_string": true, "ends_with_string": true,
 }
 
-// newUntracked returns the untracked program for a checked expression, or nil when no tier lets it
-// run untracked.
+// newUntracked returns the untracked program for a checked expression, or nil when its shape
+// keeps the tracker.
 func newUntracked(env *cel.Env, ast *cel.Ast, limit uint64) (*untracked, error) {
-	lit, ok := untrackedShape(ast)
-	if !ok {
+	if !untrackedShape(ast) || limit > math.MaxUint32-2 {
+		// The second never holds of MaxEvalCost; a bound is stored in 32 bits.
 		return nil, nil
-	}
-	u := &untracked{}
-	usable := false
-	for s, maxString := range stringTiers {
-		for l, maxList := range listTiers {
-			if lit.maxString > maxString || lit.maxList > maxList {
-				continue
-			}
-			est, err := env.EstimateCost(ast, tierSizes{maxString: uint64(maxString), maxList: uint64(maxList)})
-			if err != nil || est.Max > limit {
-				continue
-			}
-			u.max[s][l], u.fits[s][l], usable = est.Max, true, true
-		}
-	}
-	if !usable {
-		return nil, nil
-	}
-	// An event within a tier is within every larger one: where its own tier does not fit (its
-	// literals are larger than the tier), the smallest larger tier that fits bounds it.
-	for s := len(stringTiers) - 1; s >= 0; s-- {
-		for l := len(listTiers) - 1; l >= 0; l-- {
-			if u.fits[s][l] {
-				continue
-			}
-			for _, next := range [][2]int{{s + 1, l}, {s, l + 1}} {
-				if next[0] < len(stringTiers) && next[1] < len(listTiers) && u.fits[next[0]][next[1]] &&
-					(!u.fits[s][l] || u.max[next[0]][next[1]] < u.max[s][l]) {
-					u.max[s][l], u.fits[s][l] = u.max[next[0]][next[1]], true
-				}
-			}
-		}
 	}
 	prog, err := env.Program(ast, cel.OptimizeRegex(prefilteredMatches))
 	if err != nil {
 		return nil, err
 	}
-	u.prog = prog
-	return u, nil
+	return &untracked{prog: prog, env: env, ast: ast, limit: limit}, nil
 }
 
-// literals are the largest string and the longest list or map an expression writes itself.
-type literals struct{ maxString, maxList int }
+// bound returns an upper bound of the expression's cost on an event in size class c, the most
+// the tracker could count, or one more than the limit when there is none within the limit. It
+// is worked out the first time an event of the class is evaluated and is safe for concurrent
+// use.
+func (u *untracked) bound(c sizeClass) uint64 {
+	if known := u.cost[c].Load(); known != 0 {
+		return uint64(known - 1)
+	}
+	bound := u.resolve(c.tiers())
+	u.cost[c].Store(uint32(bound + 1))
+	return bound
+}
+
+// fits reports whether an evaluation on an event in size class c cannot reach the cost limit.
+func (u *untracked) fits(c sizeClass) bool {
+	return u.bound(c) <= u.limit
+}
+
+// resolve bounds the cost for the class with tiers t from as few estimates as it can, since an
+// estimate walks the whole expression and a log holds events of a hundred classes or more.
+// The estimate grows with every size, so a class within one that fits fits, with that one's
+// estimate as its bound, and a class that holds one over the limit is over it (learned). A
+// class neither answers is first widened to tiers most events are within (widened): for most
+// expressions that fits, and answers every class within it at once.
+func (u *untracked) resolve(t classTiers) uint64 {
+	known := u.learned.Load()
+	if bound, ok := known.implies(t, u.limit); ok {
+		return bound
+	}
+	if wide := t.widened(); wide != t {
+		if _, over := known.implies(wide, u.limit); !over {
+			bound := u.estimate(wide)
+			u.learn(wide, bound)
+			if bound <= u.limit {
+				return bound
+			}
+		}
+	}
+	bound := u.estimate(t)
+	u.learn(t, bound)
+	return bound
+}
+
+// estimate returns cel-go's estimate of the expression's cost on the largest event of the class
+// with tiers t, or one more than the limit when it is over the limit.
+func (u *untracked) estimate(t classTiers) uint64 {
+	est, err := u.env.EstimateCost(u.ast, t.sizes())
+	if err != nil || est.Max > u.limit {
+		return u.limit + 1
+	}
+	return est.Max
+}
+
+// learn records the estimate for the class with tiers t.
+func (u *untracked) learn(t classTiers, bound uint64) {
+	for {
+		old := u.learned.Load()
+		next := &learned{}
+		if old != nil {
+			*next = *old
+		}
+		if bound <= u.limit {
+			next.fit = nil
+			if old != nil {
+				for _, f := range old.fit {
+					if !f.tiers.within(t) {
+						next.fit = append(next.fit, f)
+					}
+				}
+			}
+			next.fit = append(next.fit, fitClass{tiers: t, bound: bound})
+		} else {
+			next.over = nil
+			if old != nil {
+				for _, o := range old.over {
+					if !t.within(o) {
+						next.over = append(next.over, o)
+					}
+				}
+			}
+			next.over = append(next.over, t)
+		}
+		if u.learned.CompareAndSwap(old, next) {
+			return
+		}
+	}
+}
+
+// learned is what the estimates made so far say of an expression: the classes found to fit
+// under the limit, none within another, and those found over it, none holding another. It is
+// never changed once stored.
+type learned struct {
+	fit  []fitClass
+	over []classTiers
+}
+
+type fitClass struct {
+	tiers classTiers
+	bound uint64
+}
+
+// implies returns the bound the estimates made so far give the class with tiers t: the
+// smallest estimate of a class that fits and holds it, or one more than the limit when it
+// holds a class that is over; and false when they say nothing of it.
+func (l *learned) implies(t classTiers, limit uint64) (uint64, bool) {
+	if l == nil {
+		return 0, false
+	}
+	bound, ok := uint64(0), false
+	for _, f := range l.fit {
+		if t.within(f.tiers) && (!ok || f.bound < bound) {
+			bound, ok = f.bound, true
+		}
+	}
+	if ok {
+		return bound, true
+	}
+	for _, o := range l.over {
+		if o.within(t) {
+			return limit + 1, true
+		}
+	}
+	return 0, false
+}
 
 // untrackedShape reports whether every operation of the expression is in untrackedOverloads and
-// every comprehension accumulates a bool or a number, and returns the sizes of its literals.
-func untrackedShape(ast *cel.Ast) (literals, bool) {
+// every comprehension accumulates a bool or a number.
+func untrackedShape(ast *cel.Ast) bool {
 	native := ast.NativeRep()
 	for _, ref := range native.ReferenceMap() {
 		for _, id := range ref.OverloadIDs {
 			if !untrackedOverloads[id] {
-				return literals{}, false
+				return false
 			}
 		}
 	}
-	var lit literals
 	ok := true
 	celast.PreOrderVisit(native.Expr(), celast.NewExprVisitor(func(e celast.Expr) {
 		switch e.Kind() {
@@ -337,39 +570,59 @@ func untrackedShape(ast *cel.Ast) (literals, bool) {
 			default:
 				ok = false
 			}
-		case celast.LiteralKind:
-			switch v := e.AsLiteral().Value().(type) {
-			case string:
-				lit.maxString = max(lit.maxString, len(v))
-			case []byte:
-				lit.maxString = max(lit.maxString, len(v))
-			}
-		case celast.ListKind:
-			lit.maxList = max(lit.maxList, len(e.AsList().Elements()))
-		case celast.MapKind:
-			lit.maxList = max(lit.maxList, len(e.AsMap().Entries()))
 		case celast.StructKind:
 			// A struct literal is built by the type provider; keep the tracker.
 			ok = false
 		}
 	}))
-	return lit, ok
+	return ok
 }
 
-// tierSizes tells cel-go's estimator that every string and bytes value is at most maxString long
-// and every list and map at most maxList, leaving call costs to cel-go's own model.
-type tierSizes struct{ maxString, maxList uint64 }
+// classSizes tells cel-go's estimator how large the values of an event in a size class can be,
+// leaving call costs to cel-go's own model. cel-go asks it for the size of every node that is
+// not a literal, with the path the node's value is read by where it knows one: the variable,
+// the fields selected from it, and a marker (@items, @keys, @values, @indices) for each list
+// or map whose entries are being read.
+//
+// A value read from the event is at most as large as its class allows, and which class it is
+// in follows from the markers in its path as it does for eventSizes from the lists the value
+// is inside. Any other node is left to cel-go, which sizes it from what it is made of: the
+// variable of a loop over a list the expression writes is as large as the largest entry
+// written (`[c.span].exists(t, ..)` gives t the size of a span, and a loop over literals the
+// size of the longest), the result of a conditional as large as the larger branch. Where
+// cel-go knows no size it assumes the largest there is, and the expression keeps the tracker.
+type classSizes [measures]uint64
 
-func (t tierSizes) EstimateSize(n checker.AstNode) *checker.SizeEstimate {
+func (z classSizes) EstimateSize(n checker.AstNode) *checker.SizeEstimate {
+	var text bool
 	switch n.Type().Kind() {
 	case types.StringKind, types.BytesKind:
-		return &checker.SizeEstimate{Min: 0, Max: t.maxString}
+		text = true
 	case types.ListKind, types.MapKind:
-		return &checker.SizeEstimate{Min: 0, Max: t.maxList}
+	default:
+		return nil
 	}
+	depth, ok := eventPathDepth(n.Path())
+	if !ok {
+		return nil
+	}
+	return &checker.SizeEstimate{Min: 0, Max: z[measureOf(text, depth)]}
+}
+
+func (classSizes) EstimateCallCost(string, string, *checker.AstNode, []checker.AstNode) *checker.CallEstimate {
 	return nil
 }
 
-func (tierSizes) EstimateCallCost(string, string, *checker.AstNode, []checker.AstNode) *checker.CallEstimate {
-	return nil
+// eventPathDepth returns how many lists and maps the value at a path is inside, and false for a
+// path that does not start at the event.
+func eventPathDepth(path []string) (depth int, ok bool) {
+	if len(path) == 0 || path[0] != eventVar {
+		return 0, false
+	}
+	for _, segment := range path[1:] {
+		if strings.HasPrefix(segment, "@") {
+			depth++
+		}
+	}
+	return depth, true
 }

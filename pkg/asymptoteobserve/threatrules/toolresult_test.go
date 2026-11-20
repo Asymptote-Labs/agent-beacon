@@ -258,10 +258,7 @@ func TestDerivationDoesNotMutateTheCallersEvents(t *testing.T) {
 		t.Fatal("rule referencing result_text not marked as needing derivation")
 	}
 	events := []asymptoteobserve.Event{toolResultEvent("file.read", "Read", injectedNotes)}
-	findings, err := compiled.Findings(events)
-	if err != nil {
-		t.Fatal(err)
-	}
+	findings := findingsOf(t, compiled, events)
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1", len(findings))
 	}

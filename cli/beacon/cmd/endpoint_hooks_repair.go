@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -16,6 +17,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/osuser"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -472,6 +474,15 @@ func defaultRunHookRepairAsUser(info consoleUserInfo, args ...string) error {
 // macOS. Hook repair and native config repair share it so the two cannot disagree about who they
 // run as.
 func consoleUserCommand(ctx context.Context, info consoleUserInfo, bin string, args ...string) *exec.Cmd {
+	// Without root, the only hooks this can repair are the user's own (user-mode enforcement), so
+	// it runs bin directly: sudo would ask for a password to become who it already is.
+	if os.Geteuid() != 0 {
+		if me, err := user.Current(); err == nil && me.Username == info.Username {
+			child := exec.CommandContext(ctx, bin, args...)
+			child.Env = append(os.Environ(), telemetry.InternalChildEnv())
+			return child
+		}
+	}
 	launcher, cmdArgs := "sudo", []string{"-u", info.Username}
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
 		if path, err := exec.LookPath("runuser"); err == nil {
@@ -479,7 +490,11 @@ func consoleUserCommand(ctx context.Context, info consoleUserInfo, bin string, a
 		}
 	}
 	cmdArgs = append(cmdArgs, "env", "HOME="+info.HomeDir, "USER="+info.Username,
-		"LOGNAME="+info.Username, bin)
+		"LOGNAME="+info.Username)
+	// sudo and runuser reset the environment, so a CLI telemetry opt-out is passed on by hand.
+	cmdArgs = append(cmdArgs, telemetry.OptOutEnv()...)
+	cmdArgs = append(cmdArgs, telemetry.InternalChildEnv())
+	cmdArgs = append(cmdArgs, bin)
 	cmdArgs = append(cmdArgs, args...)
 	return exec.CommandContext(ctx, launcher, cmdArgs...)
 }
@@ -508,6 +523,8 @@ func runHookRepairInProfile(ctx context.Context, bin string, info consoleUserInf
 	for _, entry := range profileEnvironment(info.HomeDir) {
 		env = append(env, entry[0]+"="+entry[1])
 	}
+	env = append(env, telemetry.OptOutEnv()...)
+	env = append(env, telemetry.InternalChildEnv())
 	// Appended rather than replaced: a later assignment wins in Go's exec, so these override the
 	// inherited values while everything else the child needs -- PATH, SystemRoot -- survives. Dropping
 	// SystemRoot in particular makes Windows networking and crypto calls fail in ways that read as

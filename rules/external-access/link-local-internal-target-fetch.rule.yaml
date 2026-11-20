@@ -1,12 +1,18 @@
 id: link-local-internal-target-fetch
-version: 1
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 4
 title: HTTP client fetch of a link-local or internal-only address
 description: >
   A command uses curl/wget to fetch an explicit link-local (169.254.0.0/16) or
   loopback-adjacent internal target by IP, including the IMDS-equivalent IPv6
   link-local address (fd00:ec2::254) and the AWS IMDS DNS alias. Agents reaching
   link-local space are characteristic of SSRF probing and metadata / internal
-  service credential theft rather than normal task work.
+  service credential theft rather than normal task work. The client is found by
+  what the line runs and the target (see cloud_metadata_link_local_target) must be
+  one of its words, so curl under sudo, inside `bash -c` or by its path fires, and
+  the URL in a commit message, a here-document or the words of another command does
+  not. The text pattern is asked only of the text that reaches a command the parser
+  cannot see into (unread_text).
 severity: medium
 status: stable
 posture: detect
@@ -15,10 +21,12 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
-match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\b(curl|wget)\\b") &&
-  e.command.command.matches("(?i)(https?://(\\[?(fd00:ec2::254|fe80::[0-9a-f:]+)\\]?|169\\.254\\.169\\.254|169\\.254\\.170\\.2)|instance-data(\\.[a-z0-9.-]+)?/latest)")
+# The target is looked for in the words as written (argv_raw): a word with brackets or a
+# variable has no known value. Where the words of the client do not show what it fetches
+# (see client_target_unseen: `U=http://[fd00:ec2::254]; curl $U/latest/`) and the target is
+# elsewhere on the line, the text decides. The client and where its target is looked for
+# are cloud-metadata-endpoint-access's (client_fetch), with this rule's target.
+match: client_fetch(e, x, cloud_metadata_link_local_target(x))
 
 emit:
   reason: "HTTP client request to a link-local / internal-only metadata target"
@@ -53,5 +61,77 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "curl -s https://registry.example.com/v2/" }
+        session: { id: s1 }
+  - name: curl_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo curl -s http://[fd00:ec2::254]/latest/meta-data/iam/info" }
+        session: { id: s1 }
+  - name: wget_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'wget -qO- http://instance-data.ec2.internal/latest/meta-data/iam/'" }
+        session: { id: s1 }
+  - name: curl_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/curl -s http://169.254.170.2/v2/metadata" }
+        session: { id: s1 }
+  - name: ipv6_link_local_address
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s 'http://[fe80::a9fe:a9fe%25eth0]/latest/meta-data/'" }
+        session: { id: s1 }
+  - name: url_held_by_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "U=http://[fd00:ec2::254]; curl -s \"$U/latest/dynamic/instance-identity/document\"" }
+        session: { id: s1 }
+  - name: curl_through_a_remote_shell_the_parser_does_not_read
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'curl -s http://[fd00:ec2::254]/latest/meta-data/'" }
+        session: { id: s1 }
+  - name: url_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: curl http://[fd00:ec2::254]/latest/meta-data/ is blocked by the proxy'" }
+        session: { id: s1 }
+  - name: url_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nNever run wget http://instance-data/latest/meta-data/ from a build.\nEOF" }
+        session: { id: s1 }
+  - name: address_searched_for_beside_an_unrelated_curl
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s https://example.com/health && grep -rn 'http://169.254.170.2' deploy/" }
+        session: { id: s1 }
+  - name: address_without_a_url_scheme
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s --interface fe80::1%en0 https://example.com/health" }
+        session: { id: s1 }
+  - name: fetch_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'curl -s http://169.254.170.2/v2/credentials/abc'" }
+        session: { id: s1 }
+  - name: url_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: curl http://169.254.170.2/v2/credentials is blocked by the proxy' && ./run-tests.sh" }
         session: { id: s1 }
 

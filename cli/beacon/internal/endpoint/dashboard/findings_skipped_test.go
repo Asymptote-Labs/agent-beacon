@@ -69,8 +69,8 @@ func findingsFixture(t *testing.T, rules map[string]string) *httptest.ResponseRe
 // the baseline and names the skipped rules instead of failing.
 func TestFindingsAllStoreRulesSkippedStillRunsBaseline(t *testing.T) {
 	rec := findingsFixture(t, map[string]string{
-		"future-a": storeRule("future-a", "threat-rules/v1.3"),
-		"future-b": storeRule("future-b", "threat-rules/v2"),
+		"future-a": storeRule("future-a", testenv.FutureSpec()),
+		"future-b": storeRule("future-b", "threat-rules/v3"),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
@@ -89,7 +89,7 @@ func TestFindingsAllStoreRulesSkippedStillRunsBaseline(t *testing.T) {
 func TestRunScanAllRulesSkippedNamesThem(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	dir := t.TempDir()
-	for id, spec := range map[string]string{"future-a": "threat-rules/v1.3", "future-b": "threat-rules/v2"} {
+	for id, spec := range map[string]string{"future-a": testenv.FutureSpec(), "future-b": "threat-rules/v3"} {
 		if err := os.WriteFile(filepath.Join(dir, id+".rule.yaml"), []byte(storeRule(id, spec)), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +108,7 @@ func TestRunScanAllRulesSkippedNamesThem(t *testing.T) {
 func TestFindingsSomeRulesSkippedRunsTheRest(t *testing.T) {
 	rec := findingsFixture(t, map[string]string{
 		"current-rule": storeRule("current-rule", ""),
-		"future-rule":  storeRule("future-rule", "threat-rules/v1.3"),
+		"future-rule":  storeRule("future-rule", testenv.FutureSpec()),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -120,7 +120,7 @@ func TestFindingsSomeRulesSkippedRunsTheRest(t *testing.T) {
 	if resp.Count != 1 || resp.Findings[0].RuleID != "current-rule" {
 		t.Fatalf("want the current rule's finding, got %+v", resp.Findings)
 	}
-	if len(resp.Skipped) != 1 || !strings.Contains(resp.Skipped[0], `rule "future-rule" requires threat-rules/v1.3`) {
+	if len(resp.Skipped) != 1 || !strings.Contains(resp.Skipped[0], `rule "future-rule" requires `+testenv.FutureSpec()) {
 		t.Fatalf("want future-rule in skipped, got %v", resp.Skipped)
 	}
 }
@@ -132,5 +132,34 @@ func TestFindingsNothingSkippedOmitsSkipList(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), `"skipped"`) {
 		t.Fatalf("skipped must be omitted when nothing is skipped: %s", rec.Body.String())
+	}
+}
+
+// A rule the scan cannot evaluate on an event is named, and the other rules' findings are kept.
+func TestFindingsNameARuleTheScanCouldNotEvaluate(t *testing.T) {
+	expr := `e.event.action != "x"`
+	for _, v := range []string{"a", "b", "c", "d", "e2", "f", "g"} {
+		expr = "[0,1,2,3,4,5,6,7,8,9].all(" + v + ", " + expr + ")"
+	}
+	runaway := strings.Replace(storeRule("runaway-rule", ""), `match: 'e.event.action == "file.read"'`,
+		`match: 'e.event.action == "file.read" && `+expr+`'`, 1)
+	runaway = strings.Replace(runaway, "verdict: match\n    events:\n      - event: { action: file.read }", "verdict: no_match\n    events:\n      - event: { action: other }", 1)
+	rec := findingsFixture(t, map[string]string{
+		"current-rule": storeRule("current-rule", ""),
+		"runaway-rule": runaway,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var resp FindingsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Count != 1 || resp.Findings[0].RuleID != "current-rule" {
+		t.Fatalf("want the current rule's finding, got %+v", resp.Findings)
+	}
+	if len(resp.Failed) != 1 || resp.Failed[0].RuleID != "runaway-rule" || resp.Failed[0].Events != 1 ||
+		resp.Failed[0].FirstSessionID != "s1" || !strings.Contains(resp.Failed[0].Error, "cost limit exceeded") {
+		t.Fatalf("want runaway-rule in failed, got %+v", resp.Failed)
 	}
 }

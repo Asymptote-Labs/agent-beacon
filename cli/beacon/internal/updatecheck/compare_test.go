@@ -30,3 +30,21 @@ func TestCompareVersions(t *testing.T) {
 		})
 	}
 }
+
+func TestOlder(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"1.3.69", "1.3.70", true},
+		{"v1.3.69", "1.3.70", true},
+		{"1.3.70", "1.3.70", false},
+		{"1.3.71", "1.3.70", false},
+		{"", "1.3.70", false},
+		{"1.3.69", "dev", false},
+	} {
+		if got := Older(tc.a, tc.b); got != tc.want {
+			t.Errorf("Older(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}

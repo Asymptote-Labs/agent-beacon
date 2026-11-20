@@ -1,14 +1,20 @@
 id: root-equivalent-group-add
-version: 2
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 5
 title: User added to a root-equivalent or admin group
 description: >
   A command adds an account to a group that is root-equivalent or grants
   administrative escalation — docker, lxd, libvirt, kvm, incus, podman (container/VM
   escape to the host) or sudo, wheel, admin, adm, root (sudo becomes available). This
-  is done with usermod -aG (or --append --groups), gpasswd -a (or --add),
-  adduser <user> <group>, or by writing the group into /etc/group. Membership in any
+  is done with usermod -aG (or --append --groups), useradd -G for a new account,
+  gpasswd -a (or --add), adduser <user> <group>, or by writing /etc/group or
+  /etc/gshadow directly (a redirection, tee or sed -i onto the file). Membership in any
   of these is a standing path to root. The group token is required so unrelated usermod calls (e.g. changing a shell) do
-  not match.
+  not match. The command is found by what the line runs: usermod, useradd, gpasswd,
+  adduser or addgroup with those words, also under sudo, by absolute path or inside
+  `bash -c`, so the same words in a commit message or a here-document do not fire. The
+  text pattern is asked only of the text that reaches a command the parser cannot see
+  into (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -17,14 +23,65 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0050
 
+# An account given by a variable is an empty word of args, so the account word may be empty.
+# A command that writes /etc/group or /etc/gshadow itself (c.file_writes) is matched whatever
+# it writes: the line it adds is text the rule does not parse. Its kinds of write are the ones
+# that can add a member (a write, an append, an edit, a move onto the file), not every
+# changing_write: a truncation or a link adds no one.
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)(^|[;&|]\\s*)(sudo\\s+)?(usermod\\s+(--?[a-z]+\\s+)*(-a?G|--groups)(\\s+|=)([a-z0-9_.-]+,)*(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(,|\\s|$)|gpasswd\\s+(--?[a-z]+\\s+)*(-a|--add)\\s+\\S+\\s+(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|$)|(adduser|addgroup)\\s+(--?[a-z-]+\\s+)*[^\\s-]\\S*\\s+(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|$))")
+  e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c,
+      c.name in ["usermod", "useradd"] &&
+        c.args.matches("(?m)^((-a?G|--groups)\\n|--groups=|-a?G)([a-z0-9_.-]+,)*(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(,.*)?$") ||
+      c.name == "gpasswd" &&
+        c.args.matches("(?m)^(-a|--add)\\n.*\\n(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)$") ||
+      c.name.matches("^(adduser|addgroup)$") &&
+        c.args.matches("\\A(--?[a-z-]+\\n)*([^\\n-].*)?\\n(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\n|\\z)") ||
+      c.file_writes.exists(f, f.op in ["write", "append", "edit", "move_to"] && f.path.matches("(^|/)etc/(group|gshadow)$"))
+    ) ||
+    unread_text(e, t, t.matches("(?i)(^|[;&|]\\s*)(sudo\\s+)?((usermod|useradd)\\s+(--?[a-z]+\\s+)*(-a?G|--groups)(\\s+|=)([a-z0-9_.-]+,)*(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(,|\\s|$)|gpasswd\\s+(--?[a-z]+\\s+)*(-a|--add)\\s+\\S+\\s+(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|$)|(adduser|addgroup)\\s+(--?[a-z-]+\\s+)*[^\\s-]\\S*\\s+(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|$))"))
+  )
 
 emit:
   reason: "Account added to a root-equivalent or admin group (standing escalation to root)"
 
 tests:
+  - name: useradd_with_docker_group
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo useradd -m -G docker,video build" }
+        session: { id: s1 }
+  - name: useradd_with_groups_long_form
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "useradd --groups=sudo --shell /bin/bash helper" }
+        session: { id: s1 }
+  - name: useradd_without_a_privileged_group
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo useradd -m -G video,audio build" }
+        session: { id: s1 }
+  - name: group_file_appended_by_a_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'docker:x:999:agent' | sudo tee -a /etc/group" }
+        session: { id: s1 }
+  - name: group_file_edited_in_place
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sed -i 's/^sudo:x:27:$/sudo:x:27:agent/' /etc/group" }
+        session: { id: s1 }
+  - name: group_file_only_read
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -E '^(docker|sudo):' /etc/group" }
+        session: { id: s1 }
   - name: usermod_docker_group
     verdict: match
     events:
@@ -96,5 +153,83 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'remember to run docker compose up'" }
+        session: { id: s1 }
+  - name: usermod_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo bash -c 'groupadd -f docker && usermod -aG docker agent'" }
+        session: { id: s1 }
+  - name: usermod_by_absolute_path_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo /usr/sbin/usermod -aG wheel ci" }
+        session: { id: s1 }
+  - name: usermod_group_among_several_for_a_variable_account
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo usermod -a -G video,docker,plugdev \"$USER\"" }
+        session: { id: s1 }
+  - name: usermod_groups_attached_to_the_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "usermod --append --groups=libvirt,kvm agent" }
+        session: { id: s1 }
+  - name: gpasswd_variable_account_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo gpasswd -a $USER docker" }
+        session: { id: s1 }
+  - name: adduser_variable_account_with_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo adduser --quiet \"$USER\" sudo" }
+        session: { id: s1 }
+  - name: usermod_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'id ci; sudo usermod -aG docker ci'" }
+        session: { id: s1 }
+  - name: usermod_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: runner setup; sudo usermod -aG docker ci'" }
+        session: { id: s1 }
+  - name: usermod_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nOn the old runner we ran: apt-get install docker.io; usermod -aG docker ci\nEOF" }
+        session: { id: s1 }
+  - name: addgroup_creates_a_group
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo addgroup --system docker" }
+        session: { id: s1 }
+  - name: usermod_group_with_a_longer_name
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo usermod -aG docker-users,video agent" }
+        session: { id: s1 }
+  - name: usermod_handed_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'id ci; sudo usermod -aG docker ci'" }
+        session: { id: s1 }
+  - name: usermod_named_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: runner setup; sudo usermod -aG docker ci' && ./run-tests.sh" }
         session: { id: s1 }
 

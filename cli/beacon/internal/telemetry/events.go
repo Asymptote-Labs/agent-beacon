@@ -1,0 +1,215 @@
+package telemetry
+
+// Every event, property and value the CLI sends is named here, so docs/cli/telemetry.mdx can be
+// checked against one list and nothing reaches PostHog under a name invented at a call site.
+
+// PostHog's own event and property names.
+const (
+	// eventSet updates person properties without recording a product event.
+	eventSet = "$set"
+
+	propSet                  = "$set"
+	propSetOnce              = "$set_once"
+	propProcessPersonProfile = "$process_person_profile"
+)
+
+// Super properties, sent with every event.
+const (
+	PropProduct       = "product"
+	PropSurface       = "surface"
+	PropBeaconVersion = "beacon_version"
+	PropOS            = "os"
+	PropArch          = "arch"
+	PropInstallMode   = "install_mode"
+	PropInstallMethod = "install_method"
+	PropIsCI          = "is_ci"
+	PropInvokingAgent = "invoking_agent"
+)
+
+// Super property values.
+const (
+	ProductBeacon = "beacon"
+	SurfaceCLI    = "cli"
+
+	InstallModeUser   = "user"
+	InstallModeSystem = "system"
+)
+
+// Values of invoking_agent: the coding agent whose shell ran this command, or none.
+const (
+	AgentNone       = "none"
+	AgentClaudeCode = "claude_code"
+	AgentCursor     = "cursor"
+	AgentCodex      = "codex"
+	AgentGeminiCLI  = "gemini_cli"
+	AgentOpenCode   = "opencode"
+	AgentCline      = "cline"
+)
+
+// Person properties, set only on the person once an email is known. The email itself is never an
+// event property.
+const (
+	PersonEmail        = "email"
+	PersonHasBeacon    = "has_beacon"
+	PersonBeaconUserID = "beacon_user_id"
+	PersonFirstProduct = "first_product"
+	PersonFirstSurface = "first_surface"
+)
+
+// GroupCompany is the group type an identified person's events are attributed to: the domain of a
+// work email.
+const GroupCompany = "company"
+
+// Install events, sent by `beacon endpoint install` (not by a dry run).
+const (
+	// EventInstallStarted is sent once the install is past its dry-run return, before the wizard.
+	EventInstallStarted = "cli_install_started"
+	// EventInstallCompleted is sent when the install finishes successfully, after hooks, skills,
+	// the session backfill and any Beacon Cloud connect.
+	EventInstallCompleted = "cli_install_completed"
+)
+
+// Install event properties.
+const (
+	// PropSetupPath is how the install is being driven, one of the SetupPath values.
+	PropSetupPath = "setup_path"
+	// PropDetectedHarnesses lists the agent runtimes discovery found, by their canonical names.
+	PropDetectedHarnesses = "detected_harnesses"
+	// PropIsFirstForDevice is true when this machine had never finished onboarding before the
+	// install started.
+	PropIsFirstForDevice = "is_first_for_device"
+	// PropDestination is where the endpoint's agent telemetry goes, a Destination value.
+	PropDestination = "destination"
+	// PropCloudConnect says whether this install connected the endpoint to Beacon Cloud, a
+	// CloudConnect value. Only a connect enrolls the device and reports its history, which is
+	// what sends cloud_backfill_received.
+	PropCloudConnect = "cloud_connect"
+	// PropHarnessesConfigured lists the install targets (OTLP and hooks) the install configured.
+	PropHarnessesConfigured = "harnesses_configured"
+	// PropBackfillSessionCount is how many sessions the install's session backfill wrote records
+	// for, 0 when the backfill was off.
+	PropBackfillSessionCount = "backfill_session_count"
+	// PropDurationMS is the install's wall time in milliseconds.
+	PropDurationMS = "duration_ms"
+)
+
+// Values of setup_path.
+const (
+	// SetupPathPackage is the system package's install script (BEACON_INSTALL_SOURCE=package).
+	SetupPathPackage = "package"
+	// SetupPathCI is a CI job.
+	SetupPathCI = "ci"
+	// SetupPathWizard is an interactive install that shows the onboarding wizard.
+	SetupPathWizard = "wizard"
+	// SetupPathAgent is a coding agent running the install without a terminal.
+	SetupPathAgent = "agent"
+	// SetupPathNoninteractive is everything else: scripts, MDM, a terminal past onboarding.
+	SetupPathNoninteractive = "noninteractive"
+)
+
+// Values of destination.
+const (
+	DestinationLocal = "local"
+	DestinationCloud = "cloud"
+)
+
+// Values of cloud_connect.
+const (
+	// CloudConnectNew is an install that connected to Beacon Cloud itself.
+	CloudConnectNew = "new"
+	// CloudConnectExisting is an install that kept a connection an earlier run made.
+	CloudConnectExisting = "existing"
+	// CloudConnectNone is an install that stays local.
+	CloudConnectNone = "none"
+)
+
+// Identity events. Each is sent right after Identify, as the person it names, who is known from
+// then on.
+const (
+	// EventSignInCompleted is sent when a Beacon sign-in succeeds.
+	EventSignInCompleted = "cli_sign_in_completed"
+	// EventEmailSubmitted is sent when a person gives an email without signing in.
+	EventEmailSubmitted = "cli_email_submitted"
+	// EventEmailPromptSkipped is sent when a person leaves the install wizard's optional email
+	// question blank. It is not followed by Identify.
+	EventEmailPromptSkipped = "cli_email_prompt_skipped"
+)
+
+// Identity event properties.
+const (
+	// PropTrigger is what started a sign-in, a Trigger value.
+	PropTrigger = "trigger"
+	// PropEmailSource is where a submitted email came from, an EmailSource value.
+	PropEmailSource = "email_source"
+	// PropEmailDomainKind says whether a submitted email is at a work or a personal domain, never
+	// the domain itself.
+	PropEmailDomainKind = "email_domain_kind"
+)
+
+// Values of trigger.
+const (
+	TriggerWizard       = "wizard"
+	TriggerLoginCommand = "login_command"
+)
+
+// Values of email_source.
+const (
+	EmailSourceFlag   = "flag"
+	EmailSourceEnv    = "env"
+	EmailSourcePrompt = "prompt"
+)
+
+// Values of email_domain_kind.
+const (
+	EmailDomainWork = "work"
+	EmailDomainFree = "free"
+)
+
+// EventTraceRecorded is sent once per agent session a local-only endpoint records for the first
+// time, from the install's session backfill and the scheduled session sync. An endpoint that
+// forwards to Beacon Cloud does not send it: the cloud counts its own sessions.
+const EventTraceRecorded = "cli_trace_recorded"
+
+// Trace event properties.
+const (
+	// PropHarness is the runtime's normalized harness name, as the runtime log carries it, when it
+	// is one of traceHarnesses, else TraceHarnessOther.
+	PropHarness = "harness"
+	// PropSource says how the session was found, a TraceSource value.
+	PropSource = "source"
+)
+
+// Values of source.
+const (
+	// TraceSourceBackfill is the install's read of recent session history.
+	TraceSourceBackfill = "backfill"
+	// TraceSourceLive is the scheduled session sync, reading sessions as they happen.
+	TraceSourceLive = "live"
+)
+
+// TraceHarnessOther is the harness property of a session whose harness name is not one Beacon's own
+// collectors write. Any local process can send OTLP with a service name of its choosing, which
+// NormalizeHarnessName passes through, so only names from this fixed list leave the machine.
+const TraceHarnessOther = "other"
+
+// traceHarnesses are the harness names cli_trace_recorded may carry: what NormalizeHarnessName
+// resolves to, and the hook platforms it passes through unchanged.
+var traceHarnesses = map[string]bool{
+	"antigravity_cli": true, "chatgpt_web": true, "claude_agent_sdk": true, "claude_code": true,
+	"claude_cowork": true, "claude_web": true, "cline": true, "codex_cli": true, "codex_desktop": true,
+	"copilot_cli": true, "cursor": true, "deepseek_harness": true, "devin": true, "devin-cli": true,
+	"devin-desktop": true, "factory": true, "gemini_cli": true, "goose": true, "grok": true,
+	"grok_bot": true, "harness2": true, "hermes": true, "kimi_code": true, "kiro": true,
+	"muse_code": true, "omo_senpi": true, "omp": true, "openclaw_gateway": true, "opencode": true,
+	"openhands": true, "pi_cli": true, "prime_agent": true, "qwen_code": true, "vercel_fx": true,
+	"vscode_copilot": true,
+}
+
+// traceHarness is the harness property for name: name itself when it is in traceHarnesses, else
+// TraceHarnessOther.
+func traceHarness(name string) string {
+	if traceHarnesses[name] {
+		return name
+	}
+	return TraceHarnessOther
+}

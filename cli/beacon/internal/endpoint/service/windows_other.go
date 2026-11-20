@@ -37,6 +37,9 @@ func serviceCurrent(scmService) (bool, error) { return false, errNotWindows("ins
 // never a Windows service to begin with.
 func removeService(string, time.Duration, bool) error { return nil }
 
+// serviceRegistered is false off Windows: there is no SCM to have registered anything.
+func serviceRegistered(string) bool { return false }
+
 func restartService(string, time.Duration, bool) error { return errNotWindows("restart") }
 
 func queryService(name string) Status {

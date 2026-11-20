@@ -175,6 +175,8 @@ if (-not [string]::IsNullOrWhiteSpace($dashboard)) { $installArgs += @('--dashbo
 # ordinary users nothing at all. Do not add an icacls grant here: a second, broader grant is how
 # the log directory once became writable enough to redirect the collector's writes.
 Write-BeaconPackageLog "beacon: installing the system endpoint"
+# Tells the CLI this install came from the package, for its install telemetry (setup_path).
+$env:BEACON_INSTALL_SOURCE = 'package'
 $code = Invoke-BeaconBounded -Beacon $beaconBin -Arguments $installArgs -TimeoutSeconds $installTimeoutSeconds
 if ($code -ne 0) {
     Write-BeaconPackageLog "beacon endpoint install failed with exit code $code; log: $script:BeaconPackageLogPath"

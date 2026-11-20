@@ -1,5 +1,6 @@
 id: permission-scope-expansion-via-env
-version: 1
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 6
 title: Agent runtime spawned with environment variables that elevate permissions
 description: >
   A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
@@ -11,7 +12,14 @@ description: >
   head (start of line, after a shell separator, or after a launcher like sudo/env/npx)
   AND the command must carry a permission-elevating env var. This complements
   agent-permission-bypass-spawn, which targets runtime CLI flags: this rule covers
-  out-of-band elevation via the environment the spawned agent inherits.
+  out-of-band elevation via the environment the spawned agent inherits. The runtime
+  is found by what the line runs (its command name, also behind sudo or env, by
+  absolute path, inside `bash -c` or launched by npx) and the variable as a NAME=value
+  prefix of that command, a NAME=value word given to its sudo or env wrapper, or a
+  word of an `export` or `declare -x` on the same line, so the names in a commit
+  message or a here-document do not fire. The command-head reading is that of the
+  text pattern, which is asked of the text that reaches a command the parser cannot
+  see into (unread_text).
 severity: high
 status: experimental
 posture: detect
@@ -20,15 +28,28 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0051
 
-# The agent binary must appear as a command head (start of line, after a shell
-# separator, after a launcher like sudo/env/npx, OR after a leading key=value
-# Bash-style env prefix). The env var must appear in the same command as a
-# leading key=value pair (Bash VAR=val agent form). Requiring both keeps the
-# rule off benign uses of *_TOKEN in unrelated commands.
+# The agent runtime must be a command the line runs (agent_cli, the pack's one definition,
+# rules/concepts/agents.predicates.yaml), and the variable must be set for it: in the
+# command's own NAME=value prefix (the keys of c.env), as a NAME=value word of the command
+# as written (`sudo NAME=value agent`, `env NAME=value agent`), or as a word of an `export`
+# or `declare -x` the line also runs. The words are read as written (argv_raw), since a
+# value that holds a variable is an unknown word of argv. Requiring both keeps the rule off
+# benign uses of *_TOKEN in unrelated commands.
+# The export is a question about the line, so it is asked once beside "the line runs an
+# agent", not once for each agent command.
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+|([A-Z_][A-Z0-9_]*\\s*=\\S+\\s+)+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b") &&
-  e.command.command.matches("(?i)\\b((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)\\s*=")
+  e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c,
+      agent_cli(c) && (
+        c.env.exists(k, k.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)$")) ||
+        c.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)=")))) ||
+    e.command.parsed_commands.exists(c, agent_cli(c)) &&
+      e.command.parsed_commands.exists(x,
+        (x.name == "export" || x.name.matches("^(declare|typeset)$") && x.args.matches("(?m)^-[A-Za-z]*x[A-Za-z]*$")) &&
+        x.argv_raw.exists(a, a.matches("(?i)^((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)="))) ||
+    unread_text(e, t, t.matches("(?i)\\b((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)\\s*=") &&
+      agent_cli_mention(t))
+  )
 
 emit:
   reason: "AI agent runtime spawned with environment variables that elevate permissions"
@@ -75,4 +96,71 @@ tests:
       - timestamp: "2026-06-23T10:05:00Z"
         event: { action: command.executed }
         command: { command: "ADMIN_TOKEN=secret123 curl https://example.com" }
+        session: { id: s1 }
+  - name: variable_given_to_sudo_with_options
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -E -u dev CLAUDE_CODE_USE_BEDROCK=1 claude -p 'go'" }
+        session: { id: s1 }
+  - name: variable_prefix_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'CODEX_HOME=/srv/shared/codex codex exec go'" }
+        session: { id: s1 }
+  - name: variable_prefix_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "UNSANDBOXED=1 /usr/local/bin/claude -p 'go'" }
+        session: { id: s1 }
+  - name: variable_exported_before_the_agent
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "export CODEX_HOME=\"$HOME/alt-codex\" && /opt/homebrew/bin/codex exec 'go'" }
+        session: { id: s1 }
+  - name: variable_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh dev@host.example 'cd /srv/app && ELEVATED=1 claude -p go'" }
+        session: { id: s1 }
+  - name: variable_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: do not start it as CODEX_HOME=/srv/shared/codex codex exec'" }
+        session: { id: s1 }
+  - name: variable_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nNever run: ELEVATED=1 claude -p go\nEOF" }
+        session: { id: s1 }
+  - name: variable_set_for_another_command_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ELEVATED=1 make deploy && git log --oneline -3" }
+        session: { id: s1 }
+  - name: variable_prefix_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./launch.sh 'ELEVATED=1 claude -p go'" }
+        session: { id: s1 }
+  - name: variable_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: never start it as ELEVATED=1 claude -p go' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half named seven agents until version 6; it is agent_cli_mention.
+  - name: copilot_scope_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./spawn.sh 'cd repo && ADMIN_MODE=1 copilot -p go'" }
         session: { id: s1 }

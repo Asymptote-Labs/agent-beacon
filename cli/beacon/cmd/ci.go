@@ -163,7 +163,7 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 			_ = json.NewEncoder(os.Stdout).Encode(execResult)
 		}
 		if childExit != 0 {
-			os.Exit(childExit)
+			exitProcess(childExit)
 		}
 		return finishErr
 	}
@@ -181,7 +181,7 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 		fmt.Println(execResult.ArtifactMessage)
 	}
 	if childExit != 0 {
-		os.Exit(childExit)
+		exitProcess(childExit)
 	}
 	return nil
 }

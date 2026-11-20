@@ -12,8 +12,15 @@
 # recorded in its install manifest -- which includes config.json and otelcol.yaml -- unconditionally,
 # because that is what uninstall means at the CLI level. So the files are set aside and put back, the
 # same stash-and-restore packaging/linux/nfpm/preremove.sh performs and for the same reason.
+#
+# -UpgradingProductCode is the MSI's UPGRADINGPRODUCTCODE: set only when this removal is the first
+# half of a major upgrade. The script then sets BEACON_PACKAGE_UPGRADE=1 for `endpoint uninstall`,
+# so an edition that keeps state across upgrades (the enterprise edition keeps enforcement on) can
+# tell an upgrade from a removal. A removal passes an empty value.
 [CmdletBinding()]
-param()
+param(
+    [string]$UpgradingProductCode = ''
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -60,11 +67,35 @@ function Stop-BeaconService {
 }
 
 # The services that hold a file the package is about to remove or replace: the collector, and the
-# Sentinel forwarder's Vector when one is set up.
+# Sentinel and Beacon Cloud forwarders' Vector when they are set up. `endpoint uninstall
+# --keep-config` keeps a Beacon Cloud connection's state and removes only its service, which the
+# install action of an upgrade registers again.
 function Stop-BeaconServices {
     param([string]$InstallRoot)
     Stop-BeaconService -Name 'BeaconCollector' -Executable (Join-Path $InstallRoot 'bin\beacon-otelcol.exe')
     Stop-BeaconService -Name 'BeaconSentinelForwarder' -Executable (Join-Path $InstallRoot 'bin\vector.exe')
+    Stop-BeaconService -Name 'BeaconAsymptoteForwarder' -Executable (Join-Path $InstallRoot 'bin\vector.exe')
+}
+
+# Ends the user-mode collectors and Beacon Cloud forwarders still running the package's own
+# beacon-otelcol.exe or vector.exe. Windows has no per-user service manager, so a user-mode endpoint
+# runs them as plain processes in that person's session, and nothing `endpoint uninstall --system`
+# does reaches them; the package could then neither replace nor remove those files. Only processes
+# whose image is this package's binary are touched, whichever account runs them. They come back at
+# that person's next `beacon endpoint repair` or install, which restarts them.
+function Stop-BeaconUserProcesses {
+    param([string]$InstallRoot)
+    $ErrorActionPreference = 'Continue'
+    foreach ($binary in @('beacon-otelcol.exe', 'vector.exe')) {
+        $image = Join-Path $InstallRoot "bin\$binary"
+        $processName = [System.IO.Path]::GetFileNameWithoutExtension($binary)
+        Get-Process -Name $processName -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and ($_.Path -eq $image) } |
+            ForEach-Object {
+                Write-BeaconPackageLog "terminating $processName process $($_.Id), which runs $image"
+                Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+            }
+    }
 }
 
 function Get-EnvOrDefault {
@@ -77,6 +108,11 @@ function Get-EnvOrDefault {
 $installRoot = Get-EnvOrDefault 'BEACON_INSTALL_ROOT' (Join-Path $env:ProgramFiles 'Beacon')
 $beaconBin = Get-EnvOrDefault 'BEACON_BIN' (Join-Path $installRoot 'bin\beacon.exe')
 $purge = Get-EnvOrDefault 'BEACON_PURGE' '0'
+if (-not [string]::IsNullOrWhiteSpace($UpgradingProductCode)) {
+    # Inherited by the bounded `endpoint uninstall` below (ProcessStartInfo copies this environment).
+    $env:BEACON_PACKAGE_UPGRADE = '1'
+    Write-BeaconPackageLog "beacon: removing the previous version as part of an upgrade to $UpgradingProductCode"
+}
 
 if (-not (Test-Path -LiteralPath $beaconBin)) {
     # Nothing to do, and not an error. An uninstall must not fail because the thing it removes is
@@ -164,6 +200,9 @@ if ($code -eq $script:BeaconTimeoutExitCode) {
     # removal over. A user who cannot uninstall the package has a worse problem than a leftover file.
     Write-BeaconPackageLog "beacon: endpoint uninstall exited $code; check 'beacon endpoint status --system'"
 }
+# After `endpoint uninstall`, which has stopped the services, so what is left running the package's
+# binaries is a user-mode endpoint's.
+Stop-BeaconUserProcesses -InstallRoot $installRoot
 
 if ($null -ne $stash) {
     try {

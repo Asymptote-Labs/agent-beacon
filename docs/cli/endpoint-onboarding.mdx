@@ -64,6 +64,11 @@ are:
 
 An SSH session with X11 forwarding (`ssh -X`) counts as having a display.
 
+Finishing without an account asks for your email, optionally, unless the install was
+already given one with `--email` or `BEACON_EMAIL`. It is recorded in
+`~/.beacon/profile.json` and used for [CLI telemetry](/cli/telemetry#identity), never added
+to your agents' telemetry. Leave it blank and press <kbd>enter</kbd> to skip.
+
 Signing in establishes account identity only. It does not register a managed endpoint,
 start Vector, or send telemetry. Beacon Cloud is preselected; choose Local explicitly
 to opt out of managed forwarding.
