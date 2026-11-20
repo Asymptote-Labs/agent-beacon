@@ -195,7 +195,7 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 	}
 
 	dir := Dir(true)
-	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
+	if info, err := os.Stat(dir); err != nil || (testenv.HasPOSIXFileModes() && info.Mode().Perm() != 0o700) {
 		t.Fatalf("asymptote dir mode: %v %v", info, err)
 	}
 	for name, mode := range map[string]os.FileMode{SecretsFileName: 0o600, EnrollmentFileName: 0o600, VectorConfigName: 0o644} {
@@ -203,11 +203,11 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if info.Mode().Perm() != mode {
+		if testenv.HasPOSIXFileModes() && info.Mode().Perm() != mode {
 			t.Fatalf("%s mode = %o, want %o", name, info.Mode().Perm(), mode)
 		}
 	}
-	if info, err := os.Stat(DataDir(true)); err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+	if info, err := os.Stat(DataDir(true)); err != nil || !info.IsDir() || (testenv.HasPOSIXFileModes() && info.Mode().Perm() != 0o700) {
 		t.Fatalf("data dir: %v %v", info, err)
 	}
 

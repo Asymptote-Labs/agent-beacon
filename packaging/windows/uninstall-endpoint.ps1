@@ -60,11 +60,14 @@ function Stop-BeaconService {
 }
 
 # The services that hold a file the package is about to remove or replace: the collector, and the
-# Sentinel forwarder's Vector when one is set up.
+# Sentinel and Beacon Cloud forwarders' Vector when they are set up. `endpoint uninstall
+# --keep-config` keeps a Beacon Cloud connection's state and removes only its service, which the
+# install action of an upgrade registers again.
 function Stop-BeaconServices {
     param([string]$InstallRoot)
     Stop-BeaconService -Name 'BeaconCollector' -Executable (Join-Path $InstallRoot 'bin\beacon-otelcol.exe')
     Stop-BeaconService -Name 'BeaconSentinelForwarder' -Executable (Join-Path $InstallRoot 'bin\vector.exe')
+    Stop-BeaconService -Name 'BeaconAsymptoteForwarder' -Executable (Join-Path $InstallRoot 'bin\vector.exe')
 }
 
 function Get-EnvOrDefault {

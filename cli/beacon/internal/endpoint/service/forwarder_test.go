@@ -224,8 +224,8 @@ WantedBy=multi-user.target
 		strings.Contains(plist, "EnvironmentVariables") {
 		t.Fatalf("plist changed:\n%s", plist)
 	}
-	if (ForwarderManager{}).spec().WindowsService != "" {
-		t.Fatal("the Asymptote forwarder must not be offered as a Windows service")
+	if got := (ForwarderManager{}).spec().WindowsService; got != ForwarderWindowsService {
+		t.Fatalf("the Asymptote forwarder's Windows service = %q, want %q", got, ForwarderWindowsService)
 	}
 }
 
@@ -274,16 +274,36 @@ func TestForwarderSpecReachesTheUnitPlistAndNames(t *testing.T) {
 	}
 }
 
-// A forwarder with a Windows service is supported only by a system install on Windows; the
-// Asymptote forwarder keeps refusing there with the message it always had.
+// A forwarder with a Windows service is supported only by a system install on Windows, and that
+// includes the Asymptote forwarder; one without a Windows service is refused there.
 func TestForwarderWindowsServiceSupport(t *testing.T) {
 	spec := ForwarderSpec{WindowsService: "BeaconTestForwarder", Label: "l", SystemdUnit: "u.service"}
 	system := ForwarderManager{Kind: KindWindowsService, Spec: spec}
 	user := ForwarderManager{Kind: KindWindowsService, Spec: spec, UserMode: true}
-	asymptote := ForwarderManager{Kind: KindWindowsService}
+	asymptoteSystem := ForwarderManager{Kind: KindWindowsService}
+	asymptoteUser := ForwarderManager{Kind: KindWindowsService, UserMode: true}
+	noWindows := ForwarderManager{Kind: KindWindowsService, Spec: ForwarderSpec{Label: "l", SystemdUnit: "u.service"}}
 
-	if asymptote.Supported() || !strings.Contains(asymptote.UnsupportedReason(), "install-pack") {
-		t.Fatalf("Asymptote forwarder on Windows: supported=%t reason=%q", asymptote.Supported(), asymptote.UnsupportedReason())
+	if noWindows.Supported() || !strings.Contains(noWindows.UnsupportedReason(), "install-pack") {
+		t.Fatalf("forwarder without a Windows service: supported=%t reason=%q", noWindows.Supported(), noWindows.UnsupportedReason())
+	}
+	if asymptoteUser.Supported() || asymptoteUser.RestoresRegistration() {
+		t.Fatal("a user-mode Asymptote forwarder must be refused on Windows")
+	}
+	if got := asymptoteSystem.Label(); got != ForwarderWindowsService {
+		t.Fatalf("Asymptote Windows label = %q", got)
+	}
+	if runtime.GOOS == "windows" {
+		if !asymptoteSystem.Supported() || !asymptoteSystem.RestoresRegistration() {
+			t.Fatalf("system Asymptote forwarder on Windows: supported=%t reason=%q", asymptoteSystem.Supported(), asymptoteSystem.UnsupportedReason())
+		}
+	} else if asymptoteSystem.Supported() || asymptoteSystem.RestoresRegistration() || asymptoteSystem.Installed() {
+		t.Fatal("off Windows the Asymptote Windows service must be neither supported, restored nor installed")
+	}
+	for _, kind := range []Kind{KindLaunchd, KindSystemd} {
+		if (ForwarderManager{Kind: kind}).RestoresRegistration() {
+			t.Fatalf("%s forwarder must not re-register a removed unit", kind)
+		}
 	}
 	if user.Supported() {
 		t.Fatal("a user-mode forwarder must be refused on Windows")
