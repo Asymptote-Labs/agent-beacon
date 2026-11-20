@@ -99,7 +99,9 @@ describe("beacon cline plugin", () => {
     await plugin.hooks.afterRun({ taskId: "cli-task" })
 
     expect(sent[0].sessionId).toBe("hook-session")
+    // The plugin forwards both; Go's taskId-first lookup picks the per-hook task.
     expect(sent[1].taskId).toBe("cli-task")
+    expect(sent[1].sessionId).toBe("core-session")
   })
 
   test("reads a nested roots array", async () => {
