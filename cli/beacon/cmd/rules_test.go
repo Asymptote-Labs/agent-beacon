@@ -19,6 +19,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/detect"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 	"github.com/spf13/cobra"
 )
 
@@ -88,10 +89,10 @@ func TestRulesLintFailsOnFixtureMismatch(t *testing.T) {
 }
 
 // newerSpecRuleYAML declares a spec newer than this binary supports.
-var newerSpecRuleYAML = strings.Replace(strings.Replace(validRuleYAML, "id: cli-test-rule\n", "id: cli-future-rule\nspec: threat-rules/v1.9\n", 1),
+var newerSpecRuleYAML = strings.Replace(strings.Replace(validRuleYAML, "id: cli-test-rule\n", "id: cli-future-rule\nspec: "+testenv.FutureSpec()+"\n", 1),
 	"emit:", "future_field: true\nemit:", 1)
 
-const upgradeMessage = `rule "cli-future-rule" requires threat-rules/v1.9, but this Beacon supports up to threat-rules/v1.3; upgrade Beacon to load it`
+var upgradeMessage = `rule "cli-future-rule" requires ` + testenv.FutureSpec() + `, but this Beacon supports up to ` + threatrules.SupportedSpec + `; upgrade Beacon to load it`
 
 func TestRulesLintReportsNewerSpecAsSkip(t *testing.T) {
 	dir := t.TempDir()

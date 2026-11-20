@@ -3,6 +3,7 @@ package shellcmd
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -92,6 +93,15 @@ func TestFileEffects(t *testing.T) {
 		{"cmd >| forced.txt", []string{"write forced.txt"}},
 		{"go build &> build.log", []string{"write build.log"}},
 		{"make 2>/dev/null", nil},
+		// A descriptor, also moved (3-), and a device are no file, whatever writes to them.
+		{"exec 1>&3-", nil},
+		{"echo hi >&2- 3>&-", nil},
+		{"echo x | tee /dev/stderr out.log", []string{"write out.log"}},
+		{"cp build.log /dev/null; mv a.txt /dev/null", []string{"move_from a.txt"}},
+		// /dev/.. climbs out of /dev: the file written is /etc/hosts, kept as written.
+		{"echo x | sudo tee -a /dev/../etc/hosts", []string{"append /dev/../etc/hosts"}},
+		{"cp k.pub /dev/./../home/u/.ssh/authorized_keys", []string{"write /dev/./../home/u/.ssh/authorized_keys"}},
+		{"echo x > /dev/./null", nil},
 		{"cat a.txt | tee copy.txt", []string{"write copy.txt"}},
 		{"sed -i 's/a/b/' x.go y.go", []string{"edit x.go", "edit y.go"}},
 		{"sed -i.bak -e 's/a/b/' x.go", []string{"edit x.go"}},
@@ -122,6 +132,7 @@ func TestFileEffects(t *testing.T) {
 		{"/usr/bin/env FOO=1 rm a.txt", []string{"delete a.txt"}},
 		{"sudo -E tee /etc/app.conf < in.txt", []string{"write /etc/app.conf"}},
 		{"sudo -i rm old.txt", nil}, // a login shell starts in the target user's home
+		{"sudo -l rm old.txt", nil}, // asks whether rm is allowed
 		{"env FOO=1 rm a.txt", []string{"delete a.txt"}},
 		{"env -C sub rm a.txt", nil},
 		{"rm a.txt # cleanup b.txt", []string{"delete a.txt"}},
@@ -199,9 +210,129 @@ func TestFileEffects(t *testing.T) {
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("FileEffects(%q) = %q, want %q", tc.command, got, tc.want)
 		}
-		if all := FileEffects(commands); len(all) != len(got) {
-			t.Errorf("FileEffects(Parse(%q)) has %d effects, want %d", tc.command, len(all), len(got))
+		// Every effect is a write, in the same order: a write only adds the paths an effect
+		// leaves out.
+		for _, c := range commands {
+			writes := c.FileWrites()
+			for _, e := range c.FileEffects() {
+				i := slices.Index(writes, e)
+				if i < 0 {
+					t.Errorf("FileWrites(%q) = %v, which lacks the effect %v", tc.command, writes, e)
+					break
+				}
+				writes = writes[i+1:]
+			}
 		}
+	}
+}
+
+// TestFileWrites pins the writes whose path is only known as written, which FileEffects leaves
+// out: a rule asks whether a command writes a login file or an agent's settings, and those are
+// under a home directory or a variable more often than not.
+func TestFileWrites(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    []string
+	}{
+		// Redirections.
+		{"echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc", []string{"append ~/.bashrc"}},
+		{`printf '%s\n' "$KEY" > "$HOME/.ssh/authorized_keys"`, []string{"write $HOME/.ssh/authorized_keys"}},
+		{"sudo bash -c 'cat key.pub >> ~root/.ssh/authorized_keys'", nil}, // the script is its own parse
+		{"make > \"$out\" 2>&1", []string{"write $out"}},
+		{"make >&\"$log\"", nil}, // may be a descriptor
+		{"echo x > \"$TTY\" 2> /dev/null", []string{"write $TTY"}},
+		{"echo x > ''", nil},
+		// The operands of the commands FileEffects reads.
+		{"rm -f ~/.bash_history", []string{"delete ~/.bash_history"}},
+		{"truncate -s 0 $HISTFILE", []string{"truncate $HISTFILE"}},
+		{"tee -a ~/.zshrc ./local.log", []string{"append ~/.zshrc", "append ./local.log"}},
+		{"touch \"$dir/.keep\"", []string{"touch $dir/.keep"}},
+		{"sed -i '' 's/a/b/' ~/.claude/settings.json", []string{"edit ~/.claude/settings.json"}},
+		{"sed -i \"s/$A/b/\" conf.ini", []string{"edit conf.ini"}},
+		{"cp hooks.json ~/.cursor/hooks.json", []string{"write ~/.cursor/hooks.json"}},
+		{"shred -u ~/.bash_history", []string{"delete ~/.bash_history"}},
+		{"shred -n 3 -z disk.img", []string{"write disk.img"}},
+		{"cp -r skills ~/.claude/", []string{"write ~/.claude/skills"}},
+		{"cp a.md b.md \"$DEST\"", []string{"write $DEST/a.md", "write $DEST/b.md"}},
+		{"cp ~/.claude/settings.json /tmp/backup.json", []string{"write /tmp/backup.json"}},
+		{"install -m 600 key ~/.ssh/id_ed25519", []string{"write ~/.ssh/id_ed25519"}},
+		{"ln -sf \"$PWD/rc\" ~/.zshrc", []string{"link ~/.zshrc"}},
+		{"mv ~/.zsh_history /tmp/h", []string{"move_from ~/.zsh_history", "move_to /tmp/h"}},
+		{"mv draft.md ~/notes/", []string{"move_from draft.md", "move_to ~/notes/draft.md"}},
+		// A command whose words are all known writes its effects and nothing more.
+		{"cp a.txt out/b.txt && echo ok > log.txt", []string{"write out/b.txt", "write log.txt"}},
+		// What is not a write is not one as written either: a source, a read, a device.
+		{"cat ~/.bashrc", nil},
+		{"cp ~/.bashrc \"$BACKUP\" 2> /dev/null", []string{"write $BACKUP"}},
+		// An option whose value is unknown is still an option, for writes as for reads.
+		{`cp --target-directory="$HOME/.ssh" authorized_keys`, []string{"write $HOME/.ssh/authorized_keys"}},
+		{`cp --suffix="$S" a b`, []string{"write b"}},
+		{`truncate --size="$N" ~/.bash_history`, []string{"truncate ~/.bash_history"}},
+		// A header's value is no URL to save a download under.
+		{`curl -O https://a.example/x --header "Referer: https://b.example/y"`, []string{"write x"}},
+		{"grep -q x ~/.zshrc > /dev/null", nil},
+	} {
+		commands, err := Parse(tc.command)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", tc.command, err)
+			continue
+		}
+		var got []string
+		for _, c := range commands {
+			for _, e := range c.FileWrites() {
+				got = append(got, string(e.Op)+" "+e.Path)
+			}
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("FileWrites(%q) = %q, want %q", tc.command, got, tc.want)
+		}
+	}
+}
+
+// export, declare, local, readonly and typeset are commands of the line: the builtin is the
+// name, and each option and NAME=value is one word, known when its value is.
+func TestDeclarationsAreCommands(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    []string // per command: name, then its words as text, "?" + as written when unknown
+	}{
+		{"export HISTFILE=/dev/null; ls", []string{"export HISTFILE=/dev/null", "ls"}},
+		{"export -n HISTSIZE", []string{"export -n HISTSIZE"}},
+		{`export PATH="/tmp/bin:$PATH" EDITOR=vi`, []string{`export ?PATH="/tmp/bin:$PATH" EDITOR=vi`}},
+		{"declare -x HISTSIZE=0 && readonly HISTFILE", []string{"declare -x HISTSIZE=0", "readonly HISTFILE"}},
+		{"f() { local n=1; echo $n; }", []string{"local n=1", "echo ?$n"}},
+		{"typeset -a list=(a b)", []string{"typeset -a ?list=(a b)"}},
+		{"export T=$(cat .env)", []string{"export ?T=$(cat .env)", "cat .env"}},
+		{"export -p | grep TOKEN", []string{"export -p", "grep TOKEN"}},
+		{"sudo env FOO=1 export BAR=2", []string{"export BAR=2"}}, // a word of env, not a declaration
+		{"HISTFILE=/dev/null", []string{""}},                      // an assignment alone is no command
+	} {
+		commands, err := Parse(tc.command)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", tc.command, err)
+			continue
+		}
+		var got []string
+		for _, c := range commands {
+			words, _ := c.Unwrapped()
+			var text []string
+			for _, w := range words {
+				if w.Known {
+					text = append(text, w.Text)
+				} else {
+					text = append(text, "?"+w.Raw)
+				}
+			}
+			got = append(got, strings.Join(text, " "))
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("Parse(%q) runs %q, want %q", tc.command, got, tc.want)
+		}
+	}
+	// A declaration in a pipeline is a stage of it.
+	commands, _ := Parse("export -p | grep TOKEN")
+	if len(commands) != 2 || commands[0].Pipeline != commands[1].Pipeline || commands[1].Stage != 1 {
+		t.Errorf("export -p | grep: %+v", commands)
 	}
 }
 
@@ -242,7 +373,8 @@ func TestParseIncomplete(t *testing.T) {
 func plain(s string) Word { return Word{Text: s, Raw: s, Known: true, Unquoted: s} }
 
 func TestParse(t *testing.T) {
-	commands, err := Parse("FOO=1 BAR=\"$X\" sudo -u deploy /opt/bin/beacon share 2>&1 | tee -a out.log | sh\ncd sub; echo `rm x` > {a,b}.txt")
+	const line = "FOO=1 BAR=\"$X\" sudo -u deploy /opt/bin/beacon share 2>&1 | tee -a out.log | sh\ncd sub; echo `rm x` > {a,b}.txt"
+	commands, err := Parse(line)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,23 +388,35 @@ func TestParse(t *testing.T) {
 			Redirects: []Redirect{{Op: ">&", Fd: "2", Target: plain("1")}},
 			Pipeline:  1,
 			refs:      []wordRef{{place: refEnv, index: 1, name: "X"}},
+			source:    line,
+			end:       56,
+			unwrapped: unwrapped{at: 3, name: "beacon", program: "beacon"},
 		},
 		{
-			Argv:     []Word{plain("tee"), plain("-a"), plain("out.log")},
-			Offset:   59,
-			Pipeline: 1,
-			Stage:    1,
+			Argv:      []Word{plain("tee"), plain("-a"), plain("out.log")},
+			Offset:    59,
+			Pipeline:  1,
+			Stage:     1,
+			source:    line,
+			end:       73,
+			unwrapped: unwrapped{name: "tee", program: "tee"},
 		},
 		{
-			Argv:     []Word{plain("sh")},
-			Offset:   76,
-			Pipeline: 1,
-			Stage:    2,
+			Argv:      []Word{plain("sh")},
+			Offset:    76,
+			Pipeline:  1,
+			Stage:     2,
+			source:    line,
+			end:       78,
+			unwrapped: unwrapped{name: "sh", program: "sh"},
 		},
 		{
-			Argv:     []Word{plain("cd"), plain("sub")},
-			Offset:   79,
-			Pipeline: 2,
+			Argv:      []Word{plain("cd"), plain("sub")},
+			Offset:    79,
+			Pipeline:  2,
+			source:    line,
+			end:       85,
+			unwrapped: unwrapped{name: "cd", program: "cd"},
 		},
 		{
 			Argv:      []Word{plain("echo"), {Raw: "`rm x`", Unquoted: "`rm x`"}},
@@ -280,16 +424,24 @@ func TestParse(t *testing.T) {
 			Offset:    87,
 			Pipeline:  3,
 			AfterCD:   true,
+			dirSet:    true,
 			refs:      []wordRef{{place: refArg, index: 1, subst: 1}},
+			source:    line,
+			end:       110,
+			unwrapped: unwrapped{name: "echo", program: "echo"},
 		},
 		{
-			Argv:     []Word{plain("rm"), plain("x")},
-			Offset:   93,
-			Pipeline: 4,
-			Nested:   true,
-			AfterCD:  true,
-			within:   1,
-			execEnd:  97,
+			Argv:      []Word{plain("rm"), plain("x")},
+			Offset:    93,
+			Pipeline:  4,
+			Nested:    true,
+			AfterCD:   true,
+			dirSet:    true,
+			within:    1,
+			source:    line,
+			end:       97,
+			unwrapped: unwrapped{name: "rm", program: "rm"},
+			execEnd:   97,
 		},
 	}
 	if !reflect.DeepEqual(commands, want) {
@@ -388,6 +540,13 @@ func TestUnwrapped(t *testing.T) {
 		{"/usr/bin/nohup /usr/bin/time git mv a b", "git", true, []string{"git", "mv"}},
 		{"/usr/bin/sudo -i rm x", "", false, nil},
 		{"sudo --login rm x", "", false, nil},
+		// sudo -l asks whether the command is allowed and does not run it; -v and -e run none.
+		{"sudo -l -u postgres dropdb app", "", false, nil},
+		{"sudo -nl rm x", "", false, nil},
+		{"sudo --list rm x", "", false, nil},
+		{"sudo -v", "", false, nil},
+		{"sudo -e /etc/hosts", "", false, nil},
+		{"sudo -n rm x", "rm", true, []string{"rm"}},
 		{"env -C sub rm x", "", false, nil},
 		{"env --split-string='rm x'", "", false, nil},
 		{"timeout 5 cat .env", "cat", true, []string{"cat"}},
@@ -413,9 +572,52 @@ func TestUnwrapped(t *testing.T) {
 		{`"$TOOL" share`, "", true, nil},
 		{"sudo", "", true, nil},
 		{"FOO=1", "", true, nil},
+		// A program by a path the parse does not evaluate is still named by what follows its
+		// last slash, and a wrapper by such a path still unwraps.
+		{"~/.bun/bin/bun test src", "bun", true, []string{"bun", "test"}},
+		{`"$HOME"/go/bin/govulncheck ./...`, "govulncheck", true, []string{"govulncheck"}},
+		{"$T/beacon version", "beacon", true, []string{"beacon", "version"}},
+		{"~/bin/sudo -u deploy $PREFIX/bin/rm x", "rm", true, []string{"rm"}},
+		{"$BIN/$TOOL share", "", true, nil},
+		{"${TOOL:-/usr/bin/beacon} share", "", true, nil},
+		{"$(which /usr/bin/beacon) share", "", true, nil},
+		{"$(brew --prefix)/bin/gtar xf a.tar", "gtar", true, []string{"gtar", "xf"}},
+		{"/opt/homebrew/bin/gtar czf - ~/.aws", "gtar", true, []string{"gtar", "czf"}},
+		{"~/bin/bash -c id", "bash", true, []string{"bash", "-c"}},
+		{"proxychains4 -q curl https://x.example", "curl", true, []string{"curl"}},
+		{"~/bin/*/run now", "run", true, []string{"run", "now"}},
+		{"~/bin/run* now", "", true, nil},
+		// A wrapper's own options are not the command.
+		{"command -p git mv a b", "git", true, []string{"git", "mv"}},
+		{"command -v docker", "", false, nil},
+		{"command -V git", "", false, nil},
+		{"exec -a worker git mv a b", "git", true, []string{"git", "mv"}},
+		{"/usr/bin/time -p -o t.txt git mv a b", "git", true, []string{"git", "mv"}},
+		{"setsid -f nohup git mv a b", "git", true, []string{"git", "mv"}},
+		{"caffeinate -i -t 600 git mv a b", "git", true, []string{"git", "mv"}},
+		// A runner that starts a command in a project's environment.
+		{"uv run pytest -q", "pytest", true, []string{"pytest", "-q"}},
+		{"uv run --no-project --with requests --python 3.12 python x.py", "python", true, []string{"python", "x.py"}},
+		{"uv run -q --env-file=.env git mv a b", "git", true, []string{"git", "mv"}},
+		{"uv run --directory sub pytest", "", false, nil},
+		{"uv run -m pytest -q", "", false, nil},
+		{"uv pip install requests", "uv", true, []string{"uv", "pip"}},
+		{"uv", "uv", true, []string{"uv"}},
+		{"poetry run pytest -q", "pytest", true, []string{"pytest"}},
+		{"pipenv run git mv a b", "git", true, []string{"git", "mv"}},
+		{"bundle exec rake db:migrate", "rake", true, []string{"rake"}},
+		{"poetry install", "poetry", true, []string{"poetry", "install"}},
+		{"mise exec -- git mv a b", "git", true, []string{"git", "mv"}},
+		{"mise x node@22 -- node -v", "node", true, []string{"node", "-v"}},
+		{"mise exec node@22", "mise", true, []string{"mise", "exec"}},
+		{"mise exec -c 'git mv a b'", "mise", true, []string{"mise", "exec"}},
+		{"mise run check", "mise", true, []string{"mise", "run"}},
+		// The test command.
+		{`[ -f "$f" ]`, "[", true, []string{"[", "-f"}},
 	} {
+		// The first command is the line's own; the ones of a substitution in its words follow.
 		commands, err := Parse(tc.command)
-		if err != nil || len(commands) != 1 {
+		if err != nil || len(commands) == 0 {
 			t.Fatalf("Parse(%q) = %+v, %v", tc.command, commands, err)
 		}
 		c := commands[0]

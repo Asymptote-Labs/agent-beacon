@@ -24,7 +24,8 @@ import (
 //   - fastObj is the extension's object value. Field selection and presence take the indexed path
 //     with the extension's exact semantics (getFieldValue below); anything else, from an undefined
 //     field to equality and conversion, is handed to the extension's own value, built on demand,
-//     so results and error messages are its.
+//     so results and error messages are its. It keeps the value of each field it has read, so
+//     the rules of a scan, which all read the same event, turn it into CEL values once.
 //
 // newFastAdapter checks every struct type against the extension's provider and fails if a field
 // name disagrees; Env then keeps the extension's own adapter and provider.
@@ -32,16 +33,27 @@ type fastObj struct {
 	t   *fastType
 	val any           // the struct or a pointer to it, as given
 	rv  reflect.Value // the struct, pointers followed
+	// read holds the value of each field that has been read, by the field's slot. An object is
+	// read by one goroutine at a time, as the activation it belongs to is.
+	read []ref.Val
 }
 
 // fastType is what fastObj needs about one struct type.
 type fastType struct {
-	a      *fastAdapter
-	cel    ref.Type         // the extension's type for the struct
-	fields map[string][]int // CEL field name -> index; nil for a name the extension leaves undefined
+	a   *fastAdapter
+	cel ref.Type // the extension's type for the struct
+	// fields are the fields by CEL name; nil for a name the extension leaves undefined.
+	fields map[string]*fastField
+	slots  int // how many fields have a slot in fastObj.read
 	// sized are the indexes of the fields a rule can address, the ones whose sizes bound what it
 	// reads (matcher.go).
 	sized []int
+}
+
+// fastField is one field of a struct type: where it is in the struct, and in fastObj.read.
+type fastField struct {
+	index []int
+	slot  int
 }
 
 // fastAdapter adapts values for rules: structs of the event's types become fastObjs, lists and maps
@@ -77,14 +89,32 @@ func (p *fastProvider) NewValue(typeName string, fields map[string]ref.Val) ref.
 	return p.a.NativeToValue(v.Value())
 }
 
-// indexedField is the extension's field type for one field, read by index with its getFieldValue.
-func indexedField(base *types.FieldType, index []int) *types.FieldType {
-	field := func(obj any) reflect.Value { return reflect.Indirect(reflect.ValueOf(obj)).FieldByIndex(index) }
+// indexedField is the extension's field type for one field of ft. Of a fastObj, which is what a
+// rule selects from, it gives what the object holds for the field (fastObj.get); of the struct
+// itself it reads the field by index with the extension's getFieldValue.
+func indexedField(base *types.FieldType, ft *fastType, f *fastField) *types.FieldType {
+	native := func(obj any) reflect.Value { return reflect.Indirect(reflect.ValueOf(obj)).FieldByIndex(f.index) }
 	return &types.FieldType{
 		Type:        base.Type,
 		IsJSONField: base.IsJSONField,
-		IsSet:       func(obj any) bool { return !field(obj).IsZero() },
-		GetFrom:     func(obj any) (any, error) { return getFieldValue(field(obj)), nil },
+		IsSet: func(obj any) bool {
+			if o, ok := obj.(*fastObj); ok {
+				if o.t == ft {
+					return !o.rv.FieldByIndex(f.index).IsZero()
+				}
+				obj = o.val
+			}
+			return !native(obj).IsZero()
+		},
+		GetFrom: func(obj any) (any, error) {
+			if o, ok := obj.(*fastObj); ok {
+				if o.t == ft {
+					return o.get(f), nil
+				}
+				obj = o.val
+			}
+			return getFieldValue(native(obj)), nil
+		},
 	}
 }
 
@@ -106,7 +136,7 @@ func newFastAdapter(env *cel.Env) (*fastAdapter, error) {
 		if _, done := a.types[t]; done || t == reflect.TypeFor[time.Time]() {
 			return nil
 		}
-		ft := &fastType{a: a, cel: a.base.NativeToValue(reflect.New(t).Interface()).Type(), fields: map[string][]int{}}
+		ft := &fastType{a: a, cel: a.base.NativeToValue(reflect.New(t).Interface()).Type(), fields: map[string]*fastField{}}
 		a.types[t] = ft
 		var names []string
 		for i := range t.NumField() {
@@ -123,9 +153,11 @@ func newFastAdapter(env *cel.Env) (*fastAdapter, error) {
 				ft.fields[name] = nil
 				continue
 			}
-			ft.fields[name] = f.Index
+			field := &fastField{index: f.Index, slot: ft.slots}
+			ft.slots++
+			ft.fields[name] = field
 			if base, ok := provider.FindStructFieldType(ft.cel.TypeName(), name); ok {
-				a.provider.fields[[2]string{ft.cel.TypeName(), name}] = indexedField(base, f.Index)
+				a.provider.fields[[2]string{ft.cel.TypeName(), name}] = indexedField(base, ft, field)
 				ft.sized = append(ft.sized, i)
 			}
 			if err := walk(f.Type); err != nil {
@@ -168,42 +200,85 @@ func (a *fastAdapter) NativeToValue(val any) ref.Val {
 	return a.base.NativeToValue(val)
 }
 
+// adapt is the CEL value of a field of an object (field set), or of an element of a list. It is
+// NativeToValue's, of what the extension reads the field as (getFieldValue), except that a list
+// is adapted whole, here, into a list of CEL values: the one NativeToValue gives adapts an
+// element each time it is reached, which for a struct copies it. Whatever is adapted here is
+// kept by the object it was read from, so that happens once.
+func (a *fastAdapter) adapt(v reflect.Value, field bool) ref.Val {
+	switch v.Kind() {
+	case reflect.String:
+		if v.Type() == reflect.TypeFor[string]() {
+			return types.String(v.String())
+		}
+	case reflect.Slice, reflect.Array:
+		if v.Type().Elem().Kind() != reflect.Uint8 {
+			elems := make([]ref.Val, v.Len())
+			for i := range elems {
+				elems[i] = a.adapt(v.Index(i), false)
+			}
+			return types.NewRefValList(a, elems)
+		}
+	}
+	if field {
+		return a.NativeToValue(getFieldValue(v))
+	}
+	return a.NativeToValue(v.Interface())
+}
+
 // slow is the extension's own value for o.
 func (o *fastObj) slow() ref.Val { return o.t.a.base.NativeToValue(o.val) }
 
-func (o *fastObj) field(name ref.Val) (reflect.Value, bool) {
+func (o *fastObj) field(name ref.Val) *fastField {
 	s, ok := name.(types.String)
 	if !ok {
-		return reflect.Value{}, false
+		return nil
 	}
-	idx := o.t.fields[string(s)]
-	if idx == nil {
-		return reflect.Value{}, false
+	return o.t.fields[string(s)]
+}
+
+// get is the field's value as rules see it. It is worked out once: an object stands for one
+// event of one scan, every rule of the scan reads the same few fields of it, and what took the
+// time was turning each into a CEL value again for each rule, a list of commands and each of
+// their words included.
+func (o *fastObj) get(f *fastField) ref.Val {
+	if o.read == nil {
+		o.read = make([]ref.Val, o.t.slots)
 	}
-	return o.rv.FieldByIndex(idx), true
+	v := o.read[f.slot]
+	if v == nil {
+		v = o.t.a.adapt(o.rv.FieldByIndex(f.index), true)
+		o.read[f.slot] = v
+	}
+	return v
 }
 
 // Get implements traits.Indexer as the extension's object does.
 func (o *fastObj) Get(name ref.Val) ref.Val {
-	f, ok := o.field(name)
-	if !ok {
+	f := o.field(name)
+	if f == nil {
 		return o.slow().(interface{ Get(ref.Val) ref.Val }).Get(name)
 	}
-	return o.t.a.NativeToValue(getFieldValue(f))
+	return o.get(f)
 }
 
 // IsSet implements traits.FieldTester as the extension's object does.
 func (o *fastObj) IsSet(name ref.Val) ref.Val {
-	f, ok := o.field(name)
-	if !ok {
+	f := o.field(name)
+	if f == nil {
 		return o.slow().(interface{ IsSet(ref.Val) ref.Val }).IsSet(name)
 	}
-	return types.Bool(!f.IsZero())
+	return types.Bool(!o.rv.FieldByIndex(f.index).IsZero())
 }
 
 func (o *fastObj) IsZeroValue() bool { return o.rv.IsZero() }
 func (o *fastObj) Type() ref.Type    { return o.t.cel }
-func (o *fastObj) Value() any        { return o.val }
+
+// Value is the object itself, where the extension's is the struct. cel-go selects a field by
+// handing a field type the Value of what it is selected from, and a field type of these
+// (indexedField) can then give what the object has already read. A rule cannot see the
+// difference: the struct is reached only by converting the object, which goes to the extension.
+func (o *fastObj) Value() any { return o }
 
 func (o *fastObj) ConvertToNative(t reflect.Type) (any, error) { return o.slow().ConvertToNative(t) }
 

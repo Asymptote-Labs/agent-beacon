@@ -1,5 +1,6 @@
 id: sudoers-nopasswd-tampering
-version: 2
+spec: threat-rules/v1.3  # needed for file_writes and predicates
+version: 5
 title: Sudoers / NOPASSWD privilege rule tampered or probed
 description: >
   A command writes to the sudoers configuration (/etc/sudoers or /etc/sudoers.d/),
@@ -7,7 +8,19 @@ description: >
   non-interactive listing (sudo -n -l). Any of these establishes or confirms a path
   to root that bypasses the password prompt. The match requires an actual write, a
   NOPASSWD grant token, a visudo invocation, or the non-interactive sudo listing
-  probe rather than incidental mentions of "sudo".
+  probe rather than incidental mentions of "sudo". The commands are found by what the
+  line runs, also under sudo, by absolute path or inside `bash -c`: a command whose
+  written files (file_writes) include /etc/sudoers, a command that names a file under
+  /etc/sudoers.d/ (as a word, a redirection or the value of an assignment), visudo, or
+  a sudo that only lists (-l) and is non-interactive (-n). NOPASSWD: is text a command
+  writes, not a command of the line, and counts where a command of the line names a
+  sudoers file or a file under a sudoers.d directory, or writes a file whose name has
+  no dot in it, which is what a drop-in must be (sudo skips a name with a dot) and
+  what a grant staged in /tmp or under a variable looks like. A directory a command
+  fills (`git clone … infra/`, `tar -x` into `./`) is not a drop-in. So a grant quoted in
+  a commit message, written into NOTES.md, or found by grep in a fresh clone does not
+  fire. The text pattern is asked of the text that reaches a command the parser cannot
+  see into (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -16,13 +29,37 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0050
 
+# sudo is a wrapper the parser looks through, and a sudo that only lists runs no command,
+# so the probe is the command without a name whose words hold sudo, -n and -l (`sudo -n ls
+# -l` is named ls and is not one). A write to /etc/sudoers is a changing_write
+# (rules/concepts/sensitive-files.predicates.yaml); under /etc/sudoers.d any access counts.
+# A grant staged in a file with no dot keeps its own shorter list, a write, an append or a
+# move: the ways a new file is made, which is what staging is.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(>>?\\s*|\\btee\\b[^;&|<]*\\s)/etc/sudoers(\\.d)?\\b") ||
-    e.command.command.matches("(?i)/etc/sudoers\\.d/[^\\s]+") ||
-    e.command.command.matches("(?i)\\bvisudo\\b") ||
-    e.command.command.matches("(?i)\\bNOPASSWD\\s*:") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*)sudo\\s+(-[a-z]+\\s+)*-n\\s+(-[a-z]+\\s+)*-l\\b")
+    e.command.parsed_commands.exists(c,
+      c.file_writes.exists(f,
+        changing_write(f) && f.path.matches("(?i)/etc/sudoers$") ||
+        f.path.matches("(?i)/etc/sudoers\\.d/.")) ||
+      c.file_reads.exists(f, f.path.matches("(?i)/etc/sudoers\\.d/.")) ||
+      c.argv_raw.exists(a, a.matches("(?i)^\\S*/etc/sudoers\\.d/[^\\s\"']\\S*$")) ||
+      c.env.exists(k, c.env[k].matches("(?i)/etc/sudoers\\.d/\\S+$")) ||
+      c.name == "visudo" ||
+      c.name == "" && c.argv.exists(a, a.matches("(^|/)sudo$")) &&
+        c.argv.exists(a, a.matches("^(-[a-zA-Z]*n[a-zA-Z]*|--non-interactive)$")) &&
+        c.argv.exists(a, a.matches("^(-[a-zA-Z]*l[a-zA-Z]*|--list)$"))
+    ) ||
+    (e.command.command.matches("(?i)\\bNOPASSWD\\s*:") &&
+      e.command.parsed_commands.exists(c,
+        c.argv_raw.exists(a, a.matches("(?i)^\\S*/sudoers(\\.d/[^\\s\"']\\S*)?[\"']?$")) ||
+        c.file_writes.exists(f, f.path.matches("(?i)(^|/)sudoers(\\.d/.+)?$")) ||
+        c.file_writes.exists(f, f.op in ["write", "append", "move_to"] && !f.path.endsWith("/") && !f.path.matches("(^|/)[^/]*\\.[^/]*$")) ||
+        c.env.exists(k, c.env[k].matches("(?i)(^|/)sudoers(\\.d/\\S+)?$")))) ||
+    unread_text(e, t, (t.matches("(?i)(>>?\\s*|\\btee\\b[^;&|<]*\\s)/etc/sudoers(\\.d)?\\b") ||
+      t.matches("(?i)/etc/sudoers\\.d/[^\\s]+") ||
+      t.matches("(?i)\\bvisudo\\b") ||
+      t.matches("(?i)\\bNOPASSWD\\s*:") ||
+      t.matches("(?i)(^|[;&|]\\s*)sudo\\s+(-[a-z]+\\s+)*-n\\s+(-[a-z]+\\s+)*-l\\b")))
   )
 
 emit:
@@ -100,5 +137,151 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "man sudoers | grep example" }
+        session: { id: s1 }
+  - name: sudoers_write_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sh -c 'echo \"deploy ALL=(ALL) ALL\" >> /etc/sudoers'" }
+        session: { id: s1 }
+  - name: sudoers_edited_in_place
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo sed -i 's/^%sudo.*/%sudo ALL=(ALL:ALL) ALL/' /etc/sudoers" }
+        session: { id: s1 }
+  - name: drop_in_copied_into_the_directory_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo cp agent /etc/sudoers.d/" }
+        session: { id: s1 }
+  - name: drop_in_installed_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/install -m 0440 /tmp/agent /etc/sudoers.d/agent" }
+        session: { id: s1 }
+  - name: drop_in_path_held_in_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "F=/etc/sudoers.d/agent; echo 'agent ALL=(ALL) ALL' | sudo tee \"$F\" > /dev/null" }
+        session: { id: s1 }
+  - name: drop_in_mode_changed
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo chmod 0440 /etc/sudoers.d/agent" }
+        session: { id: s1 }
+  - name: drop_in_read_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo cat /etc/sudoers.d/90-cloud-init-users" }
+        session: { id: s1 }
+  - name: visudo_by_absolute_path_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u root /usr/sbin/visudo -cf /tmp/agent" }
+        session: { id: s1 }
+  - name: probe_passwordless_sudo_in_one_cluster
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -nl 2>&1 | head -5" }
+        session: { id: s1 }
+  - name: probe_passwordless_sudo_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'sudo -n -l'" }
+        session: { id: s1 }
+  - name: nopasswd_grant_written_by_dd
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "printf 'agent ALL=(ALL) NOPASSWD: ALL\\n' | sudo dd of=/etc/sudoers conv=notrunc oflag=append" }
+        session: { id: s1 }
+  - name: nopasswd_grant_written_to_a_staged_drop_in
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'dev ALL=(ALL) NOPASSWD: ALL' > image/files/sudoers.d/dev" }
+        session: { id: s1 }
+  - name: nopasswd_grant_staged_in_a_temporary_file
+    # Version 2 matched any NOPASSWD: in the text. The grant is staged here and installed by
+    # a later command; a drop-in's name has no dot, and neither does this one.
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'agent ALL=(ALL) NOPASSWD: ALL' > /tmp/agent" }
+        session: { id: s1 }
+  - name: nopasswd_searched_in_a_fresh_clone
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clone https://github.com/org/infra && grep -rn 'NOPASSWD:' infra/" }
+        session: { id: s1 }
+  - name: nopasswd_searched_in_an_extracted_archive
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tar -xzf roles.tgz && grep -rl 'NOPASSWD:' ." }
+        session: { id: s1 }
+  - name: nopasswd_grant_written_to_a_file_named_by_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'agent ALL=(ALL) NOPASSWD: ALL' | sudo tee \"$SUDOERS_FILE\" > /dev/null" }
+        session: { id: s1 }
+  - name: sudoers_write_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example \"echo 'agent ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/agent\"" }
+        session: { id: s1 }
+  - name: sudoers_write_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"docs: the bootstrap no longer runs echo 'agent ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers.d/agent\"" }
+        session: { id: s1 }
+  - name: sudoers_write_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nThe bootstrap used to run: echo 'agent ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/agent\nThen: sudo visudo -c; sudo -n -l\nEOF" }
+        session: { id: s1 }
+  - name: drop_in_named_in_an_echoed_sentence
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'the grant lives in /etc/sudoers.d/agent on the old hosts'" }
+        session: { id: s1 }
+  - name: non_interactive_sudo_running_a_listing_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -n ls -l /srv" }
+        session: { id: s1 }
+  - name: sudoers_drop_in_directory_listed
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ls -la /etc/sudoers.d/" }
+        session: { id: s1 }
+  - name: visudo_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./bootstrap.sh 'sudo visudo -cf /tmp/agent'" }
+        session: { id: s1 }
+  - name: visudo_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: the bootstrap no longer runs sudo visudo -cf /tmp/agent' && ./run-tests.sh" }
         session: { id: s1 }
 

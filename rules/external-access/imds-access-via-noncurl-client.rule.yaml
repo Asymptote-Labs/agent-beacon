@@ -1,5 +1,6 @@
 id: imds-access-via-noncurl-client
-version: 1
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 5
 title: Cloud metadata endpoint accessed via non-curl HTTP client
 description: >
   A command reaches a cloud instance metadata endpoint (AWS IMDS
@@ -9,7 +10,15 @@ description: >
   Invoke-WebRequest/Invoke-RestMethod, or a raw bash /dev/tcp socket. The
   existing cloud-metadata rules only match curl/wget; attackers routinely pull
   instance credentials with whatever runtime is already present, so this closes
-  the HTTP-client evasion gap while still requiring a metadata target.
+  the HTTP-client evasion gap while still requiring a metadata target. A /dev/tcp
+  socket is found as a redirection of a command the line runs, and an interpreter
+  by its name with the target (see cloud_metadata_target) among its words, so both
+  fire under sudo, inside `bash -c` and by path. Script code that calls an HTTP
+  library or a PowerShell web cmdlet is content and is matched as text wherever it
+  stands, including a script written to a file; an interpreter or /dev/tcp that is
+  only named is asked of the text that reaches a command the parser cannot see into
+  (unread_text), so naming python and the address in a commit message or in
+  notes does not fire.
 severity: high
 status: stable
 posture: detect
@@ -18,11 +27,33 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
+# Three kinds of claim.
+# A socket redirection is a parsed fact, and curl or wget elsewhere on the line does not
+# take it back: version 1 let any mention of curl silence it. A path with a variable
+# (`/dev/tcp/$H/80`) may stand for the target, so there the text decides.
+# An interpreter (script_interpreter, rules/concepts/commands.predicates.yaml) the line runs
+# with the target among its words is a parsed fact. Every
+# interpreter is a command the parser cannot see into, so the text alternative below
+# (unread_text) would match these too; the parsed one says it without leaning on that.
+# Library and cmdlet names are code inside a script, which is content: they stay text and
+# are not gated, because the script may be written to a file here and run later by a line
+# that names no target.
+# `curl.exe` is kept from version 1 and never matches: the same condition excludes every
+# line that holds the word curl.
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)(169\\.254\\.169\\.254|169\\.254\\.170\\.2|metadata\\.google\\.internal|metadata\\.goog\\b|metadata\\.azure\\.com|/computeMetadata/)") &&
-  !e.command.command.matches("(?i)\\b(curl|wget)\\b") &&
-  e.command.command.matches("(?i)(\\b(python3?|ruby|perl|php|node|deno|bun)\\b|invoke-webrequest|invoke-restmethod|\\biwr\\b|\\bcurl\\.exe\\b|/dev/tcp/|urllib|requests\\.get|net/http|httpx|Net::HTTP|file_get_contents)")
+  e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c, c.socket_redirects.exists(r,
+      cloud_metadata_target(r.path) ||
+      r.path.matches("[$`]") && cloud_metadata_target(e.command.command))) ||
+    cloud_metadata_target(e.command.command) &&
+    !e.command.command.matches("(?i)\\b(curl|wget)\\b") && (
+      e.command.parsed_commands.exists(c,
+        script_interpreter(c) &&
+        c.argv_raw.exists(a, cloud_metadata_target(a))) ||
+      e.command.command.matches("(?i)(invoke-webrequest|invoke-restmethod|\\biwr\\b|urllib|requests\\.get|net/http|httpx|Net::HTTP|file_get_contents)") ||
+      unread_text(e, t, t.matches("(?i)(\\b(python[0-9.]*|nodejs|node|deno|bun|ruby|perl[0-9.]*|php)\\b|\\bcurl\\.exe\\b|/dev/tcp/)"))
+    )
+  )
 
 emit:
   reason: "Cloud metadata endpoint reached with a non-curl/wget HTTP client (interpreter, PowerShell, or /dev/tcp)"
@@ -57,5 +88,123 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "python3 -c \"import requests; requests.get('https://api.example.com/v1/status')\"" }
+        session: { id: s1 }
+  - name: metadata_path_alone
+    # New in version 2: the list of targets is shared with cloud-metadata-endpoint-access,
+    # which already had this path.
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import requests; print(requests.get('http://' + host + '/latest/meta-data/iam/info').text)\"" }
+        session: { id: s1 }
+  - name: interpreter_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo ruby -e \"require 'open-uri'; puts URI.open('http://169.254.169.254/latest/user-data').read\"" }
+        session: { id: s1 }
+  - name: interpreter_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c \"node -e 'fetch(\\\"http://metadata.google.internal/computeMetadata/v1/project/project-id\\\")'\"" }
+        session: { id: s1 }
+  - name: interpreter_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/bin/perl -MLWP::Simple -e 'print get(\"http://169.254.170.2/v2/metadata\")'" }
+        session: { id: s1 }
+  - name: interpreter_script_in_a_here_document
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 - <<'EOF'\nimport socket\ns = socket.create_connection(('169.254.169.254', 80))\nEOF" }
+        session: { id: s1 }
+  - name: socket_redirect_of_a_command_that_runs_only_itself
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat < /dev/tcp/169.254.169.254/80" }
+        session: { id: s1 }
+  - name: socket_redirect_under_sudo_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo bash -c 'exec 3<>/dev/tcp/metadata.google.internal/80; cat <&3'" }
+        session: { id: s1 }
+  - name: socket_redirect_beside_a_mention_of_curl
+    # Version 1 did not match any line that held the word curl.
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'curl is not installed'; cat < /dev/tcp/169.254.169.254/80" }
+        session: { id: s1 }
+  - name: bare_socket_redirect_as_a_port_probe
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "timeout 1 bash -c '</dev/tcp/169.254.169.254/80' && echo open" }
+        session: { id: s1 }
+  - name: socket_host_held_by_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "H=169.254.169.254; cat < /dev/tcp/$H/80" }
+        session: { id: s1 }
+  - name: interpreter_through_a_remote_shell_the_parser_does_not_read
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example \"php -r 'echo file(\\\"http://169.254.169.254/latest/user-data\\\")[0];'\"" }
+        session: { id: s1 }
+  - name: script_code_written_to_a_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > fetch.py <<'EOF'\nimport urllib.request\nprint(urllib.request.urlopen('http://169.254.169.254/latest/user-data').read())\nEOF" }
+        session: { id: s1 }
+  - name: interpreter_and_address_named_in_a_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: a python3 or node script must not reach 169.254.169.254'" }
+        session: { id: s1 }
+  - name: interpreter_and_address_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nA python3 or node script must never reach 169.254.169.254 or metadata.google.internal.\nEOF" }
+        session: { id: s1 }
+  - name: socket_path_written_in_an_echo_argument
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'exec 3<>/dev/tcp/169.254.169.254/80' >> notes.md" }
+        session: { id: s1 }
+  - name: address_searched_for_in_a_script_file
+    # Version 1 took the .php of a file name for the interpreter.
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -rn '169.254.169.254' src/metadata.php" }
+        session: { id: s1 }
+  - name: socket_to_another_host
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat < /dev/tcp/127.0.0.1/8080" }
+        session: { id: s1 }
+  - name: socket_line_piped_to_a_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'exec 3<>/dev/tcp/169.254.169.254/80' | sh" }
+        session: { id: s1 }
+  - name: interpreter_and_address_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: python must not reach 169.254.169.254' && ./run-tests.sh" }
         session: { id: s1 }
 

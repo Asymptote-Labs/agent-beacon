@@ -1,0 +1,65 @@
+# What an install from outside a package manager's default registry looks like in the text
+# of a command line, said once.
+#
+# One rule asks it: package-install-from-untrusted-source. Where the parser reads the
+# installer, the rule looks at the installer's own words. Where it cannot (the install is
+# handed to a program the parser cannot see into, or a word of the installer holds a
+# variable), the rule asks this of the text instead.
+#
+# The predicate takes a text, so a rule can ask it of the whole command line or of the part
+# of the line that reaches one command (unread_text). The patterns spell out "any host but
+# pypi.org" (and the npm and yarn registries) because RE2 has no negative lookahead.
+library: package-sources
+version: 1
+spec: threat-rules/v1.3
+description: A text that installs a package from outside the default registry.
+
+definitions:
+  - name: untrusted_install_source
+    params: [text]
+    description: >
+      The text holds an install command whose source is not the package manager's default
+      public registry. For pip, pipx, uv and poetry: a git+ or name @ URL requirement, an
+      archive or wheel URL, --extra-index-url or --trusted-host, or an index option
+      (-i, --index-url, --index, --default-index) whose URL is plain http, carries
+      userinfo, or has a host other than pypi.org. For npm, pnpm, yarn and bun: a git URL,
+      a github:, gitlab:, bitbucket: or gist: shorthand, a tarball URL, or a --registry
+      whose URL is plain http, carries userinfo, or has a host other than
+      registry.npmjs.org and registry.yarnpkg.com. For cargo: install --git. For gem:
+      install --source or --clear-sources. The install must start the line or follow a
+      shell separator, optionally behind sudo.
+    body: >
+      (
+        text.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s['\\\"]?(git\\+|[\\w.\\[\\],-]+\\s*@\\s*(git\\+)?(https?|ssh|git|file)://|(https?|ssh|git)://[^\\s'\\\"]*\\.(whl|tar\\.gz|tgz|tar\\.bz2|zip|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
+        text.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(--extra-index-url|--trusted-host)(\\s|=)") ||
+        text.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(-i|--index-url|--index|--default-index)(\\s+|=)['\\\"]?([\\w.-]+=)?['\\\"]?(http://|https://[^\\s/'\\\"?#]*@|https://([^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#y][^\\s/:'\\\"?#]*|y(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#i][^\\s/:'\\\"?#]*|i(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))([:/'\\\"?#]|\\s|$))")
+      ) || (
+        text.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b[^;&|\\n]*?\\s['\\\"]?(@?[\\w./-]+@)?(git\\+|github:|gitlab:|bitbucket:|gist:|git://|ssh://|https?://[^\\s'\\\"]*\\.(tgz|tar\\.gz|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
+        text.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b[^;&|\\n]*?\\s--registry(\\s+|=)['\\\"]?(http://|https://[^\\s/'\\\"?#]*@|https://([^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#e][^\\s/:'\\\"?#]*|e(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g(|[^\\s/:'\\\"?#i][^\\s/:'\\\"?#]*|i(|[^\\s/:'\\\"?#s][^\\s/:'\\\"?#]*|s(|[^\\s/:'\\\"?#t][^\\s/:'\\\"?#]*|t(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#y][^\\s/:'\\\"?#]*|y(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#ny][^\\s/:'\\\"?#]*|n(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#m][^\\s/:'\\\"?#]*|m(|[^\\s/:'\\\"?#j][^\\s/:'\\\"?#]*|j(|[^\\s/:'\\\"?#s][^\\s/:'\\\"?#]*|s(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))|y(|[^\\s/:'\\\"?#a][^\\s/:'\\\"?#]*|a(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#n][^\\s/:'\\\"?#]*|n(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#k][^\\s/:'\\\"?#]*|k(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#c][^\\s/:'\\\"?#]*|c(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#m][^\\s/:'\\\"?#]*|m([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))))))))))))))([:/'\\\"?#]|\\s|$))")
+      ) ||
+      text.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(cargo\\s+install\\s+([^;&|\\n]*\\s)?--git\\b|gem\\s+install\\s+([^;&|\\n]*\\s)?(--source|--clear-sources)\\b)")
+    tests:
+      - name: pip_from_a_git_url
+        match: untrusted_install_source(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cd /tmp && pip install git+https://github.com/someone/helper.git" }
+      - name: npm_with_a_registry_that_is_not_the_default
+        match: untrusted_install_source(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "npm i helper --registry https://npm.example.test" }
+      - name: cargo_install_from_git
+        match: untrusted_install_source(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cargo install --git https://github.com/someone/tool" }
+      - name: pip_by_name_from_the_default_registry
+        match: untrusted_install_source(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "pip install requests==2.32.3 && npm install express@4" }

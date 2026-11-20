@@ -1,11 +1,16 @@
 id: infrastructure-teardown
-version: 1
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 4
 title: Infrastructure destroyed or removed
 description: >
   An agent tears down infrastructure, a namespace, a whole cloud bucket, or a
   cloud project, resource group, cluster or stack. Plans and individual pod or
   object deletions are excluded. These commands may be legitimate maintenance
-  but warrant review; the rule does not assert that deletion succeeded.
+  but warrant review; the rule does not assert that deletion succeeded. The
+  command is found by what the line runs, so the same words in a commit message,
+  an echo or a here-document do not fire and the tool under `sudo env`, by any
+  path or inside `bash -c` does; the text patterns are asked of the text that
+  reaches a command the parser cannot see into (unread_text).
 severity: high
 status: experimental
 posture: detect
@@ -13,20 +18,40 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM06
 
-# Command prefixes accept environment assignments, relative executable paths, and
-# sudo execution options. Value-taking sudo options consume their argument;
-# inspection modes such as sudo -l/-v are not execution prefixes.
+# Each tool is a parsed command, named after sudo, env and the like and by any path, and
+# its subcommand is words of that command. terraform, tofu, pulumi, cdk and gsutil take the
+# subcommand as their first word after their own options (a word that could not be read,
+# as -chdir=$DIR, is an empty line), so `terraform plan -destroy` and a stack named destroy
+# are not it; az takes its command group first (`az deployment group delete` is not
+# `az group delete`); aws, gcloud and kubectl subcommands are words that follow each other.
+# A command behind sudo -l or sudo -v is not run and has no name, so its line is left to
+# the text.
+#
+# The text half is the text patterns of version 1 as one pattern, asked of the text that
+# reaches a command the parser cannot see into (unread_text): a command prefix, then what
+# the command is, one alternative for each of the nine patterns it was. Each of them began
+# with the same prefix, and a pattern is charged for its length each time it is asked, so
+# the prefix is written once. A text matches the one pattern exactly when it matched one of
+# the nine. The prefix accepts environment assignments, relative executable paths, and sudo
+# execution options. Value-taking sudo options consume their argument; inspection modes
+# such as sudo -l/-v are not execution prefixes.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:terraform|tofu)(?:[ \\t]+-chdir=[^\\s;&|]+)?[ \\t]+(?:destroy|apply(?:[ \\t]+(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)*?[ \\t]+-destroy(?:=true)?)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:pulumi|cdk)[ \\t]+destroy(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?kubectl(?:[ \\t]+(?:-n|--namespace|--context|--kubeconfig)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+delete[ \\t]+(?:namespace|namespaces|ns)(?:/[^\\s;&|<>#\\x27\"]+)?(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+(?:s3[ \\t]+rb|(?:cloudformation[ \\t]+delete-stack|eks[ \\t]+delete-cluster)|s3api[ \\t]+delete-bucket)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+s3[ \\t]+rm\\b[^;&|\\n#]*[ \\t]--recursive(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:projects[ \\t]+delete|container[ \\t]+clusters[ \\t]+delete|storage[ \\t]+buckets[ \\t]+delete)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+storage[ \\t]+rm\\b[^;&|\\n#]*[ \\t](?:--recursive|-r)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gsutil[ \\t]+(?:-m[ \\t]+)?(?:rb(?:[ \\t]|$|[;&|\\n<>#])|rm\\b[^;&|\\n#]*[ \\t]-[a-zA-Z]*[rR][a-zA-Z]*(?:[ \\t]|$|[;&|\\n<>#]))") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?az[ \\t]+(?:group[ \\t]+delete|aks[ \\t]+delete|storage[ \\t]+container[ \\t]+delete)(?:[ \\t]|$|[;&|\\n<>#])")
+    e.command.parsed_commands.exists(c,
+      c.name.matches("^(terraform|tofu)$") && c.args.matches("(?m)\\A(?:(?:-[^\\n]*)?\\n)*(?:destroy|apply\\n(?:[^\\n]*\\n)*?--?destroy(?:=true)?)$") ||
+      c.name.matches("^(pulumi|cdk)$") && c.args.matches("(?m)\\A(?:-[^\\n]*\\n(?:[^-\\n][^\\n]*\\n)?|\\n)*destroy$") ||
+      c.name == "kubectl" && c.args.matches("(?m)^delete\\n(?:-[^\\n]*\\n)*(?:namespace|namespaces|ns)(?:/[^\\n]+)?$") ||
+      c.name == "aws" && (
+        c.args.matches("(?m)^(?:s3\\nrb|cloudformation\\ndelete-stack|eks\\ndelete-cluster|s3api\\ndelete-bucket)$") ||
+        c.args.matches("(?m)^s3\\nrm$") && c.args.matches("(?m)^--recursive$")) ||
+      c.name == "gcloud" && (
+        c.args.matches("(?m)^(?:projects\\ndelete|container\\nclusters\\ndelete|storage\\nbuckets\\ndelete)$") ||
+        c.args.matches("(?m)^storage\\nrm$") && c.args.matches("(?m)^(?:--recursive|-r)$")) ||
+      c.name == "gsutil" && c.args.matches("(?m)\\A(?:-(?:m|q|D|DD)\\n|-[hiou]\\n[^\\n]*\\n)*(?:rb|rm\\n(?:[^\\n]*\\n)*?-[a-zA-Z]*[rR][a-zA-Z]*)$") ||
+      c.name == "az" && c.args.matches("(?m)\\A(?:group\\ndelete|aks\\ndelete|storage\\ncontainer\\ndelete)$")
+    ) ||
+    unread_text(e, t,
+      t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:(?:terraform|tofu)(?:[ \\t]+-chdir=[^\\s;&|]+)?[ \\t]+(?:destroy|apply(?:[ \\t]+(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)*?[ \\t]+-destroy(?:=true)?)(?:[ \\t]|$|[;&|\\n<>#])|(?:pulumi|cdk)[ \\t]+destroy(?:[ \\t]|$|[;&|\\n<>#])|kubectl(?:[ \\t]+(?:-n|--namespace|--context|--kubeconfig)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+delete[ \\t]+(?:namespace|namespaces|ns)(?:/[^\\s;&|<>#\\x27\"]+)?(?:[ \\t]|$|[;&|\\n<>#])|aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+(?:s3[ \\t]+rb|(?:cloudformation[ \\t]+delete-stack|eks[ \\t]+delete-cluster)|s3api[ \\t]+delete-bucket)(?:[ \\t]|$|[;&|\\n<>#])|aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+s3[ \\t]+rm\\b[^;&|\\n#]*[ \\t]--recursive(?:[ \\t]|$|[;&|\\n<>#])|gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:projects[ \\t]+delete|container[ \\t]+clusters[ \\t]+delete|storage[ \\t]+buckets[ \\t]+delete)(?:[ \\t]|$|[;&|\\n<>#])|gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+storage[ \\t]+rm\\b[^;&|\\n#]*[ \\t](?:--recursive|-r)(?:[ \\t]|$|[;&|\\n<>#])|gsutil[ \\t]+(?:-m[ \\t]+)?(?:rb(?:[ \\t]|$|[;&|\\n<>#])|rm\\b[^;&|\\n#]*[ \\t]-[a-zA-Z]*[rR][a-zA-Z]*(?:[ \\t]|$|[;&|\\n<>#]))|az[ \\t]+(?:group[ \\t]+delete|aks[ \\t]+delete|storage[ \\t]+container[ \\t]+delete)(?:[ \\t]|$|[;&|\\n<>#]))"))
   )
 
 emit:
@@ -440,4 +465,118 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "sudo -u deploy echo \"terraform apply -destroy\"" }
+        session: { id: s1 }
+  - name: terraform_under_sudo_and_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo env TF_IN_AUTOMATION=1 terraform destroy -auto-approve" }
+        session: { id: s1 }
+  - name: kubectl_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'kubectl --context prod delete namespace app'" }
+        session: { id: s1 }
+  - name: terraform_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/local/bin/terraform -chdir=infra apply -auto-approve --destroy" }
+        session: { id: s1 }
+  - name: terraform_with_a_directory_from_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform -chdir=\"$INFRA_DIR\" destroy -auto-approve" }
+        session: { id: s1 }
+  - name: pulumi_with_a_global_option_and_its_value
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pulumi --cwd infra destroy --yes" }
+        session: { id: s1 }
+  - name: aws_with_other_global_options_first
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws --no-cli-pager --output json cloudformation delete-stack --stack-name app" }
+        session: { id: s1 }
+  - name: cdk_under_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "env CDK_DEFAULT_REGION=us-east-1 cdk --profile dev destroy --force" }
+        session: { id: s1 }
+  - name: gsutil_with_an_option_that_takes_a_value
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gsutil -u billing-project -m rm -r gs://company" }
+        session: { id: s1 }
+  - name: az_in_a_remote_command_line
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh ops@host.example 'cd /srv/infra && az group delete --name prod --yes'" }
+        session: { id: s1 }
+  - name: terraform_in_a_here_document_sent_to_a_remote_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh ops@host.example <<'EOF'\nterraform destroy -auto-approve\nEOF" }
+        session: { id: s1 }
+  - name: terraform_named_in_a_commit_message_body
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: teardown runbook\n\nterraform destroy -auto-approve'" }
+        session: { id: s1 }
+  - name: terraform_named_in_a_here_document_written_to_a_file
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nTo remove the staging stack:\nterraform destroy -auto-approve\nEOF" }
+        session: { id: s1 }
+  - name: kubectl_named_in_an_echo_after_a_separator
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'cleanup is manual; kubectl delete namespace app'" }
+        session: { id: s1 }
+  - name: sudo_listing_what_it_may_run
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -l terraform destroy" }
+        session: { id: s1 }
+  - name: pulumi_stack_named_destroy
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pulumi stack select destroy" }
+        session: { id: s1 }
+  - name: az_deployment_record_deleted
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az deployment group delete --name nightly --resource-group prod" }
+        session: { id: s1 }
+  - name: gsutil_removes_one_object
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gsutil -m rm gs://company/one.txt" }
+        session: { id: s1 }
+  - name: teardown_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'cd infra; terraform destroy -auto-approve'" }
+        session: { id: s1 }
+  - name: teardown_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'runbook: cd infra; terraform destroy -auto-approve' && ./run-tests.sh" }
         session: { id: s1 }

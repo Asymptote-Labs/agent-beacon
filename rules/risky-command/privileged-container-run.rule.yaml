@@ -1,14 +1,18 @@
 id: privileged-container-run
-version: 5
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 7
 title: Container started with host-escaping privileges
 description: >
   A docker/podman run or exec — including Compose v2 (`docker compose run`) and the
   legacy `docker-compose` binary — grants container-escape primitives: --privileged,
   host namespace sharing (--pid/--net/--network/--ipc/--uts host), a root-filesystem
   bind mount (-v /:..., --volume=/:..., or --mount with source=/), a kernel capability
-  add (--cap-add), or a mount of the docker socket. The docker/podman token is
-  anchored to command/segment start (allowing a flagged sudo, env, or VAR=value
-  prefix) so it is not matched inside an unrelated commit message.
+  add (--cap-add), or a mount of the docker socket. The command is found by what the
+  line runs: docker, podman or their compose binary, under sudo, by path or inside
+  `bash -c`, with `run` or `exec` and then the option among its own words, so the same
+  words in a commit message or a here-document do not fire. Whatever the container
+  itself runs is not read, so the text pattern is also asked of the text that reaches a
+  docker run or exec, as of any command the parser cannot see into (unread_text).
 severity: high
 status: stable
 posture: detect
@@ -17,10 +21,17 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0050
 
+# The option is a whole word after `run` or `exec`, and one that takes a value has it either
+# attached with `=` or as the next word. A docker socket path counts inside any word (-v, --mount, -e).
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)(^|;|&&|\\|\\|)\\s*(sudo(\\s+-\\S+)*\\s+|env\\s+|([A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+)*(docker|podman)(-compose)?\\s+(container\\s+|compose\\s+)?(run|exec)\\b") &&
-  e.command.command.matches("(?i)(--privileged|--(pid|net|network|ipc|uts)[= ]host|(-v|--volume)(=|\\s+)['\"]?/:|--mount[= ]\\S*\\b(source|src)=/(,|['\"]|\\s|$)|--cap-add[= ]|/var/run/docker\\.sock\\b)")
+  e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c,
+      c.name.matches("^(docker|podman)(-compose)?$") &&
+      c.args.matches("(?m)^(run|exec)\\n(.*\\n)*?(--privileged(=true)?$|--(pid|net|network|ipc|uts)(=|\\n)host$|(-v|--volume)(=|\\n)/:|--mount(=|\\n)(.*,)?(source|src)=/(,|$)|--cap-add(=|$)|.*/var/run/docker\\.sock\\b)")
+    ) ||
+    unread_text(e, t, t.matches("(?i)(^|;|&&|\\|\\|)\\s*(sudo(\\s+-\\S+)*\\s+|env\\s+|([A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+)*(docker|podman)(-compose)?\\s+(container\\s+|compose\\s+)?(run|exec)\\b") &&
+      t.matches("(?i)(--privileged|--(pid|net|network|ipc|uts)[= ]host|(-v|--volume)(=|\\s+)['\"]?/:|--mount[= ]\\S*\\b(source|src)=/(,|['\"]|\\s|$)|--cap-add[= ]|/var/run/docker\\.sock\\b)"))
+  )
 
 emit:
   reason: "Container started with host-escaping privileges"
@@ -121,4 +132,88 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git commit -m 'docker run --net=host fix'" }
+        session: { id: s1 }
+  - name: docker_exec_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -n docker exec --privileged web sh" }
+        session: { id: s1 }
+  - name: docker_run_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'docker run --net=host alpine ip addr'" }
+        session: { id: s1 }
+  - name: docker_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/local/bin/docker run -v /:/host alpine ls /host" }
+        session: { id: s1 }
+  - name: docker_option_before_run
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker --context staging run --pid=host alpine ps aux" }
+        session: { id: s1 }
+  - name: compose_file_option_before_run
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker compose -f ci.yml run --privileged web" }
+        session: { id: s1 }
+  - name: docker_socket_mount
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --rm -v /var/run/docker.sock:/var/run/docker.sock docker:cli docker ps" }
+        session: { id: s1 }
+  - name: docker_run_through_a_wrapper_the_parser_does_not_look_through
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh build@host.example 'cd /srv && docker run --privileged ubuntu'" }
+        session: { id: s1 }
+  - name: docker_run_named_in_a_commit_message_after_a_separator
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'ci: build && docker run --privileged img in the nightly job'" }
+        session: { id: s1 }
+  - name: docker_run_named_in_a_here_document
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nKernel debugging only: make image && docker run --privileged -v /:/host img\nEOF" }
+        session: { id: s1 }
+  - name: capability_dropped_not_added
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --rm --cap-drop=ALL --network=bridge alpine true" }
+        session: { id: s1 }
+  - name: pid_namespace_of_another_container
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --rm --pid=container:web alpine ps" }
+        session: { id: s1 }
+  - name: build_with_host_network_is_not_a_run
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker build --network host -t app ." }
+        session: { id: s1 }
+  - name: docker_run_given_to_a_script_the_parser_cannot_see_into
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./ci.sh 'cd /srv && docker run --privileged ubuntu'" }
+        session: { id: s1 }
+  - name: docker_run_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'ci: build && docker run --privileged img in the nightly job' && ./run-tests.sh" }
         session: { id: s1 }

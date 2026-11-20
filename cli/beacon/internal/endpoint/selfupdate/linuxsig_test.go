@@ -89,7 +89,7 @@ func testVerifyReleaseSignature(t *testing.T) {
 		if err := os.WriteFile(pkg, []byte("package\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		return a.verifyReleaseSignature(context.Background(), srv.URL+"/v1.0.0/beacon_1.0.0_linux_amd64.deb", pkg)
+		return a.verifyReleaseSignature(context.Background(), Package{URL: srv.URL + "/v1.0.0/beacon_1.0.0_linux_amd64.deb"}, pkg, a.StageDir)
 	}
 
 	if err := verify(); err != nil {
@@ -116,6 +116,124 @@ func testVerifyReleaseSignature(t *testing.T) {
 	tampered = true
 	if err := verify(); err == nil {
 		t.Fatal("tampered checksums.txt accepted")
+	}
+}
+
+// A package behind a short-lived download link (the enterprise edition's) is not beside its
+// checksums.txt: the platform names the package's file name and the signed checksums' own links.
+func TestVerifyReleaseSignatureAtLinksThePlatformNames(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("release signatures are verified on Linux only")
+	}
+	if _, err := exec.LookPath("gpgv"); err != nil {
+		t.Skip("gpgv is not installed")
+	}
+	old := signatureVerifiers
+	signatureVerifiers = []string{"gpgv"}
+	t.Cleanup(func() { signatureVerifiers = old })
+	oldPin := releaseKeyFingerprints
+	releaseKeyFingerprints = []string{testReleaseKeyFingerprint}
+	t.Cleanup(func() { releaseKeyFingerprints = oldPin })
+
+	// Every file is served at /asset?name=<file>&sig=<token>, as a signed storage link is.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/asset" || r.URL.Query().Get("sig") == "" {
+			http.NotFound(w, r)
+			return
+		}
+		data, err := os.ReadFile(filepath.Join("testdata", "signed-release", filepath.Base(r.URL.Query().Get("name"))))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(data)
+	}))
+	defer srv.Close()
+	link := func(name string) string { return srv.URL + "/asset?name=" + name + "&sig=token" }
+	links := SignedChecksums{URL: link("checksums.txt"), SignatureURL: link("checksums.txt.sig"), KeyURL: link("beacon-release-key.gpg")}
+
+	verify := func(pkg Package, content string) error {
+		a := NewApplier("1.0.0")
+		a.StageDir = t.TempDir()
+		path := filepath.Join(t.TempDir(), "download.deb")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return a.verifyReleaseSignature(context.Background(), pkg, path, a.StageDir)
+	}
+	pkg := Package{URL: link("beacon_1.0.0_linux_amd64.deb"), Name: "beacon_1.0.0_linux_amd64.deb", Checksums: links}
+	if err := verify(pkg, "package\n"); err != nil {
+		t.Fatalf("validly signed package refused: %v", err)
+	}
+	if err := verify(pkg, "other bytes\n"); err == nil {
+		t.Fatal("bytes checksums.txt does not list were accepted")
+	}
+	// The name decides which line of checksums.txt the bytes are held to, not the link.
+	renamed := pkg
+	renamed.Name = "beacon_1.0.0_linux_amd64.rpm"
+	if err := verify(renamed, "package\n"); err == nil {
+		t.Fatal("bytes accepted under another package's checksum")
+	}
+	partial := pkg
+	partial.Checksums.KeyURL = ""
+	if err := verify(partial, "package\n"); err == nil || !strings.Contains(err.Error(), "only some") {
+		t.Fatalf("partial links: err = %v", err)
+	}
+}
+
+// A user-mode install fetches and verifies without rights to the system staging directory, so the
+// signed checksums go beside the destination it chose.
+func TestFetchVerifiedPackageOnLinuxChecksTheSignedChecksums(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("release signatures are verified on Linux only")
+	}
+	if _, err := exec.LookPath("gpgv"); err != nil {
+		t.Skip("gpgv is not installed")
+	}
+	old := signatureVerifiers
+	signatureVerifiers = []string{"gpgv"}
+	t.Cleanup(func() { signatureVerifiers = old })
+	oldPin := releaseKeyFingerprints
+	releaseKeyFingerprints = []string{testReleaseKeyFingerprint}
+	t.Cleanup(func() { releaseKeyFingerprints = oldPin })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/pkg" {
+			w.Write([]byte("package\n"))
+			return
+		}
+		data, err := os.ReadFile(filepath.Join("testdata", "signed-release", filepath.Base(r.URL.Path)))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(data)
+	}))
+	defer srv.Close()
+	pkg := Package{
+		URL: srv.URL + "/pkg", SHA256: "4e9416efcf77b84013f263e1f9008c656861298be5aabc82f458e6e47c60d9ff",
+		Name: "beacon_1.0.0_linux_amd64.deb",
+		Checksums: SignedChecksums{
+			URL: srv.URL + "/checksums.txt", SignatureURL: srv.URL + "/checksums.txt.sig", KeyURL: srv.URL + "/beacon-release-key.gpg",
+		},
+	}
+	a := NewApplier("")
+	a.StageDir = filepath.Join(t.TempDir(), "not-created")
+	dir := t.TempDir()
+	if err := a.FetchVerifiedPackage(context.Background(), pkg, filepath.Join(dir, "p.deb")); err != nil {
+		t.Fatalf("FetchVerifiedPackage: %v", err)
+	}
+	if _, err := os.Stat(a.StageDir); !os.IsNotExist(err) {
+		t.Fatalf("the staging directory was used (%v)", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Fatalf("left beside the package: %v", entries)
+	}
+
+	pkg.Name = "beacon_1.0.0_linux_amd64.rpm"
+	if err := a.FetchVerifiedPackage(context.Background(), pkg, filepath.Join(t.TempDir(), "p.deb")); err == nil ||
+		!strings.Contains(err.Error(), "verify release signature") {
+		t.Fatalf("err = %v, want the signed checksums to refuse it", err)
 	}
 }
 

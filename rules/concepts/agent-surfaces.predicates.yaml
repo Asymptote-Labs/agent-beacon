@@ -1,0 +1,188 @@
+# The files that steer a coding agent, said once for the rules about a change to them.
+#
+# A rule asks whether a path is one of these files: the path of a file event, or a path a
+# command writes (c.file_writes, which holds every path as written, so `~/.claude/settings.json`
+# and `$HOME/.cursor/hooks.json` are themselves). The two path predicates answer for a path
+# under any directory, a home directory or a variable included, and only for the whole path:
+# `.claude/settings.json.bak` is not the settings file.
+#
+# What a command writes is the parser's to say: a redirection, tee, sed -i, cp, mv, install,
+# ln, a download's output file (curl -o, wget -O), the destination of scp and rsync, and the
+# directory an archive is extracted or a repository is cloned into, which it writes with a
+# trailing slash. So a rule asks one question of every write.
+library: agent-surfaces
+version: 2
+spec: threat-rules/v1.3
+description: The files that steer a coding agent, as a path.
+
+definitions:
+  - name: agent_control_surface
+    params: [path]
+    description: >
+      The path names a file that constrains or wires an agent's runtime: a settings, hooks or
+      MCP configuration file, or a plugin or extension directory or something under it. It
+      may be under any directory, a home directory (`~`) or a variable included. A path that
+      only holds one of these names (a backup beside the file) does not count. A directory a
+      command puts files into (`~/.gemini/extensions/ext/`, as c.file_writes writes it) is one
+      when it is, or is under, a plugin or extension directory.
+    body: >
+      path.matches("(?is)^(.*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\].*)?)$")
+    tests:
+      - name: settings_under_home
+        match: agent_control_surface(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "~/.claude/settings.json" }
+      - name: hooks_under_a_variable
+        match: agent_control_surface(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "$HOME/.cursor/hooks.json" }
+      - name: a_plugin_directory
+        match: agent_control_surface(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "/home/u/.claude/plugins" }
+      - name: a_file_under_a_plugin_directory
+        match: agent_control_surface(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "/home/u/.cline/plugins/extra.ts" }
+      - name: a_backup_of_the_settings
+        match: agent_control_surface(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.modified }
+            file: { path: ".claude/settings.json.bak" }
+      - name: a_name_that_ends_like_one
+        match: agent_control_surface(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.modified }
+            file: { path: "fixtures/sample.mcp.json" }
+      - name: hooks_downloaded_to_a_quoted_variable_path
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "wget -q -O \"$HOME/.cursor/hooks.json\" https://host.example/hooks.json" }
+      - name: an_attached_output_option
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "wget --output-document=.mcp.json https://host.example/m.json" }
+      - name: a_plugin_cloned_under_home
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "git clone https://host.example/someone/ext ~/.gemini/extensions/ext" }
+      - name: an_extension_unzipped_into_place
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "unzip -o helper.zip -d ~/.gemini/extensions/helper" }
+      - name: a_config_downloaded_elsewhere
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -fsSL -o /tmp/mcp.json https://host.example/configs/.mcp.json" }
+      - name: a_download_to_standard_output
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_control_surface(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -fsSL https://host.example/configs/.mcp.json | head -5" }
+
+  - name: agent_instruction_surface
+    params: [path]
+    description: >
+      The path names a file a coding agent loads as instructions: a guidance file (CLAUDE.md,
+      AGENTS.md, GEMINI.md and the like), or a runtime's rules, skills, commands, prompts,
+      agents or workflows directory or something under it. It may be under any directory, a
+      home directory (`~`) or a variable included. A path that only holds one of these names
+      (a backup beside the file) does not count. A directory a command puts files into
+      (`~/.claude/skills/`, as c.file_writes writes it) is one when it is, or is under, one of
+      those directories.
+    body: >
+      path.matches("(?is)^(.*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\].*)?)$")
+    tests:
+      - name: a_guidance_file
+        match: agent_instruction_surface(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "packages/api/AGENTS.md" }
+      - name: a_skill_under_home
+        match: agent_instruction_surface(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "~/.claude/skills/deploy/SKILL.md" }
+      - name: a_skill_under_variables
+        match: agent_instruction_surface(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "$H/.agents/skills/$s/SKILL.md" }
+      - name: a_skills_directory
+        match: agent_instruction_surface(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.modified }
+            file: { path: "~/.claude/skills" }
+      - name: a_backup_of_a_guidance_file
+        match: agent_instruction_surface(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.modified }
+            file: { path: "CLAUDE.md.bak" }
+      - name: a_name_that_ends_like_one
+        match: agent_instruction_surface(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.modified }
+            file: { path: "docs/not-claude.md" }
+      - name: a_rule_downloaded_to_a_rules_directory
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -fsSL https://host.example/r.md --output='.cursor/rules/boot.mdc'" }
+      - name: skills_synced_under_home
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -a /tmp/skills/ \"$HOME/.claude/skills/\"" }
+      - name: a_guidance_file_downloaded_under_its_own_name
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl -sSO https://host.example/team/AGENTS.md" }
+      - name: skills_unpacked_from_an_archive
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "tar -xzf skills.tgz -C ~/.claude/skills" }
+      - name: skills_synced_out_of_home
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "rsync -a ~/.claude/skills/ /mnt/backup/skills/" }
+      - name: a_guidance_file_downloaded_under_another_name
+        match: e.command.parsed_commands.exists(c, c.file_writes.exists(f, agent_instruction_surface(f.path)))
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "wget -O /tmp/t https://host.example/team/AGENTS.md" }

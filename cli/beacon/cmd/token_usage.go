@@ -44,10 +44,7 @@ var tokenUsageCmd = &cobra.Command{
 }
 
 func runTokenUsage(cmd *cobra.Command, args []string) error {
-	userMode := tokenUsageOpts.userMode
-	if tokenUsageOpts.systemMode {
-		userMode = false
-	}
+	userMode := flagsUserMode(tokenUsageOpts.userMode, tokenUsageOpts.systemMode)
 	runtimeLog := lifecycle.ResolveRuntimeLog(userMode, tokenUsageOpts.logPath)
 	query := dashboard.EventQuery{
 		Session:    tokenUsageOpts.session,

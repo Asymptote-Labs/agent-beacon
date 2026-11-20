@@ -106,7 +106,8 @@ type Predicate struct {
 
 // Library is the predicates of one rule pack's definitions, and the CEL environment its rules
 // compile against. A nil Library has no predicates: it is the engine's environment alone, which
-// is what a pack without definitions gets. A Library is immutable and safe for concurrent use.
+// is what a pack without definitions gets. A Library's definitions never change, and it is safe
+// for concurrent use; it remembers the expressions it has compiled (matches).
 type Library struct {
 	predicates map[string]*predicate
 	// order lists the predicate names, sorted.
@@ -116,6 +117,7 @@ type Library struct {
 	info  []Predicate
 	// catalogs are the pack's catalogs, in the order of their files' names.
 	catalogs []*concepts.Catalog
+	matches  matchCache
 }
 
 // predicateTest is one fixture Check runs: a definition's, or a catalog's examples, which stand
@@ -386,18 +388,21 @@ func (l *Library) resolve(base *cel.Env, definitions []PredicateDefinition) erro
 			return fmt.Errorf("%s: predicate %s: body: %w", p.source, p.name, iss.Err())
 		}
 		body := parsed.NativeRep().Expr()
-		free := hygienic(p.name, body)
+		free, binds := hygienic(p.name, body, p.params)
 		for _, name := range free {
 			if !slices.Contains(p.params, name) {
 				return fmt.Errorf("%s: predicate %s: body reads %q, which is not one of its params (%s): a predicate reads only what it is given", p.source, p.name, name, strings.Join(p.params, ", "))
 			}
+			if slices.Contains(binds, name) {
+				return fmt.Errorf("%s: predicate %s: param %q is bound by the body and also read outside that binding: a name the predicate binds for its caller means nothing outside it", p.source, p.name, name)
+			}
 		}
 		for _, param := range p.params {
-			if !slices.Contains(free, param) {
+			if !slices.Contains(free, param) && !slices.Contains(binds, param) {
 				return fmt.Errorf("%s: predicate %s: param %q is not used", p.source, p.name, param)
 			}
 		}
-		p.body = body
+		p.body, p.binds = body, binds
 		return nil
 	}
 	for _, name := range l.order {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +70,15 @@ type Applier struct {
 	// SkipGatekeeper relaxes notarization/staple checks. Requires
 	// AllowInsecureTest. The sha256 check is always enforced regardless.
 	SkipGatekeeper bool
+
+	// RollbackPackage, on Linux, is the package that reinstalls what is installed now. A rollback
+	// that only copies the old files back leaves the package database naming the package that
+	// failed; when that one ranks above every later release (the enterprise edition's epoch), dnf,
+	// apt and the next update would never replace it. With RollbackPackage, it is downloaded and
+	// verified before anything is installed (without it, nothing is), and a rollback reinstalls it
+	// through the package manager before the files are copied back. Its SHA256 may be empty: on
+	// Linux the release's signed checksums.txt is what it is held to.
+	RollbackPackage *Package
 
 	HTTPClient *http.Client
 	run        runnerFunc
@@ -165,6 +175,28 @@ type Package struct {
 	Version string
 	// Edition, when set, must be the edition the installed `beacon version` reports.
 	Edition string
+	// Name is the package's file name, as the release's checksums.txt lists it, for a URL that does
+	// not end in it (a short-lived download link). Empty: the URL's last element.
+	Name string
+	// Checksums is where the release's signed checksums.txt is, for a package that is not beside it
+	// (a short-lived download link). Empty: beside the package's URL.
+	Checksums SignedChecksums
+}
+
+// SignedChecksums are the links to a release's checksums.txt, its signature and the public key
+// that made it, which is trusted only for carrying a pinned fingerprint.
+type SignedChecksums struct {
+	URL          string
+	SignatureURL string
+	KeyURL       string
+}
+
+// fileName is the name checksums.txt lists the package under.
+func (p Package) fileName() string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return p.URL[strings.LastIndex(p.URL, "/")+1:]
 }
 
 // InstallPackage downloads, verifies and installs one package, then health-checks the result and
@@ -189,9 +221,10 @@ func (a *Applier) InstallPackage(ctx context.Context, pkg Package) (ApplyResult,
 	return a.installPackage(ctx, pkg, result, message)
 }
 
-// FetchVerifiedPackage downloads pkg to dest and checks it as InstallPackage does on macOS -- the
-// checksum, the installer signature's team and Gatekeeper -- without installing it, for a caller
-// that only takes files out of the package. The caller removes dest.
+// FetchVerifiedPackage downloads pkg to dest and checks it as InstallPackage does -- the checksum,
+// then on macOS the installer signature's team and Gatekeeper, on Linux the signed checksums.txt --
+// without installing it, for a caller that only takes files out of the package. The caller
+// removes dest.
 func (a *Applier) FetchVerifiedPackage(ctx context.Context, pkg Package, dest string) error {
 	if err := a.download(ctx, pkg.URL, dest); err != nil {
 		return fmt.Errorf("download: %w", err)
@@ -199,8 +232,63 @@ func (a *Applier) FetchVerifiedPackage(ctx context.Context, pkg Package, dest st
 	if err := verifySHA256(dest, pkg.SHA256); err != nil {
 		return fmt.Errorf("verify checksum: %w", err)
 	}
-	if err := a.verifyGatekeeper(ctx, dest); err != nil {
-		return fmt.Errorf("verify signature/notarization: %w", err)
+	// The caller may have no rights to the system staging directory (a user-mode install), so the
+	// signed checksums are fetched beside dest, which it chose.
+	_, err := a.verifyPackage(ctx, pkg, dest, filepath.Dir(dest))
+	return err
+}
+
+// verifyPackage checks a downloaded package beyond its SHA-256 and names how it was checked.
+// workDir is where it may fetch what it checks against.
+//
+// Gatekeeper is macOS-only: pkgutil, stapler and spctl do not exist elsewhere, and there is no
+// OS-level equivalent on Linux. Skipped explicitly and logged rather than silently, so the weaker
+// verification is visible in the system log rather than assumed.
+//
+// SHA-256 verification still applies on every platform and is not optional. The trust root that
+// leaves is HTTPS plus the release checksum -- which is the same trust root the user relied on to
+// obtain the package they are updating, so this is parity with the install path rather than a
+// downgrade. On Linux, Beacon's release key is pinned, so the package must also be listed in a
+// checksums.txt signed by that key (verified with gpgv or sqv).
+func (a *Applier) verifyPackage(ctx context.Context, pkg Package, pkgPath, workDir string) (string, error) {
+	switch {
+	case runtime.GOOS == "linux" && len(releaseKeyFingerprints) > 0 && !a.AllowInsecureTest:
+		if err := a.verifyReleaseSignature(ctx, pkg, pkgPath, workDir); err != nil {
+			return "sha256+gpg", fmt.Errorf("verify release signature: %w", err)
+		}
+		return "sha256+gpg", nil
+	case runtime.GOOS != "darwin":
+		return "sha256", nil
+	case a.SkipGatekeeper:
+		// Explicitly named rather than left empty. An empty value is indistinguishable from "we
+		// did not record it", and this is the one case where a macOS update carries less assurance
+		// than a macOS update normally does -- exactly the thing a reader needs told.
+		return "sha256 (notarization check skipped)", nil
+	default:
+		if err := a.verifyGatekeeper(ctx, pkgPath); err != nil {
+			return "sha256+notarization", fmt.Errorf("verify signature/notarization: %w", err)
+		}
+		return "sha256+notarization", nil
+	}
+}
+
+// fetchRollbackPackage downloads pkg to dest and checks it as an install would. Without a SHA-256 of
+// its own it must be held to a signed checksums.txt, which only the Linux check does.
+func (a *Applier) fetchRollbackPackage(ctx context.Context, pkg Package, dest, workDir string) error {
+	if err := a.download(ctx, pkg.URL, dest); err != nil {
+		return fmt.Errorf("download %s: %w", pkg.fileName(), err)
+	}
+	if pkg.SHA256 != "" {
+		if err := verifySHA256(dest, pkg.SHA256); err != nil {
+			return fmt.Errorf("verify checksum: %w", err)
+		}
+	}
+	verification, err := a.verifyPackage(ctx, pkg, dest, workDir)
+	if err != nil {
+		return err
+	}
+	if pkg.SHA256 == "" && verification != "sha256+gpg" && !a.AllowInsecureTest {
+		return fmt.Errorf("%s has no checksum to be held to", pkg.fileName())
 	}
 	return nil
 }
@@ -221,7 +309,7 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 	defer unlock()
 
 	// Download + verify before touching the system.
-	pkgPath := filepath.Join(stage, "download"+packageExt(pkg.URL))
+	pkgPath := filepath.Join(stage, "download"+packageExt(pkg.fileName()))
 	if err := a.download(ctx, pkg.URL, pkgPath); err != nil {
 		a.emit(false, result, "download update: "+err.Error())
 		return result, fmt.Errorf("download update: %w", err)
@@ -232,35 +320,22 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 		a.emit(false, result, err.Error())
 		return result, fmt.Errorf("verify checksum: %w", err)
 	}
-	// Gatekeeper is macOS-only: pkgutil, stapler and spctl do not exist elsewhere, and there is
-	// no OS-level equivalent on Linux. Skipped explicitly and logged rather than silently, so
-	// the weaker verification is visible in the system log rather than assumed.
-	//
-	// SHA-256 verification above still applies on every platform and is not optional. The trust
-	// root that leaves is HTTPS plus the release checksum -- which is the same trust root the
-	// user relied on to obtain the package they are updating, so this is parity with the install
-	// path rather than a downgrade. On Linux, Beacon's release key is pinned, so the package must
-	// also be listed in a checksums.txt signed by that key (verified with gpgv or sqv).
-	switch {
-	case runtime.GOOS == "linux" && len(releaseKeyFingerprints) > 0 && !a.AllowInsecureTest:
-		result.Verification = "sha256+gpg"
-		if err := a.verifyReleaseSignature(ctx, pkg.URL, pkgPath); err != nil {
-			a.emit(false, result, err.Error())
-			return result, fmt.Errorf("verify release signature: %w", err)
+	verification, err := a.verifyPackage(ctx, pkg, pkgPath, stage)
+	result.Verification = verification
+	if err != nil {
+		a.emit(false, result, err.Error())
+		return result, err
+	}
+
+	reinstall := ""
+	if a.RollbackPackage != nil {
+		reinstall = filepath.Join(stage, "rollback-package"+packageExt(a.RollbackPackage.fileName()))
+		if err := a.fetchRollbackPackage(ctx, *a.RollbackPackage, reinstall, stage); err != nil {
+			message := "fetch the installed version's package, which a failed install reinstalls: " + err.Error()
+			a.emit(false, result, message)
+			return result, errors.New(message)
 		}
-	case runtime.GOOS != "darwin":
-		result.Verification = "sha256"
-	case a.SkipGatekeeper:
-		// Explicitly named rather than left empty. An empty value is indistinguishable from "we
-		// did not record it", and this is the one case where a macOS update carries less assurance
-		// than a macOS update normally does -- exactly the thing a reader needs told.
-		result.Verification = "sha256 (notarization check skipped)"
-	default:
-		result.Verification = "sha256+notarization"
-		if err := a.verifyGatekeeper(ctx, pkgPath); err != nil {
-			a.emit(false, result, err.Error())
-			return result, fmt.Errorf("verify signature/notarization: %w", err)
-		}
+		defer os.Remove(reinstall)
 	}
 
 	// Snapshot the whole install tree for rollback, then install. A snapshot
@@ -273,7 +348,7 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 	}
 
 	if err := a.install(ctx, pkgPath); err != nil {
-		rollbackErr := a.rollback(backup, &result)
+		rollbackErr := a.rollback(ctx, backup, reinstall, &result)
 		message := err.Error()
 		if rollbackErr != nil {
 			message += "; rollback failed: " + rollbackErr.Error()
@@ -285,7 +360,7 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 
 	if !a.AllowInsecureTest {
 		if err := a.restartCollector(); err != nil {
-			rollbackErr := a.rollback(backup, &result)
+			rollbackErr := a.rollback(ctx, backup, reinstall, &result)
 			message := "post-install collector restart failed: " + err.Error()
 			if rollbackErr != nil {
 				message += "; rollback failed: " + rollbackErr.Error()
@@ -297,7 +372,7 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 	}
 
 	if err := a.healthCheck(ctx, pkg.Version, pkg.Edition); err != nil {
-		rollbackErr := a.rollback(backup, &result)
+		rollbackErr := a.rollback(ctx, backup, reinstall, &result)
 		message := "post-install health check failed: " + err.Error()
 		if rollbackErr != nil {
 			message += "; rollback failed: " + rollbackErr.Error()
@@ -600,9 +675,18 @@ func (a *Applier) snapshotInstall() (string, error) {
 // config/plists live outside the tree but reference stable paths and a
 // release-stable schema, so the restored older binaries run against them
 // consistently after the collector restarts.
-func (a *Applier) rollback(backup string, result *ApplyResult) error {
+//
+// reinstall, when set, is the verified package of what was installed before
+// (Applier.RollbackPackage). It is installed through the package manager first,
+// so the package database names what is on disk again; the snapshot is copied
+// back either way, and a failed reinstall is reported as a failed rollback.
+func (a *Applier) rollback(ctx context.Context, backup, reinstall string, result *ApplyResult) error {
 	if backup == "" {
 		return nil
+	}
+	var reinstallErr error
+	if reinstall != "" {
+		reinstallErr = a.reinstall(ctx, reinstall)
 	}
 	live := a.installDir()
 	restore := filepath.Join(a.stageDir(), "rollback", "restore")
@@ -632,6 +716,23 @@ func (a *Applier) rollback(backup string, result *ApplyResult) error {
 		if err := restoreScriptForwarders(); err != nil {
 			return fmt.Errorf("restore forwarders: %w", err)
 		}
+	}
+	if reinstallErr != nil {
+		return fmt.Errorf("the files are restored, but reinstalling the previous package failed, so the package database still names the one that failed: %w", reinstallErr)
+	}
+	return nil
+}
+
+// reinstall installs the package of what was installed before, which may rank below the one that
+// failed: rpm needs --oldpackage for that, and dpkg allows it with a warning.
+func (a *Applier) reinstall(ctx context.Context, pkgPath string) error {
+	name, args := installerCommand(pkgPath, a.prefix())
+	if name == "rpm" {
+		args = []string{"--upgrade", "--oldpackage", "--replacepkgs", pkgPath}
+	}
+	out, err := a.runner()(ctx, name, args...)
+	if err != nil {
+		return fmt.Errorf("%s %s: %s: %w", name, strings.Join(args[:len(args)-1], " "), strings.TrimSpace(out), err)
 	}
 	return nil
 }

@@ -1,10 +1,16 @@
 id: database-drop-or-flush
-version: 1
+spec: threat-rules/v1.3  # needed for args and predicates
+version: 4
 title: Database dropped, truncated or flushed
 description: >
   An agent invokes a destructive database operation through a SQL client, Redis,
   or a framework reset command. Inline SQL must begin with DROP or TRUNCATE;
-  migration-file contents and arbitrary SQL scripts are not inspected.
+  migration-file contents and arbitrary SQL scripts are not inspected. The
+  command is found by what the line runs, and inline SQL or a Redis command is a
+  word of that client, so the same words in a commit message, an echo or a
+  here-document do not fire and the client under `sudo`, by any path or inside
+  `bash -c` does; where the parser cannot see into a command, the text that
+  reaches that command is matched instead (unread_text).
 severity: high
 status: experimental
 posture: detect
@@ -12,19 +18,42 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM06
 
-# Command prefixes accept environment assignments, relative executable paths, and
-# sudo execution options. Value-taking sudo options consume their argument;
-# inspection modes such as sudo -l/-v are not execution prefixes.
+# Each client is a parsed command, named after sudo, env and the like and by any path.
+# Inline SQL is one word of the client as written (argv_raw), so SQL that holds a variable
+# is still read: the word begins with DROP or TRUNCATE after its quote, or after the option
+# it is attached to (--command=, -e"...", a cluster as -tAc is a word of its own before
+# it). redis-cli takes the Redis command as its first word after its own options, so
+# `redis-cli GET FLUSHALL` reads a key. A runner (bundle exec, npx, bunx, pnpm) is the
+# command and the tool is words of it. A command behind sudo -l or sudo -v is not run and
+# has no name, so its line is left to the text.
+#
+# The text half is the text patterns of version 1 as one pattern, asked of the text that
+# reaches a command the parser cannot see into (unread_text): a command prefix, then what
+# the command is, one alternative for each of the eight patterns it was. Each of them began
+# with the same prefix, and a pattern is charged for its length each time it is asked, so
+# the prefix is written once. A text matches the one pattern exactly when it matched one of
+# the eight. The prefix accepts environment assignments, relative executable paths, and sudo
+# execution options. Value-taking sudo options consume their argument; inspection modes
+# such as sudo -l/-v are not execution prefixes.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:psql|mysql|mariadb)\\b[^;&|\\n#]*[ \\t](?:-c|-e|--command|--execute)(?:[ \\t]+|=)[\\\"\\x27]?[ \\t]*(?:(?i:DROP)[ \\t]+(?i:TABLE|DATABASE|SCHEMA|INDEX|VIEW|MATERIALIZED|SEQUENCE|TYPE|FUNCTION|PROCEDURE|TRIGGER|EXTENSION|ROLE|USER)\\b|(?i:TRUNCATE)[ \\t]+[a-zA-Z_\\\"\\x27])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?sqlite3(?:[ \\t]+-[\\w-]+)*[ \\t]+[^\\s;&|]+[ \\t][\\\"\\x27][ \\t]*(?i:DROP|TRUNCATE)[ \\t]+(?i:TABLE|INDEX|VIEW|TRIGGER)\\b") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?dropdb(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?mysqladmin(?:[ \\t]+(?:-[upPhS]|--(?:user|password|port|host|socket))(?:=|[ \\t]+)?[^\\s;&|]+|[ \\t]+(?:--force|-f))*[ \\t]+drop(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?redis-cli(?:[ \\t]+(?:-[hpansu]|--(?:host|port|pass|user|uri))(?:=|[ \\t]+)[^\\s;&|]+|[ \\t]+--(?:tls|raw|no-auth-warning))*[ \\t]+(?i:FLUSHALL|FLUSHDB)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:bundle[ \\t]+exec[ \\t]+)?(?:rails|rake)[ \\t]+db:(?:drop|reset|migrate:reset)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:(?:npx|pnpm[ \\t]+exec|bunx)[ \\t]+)?prisma[ \\t]+migrate[ \\t]+reset(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:python[0-9.]*[ \\t]+(?:[^\\s;&|]*/)?manage\\.py|django-admin)[ \\t]+flush(?:[ \\t]|$|[;&|\\n<>#])")
+    e.command.parsed_commands.exists(c,
+      c.name.matches("^(psql|mysql|mariadb)$") &&
+        c.argv_raw.exists(a, a.matches("^(?:--(?:command|execute)=|-[A-Za-z]*[ce])?[\"\\x27]?\\s*(?:(?i:DROP)\\s+(?i:TABLE|DATABASE|SCHEMA|INDEX|VIEW|MATERIALIZED|SEQUENCE|TYPE|FUNCTION|PROCEDURE|TRIGGER|EXTENSION|ROLE|USER)\\b|(?i:TRUNCATE)\\s+[a-zA-Z_\"\\x27`])")) ||
+      c.name == "sqlite3" &&
+        c.argv_raw.exists(a, a.matches("^[\"\\x27]\\s*(?i:DROP|TRUNCATE)\\s+(?i:TABLE|INDEX|VIEW|TRIGGER)\\b")) ||
+      c.name == "dropdb" ||
+      c.name == "mysqladmin" && c.args.matches("(?m)^drop$") ||
+      c.name == "redis-cli" && c.args.matches("(?m)\\A(?:-[hpsaurindDXt]\\n[^\\n]*\\n|--(?:host|port|pass|user|uri|sni|cacert|cacertdir|cert|key)(?:=[^\\n]*\\n|\\n[^\\n]*\\n)|-[cex23]\\n|--(?:tls|insecure|raw|no-raw|csv|json|quoted-json|no-auth-warning|askpass|verbose)\\n)*(?i:FLUSHALL|FLUSHDB)$") ||
+      c.name.matches("^(rails|rake)$") && c.args.matches("(?m)^db:(?:drop|reset|migrate:reset)$") ||
+      c.name == "bundle" && c.args.matches("(?m)^exec\\n(?:[^\\n]*/)?(?:rails|rake)\\n(?:[^\\n]*\\n)*?db:(?:drop|reset|migrate:reset)$") ||
+      c.name == "prisma" && c.args.matches("(?m)^migrate\\nreset$") ||
+      c.name.matches("^(npx|bunx|pnpm)$") && c.args.matches("(?m)^prisma\\nmigrate\\nreset$") ||
+      c.name.matches("^python[0-9.]*$") && c.args.matches("(?m)\\A(?:[^\\n]*/)?manage\\.py\\nflush$") ||
+      c.name == "django-admin" && c.args.matches("(?m)\\Aflush$")
+    ) ||
+    unread_text(e, t,
+      t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:(?:psql|mysql|mariadb)\\b[^;&|\\n#]*[ \\t](?:-c|-e|--command|--execute)(?:[ \\t]+|=)[\\\"\\x27]?[ \\t]*(?:(?i:DROP)[ \\t]+(?i:TABLE|DATABASE|SCHEMA|INDEX|VIEW|MATERIALIZED|SEQUENCE|TYPE|FUNCTION|PROCEDURE|TRIGGER|EXTENSION|ROLE|USER)\\b|(?i:TRUNCATE)[ \\t]+[a-zA-Z_\\\"\\x27])|sqlite3(?:[ \\t]+-[\\w-]+)*[ \\t]+[^\\s;&|]+[ \\t][\\\"\\x27][ \\t]*(?i:DROP|TRUNCATE)[ \\t]+(?i:TABLE|INDEX|VIEW|TRIGGER)\\b|dropdb(?:[ \\t]|$|[;&|\\n<>#])|mysqladmin(?:[ \\t]+(?:-[upPhS]|--(?:user|password|port|host|socket))(?:=|[ \\t]+)?[^\\s;&|]+|[ \\t]+(?:--force|-f))*[ \\t]+drop(?:[ \\t]|$|[;&|\\n<>#])|redis-cli(?:[ \\t]+(?:-[hpansu]|--(?:host|port|pass|user|uri))(?:=|[ \\t]+)[^\\s;&|]+|[ \\t]+--(?:tls|raw|no-auth-warning))*[ \\t]+(?i:FLUSHALL|FLUSHDB)(?:[ \\t]|$|[;&|\\n<>#])|(?:bundle[ \\t]+exec[ \\t]+)?(?:rails|rake)[ \\t]+db:(?:drop|reset|migrate:reset)(?:[ \\t]|$|[;&|\\n<>#])|(?:(?:npx|pnpm[ \\t]+exec|bunx)[ \\t]+)?prisma[ \\t]+migrate[ \\t]+reset(?:[ \\t]|$|[;&|\\n<>#])|(?:python[0-9.]*[ \\t]+(?:[^\\s;&|]*/)?manage\\.py|django-admin)[ \\t]+flush(?:[ \\t]|$|[;&|\\n<>#]))"))
   )
 
 emit:
@@ -390,4 +419,150 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "sudo -u postgres echo \"dropdb app\"" }
+        session: { id: s1 }
+  - name: dropdb_under_sudo_and_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo env PGHOST=db dropdb --if-exists app" }
+        session: { id: s1 }
+  - name: psql_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'psql app -c \"DROP TABLE users\"'" }
+        session: { id: s1 }
+  - name: redis_cli_by_absolute_path_under_nice
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "nice /usr/local/bin/redis-cli -n 2 flushdb" }
+        session: { id: s1 }
+  - name: sqlite3_under_timeout
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "timeout 60 sqlite3 -batch app.db 'DROP TABLE users;'" }
+        session: { id: s1 }
+  - name: mysqladmin_under_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "env MYSQL_HOST=db mysqladmin --force drop app" }
+        session: { id: s1 }
+  - name: rake_under_nice
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "nice rake db:migrate:reset" }
+        session: { id: s1 }
+  - name: prisma_through_npx_under_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "env CI=1 npx prisma migrate reset --force" }
+        session: { id: s1 }
+  - name: manage_py_flush_under_nohup
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "nohup python3 src/manage.py flush --no-input" }
+        session: { id: s1 }
+  - name: django_admin_flush_under_timeout
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "timeout 30 django-admin flush --settings=app.settings" }
+        session: { id: s1 }
+  - name: psql_option_cluster_and_sql_with_a_variable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'psql \"$DATABASE_URL\" -tAc \"DROP TABLE IF EXISTS $TABLE\"'" }
+        session: { id: s1 }
+  - name: mysql_sql_attached_to_its_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c \"mysql -e'TRUNCATE TABLE sessions'\"" }
+        session: { id: s1 }
+  - name: rails_through_bundle_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'RAILS_ENV=test bundle exec bin/rails db:environment:set db:drop'" }
+        session: { id: s1 }
+  - name: prisma_through_pnpm_inside_a_shell_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sh -c 'pnpm exec prisma migrate reset --force'" }
+        session: { id: s1 }
+  - name: psql_in_a_remote_command_line
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh ops@host.example 'cd /srv/app && psql app -c \"TRUNCATE sessions\"'" }
+        session: { id: s1 }
+  - name: dropdb_in_a_here_document_sent_to_a_remote_shell
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh ops@host.example <<'EOF'\ndropdb app\nEOF" }
+        session: { id: s1 }
+  - name: dropdb_named_in_a_commit_message_body
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docs: resetting a dev database\n\ndropdb app && createdb app'" }
+        session: { id: s1 }
+  - name: psql_named_in_a_here_document_written_to_a_file
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nTo start over in development:\npsql app -c \"DROP TABLE users;\"\nredis-cli FLUSHALL\nEOF" }
+        session: { id: s1 }
+  - name: rails_named_in_an_echo_after_a_separator
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'the schema is stale; rails db:reset would fix it'" }
+        session: { id: s1 }
+  - name: sql_in_a_here_document_to_the_client_is_not_inspected
+    # A script on the client's standard input is content, like a migration file. No version of
+    # the rule has read it.
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app <<'EOF'\nDROP TABLE users;\nEOF" }
+        session: { id: s1 }
+  - name: sql_that_names_a_drop_later_in_a_string
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app -c \"SELECT count(*) FROM audit WHERE statement LIKE 'DROP TABLE%'\"" }
+        session: { id: s1 }
+  - name: redis_cli_reads_a_key_after_an_option
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "redis-cli --raw GET flushall" }
+        session: { id: s1 }
+  - name: django_admin_other_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 manage.py sqlflush" }
+        session: { id: s1 }
+  - name: dropdb_given_to_a_project_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./deploy.sh 'cd /srv; dropdb production'" }
+        session: { id: s1 }
+  - name: dropdb_in_a_commit_message_beside_a_project_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'runbook; dropdb production is forbidden' && ./run-tests.sh" }
         session: { id: s1 }
