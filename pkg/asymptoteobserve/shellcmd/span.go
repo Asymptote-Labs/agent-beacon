@@ -242,7 +242,9 @@ func takesVariable(commands []Command, i int) bool {
 }
 
 // assignedBefore reports whether a statement of the line itself, at or before command i,
-// assigns name: NAME=value on its own, or a declaration.
+// assigns name: NAME=value on its own, a declaration, a builtin that stores into a variable
+// it is given by name (read, printf -v, mapfile, readarray, getopts), where name is one of
+// its words, or, for a positional parameter ($1, $@, $*), a set with operands.
 func assignedBefore(commands []Command, i int, name string) bool {
 	c := &commands[i]
 	for j := range commands {
@@ -262,6 +264,23 @@ func assignedBefore(commands []Command, i int, name string) bool {
 				}
 			}
 		}
+		if d.Offset < c.Offset && storesByName[d.unwrapped.name] &&
+			slices.ContainsFunc(d.Argv, func(w Word) bool { return w.Known && w.Text == name }) {
+			return true
+		}
+		if d.Offset < c.Offset && d.unwrapped.name == "set" && len(d.Argv) > 1 && positional(name) {
+			return true
+		}
 	}
 	return false
+}
+
+// storesByName are the builtins that assign a variable named by one of their words. printf
+// assigns only with -v, but a printf whose words name the variable is close enough: the span
+// is an over-approximation.
+var storesByName = map[string]bool{"read": true, "printf": true, "mapfile": true, "readarray": true, "getopts": true}
+
+// positional reports whether name is a positional parameter: a number, @ or *.
+func positional(name string) bool {
+	return name == "@" || name == "*" || name != "" && strings.Trim(name, "0123456789") == ""
 }

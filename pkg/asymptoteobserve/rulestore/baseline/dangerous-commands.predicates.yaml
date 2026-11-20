@@ -377,8 +377,14 @@ definitions:
       options), then such a mode among its words. It is for the text of a command line the
       parser cannot see into (unread_text).
     body: >
-      text.matches("(?i)(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\b(?:busybox|toybox|chroot\\s+\\S+|flock\\s+\\S+|(?:docker|podman|nerdctl|kubectl)\\s+(?:run|exec)\\b[^;&|\\n]*?)\\s+)(sudo\\s+(-\\S+\\s+)*)?chmod\\s+([^;&|]*\\s)?([0-7]?[0-7]{2}[2367](\\s|$)|([ugoa]*[oa][ugoa]*)[+=][rwx]*w[rwx]*\\b)")
+      text.matches("(?i)(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\b(?:busybox|toybox|chroot\\s+\\S+|flock\\s+\\S+|(?:docker|podman|nerdctl|kubectl)\\s+(?:run|exec)\\b[^;&|\\n]*?)\\s+)(sudo\\s+(-\\S+\\s+)*)?chmod\\s+([^;&|\\n]*[ \\t])?([0-7]?[0-7]{2}[2367](\\s|$)|([ugoa]*[oa][ugoa]*)[+=][rwx]*w[rwx]*\\b)")
     tests:
+      - name: an_executable_bit_and_a_port_on_a_later_line
+        match: world_writable_chmod_mention(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat > start.sh <<'EOF'\n#!/bin/bash\nchmod +x bin/server\nexec bin/server --port 5432\nEOF\n./start.sh" }
       - name: a_mode_under_sudo_handed_to_a_script
         match: world_writable_chmod_mention(e.command.command)
         verdict: match
@@ -422,7 +428,7 @@ definitions:
       text of a command line the parser cannot see into (unread_text).
     body: >
       world_writable_chmod_mention(text) &&
-      text.matches("(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\b(?:busybox|toybox|chroot\\s+\\S+|flock\\s+\\S+|(?:docker|podman|nerdctl|kubectl)\\s+(?:run|exec)\\b[^;&|\\n]*?)\\s+)(sudo\\s+(-\\S+\\s+)*)?(?i:chmod)\\s+([^;&|]*\\s)?(-[A-Za-z]*R[A-Za-z]*|--recursive)(\\s|$)")
+      text.matches("(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\b(?:busybox|toybox|chroot\\s+\\S+|flock\\s+\\S+|(?:docker|podman|nerdctl|kubectl)\\s+(?:run|exec)\\b[^;&|\\n]*?)\\s+)(sudo\\s+(-\\S+\\s+)*)?(?i:chmod)\\s+([^;&|\\n]*[ \\t])?(-[A-Za-z]*R[A-Za-z]*|--recursive)(\\s|$)")
     tests:
       - name: a_recursive_mode_handed_to_a_script
         match: world_writable_tree_mention(e.command.command)

