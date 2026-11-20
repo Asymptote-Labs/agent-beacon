@@ -49,27 +49,18 @@ var (
 		script: []string{"e", "f", "--regexp", "--file"},
 	}
 
-	// gzipReader covers gzip, gunzip, zcat and the lzma family, whose option sets match.
-	gzipReader = reader{
-		optionTable: optionTable{
-			values: optionSpec{short: "S", long: []string{"--suffix"}},
-			flags: optionSpec{short: "cdflnNqrstvVh123456789", long: []string{
-				"--stdout", "--to-stdout", "--decompress", "--uncompress", "--force", "--keep",
-				"--list", "--license", "--no-name", "--name", "--quiet", "--recursive",
-				"--rsyncable", "--test", "--verbose", "--version", "--help", "--fast", "--best",
-			}},
-		},
-	}
+	// gzipReader covers gzip, gunzip and zcat.
+	gzipReader = reader{optionTable: optionTable{values: optionSpec{short: "S", long: []string{"--suffix"}}}}
 
-	// xzReader covers xz, unxz and xzcat. -B and -M name the value that follows, as xz also
-	// spells them -BLOCK-size and -MEM-limit. --files and --files0 are left out of values: their
-	// bare form's value is an operand already, and inputs() adds the attached --files=f form.
+	// xzReader covers xz, unxz, xzcat and the lzma family xz-utils installs beside them.
+	// --files and --files0 are left out of values: their bare form's value is an operand
+	// already, and inputs() adds the attached --files=f form.
 	xzReader = reader{
 		optionTable: optionTable{
-			values: optionSpec{short: "TB", long: []string{
-				"--threads", "--block-size", "--block-list", "--memory", "--mem-limit",
-				"--memlimit-compress", "--memlimit-decompress", "--memlimit-mt-decompress",
-				"--flush-timeout",
+			values: optionSpec{short: "MSFCT", long: []string{
+				"--suffix", "--format", "--check", "--threads", "--memlimit", "--memory",
+				"--block-size", "--block-list", "--memlimit-compress", "--memlimit-decompress",
+				"--memlimit-mt-decompress", "--flush-timeout",
 			}},
 		},
 	}
@@ -79,15 +70,16 @@ var (
 	// so their values are operands like any other file it takes in.
 	zstdReader = reader{
 		optionTable: optionTable{
-			values: optionSpec{short: "oTMB", long: []string{
-				"--output-file", "--threads", "--memory", "--block-size", "--rsyncable",
-			}},
+			values: optionSpec{short: "oTMB", long: []string{"--threads", "--memory", "--block-size"}},
 		},
 	}
 
+	// brotliReader leaves -D, --dictionary out of values for the reason zstdReader does.
 	brotliReader = reader{
 		optionTable: optionTable{
-			values: optionSpec{short: "oZ", long: []string{"--output", "--quality", "--dictionary"}},
+			values: optionSpec{short: "oqwSC", long: []string{
+				"--output", "--quality", "--lgwin", "--large_window", "--suffix", "--comment",
+			}},
 		},
 	}
 
@@ -131,21 +123,22 @@ var (
 		// into an archive, and the archive decompress turns back. They are the pipe-reading
 		// counterpart of the printers above, so a credential file compressed into a pipeline's
 		// first stage is a read the egress rules can follow.
-		"gzip":       gzipReader,
-		"gunzip":     gzipReader,
-		"zcat":       gzipReader,
-		"lzma":       gzipReader,
-		"unlzma":     gzipReader,
-		"lzcat":      gzipReader,
-		"bzip2":      {},
-		"bunzip2":    {},
-		"bzcat":      {},
-		"xz":         xzReader,
-		"unxz":       xzReader,
-		"xzcat":      xzReader,
-		"zstd":       zstdReader,
-		"unzstd":     zstdReader,
-		"zstdcat":    zstdReader,
+		"gzip":    gzipReader,
+		"gunzip":  gzipReader,
+		"zcat":    gzipReader,
+		"lzma":    xzReader,
+		"unlzma":  xzReader,
+		"lzcat":   xzReader,
+		"bzip2":   {},
+		"bunzip2": {},
+		"bzcat":   {},
+		"xz":      xzReader,
+		"unxz":    xzReader,
+		"xzcat":   xzReader,
+		"zstd":    zstdReader,
+		"unzstd":  zstdReader,
+		"zstdcat": zstdReader,
+		// lz4's and unlz4's second operand is the file they write.
 		"lz4":        {},
 		"unlz4":      {},
 		"lz4cat":     {},
@@ -256,7 +249,7 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 		}
 	case "socat":
 		return socatFiles(args), data
-	case "xz", "unxz", "xzcat":
+	case "xz", "unxz", "xzcat", "lzma", "unlzma", "lzcat":
 		files = unquoted(readers[name].files(args))
 		// --files[=f] and --files0[=f] name a file whose lines are the paths xz compresses or
 		// decompresses. The bare form's value is already an operand; the attached form's value
@@ -280,7 +273,7 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 		}
 		operands := r.files(args)
 		switch {
-		case name == "xxd" && len(operands) > 1:
+		case (name == "xxd" || name == "lz4" || name == "unlz4") && len(operands) > 1:
 			operands = operands[:1]
 		case name == "awk":
 			operands = withoutAssignments(operands)
