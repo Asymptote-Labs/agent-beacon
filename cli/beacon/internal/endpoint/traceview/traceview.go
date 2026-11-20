@@ -169,7 +169,7 @@ func (m Model) loadList() tea.Cmd {
 }
 
 func (m Model) loadDetail() tea.Cmd {
-	if len(m.traces) == 0 || m.selected < 0 || m.selected >= len(m.traces) {
+	if len(m.traces) == 0 {
 		return nil
 	}
 	id := m.traces[m.selected].ID
@@ -483,7 +483,7 @@ func (m Model) detailView() string {
 	var b strings.Builder
 	trace := m.detail.Trace
 	title := trace.Title
-	if title == "" && len(m.traces) > 0 && m.selected >= 0 && m.selected < len(m.traces) {
+	if title == "" && len(m.traces) > 0 {
 		title = m.traces[m.selected].Title
 	}
 	b.WriteString("  " + accentStyle.Render(truncate(title, max(20, m.width-4))) + "\n")
