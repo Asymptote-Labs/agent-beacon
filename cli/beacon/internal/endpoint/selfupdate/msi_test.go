@@ -217,16 +217,33 @@ func TestInstallPackageRefusesAnMSIWhenThePreviousOneDoesNotVerify(t *testing.T)
 }
 
 // Windows will not replace a running executable, so a beacon.exe that is running this install is
-// moved out of the way first, and put back when the rollback leaves none.
+// moved out of the way first, and put back when the rollback leaves none. An unlocked copy stays at
+// the installed path through msiexec, because the old product's uninstall script runs it to stop the
+// services and does nothing when it is missing.
 func TestInstallPackageMovesTheRunningBeaconAside(t *testing.T) {
 	f := newMSIFixture(t)
 	bin := f.a.installedWindowsBeacon()
 	f.a.executable = func() (string, error) { return bin, nil }
+	run := f.a.run
+	var atInstall string
+	f.a.run = func(ctx context.Context, name string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "/i" && atInstall == "" {
+			data, err := os.ReadFile(bin)
+			atInstall = string(data)
+			if err != nil {
+				atInstall = "missing: " + err.Error()
+			}
+		}
+		return run(ctx, name, args...)
+	}
 	if _, err := f.a.InstallPackage(context.Background(), f.enterprise); err != nil {
 		t.Fatalf("InstallPackage: %v", err)
 	}
 	if !strings.Contains(f.installed(t), "enterprise edition") {
 		t.Fatalf("installed = %q", f.installed(t))
+	}
+	if atInstall != "beacon version 1.3.40 (abc) built on today" {
+		t.Fatalf("beacon.exe when msiexec ran = %q, want a copy of the one moved aside", atInstall)
 	}
 
 	// msiexec fails before laying any file down and there is no previous package: the running

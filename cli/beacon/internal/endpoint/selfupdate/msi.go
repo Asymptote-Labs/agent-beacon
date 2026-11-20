@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,11 +138,18 @@ func (a *Applier) installMSI(ctx context.Context, pkg Package, pkgPath, reinstal
 }
 
 // moveRunningBeaconAside moves the installed beacon.exe into the staging directory when it is the
-// executable running this install, and returns where it went ("" when it is not). Windows does not
-// let a running executable be replaced, so Windows Installer would otherwise leave the old one in
-// place until the next restart, and the health check would find the version that was there before.
-// It does let one be renamed. The moved file is removed by the next install that finds it no longer
-// running, and put back by a rollback that leaves no beacon.exe.
+// executable running this install, puts an unlocked copy of it back in its place, and returns where
+// the running one went ("" when it is not). Windows does not let a running executable be replaced,
+// so Windows Installer would otherwise leave the old one in place until the next restart, and the
+// health check would find the version that was there before. It does let one be renamed.
+//
+// The copy matters as much as the rename: the upgrade removes the old product first, through its
+// uninstall-endpoint.ps1, which runs the installed beacon.exe to stop the collector and forwarders
+// and exits early, stopping nothing, when there is none. With the copy in place that removal runs as
+// it would without this install, and Windows Installer replaces the copy, which nothing runs.
+//
+// The moved file is removed by the next install that finds it no longer running, and put back by a
+// rollback that leaves no beacon.exe.
 func (a *Applier) moveRunningBeaconAside() (string, error) {
 	executable := a.executable
 	if executable == nil {
@@ -164,7 +172,33 @@ func (a *Applier) moveRunningBeaconAside() (string, error) {
 	if err := os.Rename(installed, aside); err != nil {
 		return "", err
 	}
+	if err := copyExecutable(aside, installed); err != nil {
+		_ = os.Remove(installed)
+		if restoreErr := os.Rename(aside, installed); restoreErr != nil {
+			return "", fmt.Errorf("copy %s back: %v; and could not put it back: %w", installed, err, restoreErr)
+		}
+		return "", fmt.Errorf("copy %s back: %w", installed, err)
+	}
 	return aside, nil
+}
+
+// copyExecutable copies src to a new file at dst, never a link to it: a link would share the
+// running image's lock.
+func copyExecutable(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // restoreAside puts a beacon.exe moved aside back when the install directory has none.
