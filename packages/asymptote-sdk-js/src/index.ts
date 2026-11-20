@@ -650,21 +650,33 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
         return context.with(spanContext, () => methods.throw(error));
       },
     };
+    // Disposal (await using) must close the traced iterator as well, or the span never ends. The
+    // native async-iterator disposer only calls this.return(), so the traced return() does all of
+    // it; a stream's own disposer, such as the Claude Agent SDK Query's, runs on the original
+    // stream first. A disposer failure is thrown into the traced iterator, which ends the span
+    // with it.
+    const nativeDispose = Reflect.get(iterator, Symbol.asyncDispose, iterator);
+    async function disposeStream() {
+      const dispose = (result as Partial<AsyncDisposable>)[Symbol.asyncDispose];
+      if (typeof dispose === "function" && dispose !== nativeDispose) {
+        try {
+          await context.with(spanContext, () => dispose.call(result));
+        } catch (error) {
+          await tracedMethods.throw(error);
+          throw error;
+        }
+      }
+      await tracedMethods.return();
+    }
     const controls = new Map<Function, Function>();
-    let nativeDisposal: Function | undefined;
     const stream: AsyncGenerator<unknown> = new Proxy(iterator, {
       get(_target, key) {
         if (key === Symbol.asyncIterator) return iteratorForStream;
         if (key === "next" || key === "return" || key === "throw") return tracedMethods[key];
         const value = Reflect.get(result, key, result);
         if (typeof value !== "function" || key === "constructor") return value;
+        if (key === Symbol.asyncDispose) return disposeStream;
         let control = controls.get(value);
-        if (key === Symbol.asyncDispose && value === Reflect.get(iterator, key, iterator)) {
-          // Native disposal calls this.return(). Keep it on the traced wrapper;
-          // custom controls must retain their original receiver for private fields.
-          nativeDisposal ??= value.bind(stream);
-          return nativeDisposal;
-        }
         if (!control) { control = value.bind(result); controls.set(value, control!); }
         return control;
       },

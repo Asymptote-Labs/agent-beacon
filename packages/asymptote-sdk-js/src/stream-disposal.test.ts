@@ -2,7 +2,7 @@ import { context, trace, SpanStatusCode } from "@opentelemetry/api";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { afterEach, beforeEach, expect, it } from "vitest";
 
-import { flush, initialize, observe, shutdown } from "./index.js";
+import { flush, initialize, observe, shutdown, wrapClaudeAgentQuery } from "./index.js";
 
 let exporter: InMemorySpanExporter;
 beforeEach(() => {
@@ -52,20 +52,70 @@ it.skipIf(!nativeDisposal)("records errors from native async disposal", async ()
   expect(exporter.getFinishedSpans()[0]?.status).toEqual({ code: SpanStatusCode.ERROR, message: failure.message });
 });
 
-it("keeps custom disposal methods bound to their original resource", async () => {
+it.each([false, true])("ends the span at await-using scope exit through a custom disposer (started=%s)", async started => {
+  const receivers: unknown[] = [];
   class Resource {
     #disposed = false;
     [Symbol.asyncIterator]() { return this; }
     async next(): Promise<IteratorResult<string>> { return { done: this.#disposed, value: "item" }; }
-    async [Symbol.asyncDispose]() { this.#disposed = true; }
+    async [Symbol.asyncDispose]() { receivers.push(this); this.#disposed = true; }
     disposed() { return this.#disposed; }
   }
   const source = new Resource();
-  const stream = observe({ name: "custom disposal" }, () => source)();
-  await stream[Symbol.asyncDispose]();
-  expect(source.disposed()).toBe(true);
-  await stream.next();
+  {
+    await using stream = observe({ name: "custom disposal" }, () => source)();
+    if (started) await stream.next();
+    expect(exporter.getFinishedSpans()).toHaveLength(0);
+  }
   await flush();
+  expect(receivers).toHaveLength(1);
+  expect(receivers[0]).toBe(source);
+  expect(source.disposed()).toBe(true);
+  expect(exporter.getFinishedSpans()).toHaveLength(1);
+  expect(exporter.getFinishedSpans()[0]?.status.code).toBe(SpanStatusCode.UNSET);
+});
+
+it.each([false, true])("records errors from a custom disposer and still ends the span (started=%s)", async started => {
+  const failure = new Error("cleanup failed");
+  const source = {
+    [Symbol.asyncIterator]() { return this; },
+    async next(): Promise<IteratorResult<string>> { return { done: false, value: "item" }; },
+    async [Symbol.asyncDispose]() { throw failure; },
+  };
+  const stream = observe({ name: "failing custom disposal" }, () => source)();
+  if (started) await stream.next();
+  await expect(stream[Symbol.asyncDispose]()).rejects.toBe(failure);
+  await flush();
+  expect(exporter.getFinishedSpans()).toHaveLength(1);
+  expect(exporter.getFinishedSpans()[0]?.status).toEqual({ code: SpanStatusCode.ERROR, message: failure.message });
+});
+
+it.each([false, true])("closes a Claude Agent SDK query at await-using scope exit (started=%s)", async started => {
+  const receivers: unknown[] = [];
+  class Query {
+    #closed = false;
+    [Symbol.asyncIterator]() { return this; }
+    async next(): Promise<IteratorResult<string>> {
+      return this.#closed ? { value: undefined, done: true } : { value: "message", done: false };
+    }
+    async return(value?: unknown): Promise<IteratorResult<unknown>> { this.#closed = true; return { value, done: true }; }
+    async throw(error: unknown): Promise<IteratorResult<unknown>> { throw error; }
+    async interrupt() {}
+    async cleanup() { receivers.push(this); this.#closed = true; }
+    async [Symbol.asyncDispose]() { await this.cleanup(); }
+    closed() { return this.#closed; }
+  }
+  const source = new Query();
+  {
+    await using stream = wrapClaudeAgentQuery(() => source)();
+    if (started) await stream.next();
+    await stream.interrupt();
+    expect(exporter.getFinishedSpans()).toHaveLength(0);
+  }
+  await flush();
+  expect(receivers).toHaveLength(1);
+  expect(receivers[0]).toBe(source);
+  expect(source.closed()).toBe(true);
   expect(exporter.getFinishedSpans()).toHaveLength(1);
 });
 
@@ -80,16 +130,4 @@ it.skipIf(!nativeDisposal)("closes a promised observed generator at await-using 
   await flush();
   expect(exporter.getFinishedSpans()).toHaveLength(1);
   expect(exporter.getFinishedSpans()[0]?.status.code).toBe(SpanStatusCode.UNSET);
-});
-
-it.skipIf(!nativeDisposal)("does not reuse an original-receiver binding cached for a disposal alias", async () => {
-  const original = (async function* () { yield "item"; })();
-  const source = Object.assign(original, { closeAlias: original[Symbol.asyncDispose] });
-  const stream = observe({ name: "alias" }, () => source)();
-  const alias = stream.closeAlias;
-  expect(stream.closeAlias).toBe(alias);
-  await stream.next();
-  await stream[Symbol.asyncDispose]();
-  await flush();
-  expect(exporter.getFinishedSpans()).toHaveLength(1);
 });
