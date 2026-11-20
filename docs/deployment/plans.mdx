@@ -11,16 +11,16 @@ where that history goes and what Beacon does with it once it is there.
   the local dashboard, and you can forward them to your own Elastic, S3, GCS or OpenTelemetry
   stack.
 - **Beacon Cloud** is free. Connected devices upload to [beacon.sh](https://beacon.sh), where every
-  agent and machine shares one timeline, and Beacon Cloud reviews your sessions for
-  [findings](/cloud/findings).
+  agent and machine shares one timeline, Beacon Cloud reviews your sessions for
+  [findings](/cloud/findings), and up to 5 [policies](#policies) steer, ask or block your agents.
 - **Beacon Cloud Pro** is Beacon Cloud for people who work with agents every day: unlimited
-  findings, the full [MCP](/deployment/managed-mcp) toolset including findings and memory, and
-  real-time alerts. $20 a month, or $15 a month billed annually.
+  findings and policies, the full [MCP](/deployment/managed-mcp) toolset including findings and
+  memory, and real-time alerts. $20 a month, or $15 a month billed annually.
 - **Beacon Cloud Team** is Pro for every member of an organization, plus a shared workspace: one
-  namespace for the team's shared traces, privacy settings for what the team shares, and org API
-  keys and agents for CI and bots. $30 per seat a month plus a $10 base fee ($5 billed annually),
+  namespace for the team's shared traces, privacy settings for what the team shares, org-wide
+  policies that admins manage, and org API keys and agents for CI and bots. $30 per seat a month plus a $10 base fee ($5 billed annually),
   for up to 20 seats.
-- **Enterprise** adds fleet rollout, enforcement, SSO, RBAC and audit logs, with hosting in Beacon
+- **Enterprise** adds fleet rollout, SSO, RBAC and audit logs, with hosting in Beacon
   Cloud or your own bucket. [Talk to us](https://beacon.sh/pricing) for pricing.
 
 Current prices are always on the [pricing page](https://beacon.sh/pricing).
@@ -45,10 +45,16 @@ Current prices are always on the [pricing page](https://beacon.sh/pricing).
 | Team workspace: shared traces, privacy, org API keys | — | — | — | ✓ | ✓ |
 | Evidence trail on every finding | — | — | ✓ | ✓ | ✓ |
 | Alerts | — | Daily digest | Real-time email | Real-time email | Real-time and custom |
-| Block or require approval for risky actions | — | — | — | — | ✓ |
 | Fleet rollout (Jamf, Intune, Fleet) | — | — | — | — | ✓ |
 | SSO, RBAC, audit logs | — | — | — | — | ✓ |
 | Support | Community | Community | Priority | Priority | Dedicated SLA |
+| **[Policies](#policies)** | | | | | |
+| Policies for your agents | — | 5 | Unlimited | Unlimited | Unlimited |
+| Enforced actions (steers, blocks and asks) | — | 50 included | Unlimited | Unlimited | Unlimited |
+| Steer or block prompts, ask or block MCP tool calls | — | ✓ | ✓ | ✓ | ✓ |
+| Monitor mode to try a policy first | — | ✓ | ✓ | ✓ | ✓ |
+| Live enforcement on macOS, Linux and Windows | — | ✓ | ✓ | ✓ | ✓ |
+| Org-wide policies managed by admins | — | — | — | ✓ | ✓ |
 
 The Beacon CLI, hooks, local dashboard, threat rules, session sharing commands and
 [Agent Skills](/concepts/beacon-skills) are the same open-source build on every plan. Nothing on
@@ -59,6 +65,9 @@ property of your organization.
 
 - **Unlimited findings.** A free account gets 50 findings over its lifetime. Pro has no limit, so
   every new risk, skill opportunity and habit Beacon notices keeps showing up.
+- **Unlimited policies and enforced actions.** A free account has 5 policies and 50 enforced
+  actions over its lifetime. With Pro, every policy you write applies, and your agents are
+  steered, asked or blocked as often as your policies call for. See [Policies](#policies).
 - **Findings and feedback over MCP.** Your agents can list and read your findings, with their
   evidence and recommendation, and record your feedback or resolve them, through
   `beacon_findings_list`, `beacon_get_finding` and `beacon_finding_feedback`.
@@ -82,6 +91,8 @@ Pro feature without a plan of their own, and the organization gets:
 - **One namespace for your team's shared traces.** Members publish into the organization, and
   everyone in it sees the team's traces in one place. A trace moves between your personal
   namespace and the organization without changing its link.
+- **Org-wide policies.** Admins write policies for the organization, and they apply to every
+  member's devices. Members can read them; only admins change them. See [Policies](#policies).
 - **Privacy settings for what your team shares.** Admins choose which visibilities the
   organization allows and which one new traces get by default.
 - **Org API keys and agents for CI and bots.** Admins create `bcn_api_` keys that publish into the
@@ -94,6 +105,51 @@ Team costs $30 per seat a month plus a base fee of $10 a month, or $5 a month bi
 An organization can have up to 20 seats. For more seats, SSO, RBAC or fleet rollout, see
 Enterprise.
 
+## Policies
+
+A policy is a rule for your coding agents, written in plain language, such as "Agents must not
+post source code to public Slack channels." You write them under **Policies** at
+[beacon.sh/dashboard/policies](https://beacon.sh/dashboard/policies), or start from one of the
+ready-made rules in the **Policy Library**. Beacon checks your agents' prompts and MCP tool calls
+against them as they happen. For each policy you choose:
+
+- **Mode.** **Monitor** records a finding and lets everything through, so you can see what a
+  policy would catch. **Enforce** carries out the actions below.
+- **When a prompt breaks it:** don't check, **steer** (the agent declines only the part the rule
+  prohibits), or **block**.
+- **When a tool call breaks it:** don't check, **ask** you to approve the call, or **block** it.
+
+A policy with neither check on is only checked when Beacon reviews your recorded sessions. Every
+decision becomes a [finding](/cloud/findings). Each steer, ask or block carried out is an
+**enforced action**, which is what the free plan counts.
+
+Policies are on every Beacon Cloud plan:
+
+| | Beacon Cloud | Beacon Cloud Pro | Beacon Cloud Team | Enterprise |
+| --- | --- | --- | --- | --- |
+| Your own policies | 5 | Unlimited | Unlimited, for every member | Unlimited |
+| Enforced actions | 50 over the account's lifetime | Unlimited | Unlimited | Unlimited |
+| Organization policies, managed by admins | — | — | ✓ | ✓ |
+
+Live checks need the enforcement hooks on each machine. On a machine connected to Beacon Cloud,
+run:
+
+```bash
+beacon endpoint enforcement enable
+```
+
+Add `sudo` (on Windows, run it from an elevated PowerShell) if Beacon was installed in system
+mode. It installs Beacon's signed enterprise edition and sets up enforcement for the agents on the
+machine. Enforcement runs on macOS on Apple Silicon, Linux on x86-64 and Arm, and Windows on x64.
+Check it with `beacon endpoint enforcement status`. Agent sessions that were already open don't
+pick it up, so start new ones.
+
+To have your coding agent do it, give it this prompt:
+
+```text
+Read https://beacon.sh/enforcement.md then turn on Beacon policy enforcement on this machine
+```
+
 ## Upgrade, trial and cancel
 
 Open **Billing** at [beacon.sh/dashboard/billing](https://beacon.sh/dashboard/billing), or choose
@@ -105,8 +161,9 @@ and finish checkout in the browser. When a free trial is offered, the button rea
 - Findings resume from your next new telemetry once you upgrade. Sessions analyzed while you were
   at the free limit are not re-analyzed.
 - **Cancel subscription** on the Billing page keeps Pro until the end of the period you paid for,
-  then moves the account back to free Beacon Cloud. Your sessions, findings, memory, lenses and
-  shared traces are kept.
+  then moves the account back to free Beacon Cloud. Your sessions, findings, memory, lenses,
+  shared traces and policies are kept. Only your 5 oldest policies are enforced after that, and
+  the dashboard marks the rest as not enforced.
 - If a payment fails, the account stays on Pro while the payment is retried, and Billing shows it
   as past due.
 
@@ -119,8 +176,9 @@ plan; other members are asked to contact an admin.
 - Checkout starts with one seat per current member, and you can add seats up to 20 before paying.
 - **Manage members** on the Billing page opens the organization's member settings.
 - **Cancel subscription** keeps Team until the end of the period you paid for, then moves the
-  organization back to free Beacon Cloud. Its sessions, findings, memory and shared traces are
-  kept.
+  organization back to free Beacon Cloud. Its sessions, findings, memory, shared traces and
+  policies are kept. Its policies stop being enforced and can't be changed until it is on Team
+  again, though admins can still delete them.
 
 Beacon never asks for payment details in the CLI or through an agent. When an agent sets Beacon
 up for you, it sends you to the Billing page to finish upgrading.
@@ -130,6 +188,9 @@ up for you, it sends you to the Billing page to finish upgrading.
 - **Findings.** After 50 findings, Beacon Cloud stops analyzing new activity for the account. A
   finding you already have still updates when it recurs. Your sessions keep uploading and stay
   searchable.
+- **Policies.** A free account can hold 5 policies, and creating a sixth asks you to upgrade. Its
+  policies stop being enforced, live or when Beacon reviews your sessions, once it has used its 50
+  enforced actions. Policies in monitor mode use none.
 - **MCP.** A findings or memory tool called from a free account returns an error that says the
   tool is part of Beacon Cloud Pro and links to the pricing page, so your agent can tell you why.
   Every other tool keeps working.
@@ -141,11 +202,11 @@ up for you, it sends you to the Billing page to finish upgrading.
 - Choose **Beacon Cloud** to see every agent on every machine in one place, share sessions and try
   findings. See [Beacon Cloud](/deployment/managed).
 - Choose **Beacon Cloud Pro** when your agents should learn from your history: memory, findings
-  and feedback over MCP, and no findings limit.
-- Choose **Beacon Cloud Team** to give a team of up to 20 people Pro and one place for the
-  traces they share, with org API keys for CI.
-- Choose **Enterprise** to roll Beacon out across a fleet with MDM, require approval for risky
-  actions, add SSO and audit logs, or keep the data in your own bucket.
+  and feedback over MCP, and no limit on findings, policies or enforced actions.
+- Choose **Beacon Cloud Team** to give a team of up to 20 people Pro, one place for the traces
+  they share, policies that apply to everyone, and org API keys for CI.
+- Choose **Enterprise** to roll Beacon out across a fleet with MDM, add SSO and audit logs, or keep
+  the data in your own bucket.
 
 You can start local and connect later with `beacon login` and `beacon endpoint connect`, and you
 can upgrade or cancel Pro or Team at any time without touching your devices.
