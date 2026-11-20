@@ -177,6 +177,10 @@ function identity(context: Record<string, unknown> | undefined): Record<string, 
   const fields: Record<string, unknown> = {}
   const taskId = context.taskId ?? context.taskID ?? context.task_id ?? task.id ?? task.taskId
   if (taskId) fields.taskId = taskId
+  // SDK lifecycle hooks may carry only a run snapshot. The stable session ID
+  // comes from the plugin setup context and groups events across runs.
+  const sessionId = context.sessionId ?? context.session_id ?? asRecord(context.session).sessionId
+  if (sessionId) fields.sessionId = sessionId
   const roots =
     context.workspaceRoots ??
     context.workspace_roots ??

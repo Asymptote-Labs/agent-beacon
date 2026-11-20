@@ -76,6 +76,32 @@ describe("beacon cline plugin", () => {
     expect(sent[0].clineVersion).toBe("3.36.0")
   })
 
+  test("carries the Cline SDK session ID across hook stages", async () => {
+    const sent = captureSends()
+    const plugin = createBeaconPlugin()
+
+    plugin.setup(undefined, { session: { sessionId: "core-session" }, workspaceInfo: { rootPath: "/repo" } })
+    await plugin.hooks.beforeRun({ snapshot: { runId: "run-one" } })
+    await plugin.hooks.beforeTool({ toolCall: { name: "read_file" } })
+    await plugin.hooks.afterTool({ toolCall: { name: "read_file" } })
+    await plugin.hooks.afterRun({ snapshot: { runId: "run-two" } })
+
+    expect(sent.map((event) => event.sessionId)).toEqual(Array(4).fill("core-session"))
+    expect(sent.every((event) => event.cwd === "/repo")).toBe(true)
+  })
+
+  test("prefers an explicit per-hook identity over the SDK setup session", async () => {
+    const sent = captureSends()
+    const plugin = createBeaconPlugin()
+
+    plugin.setup(undefined, { session: { sessionId: "core-session" } })
+    await plugin.hooks.beforeRun({ session_id: "hook-session" })
+    await plugin.hooks.afterRun({ taskId: "cli-task" })
+
+    expect(sent[0].sessionId).toBe("hook-session")
+    expect(sent[1].taskId).toBe("cli-task")
+  })
+
   test("reads a nested roots array", async () => {
     const sent = captureSends()
     const plugin = createBeaconPlugin()
