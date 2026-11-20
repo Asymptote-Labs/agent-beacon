@@ -7,7 +7,7 @@ test('security review: findings grouped by risk, the combination flagged, eviden
   await expect(frame.locator('#root')).toBeVisible({ timeout: 15_000 });
 
   // credential-file-read matches twice: the file.read event, and `curl -d @/home/dev/.aws/credentials`,
-  // whose @file argument curl reads (a parsed command's file_reads, since threat-rules v1.3).
+  // whose @file argument curl reads (a parsed command's file_reads, since threat-rules v2.0).
   await expect(frame.locator('#root > p').first()).toHaveText('7 findings across 87 rules evaluated.');
   await expect(frame.locator('.alert')).toContainText('combines untrusted input, sensitive access and a consequential action');
 

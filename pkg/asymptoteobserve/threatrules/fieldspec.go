@@ -19,8 +19,8 @@ type specField struct {
 	// path is the CEL path after "e.", with [] for the entries of a list:
 	// command.parsed_commands[].args.
 	path string
-	// version is the tag as written (v1.3), and spec the declaration it requires
-	// (threat-rules/v1.3).
+	// version is the tag as written (v2.0), and spec the declaration it requires
+	// (threat-rules/v2.0).
 	version string
 	spec    string
 	since   specVersion

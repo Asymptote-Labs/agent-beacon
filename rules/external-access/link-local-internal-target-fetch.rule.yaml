@@ -1,5 +1,5 @@
 id: link-local-internal-target-fetch
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 4
 title: HTTP client fetch of a link-local or internal-only address
 description: >

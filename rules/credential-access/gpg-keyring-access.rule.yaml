@@ -1,5 +1,5 @@
 id: gpg-keyring-access
-spec: threat-rules/v1.3  # needed for predicates, file_reads and args
+spec: threat-rules/v2.0  # needed for predicates, file_reads and args
 version: 4
 title: Agent read a GPG private key or exported a secret key
 description: >

@@ -198,27 +198,45 @@ func (p *commandPattern) term() CommandTerm {
 
 	if p.short != "" || len(p.long) > 0 {
 		b.Reset()
-		b.WriteString(`(?m)^(?:`)
-		if p.short != "" {
-			b.WriteString(`-[A-Za-z0-9]*[` + p.short + `][A-Za-z0-9]*`)
-		}
-		if len(p.long) > 0 {
-			if p.short != "" {
-				b.WriteByte('|')
-			}
-			b.WriteString(`(?i:`)
-			for i, option := range p.long {
-				if i > 0 {
-					b.WriteByte('|')
-				}
-				writeItems(&b, option, notNewline)
-			}
-			b.WriteString(`)(?:=` + notNewline + `*)?`)
-		}
-		b.WriteString(`)$`)
+		b.WriteString(`(?m)^`)
+		writeOptions(&b, p.short, p.long, notNewline, false)
+		b.WriteString(`$`)
 		t.Flags = b.String()
 	}
 	return t
+}
+
+// writeOptions writes a regular expression for one option of a command: a cluster of short
+// options (-w, -aw) with one of the letters short, in its own case, or one of the option words
+// long, in any case, whole or with an =value. wordChar is the regular expression for a character
+// of a word, and caseless says the expression written into is under (?i).
+func writeOptions(b *strings.Builder, short string, long [][]item, wordChar string, caseless bool) {
+	b.WriteString(`(?:`)
+	if short != "" {
+		cluster := `-[A-Za-z0-9]*[` + short + `][A-Za-z0-9]*`
+		if caseless {
+			cluster = `(?-i:` + cluster + `)`
+		}
+		b.WriteString(cluster)
+		if len(long) > 0 {
+			b.WriteByte('|')
+		}
+	}
+	if len(long) > 0 {
+		if caseless {
+			b.WriteString(`(?:`)
+		} else {
+			b.WriteString(`(?i:`)
+		}
+		for i, option := range long {
+			if i > 0 {
+				b.WriteByte('|')
+			}
+			writeItems(b, option, wordChar)
+		}
+		b.WriteString(`)(?:=` + wordChar + `*)?`)
+	}
+	b.WriteString(`)`)
 }
 
 // A log does not always hold a command line as it ran. Redaction replaces a value that looks
@@ -246,15 +264,15 @@ const (
 // redactedRegex returns the match as an RE2 regular expression, under (?i), for a command text
 // in which redaction took the command's name, or "" when what would be left does not tell the
 // command from another: a match with two words or more, or with a word and options, or with a
-// word that is more than letters (auth:token), or with a whole option word (--export-secret-keys)
-// has a redacted form; one told by its name, by one plain word (lookup), or by one-letter
-// options has none.
+// word that is more than letters and digits (auth:token), or with a whole option word
+// (--export-secret-keys) has a redacted form; one told by its name, by one alphanumeric word
+// (lookup), or by one-letter options has none.
 func (p *commandPattern) redactedRegex() string {
 	options := p.short != "" || len(p.long) > 0
 	var b strings.Builder
 	b.WriteString(redactionMark + `\s+`)
 	switch {
-	case len(p.words) >= 2, len(p.words) == 1 && (options || !plainWord(p.words[0])):
+	case len(p.words) >= 2, len(p.words) == 1 && (options || !alphanumeric(p.words[0])):
 		b.WriteString(textWordsBefore)
 		for i, word := range p.words {
 			if i > 0 {
@@ -266,39 +284,27 @@ func (p *commandPattern) redactedRegex() string {
 		if !options {
 			return b.String()
 		}
-		b.WriteString(textWordsBetween + `(?:`)
-		if p.short != "" {
-			b.WriteString(`(?-i:-[A-Za-z0-9]*[` + p.short + `][A-Za-z0-9]*)`)
-			if len(p.long) > 0 {
-				b.WriteByte('|')
-			}
-		}
+		b.WriteString(textWordsBetween)
+		writeOptions(&b, p.short, p.long, textWordChar, true)
 	case len(p.words) == 0 && len(p.long) > 0:
-		b.WriteString(textOptionsBefore + `(?:`)
+		// Without a word, one-letter options do not tell the command from another.
+		b.WriteString(textOptionsBefore)
+		writeOptions(&b, "", p.long, textWordChar, true)
 	default:
 		return ""
 	}
-	if len(p.long) > 0 {
-		b.WriteString(`(?:`)
-		for i, option := range p.long {
-			if i > 0 {
-				b.WriteByte('|')
-			}
-			writeItems(&b, option, textWordChar)
-		}
-		b.WriteString(`)(?:=` + textWordChar + `*)?`)
-	}
-	b.WriteString(`)` + textWordEnd)
+	b.WriteString(textWordEnd)
 	return b.String()
 }
 
-// plainWord reports whether a word pattern is letters and digits only: a word many commands take.
-func plainWord(word []item) bool {
+// alphanumeric reports whether a word pattern is ASCII letters and digits only: a word many
+// commands take.
+func alphanumeric(word []item) bool {
 	for _, it := range word {
 		if strings.ContainsFunc(it.lit, func(r rune) bool { return r > unicode.MaxASCII || !isAlnum(byte(r)) }) {
 			return false
 		}
-		if slices.ContainsFunc(it.alts, func(alt []item) bool { return !plainWord(alt) }) {
+		if slices.ContainsFunc(it.alts, func(alt []item) bool { return !alphanumeric(alt) }) {
 			return false
 		}
 	}

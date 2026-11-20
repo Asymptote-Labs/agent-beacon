@@ -2,13 +2,17 @@ package threatrules
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+
+	celast "github.com/google/cel-go/common/ast"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -36,6 +40,28 @@ func repoRoot(t testing.TB) string {
 }
 
 func rulesDir(t testing.TB) string { return filepath.Join(repoRoot(t), "rules") }
+
+// corpusPack loads the open corpus as a pack, its rules and its definitions, once for the test
+// binary; every file must load. Its rules are shared, so a test must not change one.
+func corpusPack(t testing.TB) *Pack {
+	t.Helper()
+	corpus.Do(func() {
+		corpus.pack, corpus.err = LoadPackDir(rulesDir(t))
+		if corpus.err == nil && len(corpus.pack.Skipped) > 0 {
+			corpus.err = fmt.Errorf("%s", corpus.pack.Skipped[0])
+		}
+	})
+	if corpus.err != nil {
+		t.Fatalf("load the corpus: %v", corpus.err)
+	}
+	return corpus.pack
+}
+
+var corpus struct {
+	sync.Once
+	pack *Pack
+	err  error
+}
 
 func specDir(t *testing.T) string { return filepath.Join(repoRoot(t), "spec", "threat-rules") }
 
@@ -113,10 +139,7 @@ func TestPackCopiesNoCatalog(t *testing.T) {
 		}
 	}
 
-	lib, _, err := LoadLibraryDir(rulesDir(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	lib := corpusPack(t).Library
 	decode := func(match string) *Rule {
 		rule, err := lib.DecodeRule([]byte("id: copy\nversion: 1\ntitle: t\ndescription: d\nseverity: low\nmatch: >\n  " + match + "\n"))
 		if err != nil {
@@ -164,10 +187,7 @@ func TestPackWritesOutNoPredicate(t *testing.T) {
 		}
 	}
 
-	lib, _, err := LoadLibraryDir(rulesDir(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	lib := corpusPack(t).Library
 	const names = `"(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"`
 	sender := func(v string) string { return v + `.name.matches(` + names + `)` }
 	for match, want := range map[string][]string{
@@ -201,12 +221,11 @@ func TestPackWritesOutNoPredicate(t *testing.T) {
 // unread_text binds) has to spell the senders inside a longer pattern, so it may, but then it
 // names every client egress_sender knows that sends what it reads (all but curl and wget, which
 // the pattern qualifies), as egress_sender_mention names all of them: a client added to
-// egress_sender and not to the text would be seen on a parsed line and missed in the text.
+// egress_sender and not to the text would be seen on a parsed line and missed in the text. The
+// rule is read as CatalogCopies reads it: the constant patterns of its matches() calls, as
+// written.
 func TestPackListsNoSenderOfItsOwn(t *testing.T) {
-	lib, _, err := LoadLibraryDir(rulesDir(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	lib := corpusPack(t).Library
 	// The name as a whole alternative, not letters inside another (truncate).
 	sender := regexp.MustCompile(`(^|[^A-Za-z])(ncat|netcat)([^A-Za-z]|$)`)
 	group := regexp.MustCompile(`\(([a-z0-9]+(?:\|[a-z0-9]+)+)\)`)
@@ -230,27 +249,66 @@ func TestPackListsNoSenderOfItsOwn(t *testing.T) {
 		t.Errorf("egress_sender_mention names %q, egress_sender %q", got, all)
 	}
 	stdin := slices.DeleteFunc(slices.Clone(all), func(n string) bool { return n == "curl" || n == "wget" })
-	literal := regexp.MustCompile(`([\w.]+)\.matches\(("(?:[^"\\]|\\.)*")\)`)
 	bound := regexp.MustCompile(`unread_text\(\s*e\s*,\s*(\w+)\s*,`)
-	for _, r := range corpusRules(t) {
-		expr := strings.Join(ruleExpressions(r), " ")
-		texts := map[string]bool{"e.command.command": true}
-		for _, m := range bound.FindAllStringSubmatch(expr, -1) {
-			texts[m[1]] = true
+	// A text a rule may spell senders in: the command line, or a name unread_text binds.
+	text := func(e celast.Expr, texts map[string]bool) bool {
+		if e.Kind() == celast.IdentKind {
+			return texts[e.AsIdent()]
 		}
-		for _, m := range literal.FindAllStringSubmatch(expr, -1) {
-			receiver, list := m[1], m[2]
-			if !sender.MatchString(list) {
-				continue
+		if e.Kind() != celast.SelectKind || e.AsSelect().FieldName() != "command" {
+			return false
+		}
+		op := e.AsSelect().Operand()
+		return op.Kind() == celast.SelectKind && op.AsSelect().FieldName() == "command" &&
+			op.AsSelect().Operand().Kind() == celast.IdentKind && op.AsSelect().Operand().AsIdent() == eventVar
+	}
+	// senders returns the sender lists a rule asks of a parsed command, and the ones it asks of
+	// a text, as written.
+	senders := func(r *Rule) (own, texts []matchesLiteral) {
+		names := map[string]bool{}
+		for _, m := range bound.FindAllStringSubmatch(strings.Join(ruleExpressions(r), " "), -1) {
+			names[m[1]] = true
+		}
+		for _, e := range r.written() {
+			for _, literal := range matchesLiterals(e) {
+				if !sender.MatchString(literal.pattern) {
+					continue
+				}
+				if text(literal.subject, names) {
+					texts = append(texts, literal)
+				} else {
+					own = append(own, literal)
+				}
 			}
-			if !texts[receiver] {
-				t.Errorf("%s: %s.matches(%s) lists network senders; call egress_sender instead, so that every egress rule means the same senders", r.ID, receiver, list)
-				continue
-			}
-			names := senderGroup(list)
+		}
+		return own, texts
+	}
+	for _, r := range corpusRules(t) {
+		own, texts := senders(r)
+		for _, list := range own {
+			t.Errorf("%s: %s.matches(%q) lists network senders; call egress_sender instead, so that every egress rule means the same senders", r.ID, exprText(list.subject), list.pattern)
+		}
+		for _, list := range texts {
+			names := senderGroup(list.pattern)
 			if missing := slices.DeleteFunc(slices.Clone(stdin), func(n string) bool { return slices.Contains(names, n) }); len(missing) > 0 {
-				t.Errorf("%s: %s.matches(%s) names senders without %q, which egress_sender knows; name them all or call egress_sender_mention", r.ID, receiver, list, missing)
+				t.Errorf("%s: %s.matches(%q) names senders without %q, which egress_sender knows; name them all or call egress_sender_mention", r.ID, exprText(list.subject), list.pattern, missing)
 			}
+		}
+	}
+	// The detector sees a list of senders where a parsed command is asked, and lets a text
+	// spell them only in full.
+	for match, want := range map[string]bool{
+		`e.command.parsed_commands.exists(c, c.name.matches("^(curl|ncat|wget)$"))`: true,
+		`e.command.parsed_commands.exists(c, matches(c.name, "^(nc|netcat)$"))`:     true,
+		`e.command.command.matches("\\b(ncat|netcat)\\b")`:                          false,
+		`e.command.parsed_commands.exists(c, c.name.matches("^truncate$"))`:         false,
+	} {
+		rule, err := lib.DecodeRule([]byte("id: senders\nversion: 1\ntitle: t\nseverity: low\nmatch: >\n  " + match + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if own, _ := senders(rule); (len(own) > 0) != want {
+			t.Errorf("%s: found a sender list = %v, want %v", match, len(own) > 0, want)
 		}
 	}
 }
@@ -260,10 +318,7 @@ func TestPackListsNoSenderOfItsOwn(t *testing.T) {
 // half that has to spell them inside a longer pattern) names the same ones, so an agent added
 // to one half of a rule is not missed by the other.
 func TestPackAgentListsAgree(t *testing.T) {
-	lib, _, err := LoadLibraryDir(rulesDir(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	lib := corpusPack(t).Library
 	want := agentNames(lib.predicates["agent_cli"].text)
 	if !slices.Contains(want, "codex") || !slices.Contains(want, "claude-code") {
 		t.Fatalf("agent_cli names no agents: %q", want)
@@ -402,23 +457,25 @@ func TestBaselineIsCorpusCopies(t *testing.T) {
 	}
 }
 
-// TestPackDefinitionsConformance runs the fixtures of the pack's definitions, as
-// TestPackConformance runs its rules': each predicate definition's own, and each catalog's
-// examples. Every predicate has to be shown at work by one.
+// TestPackDefinitionsConformance runs the checks of the pack's definitions, as
+// TestPackConformance runs its rules': each catalog's examples, once, and each predicate
+// definition's fixtures. Every predicate has to be shown at work: a definition by a fixture of
+// its own, a catalog's predicate by the catalog's examples.
 func TestPackDefinitionsConformance(t *testing.T) {
-	lib, skipped, err := LoadLibraryDir(rulesDir(t))
-	if err != nil || len(skipped) > 0 {
-		t.Fatalf("load the pack's definitions: %v, skipped %v", err, skipped)
+	lib := corpusPack(t).Library
+	type checked struct {
+		catalog bool
+		name    string
 	}
-	tested := map[string]bool{}
+	tested := map[checked]bool{}
 	for _, res := range lib.Check() {
-		tested[res.RuleID] = true
+		tested[checked{res.Catalog, res.Name}] = true
 		if !res.OK() {
-			t.Errorf("predicate %s", res.String())
+			t.Error(res)
 		}
 	}
 	for _, p := range lib.Predicates() {
-		if !tested[p.Name] {
+		if !tested[checked{false, p.Name}] && !(p.Catalog != "" && tested[checked{true, p.Catalog}]) {
 			t.Errorf("predicate %s (%s) has no fixture", p.Name, p.Source)
 		}
 	}

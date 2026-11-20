@@ -52,7 +52,7 @@ func TestAnyStepErrors(t *testing.T) {
 // caller keeping events for the second pack's rule must keep.
 func TestStepMatcherTellsPacksApart(t *testing.T) {
 	pack := func(action string) *Library {
-		return testLibrary(t, DefinitionFile{"p.predicates.yaml", []byte(definitions(
+		return testLibrary(t, DefinitionFile{Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("p", "e", `e.event.action == "`+action+`"`, "p(e)")))})
 	}
 	rule := func(id string, lib *Library) *CompiledRule {

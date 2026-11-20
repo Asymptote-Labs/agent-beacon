@@ -46,6 +46,10 @@ func TestFindVectorRejectsTooOldOrUnparsableVersions(t *testing.T) {
 	if _, err := FindVector(old); err == nil || !strings.Contains(err.Error(), "0.50.0 or newer") {
 		t.Fatalf("expected too-old error, got %v", err)
 	}
+	// A shell script stands in for a Vector that prints no version; Windows cannot run one.
+	if !testenv.HasPOSIXFileModes() {
+		return
+	}
 	dir := t.TempDir()
 	garbage := filepath.Join(dir, "vector")
 	if err := os.WriteFile(garbage, []byte("#!/bin/sh\necho not a version\n"), 0o755); err != nil {

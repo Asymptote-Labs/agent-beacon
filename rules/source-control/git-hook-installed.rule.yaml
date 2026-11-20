@@ -1,5 +1,5 @@
 id: git-hook-installed
-spec: threat-rules/v1.3  # needed for file_writes and predicates
+spec: threat-rules/v2.0  # needed for file_writes and predicates
 version: 6
 title: Git hook script installed or modified
 description: >

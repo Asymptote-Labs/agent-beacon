@@ -70,7 +70,7 @@ func findingsFixture(t *testing.T, rules map[string]string) *httptest.ResponseRe
 func TestFindingsAllStoreRulesSkippedStillRunsBaseline(t *testing.T) {
 	rec := findingsFixture(t, map[string]string{
 		"future-a": storeRule("future-a", testenv.FutureSpec()),
-		"future-b": storeRule("future-b", "threat-rules/v2"),
+		"future-b": storeRule("future-b", "threat-rules/v3"),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
@@ -89,7 +89,7 @@ func TestFindingsAllStoreRulesSkippedStillRunsBaseline(t *testing.T) {
 func TestRunScanAllRulesSkippedNamesThem(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	dir := t.TempDir()
-	for id, spec := range map[string]string{"future-a": testenv.FutureSpec(), "future-b": "threat-rules/v2"} {
+	for id, spec := range map[string]string{"future-a": testenv.FutureSpec(), "future-b": "threat-rules/v3"} {
 		if err := os.WriteFile(filepath.Join(dir, id+".rule.yaml"), []byte(storeRule(id, spec)), 0o644); err != nil {
 			t.Fatal(err)
 		}

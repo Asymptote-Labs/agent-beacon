@@ -1,5 +1,5 @@
 id: permission-scope-expansion-via-env
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 6
 title: Agent runtime spawned with environment variables that elevate permissions
 description: >

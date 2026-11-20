@@ -28,16 +28,20 @@ import (
 // catalog's stores.
 type predicate struct {
 	name string
-	// source says where the predicate is defined, for error messages.
+	// source says where the predicate is defined, for error messages, and spec is the spec that
+	// file declares (v2.0 at least): what a rule that calls the predicate needs.
 	source string
-	// params and text are a definition's parameters and body as written; body is the body parsed,
-	// with its own variables renamed (see hygienic). binds are the parameters the body binds
-	// for its caller, and uses the predicates the body calls.
-	params []string
-	text   string
-	body   celast.Expr
-	binds  []string
-	uses   []string
+	spec   specVersion
+	// params and text are a definition's parameters and body as written, and written the body
+	// read as written (asWritten); body is the body parsed, with its own variables renamed (see
+	// hygienic). binds are the parameters the body binds for its caller, and uses the predicates
+	// the body calls.
+	params  []string
+	text    string
+	written celast.Expr
+	body    celast.Expr
+	binds   []string
+	uses    []string
 	// catalog and render are set for a catalog's predicate: render writes a selection of the
 	// catalog's stores as an expression over a subject.
 	catalog *concepts.Catalog
@@ -48,20 +52,24 @@ type predicate struct {
 	selections map[string]celast.Expr
 }
 
-// predicateNamePattern is the form of a predicate's name and of a parameter's.
-var (
-	predicateNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	parameterPattern     = regexp.MustCompile(`^[a-z_][a-zA-Z0-9_]*$`)
-)
+// parameterPattern is the form of a definition's parameter. A predicate's name has the form of
+// concepts.PredicateNamePattern.
+var parameterPattern = regexp.MustCompile(`^[a-z_][a-zA-Z0-9_]*$`)
 
-// reservedNames cannot name a predicate: CEL's own functions, macros and reserved words, and
-// the event variable.
-var reservedNames = []string{
-	eventVar, "has", "all", "exists", "exists_one", "map", "filter", "size", "matches", "contains",
-	"startsWith", "endsWith", "int", "uint", "double", "string", "bool", "bytes", "duration",
-	"timestamp", "type", "dyn", "true", "false", "null", "in",
-	"as", "break", "const", "continue", "else", "for", "function", "if", "import", "let", "loop",
-	"package", "namespace", "return", "var", "void", "while",
+// celsOwn reports whether name is CEL's own, which no predicate may take: the event variable, a
+// function or macro of the environment rules are checked in, or a word CEL reserves, which does
+// not parse as a name (loop, null). It is false when the environment cannot be built, which
+// NewLibrary reports when it builds it.
+func celsOwn(name string) bool {
+	env, err := Env()
+	if err != nil {
+		return false
+	}
+	if name == eventVar || env.HasFunction(name) || slices.ContainsFunc(env.Macros(), func(m cel.Macro) bool { return m.Function() == name }) {
+		return true
+	}
+	parsed, iss := env.Parse(name)
+	return iss.Err() != nil || parsed.NativeRep().Expr().Kind() != celast.IdentKind
 }
 
 // subjectParam is the parameter of a catalog predicate's generated body: what it is asked about.

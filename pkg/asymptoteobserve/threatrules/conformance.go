@@ -27,7 +27,7 @@ func (r FixtureResult) String() string {
 // embedded fixture. It returns one FixtureResult per fixture (in declaration order). A
 // non-nil error is a rule-level failure (invalid rule, maturity-gate violation, or
 // compile error) that prevents fixtures from running; in that case the results slice is
-// nil.
+// nil. A rule a loader returned has passed Validate already and is not validated again.
 //
 // A fixture fails when the rule could not be evaluated on one of its events, even where
 // another event matches: a scan reports that rule as failing on those events, and lint has to
@@ -37,7 +37,7 @@ func (r FixtureResult) String() string {
 // FixtureResult into a subtest assertion, but the logic here has no test dependency so it
 // can also back a CLI lint command later.
 func CheckRule(rule *Rule) (results []FixtureResult, err error) {
-	if err := rule.Validate(); err != nil {
+	if err := rule.validate(); err != nil {
 		return nil, fmt.Errorf("rule %q: %w", rule.ID, err)
 	}
 	if err := CheckMaturity(rule); err != nil {
