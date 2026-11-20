@@ -78,12 +78,26 @@ type Applier struct {
 	// verified before anything is installed (without it, nothing is), and a rollback reinstalls it
 	// through the package manager before the files are copied back. Its SHA256 may be empty: on
 	// Linux the release's signed checksums.txt is what it is held to.
+	//
+	// On Windows it is the previous MSI, which a failed install of an MSI reinstalls (see
+	// rollbackMSI); there is no snapshot to copy back there.
 	RollbackPackage *Package
 
 	HTTPClient *http.Client
 	run        runnerFunc
 	restart    func() error
 	now        func() time.Time
+
+	// Seams for the Windows MSI flow, so tests reach neither Program Files, this process's own
+	// executable nor the service manager: where the MSI installs (default WindowsInstallDir), the
+	// running executable (default os.Executable), and whether the collector service runs.
+	windowsDir       string
+	executable       func() (string, error)
+	collectorRunning func() bool
+
+	// rebootPending is set when msiexec reported that Windows finishes the install at the next
+	// restart (3010), to be named in the result.
+	rebootPending bool
 }
 
 // NewApplier returns an Applier with production defaults.
@@ -249,9 +263,21 @@ func (a *Applier) FetchVerifiedPackage(ctx context.Context, pkg Package, dest st
 // leaves is HTTPS plus the release checksum -- which is the same trust root the user relied on to
 // obtain the package they are updating, so this is parity with the install path rather than a
 // downgrade. On Linux, Beacon's release key is pinned, so the package must also be listed in a
-// checksums.txt signed by that key (verified with gpgv or sqv).
+// checksums.txt signed by that key (verified with gpgv or sqv), and a Windows .msi or .zip always
+// must be (verified in this process, since Windows has neither).
 func (a *Applier) verifyPackage(ctx context.Context, pkg Package, pkgPath, workDir string) (string, error) {
 	switch {
+	case isWindowsArtifact(pkg.fileName()):
+		// Windows has no Gatekeeper and the MSI is not Authenticode-signed, so the signed
+		// checksums.txt is the whole of what holds a Windows package to Beacon's release, and it is
+		// never skipped: not for a test seam, and not for a build with no pinned key.
+		if len(releaseKeyFingerprints) == 0 {
+			return "sha256+gpg", errors.New("verify release signature: this build pins no Beacon release key, so a Windows package cannot be verified")
+		}
+		if err := a.verifyReleaseSignature(ctx, pkg, pkgPath, workDir); err != nil {
+			return "sha256+gpg", fmt.Errorf("verify release signature: %w", err)
+		}
+		return "sha256+gpg", nil
 	case runtime.GOOS == "linux" && len(releaseKeyFingerprints) > 0 && !a.AllowInsecureTest:
 		if err := a.verifyReleaseSignature(ctx, pkg, pkgPath, workDir); err != nil {
 			return "sha256+gpg", fmt.Errorf("verify release signature: %w", err)
@@ -338,6 +364,10 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 		defer os.Remove(reinstall)
 	}
 
+	if isMSI(pkgPath) {
+		return a.installMSI(ctx, pkg, pkgPath, reinstall, result, success)
+	}
+
 	// Snapshot the whole install tree for rollback, then install. A snapshot
 	// failure on an existing install aborts before we touch anything: proceeding
 	// would leave us unable to roll back.
@@ -413,6 +443,9 @@ func (a *Applier) cleanupLargeUpdateArtifacts() {
 	for _, pattern := range []string{
 		filepath.Join(stage, "download*"),
 		filepath.Join(stage, "rollback"),
+		// A beacon.exe moved aside while it ran (moveRunningBeaconAside); removing one that still
+		// runs fails and is left for the next install.
+		filepath.Join(stage, replacedBeaconPrefix+"*"),
 	} {
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
@@ -741,32 +774,8 @@ func (a *Applier) reinstall(ctx context.Context, pkgPath string) error {
 // version (and edition, when one is expected) and, in production, that the
 // collector service is running.
 func (a *Applier) healthCheck(ctx context.Context, wantVersion, wantEdition string) error {
-	bin := filepath.Join(a.binDir(), "beacon")
-	out, err := a.runner()(ctx, bin, "version")
-	if err != nil {
-		return fmt.Errorf("run %s version: %s: %w", bin, strings.TrimSpace(out), err)
-	}
-	if !VersionLineMatches(out, wantVersion) {
-		return fmt.Errorf("installed binary reports %q, expected version %s", strings.TrimSpace(out), wantVersion)
-	}
-	if wantEdition != "" && VersionLineEdition(out) != wantEdition {
-		return fmt.Errorf("installed binary reports %q, expected the %s edition", strings.TrimSpace(out), wantEdition)
-	}
-	if a.AllowInsecureTest {
-		return nil
-	}
-	// Give launchd a moment to relaunch the collector via the pkg postinstall.
-	mgr := service.Manager{UserMode: false}
-	deadline := a.clock()().Add(collectorHealthTimeout)
-	for {
-		if mgr.Status().Running {
-			return nil
-		}
-		if !a.clock()().Before(deadline) {
-			return fmt.Errorf("collector service is not running after update")
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
+	// The collector check gives launchd or systemd a moment to relaunch it via the postinstall.
+	return a.healthCheckAt(ctx, filepath.Join(a.binDir(), "beacon"), wantVersion, wantEdition)
 }
 
 func (a *Applier) restartCollector() error {
@@ -876,6 +885,10 @@ func installableHere(url string, extractsTarballs bool) bool {
 // macOS, and on Linux whichever of dpkg or rpm this host actually has.
 func packageExt(url string) string {
 	switch {
+	case strings.HasSuffix(url, ".msi"):
+		return ".msi"
+	case strings.HasSuffix(url, ".zip"):
+		return ".zip"
 	case strings.HasSuffix(url, ".tar.gz"):
 		return ".tar.gz"
 	case strings.HasSuffix(url, ".tgz"):

@@ -214,12 +214,26 @@ func TestTargetsNameThisPlatform(t *testing.T) {
 	if sys.OS != runtime.GOOS || sys.Arch != runtime.GOARCH || user.OS != runtime.GOOS || user.Arch != runtime.GOARCH {
 		t.Fatalf("targets = %+v, %+v", sys, user)
 	}
-	if runtime.GOOS == "linux" {
+	switch runtime.GOOS {
+	case "linux":
 		if user.Format != FormatTarball || (sys.Format != FormatDeb && sys.Format != FormatRPM) {
 			t.Fatalf("linux targets = %+v, %+v", sys, user)
 		}
-	} else if sys.Format != FormatPkg || user.Format != FormatPkg {
-		t.Fatalf("targets = %+v, %+v", sys, user)
+	case "windows":
+		if sys.Format != FormatMSI || user.Format != FormatZip {
+			t.Fatalf("windows targets = %+v, %+v", sys, user)
+		}
+	default:
+		if sys.Format != FormatPkg || user.Format != FormatPkg {
+			t.Fatalf("targets = %+v, %+v", sys, user)
+		}
+	}
+	// Windows, from anywhere.
+	if got := (systemTarget("windows", "amd64")); got != (Target{OS: "windows", Arch: "amd64", Format: FormatMSI}) {
+		t.Fatalf("windows system target = %+v", got)
+	}
+	if got := userTarget("windows", "amd64"); got != (Target{OS: "windows", Arch: "amd64", Format: FormatZip}) {
+		t.Fatalf("windows user target = %+v", got)
 	}
 }
 
@@ -461,9 +475,9 @@ func TestLocateForLinuxAsksForThePackageToRollBackTo(t *testing.T) {
 	if gotBody != `{"os":"linux","arch":"amd64","format":"deb","rollback_from":"1.3.40"}` {
 		t.Fatalf("body = %q", gotBody)
 	}
-	back, err := linuxRollbackPackage(context.Background(), rel)
+	back, err := rollbackPackage(context.Background(), rel)
 	if err != nil {
-		t.Fatalf("linuxRollbackPackage: %v", err)
+		t.Fatalf("rollbackPackage: %v", err)
 	}
 	if back.URL != "https://release-assets.example/public-deb?sig=x" || back.Name != "beacon_1.3.40_linux_amd64.deb" ||
 		back.SHA256 != testSHA || back.Version != "1.3.40" || back.Checksums.URL != "https://release-assets.example/public-sums?sig=x" ||
@@ -539,17 +553,17 @@ func TestLocateForAsksNoRollbackWhereNoneIsNeeded(t *testing.T) {
 
 func TestLinuxRollbackPackageRefusesWithoutOne(t *testing.T) {
 	installed(t, "beacon version 1.3.40 (abc) built on today, enterprise edition\n")
-	if got, err := linuxRollbackPackage(context.Background(), Release{}); got != nil || err != nil {
+	if got, err := rollbackPackage(context.Background(), Release{}); got != nil || err != nil {
 		t.Fatalf("over the enterprise edition: %+v, %v", got, err)
 	}
 	for _, line := range []string{"", "beacon version dev (unknown) built on unknown\n"} {
 		installed(t, line)
-		if _, err := linuxRollbackPackage(context.Background(), Release{}); err == nil || !strings.Contains(err.Error(), "not a public release") {
+		if _, err := rollbackPackage(context.Background(), Release{}); err == nil || !strings.Contains(err.Error(), "not a public release") {
 			t.Fatalf("installed %q: err = %v", line, err)
 		}
 	}
 	installed(t, "beacon version 1.3.40 (abc) built on today\n")
-	if _, err := linuxRollbackPackage(context.Background(), Release{Rollback: &Rollback{Version: "1.3.39"}}); err == nil ||
+	if _, err := rollbackPackage(context.Background(), Release{Rollback: &Rollback{Version: "1.3.39"}}); err == nil ||
 		!strings.Contains(err.Error(), "no public package of 1.3.40") {
 		t.Fatalf("err = %v", err)
 	}
