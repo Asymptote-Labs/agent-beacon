@@ -167,20 +167,30 @@ func TestTraceShowCommandMetadataKeepsIndentedCommand(t *testing.T) {
 
 func TestTracesCommandsRespectCommandOut(t *testing.T) {
 	logPath, _, _ := traceHistoryFixture(t, false, "")
-	data, _ := json.Marshal(map[string]interface{}{
+	data, err := json.Marshal(map[string]interface{}{
 		"timestamp": "2026-10-12T10:00:00Z",
 		"event":     map[string]interface{}{"id": "e1", "action": "prompt.submitted", "category": "prompt"},
 		"harness":   map[string]interface{}{"name": "cursor"},
 		"session":   map[string]interface{}{"id": "s1"},
 		"prompt":    map[string]interface{}{"text": "test prompt redirection"},
 	})
-	_ = os.WriteFile(logPath, append(data, '\n'), 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, append(data, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	previous := endpointTraceOpts
-	t.Cleanup(func() { endpointTraceOpts = previous })
+	previousJSON := endpointOpts.jsonOutput
+	t.Cleanup(func() {
+		endpointTraceOpts = previous
+		endpointOpts.jsonOutput = previousJSON
+	})
 
 	var buf bytes.Buffer
 	endpointTracesSearchCmd.SetOut(&buf)
+	t.Cleanup(func() { endpointTracesSearchCmd.SetOut(nil) })
 	endpointTraceOpts.resultLevel = "trace"
 	endpointOpts.jsonOutput = false
 	if err := endpointTracesSearchCmd.RunE(endpointTracesSearchCmd, []string{"redirection"}); err != nil {
