@@ -274,8 +274,10 @@ func TestForwarderSpecReachesTheUnitPlistAndNames(t *testing.T) {
 	}
 }
 
-// A forwarder with a Windows service is supported only by a system install on Windows, and that
-// includes the Asymptote forwarder; one without a Windows service is refused there.
+// A forwarder with a Windows service is supported by a system install on Windows, and that
+// includes the Asymptote forwarder; one without a Windows service is refused there. A user-mode
+// Asymptote forwarder runs supervised on Windows (TestWindowsUserForwarderIsSupervised), so it is
+// supported there but never has a registration to restore.
 func TestForwarderWindowsServiceSupport(t *testing.T) {
 	spec := ForwarderSpec{WindowsService: "BeaconTestForwarder", Label: "l", SystemdUnit: "u.service"}
 	system := ForwarderManager{Kind: KindWindowsService, Spec: spec}
@@ -287,8 +289,9 @@ func TestForwarderWindowsServiceSupport(t *testing.T) {
 	if noWindows.Supported() || !strings.Contains(noWindows.UnsupportedReason(), "install-pack") {
 		t.Fatalf("forwarder without a Windows service: supported=%t reason=%q", noWindows.Supported(), noWindows.UnsupportedReason())
 	}
-	if asymptoteUser.Supported() || asymptoteUser.RestoresRegistration() {
-		t.Fatal("a user-mode Asymptote forwarder must be refused on Windows")
+	if asymptoteUser.RestoresRegistration() || asymptoteUser.Supported() != (runtime.GOOS == "windows") {
+		t.Fatalf("user-mode Asymptote forwarder: supported=%t (want only on Windows) restores=%t",
+			asymptoteUser.Supported(), asymptoteUser.RestoresRegistration())
 	}
 	if got := asymptoteSystem.Label(); got != ForwarderWindowsService {
 		t.Fatalf("Asymptote Windows label = %q", got)
