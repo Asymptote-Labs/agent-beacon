@@ -64,10 +64,10 @@ func TestSupervisedForwarderStartsRestartsAndStops(t *testing.T) {
 	supervisedForwarderStartCheck = 200 * time.Millisecond
 	t.Cleanup(func() { supervisedForwarderStartCheck = old })
 
-	vector := filepath.Join(t.TempDir(), "vector")
-	if err := os.WriteFile(vector, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// The test binary as a long-running stub, as the collector's tests use: running() checks the
+	// process's own command line for the program, which a script that execs another program loses
+	// on Linux.
+	vector := stubCollectorPath(t)
 	m := ForwarderManager{Kind: KindWindowsService, UserMode: true}
 	config := filepath.Join(t.TempDir(), "vector.toml")
 	if _, err := m.writeSupervisedUnit(vector, config); err != nil {
