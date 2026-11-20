@@ -91,7 +91,7 @@ var endpointTracesStatusCmd = &cobra.Command{
 			return err
 		}
 		if endpointOpts.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(status)
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(status)
 		}
 		printTraceStoreStatus(cmd.OutOrStdout(), logPath, status)
 		return nil
@@ -122,7 +122,7 @@ var endpointTracesListCmd = &cobra.Command{
 			return err
 		}
 		if endpointOpts.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(result)
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 		}
 		printPlainTraceList(cmd.OutOrStdout(), result)
 		return nil
@@ -144,16 +144,17 @@ var endpointTracesSearchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		out := cmd.OutOrStdout()
 		if endpointOpts.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(result)
+			return json.NewEncoder(out).Encode(result)
 		}
 		if result.ResultLevel == "event" {
 			for _, match := range result.Events {
-				fmt.Printf("%s\t#%d\t%s\t%s\n", match.Trace.ID, match.Event.Number, match.Event.Type, strings.Join(strings.Fields(traceFirstNonEmpty(match.Snippet, match.Event.Title, match.Event.Summary)), " "))
+				fmt.Fprintf(out, "%s\t#%d\t%s\t%s\n", match.Trace.ID, match.Event.Number, match.Event.Type, strings.Join(strings.Fields(traceFirstNonEmpty(match.Snippet, match.Event.Title, match.Event.Summary)), " "))
 			}
 		} else {
 			for _, trace := range result.Traces {
-				fmt.Printf("%s\t%s\t%s\n", trace.ID, trace.Harness.Name, strings.Join(strings.Fields(trace.Title), " "))
+				fmt.Fprintf(out, "%s\t%s\t%s\n", trace.ID, trace.Harness.Name, strings.Join(strings.Fields(trace.Title), " "))
 			}
 		}
 		return nil
@@ -175,21 +176,22 @@ var endpointTracesShowCmd = &cobra.Command{
 		if !ok {
 			return fmt.Errorf("trace not found: %s", args[0])
 		}
+		out := cmd.OutOrStdout()
 		if endpointOpts.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(result)
+			return json.NewEncoder(out).Encode(result)
 		}
-		fmt.Printf("%s\t%s\n", result.Trace.ID, strings.Join(strings.Fields(result.Trace.Title), " "))
+		fmt.Fprintf(out, "%s\t%s\n", result.Trace.ID, strings.Join(strings.Fields(result.Trace.Title), " "))
 		for _, event := range result.Events {
-			fmt.Printf("#%d\t%s\t%s\n", event.Number, event.Type, strings.Join(strings.Fields(traceFirstNonEmpty(event.Title, event.Summary)), " "))
+			fmt.Fprintf(out, "#%d\t%s\t%s\n", event.Number, event.Type, strings.Join(strings.Fields(traceFirstNonEmpty(event.Title, event.Summary)), " "))
 			if event.Content != nil && event.Content.Text != "" {
-				fmt.Println(indentTraceText(event.Content.Text))
+				fmt.Fprintln(out, indentTraceText(event.Content.Text))
 			}
 			if event.Command != nil && event.Command.Command != "" {
-				fmt.Println(indentTraceText(event.Command.Command))
+				fmt.Fprintln(out, indentTraceText(event.Command.Command))
 			}
 		}
 		if result.Range.ReturnedEvents < result.Range.TotalEvents {
-			fmt.Printf("Showing %d of %d events from offset %d.\n", result.Range.ReturnedEvents, result.Range.TotalEvents, result.Range.Offset)
+			fmt.Fprintf(out, "Showing %d of %d events from offset %d.\n", result.Range.ReturnedEvents, result.Range.TotalEvents, result.Range.Offset)
 		}
 		return nil
 	},
