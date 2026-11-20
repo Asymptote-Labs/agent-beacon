@@ -37,11 +37,12 @@ type FileRead struct {
 // file in.
 //
 // A command takes a file in directly when its own words name it as input: what cat, head, base64
-// and the other printers print, what grep, rg, awk, sed and jq search or filter, what openssl
-// reads by -in, -inkey and their kin, the sources of cp, install, scp and rsync, what tar and zip
-// put into an archive, what curl, wget, httpie, `gh gist create` and socat send, and the files an
-// inline python, node, ruby or php script opens by a literal path. The command is the one its
-// wrappers run (Unwrapped), by its program (programOf).
+// and the other printers print, what gzip, zstd, xz and their kin compress or decompress, what
+// grep, rg, awk, sed and jq search or filter, what openssl reads by -in, -inkey and their kin, the
+// sources of cp, install, scp and rsync, what tar and zip put into an archive, what curl, wget,
+// httpie, `gh gist create` and socat send, and the files an inline python, node, ruby or php
+// script opens by a literal path. The command is the one its wrappers run (Unwrapped), by its
+// program (programOf).
 //
 // What one command read follows the data to the commands that receive it:
 //

@@ -26,7 +26,11 @@ type settingsHookGroup struct {
 type settingsHookRef struct {
 	Type    string `json:"type,omitempty"`
 	Command string `json:"command"`
-	Timeout int    `json:"timeout,omitempty"`
+	// Timeout is a number, not an integer: Claude Code's settings schema allows any number of
+	// seconds above zero, so a user's own hook can say `"timeout": 2.5`. As an int, that one hook
+	// made every read of the file fail, and install, status and uninstall with it. Beacon's own
+	// timeouts are whole numbers and encode as they always have (`30`, not `30.0`).
+	Timeout float64 `json:"timeout,omitempty"`
 	// Shell names the interpreter the runtime should parse Command with, for runtimes that let a
 	// hook say. Omitted by default, so the runtimes that do not expose the field are unaffected.
 	//

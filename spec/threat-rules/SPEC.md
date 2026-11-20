@@ -386,8 +386,13 @@ the steps in both orders still fires once. A single event never satisfies two st
   - `direct`: the command opens the file itself. The command is the one `name` names. By that
     command:
     - `cat`, `tac`, `head`, `tail`, `less`, `more`, `bat`, `nl`, `strings`, `od`, `hexdump`,
-      `base64`: every operand; `xxd`: the first. A word that begins with `+` is not an operand
-      of `less`, `more` or `tail`.
+      `base64`, `base32`: every operand; `xxd`: the first. A word that begins with `+` is not an
+      operand of `less`, `more` or `tail`.
+    - The stream compressors `gzip`, `gunzip`, `zcat`, `bzip2`, `bunzip2`, `bzcat`, `xz`,
+      `unxz`, `xzcat`, `lzma`, `unlzma`, `lzcat`, `zstd`, `unzstd`, `zstdcat`, `lz4cat`,
+      `brotli`, `compress`, `uncompress`: every operand, and for the xz family the file of
+      `--files=` and `--files0=`; zstd's `-D` and `--patch-from` and brotli's `-D` name a file
+      read. `lz4`, `unlz4`: the first operand.
     - `grep`, `egrep`, `fgrep`, `rg`, `awk`, `jq`, and `sed` or `gsed` unless it edits in
       place (`-i`, which is a `file_effects` edit): the operands after the pattern, program or
       filter, or every operand when an option supplies it (`-e`, `-f`, `rg --files`). awk's

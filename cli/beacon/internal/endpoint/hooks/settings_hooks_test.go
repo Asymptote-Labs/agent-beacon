@@ -418,3 +418,74 @@ func TestSettingsHookRefEditedAfterReadKeepsUnmodelledFields(t *testing.T) {
 		t.Fatalf("entry with timeout cleared = %v, want %v", got, want)
 	}
 }
+
+// A hook's timeout is a number of seconds, and Claude Code's settings schema allows any number
+// above zero, so a user's own hook can say `"timeout": 2.5`. Beacon read it into an int, and that one
+// hook made every read of the file fail: install and repair stopped with "cannot unmarshal number
+// 2.5", status reported Beacon's hooks missing, and uninstall could not remove them. Each step must
+// work, and the user's entry must come out as it went in.
+func TestSettingsHooksAcceptAFractionalTimeoutOnAUsersHook(t *testing.T) {
+	const userGroup = `{"matcher": "Bash", "hooks": [` +
+		`{"type": "command", "command": "/usr/local/bin/guard", "timeout": 2.5}, ` +
+		`{"type": "command", "command": "/usr/local/bin/audit", "timeout": 0.5}]}`
+	for _, runtime := range settingsHooksRuntimes {
+		t.Run(runtime.platform, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			if err := os.WriteFile(path, []byte(`{"hooks": {"PreToolUse": [`+userGroup+`]}}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			for _, step := range []string{"install", "repair"} {
+				if err := runtime.install(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+					t.Fatalf("%s failed on a user's hook with a fractional timeout: %v", step, err)
+				}
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertFractionalTimeoutHooksKept(t, data)
+			if !strings.Contains(string(data), "--platform "+runtime.platform) {
+				t.Fatalf("Beacon hooks were not installed:\n%s", data)
+			}
+			if runtime.platform == "claude" && !isClaudeInstalledAt(path) {
+				t.Error("status reports Beacon's Claude hooks missing, though they are in the file")
+			}
+			changed, err := runtime.uninstall(path)
+			if err != nil {
+				t.Fatalf("uninstall failed on a user's hook with a fractional timeout: %v", err)
+			}
+			if !changed {
+				t.Fatal("uninstall reported no change, want Beacon's hooks removed")
+			}
+			if data, err = os.ReadFile(path); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "--platform "+runtime.platform) {
+				t.Fatalf("Beacon hooks were not removed:\n%s", data)
+			}
+			assertFractionalTimeoutHooksKept(t, data)
+		})
+	}
+}
+
+// assertFractionalTimeoutHooksKept checks that both of the user's hooks are still in the Bash
+// group, field for field, with their timeouts written as they were.
+func assertFractionalTimeoutHooksKept(t *testing.T, data []byte) {
+	t.Helper()
+	group := groupWithMatcherForTest(decodeSettingsForTest(t, data)["PreToolUse"], "Bash")
+	if group == nil {
+		t.Fatalf("the user's PreToolUse Bash group was dropped:\n%s", data)
+	}
+	want := []map[string]any{
+		{"type": "command", "command": "/usr/local/bin/guard", "timeout": 2.5},
+		{"type": "command", "command": "/usr/local/bin/audit", "timeout": 0.5},
+	}
+	if got := hookEntriesForTest([]map[string]any{group}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the user's hook entries changed: got %v, want %v\n%s", got, want, data)
+	}
+	for _, timeout := range []string{`"timeout": 2.5`, `"timeout": 0.5`} {
+		if !strings.Contains(string(data), timeout) {
+			t.Errorf("the file no longer says %s:\n%s", timeout, data)
+		}
+	}
+}

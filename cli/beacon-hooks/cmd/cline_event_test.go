@@ -118,6 +118,39 @@ func TestClineEventBaseFieldsResolveWorkspaceWithoutPlatformFlag(t *testing.T) {
 	}
 }
 
+// The Cline SDK plugin carries the setup session as `sessionId`; with no `taskId` it is the session.
+func TestClineEventSessionIDAloneIsTheSession(t *testing.T) {
+	logPath := clineTestLog(t)
+
+	runHookWithInput(t, runClineEvent, map[string]interface{}{
+		"hookName":  "UserPromptSubmit",
+		"sessionId": "sdk-session",
+		"prompt":    "explain this repo",
+	})
+
+	event := clineEventWithAction(t, logPath, "prompt.submitted")
+	if id := nested(t, event, "session")["id"]; id != "sdk-session" {
+		t.Errorf("session.id = %q, want sdk-session", id)
+	}
+}
+
+// A per-hook `taskId` wins over the carried SDK `sessionId`.
+func TestClineEventTaskIDWinsOverSessionID(t *testing.T) {
+	logPath := clineTestLog(t)
+
+	runHookWithInput(t, runClineEvent, map[string]interface{}{
+		"hookName":  "UserPromptSubmit",
+		"taskId":    "cli-task",
+		"sessionId": "sdk-session",
+		"prompt":    "explain this repo",
+	})
+
+	event := clineEventWithAction(t, logPath, "prompt.submitted")
+	if id := nested(t, event, "session")["id"]; id != "cli-task" {
+		t.Errorf("session.id = %q, want cli-task", id)
+	}
+}
+
 // The file-based hook surface names the hook in `hookName` and sends prompts on their own, so a
 // prompt payload with no run-start context still has to produce a prompt event.
 func TestClineEventPromptOnlyPayload(t *testing.T) {

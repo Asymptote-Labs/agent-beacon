@@ -289,7 +289,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "pgdown":
 		m.selected += m.visibleTraceCount()
 		if m.selected >= len(m.traces) {
-			m.selected = len(m.traces) - 1
+			m.selected = max(0, len(m.traces)-1)
 		}
 		m.ensureVisible()
 	case "enter":
