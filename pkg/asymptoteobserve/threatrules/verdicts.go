@@ -251,8 +251,10 @@ type SnapshotDiff struct {
 	// events one of them holds alone, which are not compared.
 	Compared, OnlyBefore, OnlyAfter int
 	// Sequences is the number of sequences both snapshots ran the correlation rules on. A
-	// snapshot written before sequences were recorded has none.
-	Sequences int
+	// snapshot written before sequences were recorded has none. SequencesOnlyBefore and
+	// SequencesOnlyAfter count the sequences one of them holds alone, which are not compared:
+	// a log that gained or lost an event since the snapshot is a different sequence.
+	Sequences, SequencesOnlyBefore, SequencesOnlyAfter int
 	// Changes lists the matchers whose verdict changed on some event or sequence, or that only
 	// one snapshot has, sorted by name.
 	Changes []MatcherChange
@@ -351,6 +353,7 @@ func (before *Snapshot) Diff(after *Snapshot) SnapshotDiff {
 			was := &before.Sequences[i]
 			is, ok := laterSequences[was.ID]
 			if !ok {
+				diff.SequencesOnlyBefore++
 				continue
 			}
 			diff.Sequences++
@@ -359,6 +362,12 @@ func (before *Snapshot) Diff(after *Snapshot) SnapshotDiff {
 			ref := EventRef{ID: was.ID, Label: was.Label}
 			gone(is.Failed, was.Failed, func(r string) { c := change(r); c.Failing = append(c.Failing, ref) })
 			gone(was.Failed, is.Failed, func(r string) { c := change(r); c.Recovered = append(c.Recovered, ref) })
+		}
+		diff.SequencesOnlyAfter = len(after.Sequences) - diff.Sequences
+		// A snapshot of a pack with no correlation rules ran none; its sequences are not
+		// missing, so nothing is said of them.
+		if len(before.Sequences) == 0 || len(after.Sequences) == 0 {
+			diff.SequencesOnlyBefore, diff.SequencesOnlyAfter = 0, 0
 		}
 	}
 

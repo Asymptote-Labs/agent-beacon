@@ -136,3 +136,18 @@ func TestAtomNewerThanTheAutomatonIsSearchedFor(t *testing.T) {
 		}
 	}
 }
+
+// An atom past maxAtoms keeps number 0 and is searched for in the text, so the bound on the
+// table never changes what matches.
+func TestAtomWithoutANumberIsSearchedFor(t *testing.T) {
+	auto := buildAutomaton(tableAtoms())
+	pf := &prefilter{op: pfAtom, atom: canon("zqxjkv-past-the-bound")}
+	for text, want := range map[string]bool{
+		"echo ZQXJKV-past-the-BOUND": true,
+		"echo zqxjkv-past":           false,
+	} {
+		if got := pf.holds((&eventActivation{atoms: auto}).atomsOf(text)); got != want {
+			t.Errorf("%q: %v, want %v", text, got, want)
+		}
+	}
+}

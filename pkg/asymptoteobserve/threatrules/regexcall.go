@@ -44,9 +44,11 @@ type pattern struct {
 // pattern is immutable and safe to share, and an atom's number never changes.
 //
 // An atom is numbered when a pattern that holds it is stored, so the atoms are those of the
-// stored patterns and nothing else, and one bound covers both: past maxSharedPatterns the table
-// keeps what it holds, as matchCache does, a pattern is compiled where it is written, and its
-// atoms are searched for in the text, as every atom was before the automaton.
+// stored patterns and nothing else. Two bounds hold the table: past maxSharedPatterns it keeps
+// what it holds, as matchCache does, and a pattern is compiled where it is written; past
+// maxAtoms an atom is left unnumbered, since one pattern can hold thousands (an alternation of
+// literals). An atom without a number is searched for in the text, as every atom was before the
+// automaton, so neither bound changes what matches.
 var patternTable struct {
 	mu     sync.Mutex
 	byText map[string]*pattern // nil for a pattern that does not compile
@@ -56,8 +58,12 @@ var patternTable struct {
 	built  atomic.Pointer[automaton]
 }
 
-// maxSharedPatterns bounds the pattern table.
-const maxSharedPatterns = 8192
+// maxSharedPatterns bounds the pattern table, and maxAtoms the atoms it numbers. A pack has a
+// few thousand atoms.
+const (
+	maxSharedPatterns = 8192
+	maxAtoms          = 1 << 15
+)
 
 // compiledPattern returns the compiled form of a pattern, or nil when it does not compile.
 func compiledPattern(text string) *pattern {
@@ -94,11 +100,12 @@ func compiledPattern(text string) *pattern {
 }
 
 // numberAtoms gives every atom of a prefilter being stored its number, numbering the atoms the
-// table does not have yet. The table's lock is held.
+// table does not have yet while it holds fewer than maxAtoms; an atom past that keeps number 0.
+// The table's lock is held.
 func numberAtoms(pf *prefilter) {
 	if pf.op == pfAtom {
 		id, ok := patternTable.ids[pf.atom]
-		if !ok {
+		if !ok && len(patternTable.atoms) < maxAtoms {
 			patternTable.atoms = append(patternTable.atoms, pf.atom)
 			id = uint32(len(patternTable.atoms))
 			patternTable.ids[pf.atom] = id

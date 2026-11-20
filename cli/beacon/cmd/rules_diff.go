@@ -238,6 +238,10 @@ func printSnapshotDiff(out io.Writer, diff threatrules.SnapshotDiff) {
 	if diff.OnlyBefore > 0 || diff.OnlyAfter > 0 {
 		fmt.Fprintf(out, "; %d event(s) only before and %d only after were not compared", diff.OnlyBefore, diff.OnlyAfter)
 	}
+	if diff.SequencesOnlyBefore > 0 || diff.SequencesOnlyAfter > 0 {
+		fmt.Fprintf(out, "; %d fixture(s) or log(s) only before and %d only after were not compared (a log that changed since the snapshot is one)",
+			diff.SequencesOnlyBefore, diff.SequencesOnlyAfter)
+	}
 	fmt.Fprintln(out)
 }
 

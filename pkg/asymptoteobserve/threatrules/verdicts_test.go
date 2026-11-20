@@ -66,7 +66,8 @@ func TestSnapshotDiffShowsWhatAChangeDid(t *testing.T) {
 		t.Fatal(err)
 	}
 	diff := before.Diff(after)
-	want := SnapshotDiff{Compared: 3, OnlyAfter: 1, Changes: []MatcherChange{
+	// The later sequence holds one more event, so it is another sequence: counted, not compared.
+	want := SnapshotDiff{Compared: 3, OnlyAfter: 1, SequencesOnlyBefore: 1, SequencesOnlyAfter: 1, Changes: []MatcherChange{
 		{Matcher: "fresh", Added: true, Gained: []EventRef{refTo(events[0])}},
 		{Matcher: "pair#send", Lost: []EventRef{refTo(events[2])}},
 		{Matcher: "retired", Removed: true, Lost: []EventRef{refTo(events[0])}},
@@ -128,6 +129,30 @@ func TestSnapshotDiffShowsWhatACorrelationFinds(t *testing.T) {
 	want := SnapshotDiff{Compared: 2, Sequences: 1, Changes: []MatcherChange{{Matcher: "pair", Lost: []EventRef{lost}}}}
 	if !reflect.DeepEqual(diff, want) {
 		t.Errorf("diff =\n%+v\nwant\n%+v", diff, want)
+	}
+}
+
+// A log that gained an event since the snapshot is a different sequence: what the correlation
+// rules find over it is not compared, and the diff counts it on each side rather than leaving
+// it out without a word.
+func TestSnapshotDiffCountsASequenceThatChanged(t *testing.T) {
+	pair := snapshotRule(t, "pair", "correlation:\n  scope: session\n  window: 60s\n  steps:\n"+
+		"    - id: read\n      match: 'e.event.action == \"file.read\"'\n"+
+		"    - id: send\n      match: 'e.event.action == \"command.executed\"'\n")
+	read := corrEvent("2026-06-13T10:00:00Z", "file.read", "s1", withEnv)
+	send := corrEvent("2026-06-13T10:00:30Z", "command.executed", "s1", withCurl)
+	later := corrEvent("2026-06-13T10:00:40Z", "command.executed", "s1", nil)
+	before, err := TakeSnapshot([]*Rule{pair}, []EventSequence{{Label: "log", Events: []asymptoteobserve.Event{read, send}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := TakeSnapshot([]*Rule{pair}, []EventSequence{{Label: "log", Events: []asymptoteobserve.Event{read, send, later}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff := before.Diff(after)
+	if diff.Sequences != 0 || diff.SequencesOnlyBefore != 1 || diff.SequencesOnlyAfter != 1 {
+		t.Errorf("diff = %+v; want the changed log counted once on each side and not compared", diff)
 	}
 }
 
