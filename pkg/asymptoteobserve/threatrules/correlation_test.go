@@ -271,10 +271,7 @@ func TestCorrelationAnyOrderOneFindingPerSession(t *testing.T) {
 		corrEvent("2026-06-13T10:00:00Z", "command.executed", "s2", withCurl),
 		corrEvent("2026-06-13T10:00:05Z", "file.read", "s2", withEnv),
 	}
-	findings, err := c.Findings(events)
-	if err != nil {
-		t.Fatalf("findings: %v", err)
-	}
+	findings := findingsOf(t, c, events)
 	if len(findings) != 2 {
 		t.Fatalf("want one finding per session (2), got %d", len(findings))
 	}

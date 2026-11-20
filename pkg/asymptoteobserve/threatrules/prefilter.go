@@ -23,11 +23,14 @@ import (
 // compared the same way, which only makes their prefilter weaker, never wrong.
 //
 // TestPrefilterIsSound and FuzzPrefilterIsSound check the one property results depend on: a
-// regex never matches a text its prefilter rejects.
+// regex never matches a text its prefilter rejects. They ask it through holds, the walker a
+// scan runs, of a text with no atoms read (plainText).
 type prefilter struct {
 	op   pfOp
 	atom string // canonical; op == pfAtom
-	id   uint32 // the atom's number in the atom table (textatoms.go), 0 when it has none
+	// id is the atom's number in the pattern table (regexcall.go), given when a pattern
+	// holding it is stored there, and 0 until then.
+	id   uint32
 	subs []*prefilter
 }
 
@@ -45,21 +48,22 @@ const maxExact = 16
 
 var pfAlways = &prefilter{op: pfTrue}
 
-// holds reports whether the prefilter holds for canonical text.
-func (p *prefilter) holds(text string) bool {
+// holds reports whether the prefilter holds for a text: whether the text holds its atoms, read by
+// the scan's automaton or searched for (textAtoms.holds).
+func (p *prefilter) holds(t *textAtoms) bool {
 	switch p.op {
 	case pfAtom:
-		return strings.Contains(text, p.atom)
+		return t.holds(p)
 	case pfAnd:
 		for _, s := range p.subs {
-			if !s.holds(text) {
+			if !s.holds(t) {
 				return false
 			}
 		}
 		return true
 	case pfOr:
 		for _, s := range p.subs {
-			if s.holds(text) {
+			if s.holds(t) {
 				return true
 			}
 		}
@@ -68,7 +72,8 @@ func (p *prefilter) holds(text string) bool {
 	return true
 }
 
-// compilePrefilter derives the prefilter of a pattern, parsed as regexp.Compile parses it.
+// compilePrefilter derives the prefilter of a pattern, parsed as regexp.Compile parses it. Its
+// atoms have no number until the pattern is stored (compiledPattern).
 func compilePrefilter(pattern string) (*prefilter, error) {
 	re, err := syntax.Parse(pattern, syntax.Perl)
 	if err != nil {
@@ -108,7 +113,7 @@ func (in pfInfo) match() *prefilter {
 	slices.Sort(atoms) // a stable order, so a rule's work does not vary between runs
 	subs := make([]*prefilter, len(atoms))
 	for i, s := range atoms {
-		subs[i] = &prefilter{op: pfAtom, atom: s, id: atomID(s)}
+		subs[i] = &prefilter{op: pfAtom, atom: s}
 	}
 	return anyOf(subs...)
 }

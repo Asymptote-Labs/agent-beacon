@@ -3,6 +3,7 @@ package threatrules
 import (
 	"regexp"
 	"sync"
+	"sync/atomic"
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -35,24 +36,40 @@ type pattern struct {
 	pf *prefilter
 }
 
-// patterns holds every pattern compiled so far, by its text. A pack's expressions hold some
-// 1,700 matches() calls after its predicates are expanded, on a few hundred distinct patterns,
-// and an expression is planned twice, with and without cost tracking: compiled where it is
-// written, each pattern was compiled, and its prefilter derived, many times over. A compiled
-// pattern is immutable and safe to share.
-var patterns struct {
+// patternTable holds every pattern compiled so far, by its text, and numbers the atoms of their
+// prefilters for the automaton that reads an event's texts (textatoms.go). A pack's expressions
+// hold some 1,700 matches() calls after its predicates are expanded, on a few hundred distinct
+// patterns, and an expression is planned twice, with and without cost tracking: compiled where
+// it is written, each pattern was compiled, and its prefilter derived, many times over. A stored
+// pattern is immutable and safe to share, and an atom's number never changes.
+//
+// An atom is numbered when a pattern that holds it is stored, so the atoms are those of the
+// stored patterns and nothing else. Two bounds hold the table: past maxSharedPatterns it keeps
+// what it holds, as matchCache does, and a pattern is compiled where it is written; past
+// maxAtoms an atom is left unnumbered, since one pattern can hold thousands (an alternation of
+// literals). An atom without a number is searched for in the text, as every atom was before the
+// automaton, so neither bound changes what matches.
+var patternTable struct {
 	mu     sync.Mutex
 	byText map[string]*pattern // nil for a pattern that does not compile
+	ids    map[string]uint32   // a canonical atom -> its number, from 1
+	atoms  []string            // atoms[number-1]
+	count  atomic.Int32        // len(atoms), read without the lock
+	built  atomic.Pointer[automaton]
 }
 
-// maxSharedPatterns bounds patterns; past it a pattern is compiled where it is written.
-const maxSharedPatterns = 8192
+// maxSharedPatterns bounds the pattern table, and maxAtoms the atoms it numbers. A pack has a
+// few thousand atoms.
+const (
+	maxSharedPatterns = 8192
+	maxAtoms          = 1 << 15
+)
 
 // compiledPattern returns the compiled form of a pattern, or nil when it does not compile.
 func compiledPattern(text string) *pattern {
-	patterns.mu.Lock()
-	p, ok := patterns.byText[text]
-	patterns.mu.Unlock()
+	patternTable.mu.Lock()
+	p, ok := patternTable.byText[text]
+	patternTable.mu.Unlock()
 	if ok {
 		return p
 	}
@@ -64,18 +81,41 @@ func compiledPattern(text string) *pattern {
 			p = &pattern{re: re, pf: pf}
 		}
 	}
-	patterns.mu.Lock()
-	defer patterns.mu.Unlock()
-	if shared, ok := patterns.byText[text]; ok {
+	patternTable.mu.Lock()
+	defer patternTable.mu.Unlock()
+	if shared, ok := patternTable.byText[text]; ok {
 		return shared
 	}
-	if patterns.byText == nil {
-		patterns.byText = map[string]*pattern{}
+	if len(patternTable.byText) >= maxSharedPatterns {
+		return p
 	}
-	if len(patterns.byText) < maxSharedPatterns {
-		patterns.byText[text] = p
+	if patternTable.byText == nil {
+		patternTable.byText, patternTable.ids = map[string]*pattern{}, map[string]uint32{}
 	}
+	if p != nil && p.pf != nil {
+		numberAtoms(p.pf)
+	}
+	patternTable.byText[text] = p
 	return p
+}
+
+// numberAtoms gives every atom of a prefilter being stored its number, numbering the atoms the
+// table does not have yet while it holds fewer than maxAtoms; an atom past that keeps number 0.
+// The table's lock is held.
+func numberAtoms(pf *prefilter) {
+	if pf.op == pfAtom {
+		id, ok := patternTable.ids[pf.atom]
+		if !ok && len(patternTable.atoms) < maxAtoms {
+			patternTable.atoms = append(patternTable.atoms, pf.atom)
+			id = uint32(len(patternTable.atoms))
+			patternTable.ids[pf.atom] = id
+			patternTable.count.Store(int32(id))
+		}
+		pf.id = id
+	}
+	for _, sub := range pf.subs {
+		numberAtoms(sub)
+	}
 }
 
 // matchesCall is a matches() call with a constant pattern. It keeps the call's identity (id,
@@ -131,17 +171,16 @@ func (m *matchesCall) match(frame *interpreter.ExecutionFrame, vals []ref.Val) r
 	if !ok {
 		return types.NoSuchOverloadErr()
 	}
-	act := eventActivationOf(frame)
-	if act == nil {
-		if m.pf != nil && !m.pf.holds(canon(s)) {
-			return types.False
-		}
-		return types.Bool(m.re.MatchString(s))
-	}
 	// The text's atoms are read once for the event, and so is each pattern that gets past its
-	// prefilter: every rule that asks the same of the same text shares the answer.
-	t := act.atomsOf(s)
-	if m.pf != nil && !m.pf.holdsIn(t) {
+	// prefilter: every rule that asks the same of the same text shares the answer. A text with
+	// no event behind it (a program evaluated outside the engine) is read on its own.
+	var t *textAtoms
+	if act := eventActivationOf(frame); act != nil {
+		t = act.atomsOf(s)
+	} else {
+		t = plainText(s)
+	}
+	if m.pf != nil && !m.pf.holds(t) {
 		return types.False
 	}
 	return types.Bool(t.matches(m.re))

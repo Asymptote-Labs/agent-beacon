@@ -127,8 +127,9 @@ func (a *eventActivation) class() (sizeClass, bool) {
 
 // eventSizes is how large the values of an event are where a rule can read them: the fields the
 // CEL environment exposes, which leaves out interface{} values (a tool's raw result, raw
-// attributes) that no rule can address. The values are measured in four classes, by how many
-// lists and maps a value is inside, because that is what decides how often a rule reads one:
+// attributes) that no rule can address. The values are measured in four measures, by how many
+// lists and maps a value is inside, because that is what decides how often a rule reads one
+// (measureOf):
 //
 //   - long: the largest string or bytes value that is in no list, or in the entries of one (a
 //     command line, a prompt, a tool result; a parsed command's name, args and span);
@@ -141,14 +142,14 @@ func (a *eventActivation) class() (sizeClass, bool) {
 // a word is multiplied by top and by nested. One size for every string and one for every list
 // charged each of a command's words as if it were as long as the whole line, and each
 // command as if it had as many words as the line has commands.
-type eventSizes struct{ long, word, top, nested int }
+type eventSizes [measures]int
 
 // walk measures v, of a type the event's CEL types hold and inside depth lists or maps, and
 // reports false for a value it does not know how to measure.
 func (z *eventSizes) walk(a *fastAdapter, v reflect.Value, depth int) bool {
 	switch v.Kind() {
 	case reflect.String:
-		z.text(v.Len(), depth)
+		z.add(measureOf(true, depth), v.Len())
 	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64:
@@ -158,17 +159,17 @@ func (z *eventSizes) walk(a *fastAdapter, v reflect.Value, depth int) bool {
 		}
 	case reflect.Slice, reflect.Array:
 		if v.Type().Elem().Kind() == reflect.Uint8 {
-			z.text(v.Len(), depth)
+			z.add(measureOf(true, depth), v.Len())
 			return true
 		}
-		z.entries(v.Len(), depth)
+		z.add(measureOf(false, depth), v.Len())
 		for i := range v.Len() {
 			if !z.walk(a, v.Index(i), depth+1) {
 				return false
 			}
 		}
 	case reflect.Map:
-		z.entries(v.Len(), depth)
+		z.add(measureOf(false, depth), v.Len())
 		for it := v.MapRange(); it.Next(); {
 			if !z.walk(a, it.Key(), depth+1) || !z.walk(a, it.Value(), depth+1) {
 				return false
@@ -191,23 +192,10 @@ func (z *eventSizes) walk(a *fastAdapter, v reflect.Value, depth int) bool {
 	return true
 }
 
-// text records a string or bytes value of n bytes inside depth lists or maps. A string's size
-// to CEL is its code points, which are no more than its bytes.
-func (z *eventSizes) text(n, depth int) {
-	if depth <= longDepth {
-		z.long = max(z.long, n)
-	} else {
-		z.word = max(z.word, n)
-	}
-}
-
-// entries records a list or map of n entries inside depth lists or maps.
-func (z *eventSizes) entries(n, depth int) {
-	if depth == 0 {
-		z.top = max(z.top, n)
-	} else {
-		z.nested = max(z.nested, n)
-	}
+// add records a value of size n in measure m: a string's or bytes value's bytes (a string's size
+// to CEL is its code points, which are no more than its bytes), a list's or map's entries.
+func (z *eventSizes) add(m measure, n int) {
+	z[m] = max(z[m], n)
 }
 
 // longDepth is the deepest a string can be inside lists and maps and still be measured as long.

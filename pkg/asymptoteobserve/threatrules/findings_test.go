@@ -42,10 +42,7 @@ func TestSingleEventFindings(t *testing.T) {
 		{Event: asymptoteobserve.EventInfo{Action: "tool.invoked"}},
 		{Event: asymptoteobserve.EventInfo{Action: "file.read"}, Session: &asymptoteobserve.SessionInfo{ID: "s2"}},
 	}
-	findings, err := c.Findings(events)
-	if err != nil {
-		t.Fatalf("findings: %v", err)
-	}
+	findings := findingsOf(t, c, events)
 	if len(findings) != 2 {
 		t.Fatalf("want 2 findings (one per matching event), got %d", len(findings))
 	}
@@ -71,10 +68,7 @@ func TestCorrelationFindingsEvidence(t *testing.T) {
 		// a second, unrelated session that does not complete
 		corrEvent("2026-06-13T10:00:00Z", "file.read", "s2", withEnv),
 	}
-	findings, err := c.Findings(events)
-	if err != nil {
-		t.Fatalf("findings: %v", err)
-	}
+	findings := findingsOf(t, c, events)
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding (only s1 completes), got %d", len(findings))
 	}
@@ -108,4 +102,15 @@ func TestScanEventsAggregates(t *testing.T) {
 	if len(findings) != 2 {
 		t.Fatalf("want 2 findings across both rules, got %d", len(findings))
 	}
+}
+
+// findingsOf returns what the rule finds in the events when it is scanned alone, failing the
+// test when an evaluation fails.
+func findingsOf(t testing.TB, c *CompiledRule, events []asymptoteobserve.Event) []Finding {
+	t.Helper()
+	result := Scan([]*CompiledRule{c}, events)
+	if len(result.Failures) > 0 {
+		t.Fatalf("rule %s: %v", c.rule.ID, result.Failures[0].Err)
+	}
+	return result.Findings
 }
