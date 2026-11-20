@@ -1,6 +1,6 @@
 id: persistence-install-command
-spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 6
 title: Command installs scheduled-job or service persistence
 description: >
   A command installs persistence that runs outside any agent sandbox at login,
@@ -32,7 +32,7 @@ match: >
       c.name == "systemctl" && c.args.matches("(?m)^enable$") ||
       c.name == "launchctl" && c.args.matches("\\A(load|bootstrap|enable)(\\n|\\z)")
     ) ||
-    unread_text(e, t, (t.matches("(?i)\\bcrontab\\b\\s+(-($|[\\s|])|-e\\b|[^-\\s])") ||
+    unread_text(e, t, (crontab_installs_text(t) ||
       t.matches("(?i)\\bsystemctl\\b(\\s+--?[a-z][a-z-]*(=\\S+)?)*\\s+enable\\b") ||
       t.matches("(?i)\\blaunchctl\\b\\s+(load|bootstrap|enable)\\b")))
   )
@@ -184,5 +184,12 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git commit -m 'docs: systemctl enable is not needed here' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half asked for an operand after crontab until version 6.
+  - name: crontab_from_stdin_in_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh 'printf \"* * * * * /tmp/x.sh\\n\" | crontab'" }
         session: { id: s1 }
 

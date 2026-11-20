@@ -1,6 +1,6 @@
 id: dependency-manifest-modified
-spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 6
+spec: threat-rules/v2.0  # needed for file_writes and predicates
+version: 8
 title: Dependency manifest or lockfile modified
 description: >
   The agent modified a dependency manifest or lockfile (package.json, lockfiles,
@@ -20,17 +20,18 @@ taxonomy:
 # that lands in a temporary directory is left out (write_outside_scratch): agents stage
 # copies and throwaway projects there all the time, and moving one back into the project is
 # a write of its own. A package manager rewriting its own manifest (npm install, go mod
-# tidy) is not a write the parser reports.
+# tidy) is not a write the parser reports. Where the parser cannot see into a command, the
+# text that reaches it counts when it redirects or tees into a manifest
+# (dependency_manifest_file_redirect), unless every such command runs in a temporary
+# directory (opaque_commands_in_scratch) or the text writes into one: a text does not say
+# which directory a relative path is in.
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    dependency_manifest_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    write_outside_scratch(e, f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      dependency_manifest_file(f.path))
-  )
+  file_edited(e) && dependency_manifest_file(e.file.path) ||
+  e.event.action == "command.executed" && (
+    write_outside_scratch(e, f, changing_write(f) && dependency_manifest_file(f.path)) ||
+    dependency_manifest_file_redirect(e.command.command) && !opaque_commands_in_scratch(e) &&
+      unread_text(e, t, dependency_manifest_file_redirect(t) &&
+      !t.matches("(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(/private)?/(tmp|var/tmp|var/folders)/")))
 
 emit:
   reason: "Dependency manifest or lockfile modified (supply-chain edge change)"
@@ -119,4 +120,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: "frontend/package.json" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh \"echo 'evil==1.0' >> requirements.txt\"" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never echo 'evil==1.0' >> requirements.txt\" && ./run-tests.sh" }
         session: { id: s1 }

@@ -1,6 +1,6 @@
 id: git-config-exec-injection
-spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 6
 title: Git config sets a code-execution directive
 description: >
   A command sets a git directive that turns an ordinary git operation into code
@@ -21,16 +21,14 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
-# The subcommand is the first word after git's own options, of which -C, -c, --git-dir,
-# --work-tree and --namespace take the next word as their value; a word whose value is
-# unknown (`git $OPTS config`) is passed over as an option. `git config KEY VALUE` is the
-# key as a whole word with a word after it; the key alone prints it. A value that holds a
-# variable is an empty word in args, so the inline `-c KEY=VALUE` word and the `!` that
-# opens a shell alias are read as written (argv_raw) where args cannot tell.
+# The subcommand is the first word after git's own options (git_subcommand). `git config
+# KEY VALUE` is the key as a whole word with a word after it; the key alone prints it. A
+# value that holds a variable is an empty word in args, so the inline `-c KEY=VALUE` word
+# and the `!` that opens a shell alias are read as written (argv_raw) where args cannot tell.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c, c.name == "git" && (
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*config\\n") &&
+      git_subcommand(c, "config\\n") &&
         !c.args.matches("(?m)^(--get(-all|-regexp|-urlmatch)?|--unset(-all)?|--list|-l)$|^config\\n(-[^\\n]*\\n)*(get|unset|list)$") && (
           c.args.matches("(?mi)^(core\\.sshcommand|diff\\.external|filter\\.[a-z0-9_-]+\\.(clean|smudge|process))\\n") ||
           c.args.matches("(?mi)^core\\.fsmonitor\\n") && !c.args.matches("(?mi)^core\\.fsmonitor\\n(true|false)$") ||

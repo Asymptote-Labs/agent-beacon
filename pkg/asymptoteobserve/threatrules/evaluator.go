@@ -35,9 +35,10 @@ type CompiledRule struct {
 
 // Compile validates a rule and compiles its CEL expressions into a reusable evaluator.
 // Validation (including CEL type-checking) runs first, so Compile fails on any rule that
-// would not load.
+// would not load; a rule that has passed Validate, as every rule a loader returns has, is not
+// validated again.
 func Compile(rule *Rule) (*CompiledRule, error) {
-	if err := rule.Validate(); err != nil {
+	if err := rule.validate(); err != nil {
 		return nil, err
 	}
 	c := &CompiledRule{rule: rule}

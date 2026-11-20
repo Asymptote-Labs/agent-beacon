@@ -1,6 +1,6 @@
 id: git-force-push-to-protected
-spec: threat-rules/v1.3  # needed for args and predicates
-version: 4
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 5
 title: Force-push directed at a protected branch
 description: >
   A git push with --force, --force-with-lease, -f, or a leading +
@@ -30,20 +30,19 @@ taxonomy:
   beacon_category: source-control
   owasp_llm: LLM03
 
-# The subcommand is the first word after git's own options, of which -C, -c, --git-dir,
-# --work-tree and --namespace take the next word as their value; a word whose value is
-# unknown (`git $OPTS push`) is passed over as an option. The destination is a whole word
-# after push: the branch, or a refspec that ends in it (HEAD:main, x:refs/heads/main), so
-# main:feature/x, feature/main and a directory given to -C are not one. A force option is
-# read as written (argv_raw), since `--force-with-lease=main:$old` is an empty word in
-# args; any word that begins --force counts, as it did in the text.
+# The subcommand is the first word after git's own options (git_subcommand). The
+# destination is a whole word after push: the branch, or a refspec that ends in it
+# (HEAD:main, x:refs/heads/main), so main:feature/x, feature/main and a directory given to
+# -C are not one. A force option is read as written (argv_raw), since
+# `--force-with-lease=main:$old` is an empty word in args; any word that begins --force
+# counts, as it did in the text.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c, c.name == "git" && (
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*push\\n(?:[^\\n]*\\n)*?(?:(?:[^\\n:+-][^\\n:]*)?:)?(?:refs/heads/)?(?i:main|master|develop|production|release/[^\\n]+)(?:\\n|\\z)") && (
+      git_subcommand(c, "push\\n(?:[^\\n]*\\n)*?(?:(?:[^\\n:+-][^\\n:]*)?:)?(?:refs/heads/)?(?i:main|master|develop|production|release/[^\\n]+)(?:\\n|\\z)") && (
         c.args.matches("(?m)^-[vqnud46]*f[vqnud46]*$") ||
         c.argv_raw.exists(a, a.matches("^[\"']?--force\\b"))) ||
-      c.args.matches("\\A(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\\n[^\\n]*\\n|--?[A-Za-z][^\\n]*\\n|\\n)*push\\n(?:[^\\n]*\\n)*?\\+(?:[^\\n:]*:)?(?:refs/heads/)?(?i:main|master|develop|production|release/[^\\n]+)(?:\\n|\\z)")
+      git_subcommand(c, "push\\n(?:[^\\n]*\\n)*?\\+(?:[^\\n:]*:)?(?:refs/heads/)?(?i:main|master|develop|production|release/[^\\n]+)(?:\\n|\\z)")
     )) ||
     unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)") ||
       t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(\\s[^;&|]*)?(\\s--force(-with-lease)?\\b|\\s-f\\b)") ||

@@ -253,6 +253,25 @@ func waitForServiceRunning(name string, timeout time.Duration) error {
 	})
 }
 
+// serviceRegistered reports whether the SCM has a service by this name. Only the SCM's own "does
+// not exist" is false: a service it could not be asked about (no SCM access, any other error) counts
+// as registered, so a caller deciding whether to remove one never leaves it behind.
+func serviceRegistered(name string) bool {
+	registered := true
+	_ = withManager(func(m *mgr.Mgr) error {
+		s, err := m.OpenService(name)
+		if err != nil {
+			if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+				registered = false
+			}
+			return nil
+		}
+		s.Close()
+		return nil
+	})
+	return registered
+}
+
 // removeService stops and deletes the registration, treating an absent service as success.
 //
 // terminateHung ends the service's process when it will not stop, and deletes the registration

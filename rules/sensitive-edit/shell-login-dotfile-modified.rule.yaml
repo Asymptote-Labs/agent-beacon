@@ -1,6 +1,6 @@
 id: shell-login-dotfile-modified
-spec: threat-rules/v1.3  # needed for file_writes and predicates
-version: 6
+spec: threat-rules/v2.0  # needed for file_writes and predicates
+version: 8
 title: Shell rc / login dotfile modified
 description: >
   The agent modified a shell startup or login file: a user's dotfile (.bashrc,
@@ -24,15 +24,9 @@ taxonomy:
 # path a shell command writes (c.file_writes: a redirection, tee, sed -i, cp, mv), under `~`
 # or a variable too.
 match: >
-  (
-    e.event.action in ["file.modified", "file.created", "file.edited"] &&
-    shell_startup_file(e.file.path)
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.parsed_commands.exists(c, c.file_writes.exists(f,
-      f.op in ["write", "append", "truncate", "edit", "move_to", "link"] &&
-      shell_startup_file(f.path)))
-  )
+  file_changed(e, p, shell_startup_file(p)) ||
+  e.event.action == "command.executed" && shell_startup_file_redirect(e.command.command) &&
+    unread_text(e, t, shell_startup_file_redirect(t))
 
 emit:
   reason: "Shell rc / login dotfile modified — runs on every new shell/login, durable user-level persistence"
@@ -133,4 +127,16 @@ tests:
     events:
       - event: { action: file.created }
         file: { path: "/home/dev/.bashrc" }
+        session: { id: s1 }
+  - name: a_write_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh \"echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc\"" }
+        session: { id: s1 }
+  - name: a_write_named_in_a_commit_message_beside_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"never echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc\" && ./run-tests.sh" }
         session: { id: s1 }

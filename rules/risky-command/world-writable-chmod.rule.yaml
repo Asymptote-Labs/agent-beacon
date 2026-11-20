@@ -1,6 +1,6 @@
 id: world-writable-chmod
-spec: threat-rules/v1.3  # needed for args and predicates
-version: 6
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 7
 title: chmod grants world-writable or full permissions
 description: >
   A command makes a file or tree world-writable — an octal mode whose "other" digit
@@ -11,7 +11,8 @@ description: >
   under sudo, by absolute path or inside `bash -c`, whose first operand is such a mode,
   so chmod in a commit message or a here-document does not fire. Where the parser
   cannot see into a command, the text that reaches that command is matched instead
-  (unread_text), where chmod is anchored to the acting command position.
+  (unread_text), where chmod is anchored to the acting command position (also right
+  after a quote, or after sudo and its options).
 severity: medium
 status: stable
 posture: detect
@@ -19,14 +20,14 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM06
 
-# The mode is the first word of chmod that is not an option (an unknown word, such as a
+# world_writable_chmod and its text twin world_writable_chmod_mention
+# (rules/concepts/dangerous-commands.predicates.yaml), which the approval rules ask too, for a
+# tree: the mode is the first word of chmod that is not an option (an unknown word, such as a
 # variable, is skipped), so a file named 777 is not a mode.
 match: >
   e.event.action == "command.executed" && (
-    e.command.parsed_commands.exists(c,
-      c.name == "chmod" &&
-      c.args.matches("\\A(-[^\\n]*\\n|\\n)*([0-7]?[0-7]{2}[2367]|[ugoa,+=rwxXst-]*[oa][ugoa]*[+=][rwxXst]*w[ugoa,+=rwxXst-]*)(\\n|\\z)")) ||
-    unread_text(e, t, t.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([0-7]?[0-7]{2}[2367](\\s|$)|([ugoa]*[oa][ugoa]*)[+=][rwx]*w[rwx]*\\b)"))
+    e.command.parsed_commands.exists(c, world_writable_chmod(c)) ||
+    unread_text(e, t, world_writable_chmod_mention(t))
   )
 
 emit:

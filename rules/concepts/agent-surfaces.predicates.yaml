@@ -12,7 +12,7 @@
 # trailing slash. So a rule asks one question of every write.
 library: agent-surfaces
 version: 2
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 description: The files that steer a coding agent, as a path.
 
 definitions:

@@ -3,21 +3,18 @@ package threatrules
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/concepts"
 )
 
-// idPattern constrains rule ids to a stable kebab slug.
-var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-
-// ValidID reports whether id is a well-formed rule id. The pattern admits no
-// path separators or "." segments, so a valid id is always a safe single
-// filename component when joined with the store directory.
-func ValidID(id string) bool { return idPattern.MatchString(id) }
+// ValidID reports whether id is a well-formed rule id (concepts.IDPattern). The pattern admits
+// no path separators or "." segments, so a valid id is always a safe single filename component
+// when joined with the store directory.
+func ValidID(id string) bool { return concepts.IDPattern.MatchString(id) }
 
 // Status is a rule's maturity level; it drives the conformance gates (see lint.go).
 type Status string
@@ -65,6 +62,9 @@ type Rule struct {
 	// lib is the library of the pack the rule was loaded from: the predicates its expressions
 	// may call. Nil for a rule decoded on its own.
 	lib *Library
+	// validated is set when Validate last passed: a loader validates every rule it returns, and
+	// CheckRule and Compile do not validate it again (validate).
+	validated bool
 }
 
 // Order says whether a correlation's steps must occur in the order they are listed.
@@ -157,10 +157,26 @@ func validSeverity(s asymptoteobserve.Severity) bool {
 
 // Validate checks a rule against the spec: structural constraints plus every CEL match
 // expression compiling to bool against the event schema. A nil return means the rule is
-// loadable; it does not by itself assert maturity-ladder gates (see CheckMaturity).
+// loadable; it does not by itself assert maturity-ladder gates (see CheckMaturity). It checks
+// the rule as it is now, every time it is called: a rule changed after it passed is validated
+// again by calling it.
 func (r *Rule) Validate() error {
-	if !idPattern.MatchString(r.ID) {
-		return fmt.Errorf("id %q must match %s", r.ID, idPattern.String())
+	err := r.check()
+	r.validated = err == nil
+	return err
+}
+
+// validate is Validate for a rule that has not passed it yet.
+func (r *Rule) validate() error {
+	if r.validated {
+		return nil
+	}
+	return r.Validate()
+}
+
+func (r *Rule) check() error {
+	if !ValidID(r.ID) {
+		return fmt.Errorf("id %q must match %s", r.ID, concepts.IDPattern)
 	}
 	if err := checkSpecSupported(r.ID, r.Spec); err != nil {
 		return err
@@ -234,15 +250,25 @@ func (r *Rule) validateExpressions() error {
 }
 
 func (r *Rule) validateExpression(expr string) error {
+	// A predicate set aside for a newer spec sets the rule aside: asked before compiling, where
+	// the call would be an unknown function.
+	used, err := r.lib.uses(r.ID, expr)
+	if err != nil {
+		return err
+	}
 	_, ast, err := r.lib.compileMatch(expr)
 	if err != nil {
-		return r.lib.explain(err)
+		return r.lib.explain(expr, err)
 	}
 	// Already known to be parseable and supported (Validate checked it first). The newest field
-	// is checked first, so the error names the version the rule needs.
+	// is checked first, so the error names the version the rule needs. A rule needs the spec of
+	// the definitions of each predicate it calls, which is v2.0 at least: an engine before it
+	// does not expand predicates, or does not load those definitions.
 	v, _ := parseSpec(r.Spec)
-	if used := r.lib.uses(expr); len(used) > 0 && specV1_3.newerThan(v) {
-		return fmt.Errorf("the predicate %s requires spec: threat-rules/v1.3 or later (engines before v1.3 do not expand predicates)", used[0])
+	for _, p := range used {
+		if p.spec.newerThan(v) {
+			return fmt.Errorf("the predicate %s (%s) requires spec: %s or later (an engine before it does not load the predicate)", p.name, p.source, p.spec)
+		}
 	}
 	for _, f := range specFields() {
 		if f.since.newerThan(v) && selectsField(ast, f.name) {

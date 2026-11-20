@@ -4,10 +4,11 @@
 # persistence-install-command (a job or service installed to run later). A job is installed
 # by the crontab command or by writing one of cron's own files, so there is a predicate for
 # each: crontab_installs for a parsed command, cron_file for a path, asked of a file event
-# and of every path a command writes (c.file_writes).
+# and of every path a command writes (c.file_writes). crontab_installs_text is
+# crontab_installs asked of a text the parser cannot see into (unread_text).
 library: scheduling
-version: 1
-spec: threat-rules/v1.3
+version: 2
+spec: threat-rules/v2.0
 description: Installing a cron job, by the crontab command or by writing one of cron's files.
 
 definitions:
@@ -48,6 +49,84 @@ definitions:
           - event: { action: command.executed }
             command: { command: "crontab -r" }
 
+  - name: crontab_installs_text
+    params: [text]
+    description: >
+      The text runs crontab to edit or install a crontab, as crontab_installs says of a
+      parsed command: crontab by any path, with -e (after any options), or with `-`, a file
+      operand or nothing (standard input, a pipe or a here-document), each optionally after
+      -u and a user. It is for the text of a command line the parser cannot see into
+      (unread_text). `crontab -l` and `crontab -r` are not installs; a quote after crontab
+      ends a message ("edit the crontab") unless a pipe goes into it. crontab counts at a
+      command position only: the start of the text or of a line, after ; & | ( ` or a quote,
+      or after sudo (with its options), then, do or else; "fix crontab syntax" handed to a
+      script is prose.
+    body: >
+      text.matches("(?i)(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+(?:-\\S+\\s+(?:[^-\\s;&|]\\S*\\s+)?)*)([^\\s;&|'\"]*/)?crontab\\b[^;&|\\n]*\\s-[is]*e\\b") ||
+      text.matches("(?i)(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+(?:-\\S+\\s+(?:[^-\\s;&|]\\S*\\s+)?)*)([^\\s;&|'\"]*/)?crontab(\\s+-u\\s*[^\\s;&|]+)?(\\s+-(\\s|$|[;&|)'\"])|\\s+[^-\\s;&|<>)'\"][^\\s;&|]*|\\s*($|[;&)<]))") ||
+      text.matches("(?i)\\|\\s*([^\\s;&|'\"]*/)?crontab\\s*['\"`]")
+    tests:
+      - name: a_crontab_piped_in_to_a_script
+        match: crontab_installs_text(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"(crontab -l; echo '*/5 * * * * /tmp/x.sh') | crontab -\"" }
+      - name: a_crontab_piped_in_at_the_end_of_a_script
+        match: crontab_installs_text(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh '(crontab -l; echo \"*/5 * * * * /tmp/x.sh\") | crontab'" }
+      - name: a_crontab_from_a_here_document
+        match: crontab_installs_text(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "crontab <<'EOF'\n*/5 * * * * /tmp/x.sh\nEOF" }
+      - name: a_crontab_edited_after_an_option
+        match: crontab_installs_text(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./run.sh '/usr/bin/crontab -i -e'" }
+      - name: a_crontab_file_for_another_user
+        match: crontab_installs_text(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./run.sh 'sudo crontab -u deploy /tmp/jobs.cron'" }
+      - name: a_crontab_listed
+        match: crontab_installs_text(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./run.sh 'crontab -l | grep backup'" }
+      - name: a_crontab_removed
+        match: crontab_installs_text(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./run.sh 'crontab -r'" }
+      - name: crontab_named_in_a_message
+        match: crontab_installs_text(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./notify.sh 'edit the crontab' && echo 'my-crontab -e'" }
+      - name: crontab_named_in_prose_handed_to_a_script
+        match: crontab_installs_text(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./scripts/commit.sh \"fix crontab syntax\"" }
+
+      - name: crontab_in_a_list_of_names
+        match: crontab_installs_text(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "python3 -c \"import re; print(re.findall(r'crontab|systemctl', open('notes').read()))\"" }
   - name: cron_file
     params: [path]
     description: >

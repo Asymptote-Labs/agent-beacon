@@ -261,7 +261,11 @@ func TestCredentialFileFilterIsTheCatalog(t *testing.T) {
 		t.Fatal("no caller information")
 	}
 	dir := filepath.Dir(thisFile)
-	catalog, err := concepts.Load(filepath.Join(dir, "..", "..", "..", "..", "..", "rules", "concepts", "credential-stores.catalog.yaml"))
+	data, err := os.ReadFile(filepath.Join(dir, "..", "..", "..", "..", "..", "rules", "concepts", "credential-stores.catalog.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := concepts.Decode(data)
 	if err != nil {
 		t.Fatal(err)
 	}

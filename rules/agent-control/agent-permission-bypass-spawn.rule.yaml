@@ -1,6 +1,6 @@
 id: agent-permission-bypass-spawn
-spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 6
 title: Agent runtime spawned with permission/approval gating disabled
 description: >
   A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
@@ -38,7 +38,7 @@ match: >
       c.args.matches("(?mi)^(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--full-auto|--yolo|--force)$|^--permission-mode[=\\n]bypasspermissions$|^(--sandbox|-s)[=\\n]danger-full-access$|^(--ask-for-approval|-a)[=\\n]never$")
     ) ||
     unread_text(e, t, t.matches("(?i)(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--permission-mode[ =]+bypasspermissions|(--sandbox|(^|\\s)-s)[ =]+danger-full-access|--ask-for-approval[ =]+never|--full-auto|--yolo|(^|\\s)-a[ =]+never\\b|--force\\b)") &&
-      t.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b"))
+      agent_cli_mention(t))
   )
 
 emit:
@@ -175,4 +175,11 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git commit -m 'docs: never run env claude --dangerously-skip-permissions' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half named seven agents until version 6; it is agent_cli_mention.
+  - name: qwen_bypass_handed_to_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./spawn.sh 'cd repo && qwen --yolo -p fix'" }
         session: { id: s1 }

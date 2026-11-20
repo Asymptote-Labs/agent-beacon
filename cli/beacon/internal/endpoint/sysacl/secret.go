@@ -19,3 +19,29 @@ func SecretDirDACL() []ACE {
 	}
 	return dacl
 }
+
+// UserSecretFileDACL is the protected DACL on a file in one account's own Beacon state that holds a
+// credential, such as a user-mode endpoint's Beacon Cloud device key: that account and SYSTEM,
+// nobody else. What a profile passes on can include Administrators and, on a redirected or
+// hand-made home, wider groups; the 0600 mode Beacon asks for means nothing on Windows.
+func UserSecretFileDACL(userSID string) []ACE {
+	return []ACE{
+		{Type: aceTypeAllowed, Mask: fileAllAccess, SID: userSID},
+		{Type: aceTypeAllowed, Mask: fileAllAccess, SID: sidSystem},
+	}
+}
+
+// UserSecretDirDACL is UserSecretFileDACL inherited by every file and directory created below.
+func UserSecretDirDACL(userSID string) []ACE {
+	dacl := UserSecretFileDACL(userSID)
+	for i := range dacl {
+		dacl[i].Flags |= aceObjectInherit | aceContainerInherit
+	}
+	return dacl
+}
+
+// daclSDDL renders a DACL with no owner, so a descriptor applied with it leaves the owner alone (an
+// ordinary account may not make anyone else the owner) and one used at creation takes the creator.
+func daclSDDL(protected bool, dacl []ACE) string {
+	return SDDL("", protected, dacl)[len("O:"):]
+}

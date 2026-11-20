@@ -57,7 +57,7 @@ func (supervisedBackend) label(userMode bool) string {
 // unitPath reports the pidfile, since supervised mode has no unit file. Callers show this to
 // users, so returning something real beats returning an error.
 func (b supervisedBackend) unitPath(userMode bool) (string, error) {
-	return filepath.Join(stateDir(userMode), "collector.pid"), nil
+	return SupervisedPIDFile(stateDir(userMode)), nil
 }
 
 // writeUnit records the intended command. Nothing starts here: load does that, matching the
@@ -83,11 +83,27 @@ func (b supervisedBackend) writeUnit(userMode bool, program, configPath string) 
 }
 
 func (b supervisedBackend) read(userMode bool) (supervisedState, error) {
-	var st supervisedState
 	path, err := b.unitPath(userMode)
 	if err != nil {
-		return st, err
+		return supervisedState{}, err
 	}
+	return readSupervisedState(path)
+}
+
+// SupervisedPIDFile is a supervised collector's pidfile under an endpoint directory: the user-mode
+// collector's on Windows, which has no per-user service manager, is under the user's
+// ~/.beacon/endpoint.
+func SupervisedPIDFile(baseDir string) string { return filepath.Join(baseDir, "collector.pid") }
+
+// SupervisedCollectorRunning reports whether the supervised collector a pidfile records is
+// running, for asking about another account's user-mode collector.
+func SupervisedCollectorRunning(pidfile string) bool {
+	st, err := readSupervisedState(pidfile)
+	return err == nil && st.running()
+}
+
+func readSupervisedState(path string) (supervisedState, error) {
+	var st supervisedState
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return st, err

@@ -1,4 +1,4 @@
-# Threat Rules — Specification (v1.3)
+# Threat Rules — Specification (v2.0)
 
 An open detection-rule format for AI-agent security threats, native to the Beacon
 endpoint event schema. A rule is a YAML document whose match conditions are
@@ -9,7 +9,7 @@ This is the "Sigma for agent telemetry" layer: the rule format and corpus are op
 evaluation engine that consumes them may be separate (and closed). Any engine that
 produces the same `verdict` for a rule's fixtures conforms to this spec.
 
-- Spec version: `threat-rules/v1.3` (see `VERSION` and [Versioning](#versioning)).
+- Spec version: `threat-rules/v2.0` (see `VERSION` and [Versioning](#versioning)).
 - Canonical event schema: the Beacon endpoint event
   (`pkg/asymptoteobserve` `Event`, `schema_version: "1.0"`).
 - Machine-readable structural schemas (JSON Schema, draft 2020-12): `schema.json` for a
@@ -81,7 +81,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v1.3 or later for its `args`, `cwd`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`, `runs_read`, `span`, `earlier_stages` and `later_stages`, for `e.command.parsed_incomplete`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`, v2.0 or later for its `args`, `cwd`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`, `runs_read`, `span`, `earlier_stages` and `later_stages`, for `e.command.parsed_incomplete`, and for a call to a [predicate](#predicates). See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -184,7 +184,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   `spec: threat-rules/v1.2` or later) is derived under the same rules (computed, never read
   from input). It is `command.command`, its first 4096 bytes, read as a bash command line: a
   list with one entry per simple command, and per compound command that carries
-  redirections, in walk order (each statement, then the statements inside it). Since v1.3 a
+  redirections, in walk order (each statement, then the statements inside it). Since v2.0 a
   declaration (`export`, `declare`, `typeset`, `readonly`, `local`) is an entry too: the
   builtin is its first word, and each option and each `NAME`, `NAME=value` or `NAME+=value`
   after it is one word, whose value is unknown when the value's is (and for an array or an
@@ -193,11 +193,11 @@ the steps in both orders still fires once. A single event never satisfies two st
   is, as before, an entry with no words and the assignment in `env`. Each entry
   has `name` (the base name of the first word after the wrappers `command`, `builtin`,
   `exec`, `nohup`, `time`, `sudo` and `env` with their options and `NAME=value` words, and,
-  since v1.3, `timeout`, `nice`, `ionice`, `stdbuf`, `doas`, `torsocks`, `proxychains`,
+  since v2.0, `timeout`, `nice`, `ionice`, `stdbuf`, `doas`, `torsocks`, `proxychains`,
   `proxychains4`, `caffeinate`, `setsid` and `chronic` with their options and `timeout`'s
   duration, and the runners `uv run`, `poetry run`, `pipenv run`, `bundle exec` and
   `mise exec ... --`, which start the command in a project's environment; each is recognized
-  by its base name so `/usr/bin/env` is `env`; since v1.3 a word whose value is unknown
+  by its base name so `/usr/bin/env` is `env`; since v2.0 a word whose value is unknown
   still names a program when what follows its last `/` is written out in letters, digits and
   `._+-@`, so `~/bin/tool`, `$HOME/go/bin/tool` and `"$dir"/tool` are `tool`, and a lone `[`
   is the test command and not a glob; a Windows executable's `.exe`, `.cmd` or `.bat` is
@@ -205,13 +205,13 @@ the steps in both orders still fires once. A single event never satisfies two st
   assignment's `$name =` is taken when it is a bare name (`$t = az account get-access-token`
   is `az`); `""` when that word names no program or a wrapper
   option moves or replaces the command or makes the wrapper act on something else, as
-  `sudo -i`, `env -C`, `doas -s`, `ionice -p` and `uv run --directory` do, or, since v1.3,
+  `sudo -i`, `env -C`, `doas -s`, `ionice -p` and `uv run --directory` do, or, since v2.0,
   does not run it, as `sudo -l` (which lists whether the command is allowed), `sudo -v`,
   `sudo -e`, `command -v`, `command -V` and `uv run --module` do),
   `argv` (every word after brace expansion, wrappers included,
   as the shell passes it on, or `""` when its value depends on a parameter, command or
   arithmetic substitution, an ANSI-C or locale string, an unquoted glob character, or a
-  leading tilde), `argv_raw` (the same words as written), `args` (since v1.3, with the
+  leading tilde), `argv_raw` (the same words as written), `args` (since v2.0, with the
   declaration rule of `file_reads`: the words of `argv` after the one `name` is taken from,
   as one string with a newline between words, `""` when there are none; a newline inside a
   word is written as a space, so a line is always one whole word and
@@ -230,10 +230,10 @@ the steps in both orders still fires once. A single event never satisfies two st
   `{ a; b; } | c` or `(a) | c` carries that stage unless it is a stage of an inner pipeline
   or inside a substitution) and `nested` (inside a command or process
   substitution, or inside a command line another command hands on). When `sh`, `bash`,
-  `zsh`, `dash` or `ksh` appears (since v1.3 by any path, as `name` is read: `~/bin/bash`)
+  `zsh`, `dash` or `ksh` appears (since v2.0 by any path, as `name` is read: `~/bin/bash`)
   as a word of a command with an option cluster containing `c`, its first operand, if known,
   is read the same way, and its commands follow the shell's with
-  `nested` true and pipeline numbers of their own. Since v1.3 the same holds for the
+  `nested` true and pipeline numbers of their own. Since v2.0 the same holds for the
   here-document or here-string on the standard input of a command whose `name` is one of
   those shells, when the shell is given neither `-c` nor a script file (`sudo bash <<'EOF'`,
   `sh -s -- arg <<EOF`, `bash <<< 'cmd'`), and for the command line a carrier hands on, when
@@ -271,7 +271,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   that is not a literal is a word whose value is unknown. A literal the language fills in
   (an f-string, `${..}`, `#{..}`) or that is an operand of an expression is not read.
   A command line handed on is read at most three levels deep (two
-  before v1.3). Since v1.3 the words after the `-Command` (`-c`) option of `powershell` or
+  before v2.0). Since v2.0 the words after the `-Command` (`-c`) option of `powershell` or
   `pwsh`, joined with spaces as PowerShell joins them, are read the same way, where
   PowerShell and bash agree on a command and its words
   (`powershell -Command "Get-StoredCredential -Target x"`). Other here-document bodies, what
@@ -285,13 +285,13 @@ the steps in both orders still fires once. A single event never satisfies two st
   reference derivation is `threatrules.ParsedCommands` over `shellcmd.Read`, and the file
   effects are `shellcmd.Command.FileEffects`.
 
-  The two v1.3 changes to `name` and to which commands are listed apply to every rule an
-  engine at v1.3 or later evaluates, whatever `spec` the rule declares: an engine derives the
+  The two v2.0 changes to `name` and to which commands are listed apply to every rule an
+  engine at v2.0 or later evaluates, whatever `spec` the rule declares: an engine derives the
   field once per event. A rule that relies on them (`c.name == "nc"` for `timeout 5 nc ..`)
-  SHOULD declare `spec: threat-rules/v1.3`, so an engine at v1.2 sets it aside rather than
+  SHOULD declare `spec: threat-rules/v2.0`, so an engine at v1.2 sets it aside rather than
   evaluating it on the older derivation.
-- `e.command.parsed_incomplete` (since v1.3; a rule that selects it MUST declare
-  `spec: threat-rules/v1.3` or later) is derived with `e.command.parsed_commands` and says
+- `e.command.parsed_incomplete` (since v2.0; a rule that selects it MUST declare
+  `spec: threat-rules/v2.0` or later) is derived with `e.command.parsed_commands` and says
   whether the command line was read to its end. It is `true` when `command.command` does not
   parse, when it ends early (an unclosed quote, here-document, substitution or compound
   command, which is what a capture cut by a writer or a runtime looks like), when it is
@@ -317,7 +317,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   incomplete with no commands as well. A command line handed on more than three levels deep
   is not a bound: it is not read, the command that hands it on has `runs_read` false, and
   the line is complete.
-- `file_writes` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
+- `file_writes` (since v2.0; a rule that selects it MUST declare `spec: threat-rules/v2.0` or
   later) is a field of each `parsed_commands` entry: the files the command evidently writes,
   a list of `{path, op}` with the `op` values of `file_effects` (`write`, `append`, `touch`,
   `truncate`, `edit`, `delete`, `move_from`, `move_to`, `link`). `path` is as for
@@ -340,7 +340,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   and `install` (`write`, the destination), `ln` (`link`) and `mv` and `git mv` (`move_from`
   for each source, `move_to` for the destination). A destination that is a directory (the
   last of three or more operands, one written with a trailing slash, the value of `-t`) is
-  reported as the directory joined with each source's base name. Since v1.3 (in
+  reported as the directory joined with each source's base name. Since v2.0 (in
   `file_effects` too, when the path is known) they are also: the file of each `-o` or
   `--output` of `curl`, and with `-O` or `--remote-name` the name each URL ends in, under
   `--output-dir`; the file of `-O` or `--output-document` of `wget`, or else the name each
@@ -357,7 +357,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   creates (its second operand, else the repository's name), and the destination of `rsync`
   for a source written with a trailing slash. The reference derivation is
   `shellcmd.FileWrites`.
-- `cwd` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or later)
+- `cwd` (since v2.0; a rule that selects it MUST declare `spec: threat-rules/v2.0` or later)
   is a field of each `parsed_commands` entry: the directory the command runs in when the
   line changed into it before the command, as a literal path, and `""` otherwise. It is the
   operand of the last `cd` or `pushd` before the command, in line order, in the shell the
@@ -375,7 +375,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   unknown directory otherwise (`ssh`, `docker exec`, `sudo -i`). A relative path of
   `file_writes` names the file under `cwd`. The reference derivation is `shellcmd`'s
   `Command.Dir`.
-- `file_reads` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
+- `file_reads` (since v2.0; a rule that selects it MUST declare `spec: threat-rules/v2.0` or
   later) is a field of each `parsed_commands` entry: the files whose content the command
   evidently takes in, a list of `{path, via}`. `path` is the word as written with its quotes
   and escaping backslashes removed and everything the parse does not evaluate left as written,
@@ -412,7 +412,7 @@ the steps in both orders still fires once. A single event never satisfies two st
       `Bun.file` (JavaScript), `File.read|readlines|binread|foreach|open` and
       `IO.read|readlines|binread|foreach` (ruby), and `file_get_contents`, `fopen`, `readfile`
       and `file` (php). A call whose mode argument holds `w`, `a` or `x` is not a read.
-      `script_sends` (since v1.3, with the same declaration rule) lists the paths of those the
+      `script_sends` (since v2.0, with the same declaration rule) lists the paths of those the
       script sends over the network: a file it opens inside the parentheses of a call that
       sends its arguments, at any depth (`.env` for
       `requests.post(url, data=open(".env").read())`), or one whose content a name holds when
@@ -493,8 +493,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   script from a here-document takes in what the body expands, and its script's commands do
   not read that as their standard input. The reference derivation is `shellcmd.Read`
   (`Line.Reads`).
-- `socket_redirects` (since v1.3; a rule that selects it MUST declare
-  `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` lists the
+- `socket_redirects` (since v2.0; a rule that selects it MUST declare
+  `spec: threat-rules/v2.0` or later) on an entry of `e.command.parsed_commands` lists the
   command's redirections to or from bash's network pseudo-files, each `{path, op}`. `path` is
   the target as written without its quotes, when it begins `/dev/tcp/` or `/dev/udp/` and
   names something after it: `/dev/tcp/host.example/4444`, and `/dev/tcp/$HOST/$PORT` as
@@ -507,7 +507,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   the `cat` entry `{/dev/tcp/h/1, write}`. A later `exec` that closes the descriptor or
   points it elsewhere ends that. The same path as a word of a command is not a redirection.
   The reference derivation is `shellcmd.Read` (`Line.Sockets`).
-- `runs_read` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
+- `runs_read` (since v2.0; a rule that selects it MUST declare `spec: threat-rules/v2.0` or
   later) on an entry of `e.command.parsed_commands` is true when the command hands a command
   line to another program to run (a shell's `-c` script, the here-document it reads or the
   literal script a pipe sends it, the command line of a carrier, and the command of a
@@ -522,7 +522,7 @@ the steps in both orders still fires once. A single event never satisfies two st
   For `xargs` and `find` it says only that the command they run is listed: that command's
   operands come from a pipe or from what `find` matches, which the entry does not hold.
   The reference derivation is `shellcmd.Command.RunsRead` over `shellcmd.Read`.
-- `span` (since v1.3; a rule that selects it MUST declare `spec: threat-rules/v1.3` or
+- `span` (since v2.0; a rule that selects it MUST declare `spec: threat-rules/v2.0` or
   later) on an entry of `e.command.parsed_commands` is the part of the command line that can
   decide what the command runs, as text. It exists for the rule that must match text because
   a command is a program the engine cannot see into (an interpreter, a project's script, a
@@ -547,8 +547,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   that comes from a command line another command hands on has the `span` of the entry of the
   line itself that it came from. The span over-approximates on purpose and always holds the
   command's own text. The reference derivation is `shellcmd.Read` (`Line.Spans`).
-- `earlier_stages` and `later_stages` (since v1.3; a rule that selects either MUST declare
-  `spec: threat-rules/v1.3` or later) on an entry of `e.command.parsed_commands` are lists of
+- `earlier_stages` and `later_stages` (since v2.0; a rule that selects either MUST declare
+  `spec: threat-rules/v2.0` or later) on an entry of `e.command.parsed_commands` are lists of
   integers: the 0-based indexes, in `e.command.parsed_commands` and in ascending order, of the
   entries with the same `pipeline` and a lower `stage`, and of those with the same `pipeline`
   and a higher `stage`. For `curl u | tee f | sh`, whose entries are `curl`, `tee` and `sh`,
@@ -572,17 +572,20 @@ the steps in both orders still fires once. A single event never satisfies two st
 
 ## Predicates
 
-Since v1.3. A predicate is a named expression a rule calls like a function:
+Since v2.0. A predicate is a named expression a rule calls like a function:
 
 ```yaml
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 match: credential_file_read(e)
 ```
 
 A predicate is not a CEL function. An engine expands it where it is called, before the
 expression is type-checked, so a rule that calls one is the rule with the predicate's body
 written out: it has the same verdicts, the same errors, and the same evaluation cost. A rule
-whose expression calls a predicate MUST declare `spec: threat-rules/v1.3` or later.
+whose expression calls a predicate MUST declare `spec: threat-rules/v2.0` or later, and at
+least the `spec` of the definitions file that defines the predicate. An engine that sets a
+definitions file aside for needing a newer spec MUST set aside with it every rule, and every
+predicate definition, that calls one of its predicates, and load the rest of the pack.
 
 Predicates are defined by the **definitions** of the rule pack the rule belongs to: the files
 beside its rules whose names end in `.predicates.yaml` or `.catalog.yaml`, anywhere under the
@@ -598,7 +601,7 @@ the baseline's with the baseline.
 ```yaml
 library: credentials
 version: 1
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 definitions:
   - name: command_reads_credential_file
     params: [c]
@@ -616,7 +619,7 @@ definitions:
 |---|---|---|---|
 | `library` | yes | string `^[a-z0-9][a-z0-9-]*$` | The file's identity. Two files of a pack MUST NOT declare the same one. |
 | `version` | yes | int ≥ 1 | Content revision. |
-| `spec` | no | as a rule's | Minimum spec version the file needs. An engine MUST read it before it rejects any unknown field, and sets aside a file that needs a newer version than it implements, as it does a rule. |
+| `spec` | no | as a rule's | Minimum spec version the file needs. An engine MUST read it before it rejects any unknown field, and sets aside a file that needs a newer version than it implements, as it does a rule, with what calls its predicates. A body MUST NOT call a predicate whose file needs a newer version than its own. |
 | `description` | no | string | Documentation only. |
 | `definitions` | yes | list ≥ 1 | The predicates. |
 | `definitions[].name` | yes | string `^[a-z][a-z0-9_]*$` | How the predicate is called. Unique across the pack's definitions, and not a name CEL has (a function, a macro, a reserved word, or `e`). |
@@ -630,7 +633,11 @@ by its argument, wherever the parameter appears, so an argument is evaluated as 
 body uses it. Expansion is hygienic: a variable the body binds itself (the `f` of
 `x.exists(f, ..)`) never captures an argument, so `p(f)` called inside a rule's own
 `exists(f, ..)` still means the rule's `f`. A call with the wrong number of arguments is a
-load-time error. A predicate is called only as `name(..)`, never as a method.
+load-time error. A predicate is called only as `name(..)`, never as a method. Where
+substitution leaves two string literals joined by `+`, the expansion is the one literal they
+make, so a body MAY build a pattern from a fixed part and a parameter
+(`c.args.matches("\\A..." + rest)`) and a call that passes a literal gives the engine one
+constant pattern.
 
 A predicate MAY bind one of its parameters for its caller: it does when its body uses the
 parameter as the variable of a comprehension. The call then passes a name for that
@@ -673,6 +680,11 @@ corpus has one, `credential-stores`: where credentials are kept and how they are
 | `stores[].examples` | yes | list of strings | Paths for a store of files, command lines for a store of commands. Each MUST be this store, and there MUST be one for each pattern of `match` and each entry of `commands`. |
 | `stores[].counterexamples` | no | list of strings | Paths or command lines that MUST NOT be any store of the catalog, with one for each pattern of `exclude`. |
 
+A catalog's examples and counterexamples hold for every expression generated from it, as well
+as for its stores: an engine that checks a catalog (lint, install) evaluates the expression of
+each of its predicate forms, for each tier and for every kind and each kind, on every example
+and counterexample, and requires the answer the stores give.
+
 A catalog's predicate takes what it is asked about, then optionally a tier and then kinds,
 each a string literal: `credential_path(e.file.path)` is true for a store of either tier,
 `credential_path(f.path, "definite")` for a `definite` store, and
@@ -692,12 +704,13 @@ word such as `credentials`) counts only directly after a separator. A store with
 patterns is not mentioned by a text that also names something those patterns match.
 `redacted` is for a command line as a log holds it. A log's redaction replaces a value that
 looks like a secret, and where a command substitution is put in a secret's place the value
-can begin with the command's name: of `curl -u "ci:$(gh auth token)"` the log holds
-`curl -u "ci:[REDACTED] auth token)"`. (A Beacon before the release that introduced v1.3
-also wrote `TOKEN=[REDACTED] auth token)` for `TOKEN=$(gh auth token)`; redaction now keeps
-the opening of a substitution after a label, and that line is logged as written.) The
-predicate is true when the text
-holds `[REDACTED]`, whitespace, and then, within the same command, an entry's `words` in
+can begin with the command's name. Redaction keeps a substitution that opens with a plain
+command name, but one that opens with an assignment still loses it: of
+`TOKEN=$(GH_TOKEN=$(gh auth token) ./x)` the log holds `TOKEN=[REDACTED] auth token) ./x)`.
+(A Beacon before the release that introduced v2.0 lost it after every secret's label:
+`curl -u "ci:[REDACTED] auth token)"` for `curl -u "ci:$(gh auth token)"`, and
+`TOKEN=[REDACTED] auth token)` for `TOKEN=$(gh auth token)`.) The predicate is true when the
+text holds `[REDACTED]`, whitespace, and then, within the same command, an entry's `words` in
 order and one of its `flags`. An entry has this form only when what is left tells the
 command from another: two `words` or more, one word with `flags`, one word that is more than
 letters and digits, or no words and a flag that is a whole option word (which then follows
@@ -749,9 +762,24 @@ the fixture's declared `verdict`.
 
 ## Versioning
 
-A spec version is `threat-rules/v<major>.<minor>`; `v1` is `v1.0`. A minor version only adds
-optional fields, so every rule valid under an earlier minor stays valid. A major version may
-change meaning.
+A spec version is `threat-rules/v<major>.<minor>`; `v1` is `v1.0`. A version says two things:
+which rules are valid, and what the derived fields read from an event.
+
+- **The format.** A minor version only adds optional fields and rule features, so every rule
+  valid under an earlier minor of the same major stays valid and keeps its meaning. A major
+  version may change what a field means.
+- **Derived fields.** A derived field (`e.command.parsed_commands` and what each entry holds) is
+  a reading of the captured command line, and any version, minor or major, may read more of
+  it: a wrapper it did not see through, a command line a program is handed. Such a change can
+  change a rule's verdict without changing the rule, so the changelog below names it, and a
+  pack's author re-runs its fixtures (`beacon rules lint`) and compares verdicts
+  (`beacon rules diff`) on an engine that adopts it. A change to what a field is defined to
+  hold, as opposed to how much of the command line it reads, is a major version.
+
+v2.0 is a major version because v1.2 defined `name` by a closed list of wrappers and defined
+here-document bodies as not commands, and v2.0 changes both definitions (see the changelog). An
+engine at v2.0 evaluates a rule that declares a v1 version with the v2.0 derivation; nothing a
+v1 rule may write became invalid.
 
 A rule declares the version it needs in `spec`, not the version current when it was written,
 so a corpus mixes versions and a rule moves to a newer `spec` only when it adopts a newer
@@ -765,11 +793,12 @@ warning in `beacon scan`, `beacon rules list`, `add`, and `pull`, and reports th
 lines that fail `beacon rules lint`.
 
 Engines released before v1.1 do not read `spec`: they reject a rule that carries it, or any
-v1.1 field, as an unknown field, and refuse the directory that contains it.
+v1.1 field, as an unknown field, and refuse the directory that contains it. Engines at v1.1 or
+v1.2 set a rule that declares v2.0 aside like any newer rule.
 
 ### Changelog
 
-- **v1.3**: `args`, `cwd`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`,
+- **v2.0**: `args`, `cwd`, `file_reads`, `file_writes`, `script_sends`, `socket_redirects`,
   `runs_read`, `span`, `earlier_stages` and `later_stages` on each entry of
   `e.command.parsed_commands`, and `e.command.parsed_incomplete`.
   `name` and `file_effects` find the command behind `timeout`, `nice`, `ionice`, `stdbuf`,
@@ -788,7 +817,8 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
   (`curl -o`, `wget -O`), `dd of=`, and the local destination of `scp` and `rsync`;
   `file_writes` also lists the directory an archive or a clone lands in.
   [Predicates](#predicates): named expressions a rule calls, defined by the pack's
-  definitions files.
+  definitions files. A major version because the changes to `name` and to which commands are
+  listed change what v1.2 defined those to hold ([Versioning](#versioning)).
 - **v1.2**: the derived field `e.command.parsed_commands`.
 - **v1.1**: `correlation.order` (`sequence` default, or `any` for order-insensitive steps),
   and the per-rule `spec` field with the engine rules above.

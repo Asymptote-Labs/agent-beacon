@@ -1,6 +1,6 @@
 id: cloud-metadata-then-egress
-spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 4
 title: Cloud metadata access followed by outbound network egress
 description: >
   A session reads cloud instance metadata (IMDS 169.254.169.254 or a provider
@@ -20,7 +20,7 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
-# read_metadata is the condition of cloud-metadata-endpoint-access. In egress the outside
+# read_metadata is the condition of cloud-metadata-endpoint-access (cloud_metadata_fetch). In egress the outside
 # URL is one word of the client, so a metadata address in another word of the line (a
 # header, a second command) no longer hides the request, as it did when the whole text was
 # asked. The text pattern is asked of the text that reaches a command the parser cannot
@@ -30,14 +30,7 @@ correlation:
   window: 120s
   steps:
     - id: read_metadata
-      match: >
-        e.event.action == "command.executed" && (
-          e.command.parsed_commands.exists(c, c.name.matches("^(curl|wget)$") && (
-            c.argv_raw.exists(a, cloud_metadata_target(a)) ||
-            client_target_unseen(c) && cloud_metadata_target(e.command.command))) ||
-          unread_text(e, t, t.matches("(?i)\\b(curl|wget)\\b") &&
-            cloud_metadata_target(t))
-        )
+      match: cloud_metadata_fetch(e)
     - id: egress
       match: >
         e.event.action == "command.executed" && (

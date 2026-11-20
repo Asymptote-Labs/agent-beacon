@@ -1,6 +1,6 @@
 id: cloud-permission-grant
-spec: threat-rules/v1.3  # needed for args and predicates
-version: 3
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 4
 title: Cloud credentials created or permissions granted
 description: >
   An agent creates cloud access keys, attaches or adds IAM policies or bindings,
@@ -25,11 +25,14 @@ taxonomy:
 # command behind sudo -l or sudo -v is not run and has no name, so its line is left to the
 # text.
 #
-# The text patterns are those of version 1, asked of the text that reaches a command the
-# parser cannot see into (unread_text).
-# Their command prefixes accept environment assignments, relative executable paths, and
-# sudo execution options. Value-taking sudo options consume their argument;
-# inspection modes such as sudo -l/-v are not execution prefixes.
+# The text half is the text patterns of version 1 as one pattern, asked of the text that
+# reaches a command the parser cannot see into (unread_text): a command prefix, then what
+# the command is, one alternative for each of the six patterns it was. Each of them began
+# with the same prefix, and a pattern is charged for its length each time it is asked, so
+# the prefix is written once. A text matches the one pattern exactly when it matched one of
+# the six. The prefix accepts environment assignments, relative executable paths, and sudo
+# execution options. Value-taking sudo options consume their argument; inspection modes
+# such as sudo -l/-v are not execution prefixes.
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
@@ -39,14 +42,8 @@ match: >
       c.name == "az" && c.args.matches("(?m)\\A(?:role\\nassignment\\ncreate|ad\\nsp\\ncredential\\nreset)$") ||
       c.name == "kubectl" && c.args.matches("(?m)^create\\n(?:rolebinding|clusterrolebinding)$")
     ) ||
-    unread_text(e, t, (
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+iam[ \\t]+(?:create-access-key|attach-(?:user|group|role)-policy|put-(?:user|group|role)-policy|create-policy|create-policy-version|add-user-to-group)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+iam[ \\t]+service-accounts[ \\t]+keys[ \\t]+create(?:[ \\t]|$|[;&|\\n<>#])") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:projects|organizations|folders|iam[ \\t]+service-accounts)[ \\t]+(?:add-iam-policy-binding|set-iam-policy)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:storage[ \\t]+buckets|run[ \\t]+services|secrets)[ \\t]+add-iam-policy-binding(?:[ \\t]|$|[;&|\\n<>#])") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?az[ \\t]+(?:role[ \\t]+assignment[ \\t]+create|ad[ \\t]+sp[ \\t]+credential[ \\t]+reset)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?kubectl(?:[ \\t]+(?:-n|--namespace|--context|--kubeconfig)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+create[ \\t]+(?:rolebinding|clusterrolebinding)(?:[ \\t]|$|[;&|\\n<>#])")
-    ))
+    unread_text(e, t,
+      t.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+iam[ \\t]+(?:create-access-key|attach-(?:user|group|role)-policy|put-(?:user|group|role)-policy|create-policy|create-policy-version|add-user-to-group)(?:[ \\t]|$|[;&|\\n<>#])|gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+iam[ \\t]+service-accounts[ \\t]+keys[ \\t]+create(?:[ \\t]|$|[;&|\\n<>#])|gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:projects|organizations|folders|iam[ \\t]+service-accounts)[ \\t]+(?:add-iam-policy-binding|set-iam-policy)(?:[ \\t]|$|[;&|\\n<>#])|gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:storage[ \\t]+buckets|run[ \\t]+services|secrets)[ \\t]+add-iam-policy-binding(?:[ \\t]|$|[;&|\\n<>#])|az[ \\t]+(?:role[ \\t]+assignment[ \\t]+create|ad[ \\t]+sp[ \\t]+credential[ \\t]+reset)(?:[ \\t]|$|[;&|\\n<>#])|kubectl(?:[ \\t]+(?:-n|--namespace|--context|--kubeconfig)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+create[ \\t]+(?:rolebinding|clusterrolebinding)(?:[ \\t]|$|[;&|\\n<>#]))"))
   )
 
 emit:

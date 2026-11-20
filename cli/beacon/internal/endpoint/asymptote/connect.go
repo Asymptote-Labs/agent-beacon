@@ -397,6 +397,14 @@ type DisconnectOptions struct {
 	Forwarder Forwarder
 	// KeepCredentials leaves enrollment.json and the secrets file in place.
 	KeepCredentials bool
+	// KeepForwarderState removes only the service and leaves everything else as it is: the
+	// credentials, vector.toml, Vector's checkpoints and buffer, the staged backfill and the
+	// managed_ingest block, so the endpoint still reads as connected and the next install's
+	// reconcile registers the service again where it left off. The Windows package's uninstall
+	// step gets it (through `endpoint uninstall --keep-config`): every MSI upgrade runs that step
+	// to free vector.exe, and nothing short of a re-connect, which rotates the device key, could
+	// bring the connection back otherwise. Implies KeepCredentials.
+	KeepForwarderState bool
 }
 
 // Disconnect stops and removes the forwarder and, unless asked to keep them, the local
@@ -418,6 +426,9 @@ func Disconnect(opts DisconnectOptions) error {
 			problems = append(problems, fmt.Errorf("stop forwarder: %w", err))
 		}
 		manager.RemoveUnits()
+	}
+	if opts.KeepForwarderState {
+		return errors.Join(problems...)
 	}
 	if err := RemoveBackfill(opts.LogPath); err != nil {
 		problems = append(problems, fmt.Errorf("remove staged session backfill: %w", err))
@@ -444,12 +455,53 @@ func forwarderInstalled(userMode bool, manager Forwarder) bool {
 			return true
 		}
 	}
-	if path, err := manager.UnitPath(); err == nil && path != "" {
-		if _, err := os.Stat(path); err == nil {
-			return true
-		}
+	installed, _ := unitInstalled(manager)
+	return installed
+}
+
+// installedForwarder is what a forwarder whose service definition is not a file adds: the Windows
+// SCM registration, whose UnitPath names a registry key os.Stat cannot see.
+type installedForwarder interface {
+	Installed() bool
+}
+
+// registrationRestorer is a forwarder whose missing service a reconcile registers again (see
+// service.ForwarderManager.RestoresRegistration).
+type registrationRestorer interface {
+	RestoresRegistration() bool
+}
+
+// unitInstalled reports whether the forwarder's service definition exists, and where it is.
+func unitInstalled(manager Forwarder) (bool, string) {
+	path, err := manager.UnitPath()
+	if err != nil {
+		path = ""
 	}
-	return false
+	if f, ok := manager.(installedForwarder); ok {
+		return f.Installed(), path
+	}
+	if path == "" {
+		return false, ""
+	}
+	_, err = os.Stat(path)
+	return err == nil, path
+}
+
+// restoresRegistration reports whether a reconcile should register a missing service again.
+func restoresRegistration(manager Forwarder) bool {
+	f, ok := manager.(registrationRestorer)
+	return ok && f.RestoresRegistration()
+}
+
+// stoppedStarter is a forwarder a restarting reconcile starts even when it is not running (see
+// service.ForwarderManager.StartsWhenStopped).
+type stoppedStarter interface {
+	StartsWhenStopped() bool
+}
+
+func startsWhenStopped(manager Forwarder) bool {
+	f, ok := manager.(stoppedStarter)
+	return ok && f.StartsWhenStopped()
 }
 
 // updateConfig records (or clears) the non-secret managed_ingest block in config.json. A

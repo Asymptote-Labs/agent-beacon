@@ -1,6 +1,6 @@
 id: crontab-modification
-spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 7
 title: Crontab modified (user, system, or spool)
 description: >
   A persistent-scheduling primitive was modified: the user crontab
@@ -30,18 +30,16 @@ taxonomy:
 # crontab installs when its words are an optional `-u user` and at most one operand
 # (crontab_installs, rules/concepts/scheduling.predicates.yaml); -r removes. Which file is
 # cron's is one definition too (cron_file), asked of a file event's path and of every path a
-# command writes.
+# command writes (file_changed, rules/concepts/sensitive-files.predicates.yaml).
 match: >
-  (e.event.action == "command.executed" && (
+  file_changed(e, p, cron_file(p)) ||
+  e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
       crontab_installs(c) ||
-      c.name == "crontab" && c.args.matches("(?m)^-[is]*r") ||
-      c.file_writes.exists(f, f.op in ["write", "append", "truncate", "edit", "move_to", "link"] && cron_file(f.path))
+      c.name == "crontab" && c.args.matches("(?m)^-[is]*r")
     ) ||
-    unread_text(e, t, (t.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*crontab\\b[^;&|]*(\\s-e\\b|\\s-[a-z]*r\\b|\\s-\\s+[a-zA-Z0-9_./-]+|\\s-\\s*$|\\b[^;&|]*\\|\\s*crontab\\b)") ||
-      t.matches("(?i)(^|[;&|(]\\s*|\\bsudo\\s+)\\s*crontab(\\s+-u\\s*[^\\s;&|]+)?\\s+[a-zA-Z0-9_./~][a-zA-Z0-9_./~-]*\\s*($|[;&|)])")))
-  )) || (
-    e.event.action in ["file.modified", "file.created", "file.edited"] && cron_file(e.file.path)
+    unread_text(e, t, crontab_installs_text(t) ||
+      t.matches("(?i)(^|[^\\w.-])crontab\\b[^;&|\\n]*\\s-[is]*r\\b"))
   )
 
 emit:
@@ -239,4 +237,17 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git commit -m 'ops: we ran sudo crontab -r by mistake' && ./run-tests.sh" }
+        session: { id: s1 }
+  # The text half is crontab_installs_text since version 6.
+  - name: crontab_piped_in_at_the_end_of_a_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./setup.sh '(crontab -l; echo \"* * * * * /tmp/x.sh\") | crontab'" }
+        session: { id: s1 }
+  - name: crontab_listed_in_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./backup.sh 'crontab -l > /tmp/cron.bak'" }
         session: { id: s1 }

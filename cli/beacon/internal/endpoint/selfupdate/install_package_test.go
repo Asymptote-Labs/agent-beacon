@@ -53,15 +53,7 @@ func installedVersionLine(t *testing.T, a *Applier) string {
 	return strings.TrimSpace(out)
 }
 
-func skipWithoutShellStubs(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the POSIX install flow stages an executable shell stub; the Windows flow is not implemented yet")
-	}
-}
-
 func TestInstallPackageInstallsTheSameVersionWithoutAManifest(t *testing.T) {
-	skipWithoutShellStubs(t)
 	artifact, sha := makeBeaconTarball(t, "1.3.41", "partner")
 	srv, hits := packageServer(t, artifact)
 
@@ -92,7 +84,6 @@ func TestInstallPackageInstallsTheSameVersionWithoutAManifest(t *testing.T) {
 }
 
 func TestInstallPackageRollsBackWhenTheEditionIsWrong(t *testing.T) {
-	skipWithoutShellStubs(t)
 	a := packageApplier(t, "1.3.40")
 	before, beforeSHA := makeBeaconTarball(t, "1.3.40")
 	srv, _ := packageServer(t, before)
@@ -173,7 +164,6 @@ func rollbackServer(t *testing.T, body []byte) (*httptest.Server, *atomic.Int32)
 // A failed install with RollbackPackage reinstalls the previous package through the package
 // manager, so its database names what is on disk again, and copies the files back.
 func TestInstallPackageRollsBackThroughThePackageManager(t *testing.T) {
-	skipWithoutShellStubs(t)
 	a := packageApplier(t, "1.3.40")
 	before, beforeSHA := makeBeaconTarball(t, "1.3.40")
 	srv, _ := packageServer(t, before)
@@ -214,7 +204,6 @@ func TestInstallPackageRollsBackThroughThePackageManager(t *testing.T) {
 
 // Without the package a rollback would reinstall, nothing is installed.
 func TestInstallPackageRefusesWithoutItsRollbackPackage(t *testing.T) {
-	skipWithoutShellStubs(t)
 	a := packageApplier(t, "1.3.40")
 	before, beforeSHA := makeBeaconTarball(t, "1.3.40")
 	srv, _ := packageServer(t, before)

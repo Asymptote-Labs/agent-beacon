@@ -2,16 +2,17 @@ package concepts
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
 
 // A catalog is a reviewed list, so it is only as complete as what its reviewers have seen. The
 // files agents actually read say what it is missing: a file that is named like something that
-// holds a credential, is read, and is no store is a candidate for the catalog. Candidates are for
+// holds a credential, is read, and is no store is a candidate for a catalog. Candidates are for
 // a person to review, never a store on their own: the names are a guess.
 
-// Candidate is a file name agents read that the catalog does not have and that is named like a
+// Candidate is a file name agents read that no catalog has and that is named like a
 // credential's.
 type Candidate struct {
 	// Name is the file's name, in lower case.
@@ -22,7 +23,9 @@ type Candidate struct {
 }
 
 var (
-	// credentialName is what a file that holds a credential is often called.
+	// credentialName is what a file that holds a credential is often called. It is not the
+	// redaction's list of secret words (redactLabel and redactLabelWords in privacy.go): that one
+	// finds a label before a value in text, this one a file's name.
 	credentialName = regexp.MustCompile(`(?i)(secret|credential|passw(or)?d|passphrase|token|api[_-]?key|private[_-]?key|service[_-]?account|oauth|htpasswd|wallet|keystore|` +
 		`\.(pem|p12|pfx|jks|key|kdb|ovpn|tfvars|asc)$|^id_[a-z0-9_]+$|^auth\.json$)`)
 	// notAStore is what such a name is on a file that describes or uses a credential rather than
@@ -35,10 +38,10 @@ var (
 	lineSelector = regexp.MustCompile(`(:(raw|[0-9][0-9,+-]*))+$`)
 )
 
-// Candidates returns the names, among the paths given, of files the catalog does not have and
+// Candidates returns the names, among the paths given, of files none of the catalogs has and
 // that are named like a credential's, most read first. A path is counted once however often it
-// is given.
-func (c *Catalog) Candidates(paths []string) []Candidate {
+// is given. The names are told by the same rule whatever the catalogs.
+func Candidates(paths []string, catalogs ...*Catalog) []Candidate {
 	byName := map[string]*Candidate{}
 	seen := map[string]bool{}
 	for _, path := range paths {
@@ -51,7 +54,7 @@ func (c *Catalog) Candidates(paths []string) []Candidate {
 		if !credentialName.MatchString(name) || notAStore.MatchString(name) {
 			continue
 		}
-		if _, ok := c.Lookup(path); ok {
+		if slices.ContainsFunc(catalogs, func(c *Catalog) bool { _, ok := c.Lookup(path); return ok }) {
 			continue
 		}
 		key := strings.ToLower(name)

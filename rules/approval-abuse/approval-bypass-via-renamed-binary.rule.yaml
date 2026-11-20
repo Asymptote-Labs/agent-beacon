@@ -1,6 +1,6 @@
 id: approval-bypass-via-renamed-binary
-spec: threat-rules/v1.3  # needed for args and predicates
-version: 5
+spec: threat-rules/v2.0  # needed for args and predicates
+version: 8
 title: Denied dangerous command re-invoked via a renamed copy of the binary
 description: >
   An approval for a destructive or high-impact shell command was explicitly denied
@@ -46,7 +46,9 @@ taxonomy:
 # whose own word is a path under /tmp or /var/tmp (the word that ends in its name and is not
 # one of its arguments) with an rm-style cluster among its words; a copy under $(mktemp ..)
 # has no known name, which leaves the line to its text. A dd-shaped copy can have any name,
-# so it is any command given an if= or of=/dev/sd word.
+# so it is any command given an if= or of=/dev/sd word. mkfs, a tree opened to everyone and a
+# root shell are dangerous_command's own parts (makes_filesystem, world_writable_tree,
+# root_shell) and their text twins.
 correlation:
   scope: session
   window: 300s
@@ -61,12 +63,13 @@ correlation:
             c.name != "" && c.args.matches("(?mi)^-[dfirv]*(r[dfirv]*f|f[dfirv]*r)[dfirv]*$") &&
               c.argv.exists(a, a.matches("^/(var/)?tmp/") && a.endsWith("/" + c.name) && !("\n" + c.args + "\n").contains("\n" + a + "\n")) ||
             c.args.matches("(?m)^(if=|of=/dev/sd)") ||
-            c.name.matches("^mkfs(\\.[a-z0-9]+)?$") ||
-            c.stage > 0 && c.name.matches("^(ba|z|da|k)?sh$") ||
-            c.name == "chmod" && c.args.matches("(?m)^(-[A-Za-z]*R[A-Za-z]*|--recursive)$") && c.args.matches("(?m)^0?777$") ||
-            size(c.argv) > 1 && c.argv[0].matches("(^|/)sudo$") && c.argv[1].matches("^(-[A-Za-z]*s[A-Za-z]*|--shell)$")
+            makes_filesystem(c) ||
+            c.stage > 0 && shell_command(c) ||
+            world_writable_tree(c) ||
+            root_shell(c)
           ) ||
-          unread_text(e, t, t.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:^|[;&|(`]|(?:\\b(?:ba|z|da|k)?sh(?:\\s+-[a-z]+)*\\s+-c\\s+|\\beval\\s+)[\"'])\\s*(?:[a-z_][a-z0-9_]*=[^;&|\\s]*\\s+|(?:sudo|doas|env|nohup|exec|command|nice|time|xargs|timeout|stdbuf|setsid|eval)(?:\\s+(?:-[^;&|\\s]*(?:\\s+[a-z0-9_][^;&|\\s/]*)?|[0-9][^;&|\\s]*))*\\s+)*(?:/tmp/|/var/tmp/|\\$\\(mktemp[^)]*\\))[^;&|\\s\"'`]*(?:\\s+[^;&|\\s]+)*?\\s+-[dfirv]*(?:r[dfirv]*f|f[dfirv]*r)[dfirv]*(?:[\\s\"'`)]|$)|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)"))
+          unread_text(e, t, t.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:^|[;&|(`]|(?:\\b(?:ba|z|da|k)?sh(?:\\s+-[a-z]+)*\\s+-c\\s+|\\beval\\s+)[\"'])\\s*(?:[a-z_][a-z0-9_]*=[^;&|\\s]*\\s+|(?:sudo|doas|env|nohup|exec|command|nice|time|xargs|timeout|stdbuf|setsid|eval)(?:\\s+(?:-[^;&|\\s]*(?:\\s+[a-z0-9_][^;&|\\s/]*)?|[0-9][^;&|\\s]*))*\\s+)*(?:/tmp/|/var/tmp/|\\$\\(mktemp[^)]*\\))[^;&|\\s\"'`]*(?:\\s+[^;&|\\s]+)*?\\s+-[dfirv]*(?:r[dfirv]*f|f[dfirv]*r)[dfirv]*(?:[\\s\"'`)]|$)|\\bmkfs\\b|\\|\\s*(sudo(\\s+-\\S+(\\s+\\w+)?)*\\s+)?(\\S*/)?(env(\\s+-\\S+|\\s+\\w+=\\S*)*\\s+)?(\\S*/)?(ba|z|da|k)?sh\\b)") ||
+            world_writable_tree_mention(t) || root_shell_mention(t))
         )
 
 emit:
