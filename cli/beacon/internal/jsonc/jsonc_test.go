@@ -130,6 +130,16 @@ func TestInsertJSONMemberCopiesTheDocumentsFormatting(t *testing.T) {
 			`{"mcpServers":{"other":{},"beacon-managed":{"url":"https://mcp.example.test","type":"http"}}}`,
 		},
 		{
+			"literal Unicode line separator in a key",
+			"{\"mcpServers\":{\"\u2028\":{}}}",
+			"{\"mcpServers\":{\"\u2028\":{},\"beacon-managed\":{\"url\":\"https://mcp.example.test\",\"type\":\"http\"}}}",
+		},
+		{
+			"escaped key keeps compact colon style",
+			`{"mcpServers":{"\u006fther":{}}}`,
+			`{"mcpServers":{"\u006fther":{},"beacon-managed":{"url":"https://mcp.example.test","type":"http"}}}`,
+		},
+		{
 			"CRLF line endings",
 			"{\r\n  \"a\": 1\r\n}\r\n",
 			"{\r\n  \"a\": 1,\r\n  \"mcpServers\": {\r\n    \"beacon-managed\": {\r\n      \"url\": \"https://mcp.example.test\",\r\n      \"type\": \"http\"\r\n    }\r\n  }\r\n}\r\n",
