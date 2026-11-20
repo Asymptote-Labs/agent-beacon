@@ -11,6 +11,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 )
 
 // Files under <BaseDir>/asymptote/. The directory is 0700 and the two credential-adjacent
@@ -182,7 +183,14 @@ func WriteSecrets(userMode bool, deviceKey string) error {
 	if err := ensureDir(userMode); err != nil {
 		return err
 	}
-	return atomicfile.Write(SecretsPath(userMode), []byte(SecretsFileContent(deviceKey)), 0o600)
+	// Both are the same 0600 file off Windows. On Windows, where the mode means nothing, the file is
+	// created with a protected DACL: SYSTEM and Administrators for a system endpoint, since
+	// %ProgramData% lets every user read; this account and SYSTEM for a user endpoint.
+	content := []byte(SecretsFileContent(deviceKey))
+	if userMode {
+		return sysacl.WriteUserSecretFile(SecretsPath(userMode), content)
+	}
+	return sysacl.WriteSecretFile(SecretsPath(userMode), content)
 }
 
 // ReadDeviceKey returns the stored device key, for the credential check.
@@ -231,5 +239,15 @@ func ensureDir(userMode bool) error {
 	}
 	// MkdirAll leaves an existing directory's mode alone; tighten it in case it was created
 	// by an older tool or by hand.
-	return os.Chmod(dir, 0o700)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	// On Windows the mode means nothing, so the directory gets a protected DACL inherited by
+	// everything connect writes in it: SYSTEM and Administrators for the system directory, since
+	// %ProgramData% passes read access to every user; this account and SYSTEM for a user directory.
+	// Both are no-ops elsewhere, where the owner's 0700 directory is already private.
+	if userMode {
+		return sysacl.SecureUserSecretDir(dir)
+	}
+	return sysacl.SecureSecretDir(dir)
 }

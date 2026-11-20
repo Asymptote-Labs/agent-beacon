@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 // Issue #450: a re-connect exchanges the code first, and the server rotates the device key in
@@ -37,7 +38,7 @@ func fakeVectorRejecting(t *testing.T, reject string) string {
 // to rotate the key, as the server does for a known install id.
 func connectedEndpoint(t *testing.T, vector string) (*fakeDashboard, *fakeForwarder) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
@@ -92,7 +93,7 @@ func assertConnectIncomplete(t *testing.T, connectErr error) {
 	if err != nil {
 		t.Fatalf("pending marker: %v", err)
 	}
-	if info, _ := os.Stat(ConnectPendingPath(true)); info.Mode().Perm() != 0o600 {
+	if info, _ := os.Stat(ConnectPendingPath(true)); testenv.HasPOSIXFileModes() && info.Mode().Perm() != 0o600 {
 		t.Fatalf("pending marker mode = %o, want 600", info.Mode().Perm())
 	}
 	for _, text := range []string{msg, string(marker), string(mustJSON(t, status))} {
@@ -248,7 +249,7 @@ func TestDisconnectClearsAnIncompleteConnect(t *testing.T) {
 }
 
 func TestFirstConnectFailureAfterStartingForwarderStopsIt(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}

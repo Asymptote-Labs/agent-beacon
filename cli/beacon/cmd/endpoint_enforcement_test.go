@@ -105,6 +105,8 @@ func stubEnforcement(t *testing.T) *enforcementFakes {
 			return nil
 		}),
 		swapEnforcementSeam(&activateEnforcement, nil),
+		// The advice is a Mac's unless a test asks for another platform's.
+		swapEnforcementSeam(&enforcementGOOS, "darwin"),
 	}
 	t.Cleanup(func() {
 		for _, restore := range saved {
@@ -192,7 +194,7 @@ func TestEnforcementEnableRefusesBeforeAskingThePlatform(t *testing.T) {
 		set  func(*enforcementFakes)
 		want string
 	}{
-		"unsupported":   {func(f *enforcementFakes) { f.supported = false }, "macOS on Apple Silicon and for Linux on amd64 and arm64 only"},
+		"unsupported":   {func(f *enforcementFakes) { f.supported = false }, "Linux on amd64 and arm64, and Windows on x64 only"},
 		"not root":      {func(f *enforcementFakes) { f.root = false }, "needs root"},
 		"not connected": {func(f *enforcementFakes) { f.connected = false }, "endpoint connect --system"},
 		"user mode": {func(f *enforcementFakes) {
@@ -358,6 +360,88 @@ func TestEnforcementEnableSaysWhatToRunForEachMode(t *testing.T) {
 				t.Fatalf("located %v, installed %v, handed off %v", f.locatedWith, f.userInstalled, f.userHandedOff)
 			}
 		})
+	}
+}
+
+// On Windows the advice is an elevated PowerShell, never sudo.
+func TestEnforcementEnableSaysWhatToRunOnWindows(t *testing.T) {
+	cases := map[string]struct {
+		root, connected, userConnected bool
+		want                           []string
+	}{
+		"elevated on a user-mode machine": {true, false, true, []string{"from a PowerShell that is not elevated", `& "`}},
+		"system mode without elevation":   {false, true, false, []string{"needs administrator rights. From an elevated PowerShell (Run as administrator):", `& "`}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := stubEnforcement(t)
+			enforcementGOOS = "windows"
+			f.root, f.connected, f.userConnected = tc.root, tc.connected, tc.userConnected
+			_, err := runEnforcementEnableForTest(t)
+			if err == nil || strings.Contains(err.Error(), "sudo") {
+				t.Fatalf("err = %v", err)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Fatalf("err = %v, want %q", err, w)
+				}
+			}
+		})
+	}
+	// User mode is not refused on Windows: it installs the edition's beacon for this user.
+	f := stubEnforcement(t)
+	enforcementGOOS = "windows"
+	f.root, f.connected, f.userConnected = false, false, true
+	if _, err := runEnforcementEnableForTest(t); err != nil || len(f.userInstalled) != 1 || len(f.userHandedOff) != 1 {
+		t.Fatalf("err = %v, installed %v, handed off %v", err, f.userInstalled, f.userHandedOff)
+	}
+}
+
+// On Windows a user-mode Beacon shows as its supervised collector running, or a user-mode
+// connection to Beacon Cloud.
+func TestWindowsUserModeFindings(t *testing.T) {
+	home := t.TempDir()
+	info := consoleUserInfo{Username: "alice", HomeDir: home}
+	base := filepath.Join(home, ".beacon", "endpoint")
+	var asked string
+	running := func(pidfile string) bool { asked = pidfile; return false }
+	if got := windowsUserModeFindings(info, running); len(got) != 0 {
+		t.Fatalf("nothing set up: %v", got)
+	}
+	if asked != filepath.Join(base, "collector.pid") {
+		t.Fatalf("asked about %q", asked)
+	}
+	if got := windowsUserModeFindings(info, func(string) bool { return true }); len(got) != 1 || !strings.Contains(got[0], "user-mode collector is running for alice") {
+		t.Fatalf("running collector: %v", got)
+	}
+	cloud := filepath.Join(base, "asymptote")
+	if err := os.MkdirAll(cloud, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"enrollment.json", "vector.toml"} {
+		if got := windowsUserModeFindings(info, running); len(got) != 0 {
+			t.Fatalf("before %s: %v", name, got)
+		}
+		if err := os.WriteFile(filepath.Join(cloud, name), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := windowsUserModeFindings(info, running); len(got) != 1 || !strings.Contains(got[0], "connected to Beacon Cloud in user mode") {
+		t.Fatalf("connected: %v", got)
+	}
+}
+
+// settings.json escapes a Windows path's backslashes.
+func TestMentionsPathReadsAJSONEscapedWindowsPath(t *testing.T) {
+	path := `C:\Users\alice\.beacon\endpoint\logs\runtime.jsonl`
+	if !mentionsPath(`{"command":"beacon-hooks --log-path \"C:\\Users\\alice\\.beacon\\endpoint\\logs\\runtime.jsonl\""}`, path) {
+		t.Fatal("escaped path not found")
+	}
+	if !mentionsPath(`--log-path /home/alice/.beacon/endpoint/logs/runtime.jsonl`, "/home/alice/.beacon/endpoint/logs/runtime.jsonl") {
+		t.Fatal("plain path not found")
+	}
+	if mentionsPath(`{"command":"beacon-hooks"}`, path) {
+		t.Fatal("found a path that is not there")
 	}
 }
 
@@ -603,25 +687,53 @@ func TestHookInstallsUpdateAnOlderKeptEnterpriseBinaryFirst(t *testing.T) {
 	}
 }
 
-func TestEnforcementPlatformsAreAppleSiliconAndLinux(t *testing.T) {
-	want := (runtime.GOOS == "darwin" && runtime.GOARCH == "arm64") ||
-		(runtime.GOOS == "linux" && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64"))
-	if got := defaultEnforcementPlatformSupported(); got != want {
-		t.Fatalf("supported on %s/%s = %v, want %v", runtime.GOOS, runtime.GOARCH, got, want)
+func TestEnforcementPlatformsAreAppleSiliconLinuxAndWindowsX64(t *testing.T) {
+	for platform, want := range map[string]bool{
+		"darwin/arm64": true, "darwin/amd64": false,
+		"linux/amd64": true, "linux/arm64": true, "linux/386": false,
+		"windows/amd64": true, "windows/arm64": false,
+		"freebsd/amd64": false,
+	} {
+		goos, goarch, _ := strings.Cut(platform, "/")
+		if got := enforcementPlatformSupportedOn(goos, goarch); got != want {
+			t.Errorf("supported on %s = %v, want %v", platform, got, want)
+		}
+	}
+	if defaultEnforcementPlatformSupported() != enforcementPlatformSupportedOn(runtime.GOOS, runtime.GOARCH) {
+		t.Fatal("the default does not ask about this machine")
 	}
 }
 
-// The way out of user mode names this platform's service manager.
+// The way out of user mode names each platform's service manager.
 func TestUserModeActiveErrorNamesThisPlatformsServices(t *testing.T) {
-	msg := userModeActiveError("dev", []string{"something"}).Error()
-	if runtime.GOOS == "linux" {
-		if !strings.Contains(msg, "systemctl --user disable --now beacon-collector.service beacon-asymptote-forwarder.service beacon-inventory.timer beacon-session-sync.timer") || strings.Contains(msg, "launchctl") {
-			t.Fatalf("message = %q", msg)
-		}
-		return
-	}
-	if !strings.Contains(msg, "launchctl bootout gui/$(id -u)/com.beacon.endpoint.collector.user") || strings.Contains(msg, "systemctl") {
-		t.Fatalf("message = %q", msg)
+	for goos, tc := range map[string]struct{ want, notWant []string }{
+		"linux": {
+			want:    []string{"systemctl --user disable --now beacon-collector.service beacon-asymptote-forwarder.service beacon-inventory.timer beacon-session-sync.timer", "sudo "},
+			notWant: []string{"launchctl"},
+		},
+		"darwin": {
+			want:    []string{"launchctl bootout gui/$(id -u)/com.beacon.endpoint.collector.user", "sudo "},
+			notWant: []string{"systemctl"},
+		},
+		"windows": {
+			want:    []string{"beacon endpoint disconnect\n  beacon endpoint uninstall", "from an elevated PowerShell", `& "`},
+			notWant: []string{"launchctl", "systemctl", "sudo"},
+		},
+	} {
+		t.Run(goos, func(t *testing.T) {
+			defer swapEnforcementSeam(&enforcementGOOS, goos)()
+			msg := userModeActiveError("dev", []string{"something"}).Error()
+			for _, w := range tc.want {
+				if !strings.Contains(msg, w) {
+					t.Errorf("message lacks %q:\n%s", w, msg)
+				}
+			}
+			for _, w := range tc.notWant {
+				if strings.Contains(msg, w) {
+					t.Errorf("message has %q:\n%s", w, msg)
+				}
+			}
+		})
 	}
 }
 
