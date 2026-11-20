@@ -403,6 +403,16 @@ the steps in both orders still fires once. A single event never satisfies two st
       `httpie`, `xh`, `xhs`: the file of a `name@file`, `name=@file`, `name:=@file` or `@file`
       request item. `gh gist create`: its operands. `socat`: the path of an `OPEN:`, `FILE:`
       or `GOPEN:` address.
+    - `openssl`: by its subcommand (`base64` and a cipher name are `enc`, a digest name is
+      `dgst`), the value of each option that names a file it reads, written `-opt value`,
+      `-opt=value` or with two dashes: `-in` (`enc`, `rsa`, `pkey`, `ec`, `dsa`, `pkcs8`,
+      `pkcs12`, `x509`, `req`, `crl`, `cms`, `smime` and the like), `-inkey`, `-key`, `-CA`,
+      `-CAkey`, `-CAfile`, `-certfile`, `-config`, `-kfile`, `-peerkey`, `-untrusted`, dgst's
+      `-sign`, `-verify`, `-prverify` and `-signature`, s_client's and s_server's certificates
+      and keys; the `PATH` of a `file:PATH` password source (`-pass` of `enc`, `genpkey`,
+      `s_client` and `s_server`, `-passin` and `-passout` elsewhere); and the operands of
+      `dgst`, `verify` and `storeutl`. An output (`-out`, `-keyout`, `-writerand`) and the
+      value of an option it does not list are not reads.
     - `python*`, `pypy*`, `node`, `nodejs`, `bun`, `deno eval`, `ruby`, `php`: the paths the
       script given as text opens for reading, where the path is a string literal outside
       strings and comments. The script is the value of `-c`, `-e`, `-p`, `-r`, `--eval` or

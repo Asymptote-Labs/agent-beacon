@@ -187,7 +187,7 @@ func (c *Command) inputs(name string, args []Word) (files []string, data dataWor
 	case "socat":
 		return socatFiles(args), data
 	case "openssl":
-		return opensslInputs(args, base)
+		return opensslFiles(args), data
 	default:
 		r, ok := readers[name]
 		if !ok {
@@ -445,122 +445,194 @@ func wgetInputs(args []Word, base int) (files []string, data dataWords) {
 	return files, data
 }
 
-// opensslFileOptions are the subcommand options whose value is a file openssl reads: the input
-// of enc, dgst, rsa, pkey, x509, req and pkcs12 and their kin, the keys -inkey and -key, the
-// certificates -certfile, -signkey, -recip and -content, the config -config, the CA bundle
-// -CAfile and s_client's -verifyCAfile, -signaturefile of cms and smime, the randomness seeds
-// -rand and -writerand, enc's -kfile and the PVK key -pvkfile. The option and its value may be
-// attached (`-in=key.pem` or the legacy `-inkey.pem`); opensslInputs peels the longest known name.
-var opensslFileOptions = []string{
-	"-in", "-inkey", "-key", "-certfile", "-signkey", "-recip", "-content", "-config",
-	"-CAfile", "-verifyCAfile", "-signaturefile", "-rand", "-writerand", "-kfile", "-pvkfile",
+// opensslCommand is how one openssl subcommand names the files it reads, as its -help lists its
+// options.
+type opensslCommand struct {
+	// files are the options whose value is a file the subcommand reads. An output (-out, -keyout,
+	// -writerand) is not one.
+	files []string
+	// passwords are the options whose value is a password source (-pass, -passin, -passout). Of
+	// the sources, file:path reads path; pass:, env:, fd: and stdin read no file.
+	passwords []string
+	// operands is whether the subcommand's operands are files it reads.
+	operands bool
+	// values are, for a subcommand with operands, its other options that take a value, so that
+	// the value is not taken for an operand.
+	values []string
 }
 
-// opensslValueOptions are the options that consume a value openssl does not read as a file: the
-// output file, the forms, the digest and cipher names, the password sources and the literal
-// password of enc's -k, and s_client's connection options.
-var opensslValueOptions = []string{
-	"-out", "-inform", "-outform", "-inkeyform", "-keyform", "-certform", "-digest", "-cipher",
-	"-md", "-kdf", "-iter", "-engine", "-provider", "-provider-path", "-saltlen", "-macalg",
-	"-passin", "-passout", "-k", "-salt", "-connect", "-servername", "-proxy", "-passarg",
-	"-passphrase-arg",
+// opensslProviderOptions are the provider options nearly every openssl subcommand takes.
+var opensslProviderOptions = []string{"-provider-path", "-provider", "-provparam", "-propquery"}
+
+// opensslCommands are the openssl subcommands that read keys, certificates or data by option or
+// operand. A subcommand that is not here, or an option that is not listed for it, is read for
+// no file.
+var opensslCommands = map[string]opensslCommand{
+	"asn1parse": {files: []string{"-in", "-oid", "-genconf"}},
+	"cms": {
+		files: []string{
+			"-in", "-config", "-inkey", "-recip", "-certfile", "-content", "-CAfile", "-originator",
+			"-verify_receipt",
+		},
+		passwords: []string{"-passin"},
+	},
+	"crl":       {files: []string{"-in", "-key", "-gendelta", "-CAfile"}},
+	"crl2pkcs7": {files: []string{"-in", "-certfile"}},
+	"dgst": {
+		files:     []string{"-sign", "-verify", "-prverify", "-signature"},
+		passwords: []string{"-passin"},
+		operands:  true,
+		values: append([]string{
+			"-out", "-keyform", "-xoflen", "-sigopt", "-hmac", "-hmac-env", "-mac", "-macopt", "-rand",
+			"-writerand",
+		}, opensslProviderOptions...),
+	},
+	"dsa":       {files: []string{"-in"}, passwords: []string{"-passin", "-passout"}},
+	"ec":        {files: []string{"-in"}, passwords: []string{"-passin", "-passout"}},
+	"enc":       {files: []string{"-in", "-kfile"}, passwords: []string{"-pass"}},
+	"genpkey":   {files: []string{"-paramfile", "-config"}, passwords: []string{"-pass"}},
+	"passwd":    {files: []string{"-in"}},
+	"pkcs7":     {files: []string{"-in"}},
+	"pkcs8":     {files: []string{"-in"}, passwords: []string{"-passin", "-passout"}},
+	"pkey":      {files: []string{"-in"}, passwords: []string{"-passin", "-passout"}},
+	"pkeyparam": {files: []string{"-in"}},
+	"pkcs12": {
+		files:     []string{"-in", "-inkey", "-certfile", "-untrusted", "-CAfile"},
+		passwords: []string{"-passin", "-passout"},
+	},
+	"pkeyutl": {
+		files:     []string{"-in", "-inkey", "-peerkey", "-sigfile", "-config"},
+		passwords: []string{"-passin"},
+	},
+	"req": {
+		files:     []string{"-in", "-config", "-CA", "-CAkey", "-key"},
+		passwords: []string{"-passin", "-passout"},
+	},
+	"rsa":    {files: []string{"-in"}, passwords: []string{"-passin", "-passout"}},
+	"rsautl": {files: []string{"-in", "-inkey"}, passwords: []string{"-passin"}},
+	"s_client": {
+		files: []string{
+			"-cert", "-cert_chain", "-key", "-CAfile", "-requestCAfile", "-CRL", "-chainCAfile",
+			"-verifyCAfile", "-xkey", "-xcert", "-xchain", "-sess_in", "-psk_session", "-early_data",
+			"-ctlogfile", "-expected-rpks",
+		},
+		passwords: []string{"-pass"},
+	},
+	"s_server": {
+		files: []string{
+			"-cert", "-cert2", "-cert_chain", "-key", "-key2", "-dcert", "-dcert_chain", "-dkey",
+			"-dhparam", "-CAfile", "-CRL", "-chainCAfile", "-verifyCAfile", "-xkey", "-xcert",
+			"-xchain", "-psk_session", "-status_file", "-expected-rpks", "-srpvfile",
+		},
+		passwords: []string{"-pass"},
+	},
+	"smime": {
+		files:     []string{"-in", "-inkey", "-config", "-content", "-recip", "-certfile", "-CAfile"},
+		passwords: []string{"-passin"},
+	},
+	"spkac": {files: []string{"-in", "-key"}, passwords: []string{"-passin"}},
+	"storeutl": {
+		passwords: []string{"-passin"},
+		operands:  true,
+		values: append([]string{
+			"-subject", "-issuer", "-serial", "-fingerprint", "-alias", "-out",
+		}, opensslProviderOptions...),
+	},
+	"verify": {
+		files:    []string{"-trusted", "-CAfile", "-untrusted", "-CRLfile"},
+		operands: true,
+		values: append([]string{
+			"-nameopt", "-CApath", "-CAstore", "-policy", "-purpose", "-verify_name", "-verify_depth",
+			"-auth_level", "-attime", "-verify_hostname", "-verify_email", "-verify_ip", "-vfyopt",
+		}, opensslProviderOptions...),
+	},
+	"x509": {
+		files:     []string{"-in", "-key", "-signkey", "-CA", "-CAkey", "-force_pubkey", "-extfile"},
+		passwords: []string{"-passin"},
+	},
 }
 
-// opensslInputs returns the files openssl reads and the words carrying a literal password.
-//
-// The first word after the name is the subcommand (`openssl rsa -in key.pem ...`); the option
-// names that hold files are shared by the subcommands, so one table covers them. Every other
-// word that starts with `-` is an option and is skipped, since OpenSSL's option vocabulary is
-// far larger than the ones it reads files by.
-//
-// -passin and -passout take a password source: `file:path` is a read, a `pass:...`, `env:...`
-// or plain password is the word's own data, and a `stdin:` or `fd:` source is neither. The
-// short form of enc's `-k`, whose value is a literal password, is data as well.
-func opensslInputs(args []Word, base int) (files []string, data dataWords) {
-	data.listed = true
-	if len(args) < 2 || !args[0].Known || args[0].Text == "" {
-		return nil, data
+// opensslDigests are the digest names openssl runs as dgst (`openssl sha256 file`).
+var opensslDigests = []string{
+	"blake2b512", "blake2s256", "md4", "md5", "mdc2", "rmd160", "ripemd160", "sha1", "sha224",
+	"sha256", "sha3-224", "sha3-256", "sha3-384", "sha3-512", "sha384", "sha512", "sha512-224",
+	"sha512-256", "shake128", "shake256", "sm3",
+}
+
+// opensslCiphers are the prefixes of the cipher names openssl runs as enc (`openssl aes-256-cbc
+// -in f`).
+var opensslCiphers = []string{
+	"aes-", "aria-", "bf", "camellia-", "cast", "des", "idea", "rc2", "rc4", "seed", "sm4",
+}
+
+// opensslSubcommand returns how openssl's first word reads files: base64, a cipher name and a
+// digest name are enc and dgst under another name.
+func opensslSubcommand(name string) (opensslCommand, bool) {
+	switch {
+	case name == "base64":
+		name = "enc"
+	case slices.Contains(opensslDigests, name):
+		name = "dgst"
+	case slices.ContainsFunc(opensslCiphers, func(prefix string) bool { return strings.HasPrefix(name, prefix) }):
+		name = "enc"
 	}
+	c, ok := opensslCommands[name]
+	return c, ok
+}
+
+// opensslFiles returns the files openssl reads: the value of each of its subcommand's file
+// options, the file of a file: password source and, for dgst, verify and storeutl, its operands.
+// An option is written -opt value, -opt=value, or with two dashes; openssl takes no value attached
+// to the name itself. Options end at --, or at the first operand. An option that is not listed is
+// taken for a flag: of a subcommand without operands, a word that is not an option is read for
+// nothing.
+//
+// openssl sends nothing, so every word stays its data: a password or key given by its value
+// (-pass pass:..., -K, -hmac) is the command's argument.
+func opensslFiles(args []Word) []string {
+	if len(args) == 0 || !args[0].Known {
+		return nil
+	}
+	cmd, ok := opensslSubcommand(args[0].Text)
+	if !ok {
+		return nil
+	}
+	var files []string
 	for i := 1; i < len(args); i++ {
-		w := args[i]
-		t := w.Unquoted
-		if !isOption(w) {
-			files = append(files, t)
+		t := args[i].Unquoted
+		if t == "--" || !isOption(args[i]) {
+			if !cmd.operands {
+				continue
+			}
+			if t == "--" {
+				i++
+			}
+			for _, w := range args[i:] {
+				files = append(files, w.Unquoted)
+			}
+			break
+		}
+		name, value, attached := strings.Cut(strings.TrimPrefix(t, "-"), "=")
+		name = "-" + strings.TrimPrefix(name, "-")
+		file, password := slices.Contains(cmd.files, name), slices.Contains(cmd.passwords, name)
+		if !file && !password && !slices.Contains(cmd.values, name) {
 			continue
 		}
-		name := strings.TrimPrefix(t, "-")
-		value, attached := "", false
-		if eq := strings.IndexByte(name, '='); eq >= 0 {
-			value, attached = name[eq+1:], true
-			name = name[:eq]
-		}
 		if !attached {
-			if opensslValue(name, opensslFileOptions) || opensslValue(name, opensslValueOptions) {
-				// The word is a whole known option; its value is the next word.
-				if i+1 < len(args) {
-					i++
-					value = args[i].Unquoted
-					attached = true
-				}
-			} else if option, rest, ok := opensslAttached(name); ok {
-				// The legacy attached form: -inkey.pem names -inkey and its value .pem.
-				name, value, attached = option, rest, true
+			if i+1 == len(args) {
+				break
 			}
+			i++
+			value = args[i].Unquoted
 		}
-		switch {
-		case !attached:
-		case opensslValue(name, opensslFileOptions):
-			if value != "-" {
-				files = append(files, value)
-			}
-		case name == "passin" || name == "passout":
-			files, data = opensslPasswordSource(value, base+i, files, data)
-		case name == "k":
-			data.index = append(data.index, base+i)
+		if password {
+			value, file = strings.CutPrefix(value, "file:")
+		}
+		if file && value != "" && value != "-" {
+			files = append(files, value)
 		}
 	}
-	return files, data
-}
-
-// opensslValue reports whether a word is one of the openssl option names that take a value.
-func opensslValue(name string, table []string) bool {
-	return slices.Contains(table, "-"+name)
-}
-
-// opensslAttached splits the legacy attached spelling of an option and its value (-inkey.pem):
-// the longest known option name the word begins, and the rest as the value.
-func opensslAttached(name string) (string, string, bool) {
-	best := ""
-	for _, table := range [][]string{opensslFileOptions, opensslValueOptions} {
-		for _, option := range table {
-			option = option[1:] // the option without its dash
-			if len(option) > len(best) && strings.HasPrefix(name, option) && len(option) < len(name) {
-				best = option
-			}
-		}
-	}
-	if best == "" {
-		return "", "", false
-	}
-	return best, name[len(best):], true
-}
-
-// opensslPasswordSource reads one password source as openssl's -passin and -passout spell them.
-func opensslPasswordSource(value string, index int, files []string, data dataWords) ([]string, dataWords) {
-	scheme, rest, hasScheme := strings.Cut(value, ":")
-	if !hasScheme {
-		data.index = append(data.index, index)
-		return files, data
-	}
-	switch scheme {
-	case "file":
-		if rest != "" {
-			files = append(files, rest)
-		}
-	case "pass", "env":
-		data.index = append(data.index, index)
-	}
-	return files, data
+	return files
 }
 
 // httpieInputs returns the files an HTTPie or xh request sends and the words whose value it sends
