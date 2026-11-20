@@ -228,9 +228,10 @@ definitions:
       The text pipes a curl or wget download into a shell (sh, bash, zsh, dash or ksh, by any
       path, under sudo or env with their options), as download_piped_to_shell says of a
       parsed command. It is for the text of a command line the parser cannot see into
-      (unread_text).
+      (unread_text). The pipe is a single bar: `curl … || sh restart.sh` runs the shell only
+      when the download fails, and is not given it.
     body: >
-      text.matches("(?i)\\b(curl|wget)\\b.*\\|\\s*(sudo(\\s+-\\S+(\\s+\\w+)?)*\\s+)?(\\S*/)?(env(\\s+-\\S+|\\s+\\w+=\\S*)*\\s+)?(\\S*/)?(ba|z|da|k)?sh\\b")
+      text.matches("(?i)\\b(curl|wget)\\b.*[^|]\\|\\s*(sudo(\\s+-\\S+(\\s+\\w+)?)*\\s+)?(\\S*/)?(env(\\s+-\\S+|\\s+\\w+=\\S*)*\\s+)?(\\S*/)?(ba|z|da|k)?sh\\b")
     tests:
       - name: a_download_into_a_shell_handed_to_a_script
         match: download_piped_to_shell_mention(e.command.command)
@@ -244,6 +245,12 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "./bootstrap.sh 'wget -qO i.sh https://get.example/i.sh'" }
+      - name: a_shell_run_when_a_check_fails
+        match: download_piped_to_shell_mention(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./scripts/ci.sh 'curl -sf http://localhost:3000/health || sh scripts/restart.sh'" }
 
   - name: root_shell
     params: [c]
@@ -287,14 +294,16 @@ definitions:
     description: >
       The text opens a root shell as root_shell says of a parsed command: su root, su -, sudo
       -i, -s, --login, --shell or su with nothing after it, or pkexec, each at the start of a
-      command (the start of the text, after ; & | ( or a backtick, after then, do or else, or
-      right after a quote, as in a script handed the command line). It is for the text of a
+      command (the start of the text or of a line, after ; & | ( or a backtick, after then, do
+      or else, right after a quote, as in a script handed the command line, or after a runner
+      that hands on its remaining words: busybox, toybox, chroot DIR, flock FILE, docker,
+      podman, nerdctl or kubectl run or exec and their words). It is for the text of a
       command line the parser cannot see into (unread_text).
     body: >
-      text.matches("(?i)(^|[;&|(`'\"]\\s*|\\b(?:then|do|else)\\s+)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
-      text.matches("(?i)(^|[;&|(`'\"]\\s*|\\b(?:then|do|else)\\s+)(?:(su)[ \\t]|(su)\\n|(su)[\\f\\r])\\s*-\\s*($|[;&|)`'\"])") ||
-      text.matches("(?i)(^|[;&|(`'\"]\\s*|\\b(?:then|do|else)\\s+)sudo\\s+(-[is]|--login|--shell|su)\\s*($|[;&|)`'\"])") ||
-      text.matches("(?i)(^|[;&|(`'\"]\\s*|\\b(?:then|do|else)\\s+)pkexec\\b")
+      text.matches("(?i)(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\b(?:busybox|toybox|chroot\\s+\\S+|flock\\s+\\S+|(?:docker|podman|nerdctl|kubectl)\\s+(?:run|exec)\\b[^;&|\\n]*?)\\s+)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
+      text.matches("(?i)(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\b(?:busybox|toybox|chroot\\s+\\S+|flock\\s+\\S+|(?:docker|podman|nerdctl|kubectl)\\s+(?:run|exec)\\b[^;&|\\n]*?)\\s+)(?:(su)[ \\t]|(su)\\n|(su)[\\f\\r])\\s*-\\s*($|[;&|)`'\"\\n])") ||
+      text.matches("(?i)(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\b(?:busybox|toybox|chroot\\s+\\S+|flock\\s+\\S+|(?:docker|podman|nerdctl|kubectl)\\s+(?:run|exec)\\b[^;&|\\n]*?)\\s+)sudo\\s+(-[is]|--login|--shell|su)\\s*($|[;&|)`'\"\\n])") ||
+      text.matches("(?i)(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\b(?:busybox|toybox|chroot\\s+\\S+|flock\\s+\\S+|(?:docker|podman|nerdctl|kubectl)\\s+(?:run|exec)\\b[^;&|\\n]*?)\\s+)pkexec\\b")
     tests:
       - name: sudo_s_after_then_handed_to_a_script
         match: root_shell_mention(e.command.command)
@@ -326,6 +335,12 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "./run.sh 'jisu root-cause'" }
+      - name: sudo_s_on_a_later_line_of_a_script
+        match: root_shell_mention(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat > /tmp/fix.sh <<'EOF'\ncd /srv\nsudo -s\nEOF\nbash /tmp/fix.sh" }
 
   - name: world_writable_chmod
     params: [c]
@@ -356,12 +371,13 @@ definitions:
     params: [text]
     description: >
       The text runs chmod with a mode that lets others write, as world_writable_chmod says
-      of a parsed command: chmod at the start of a command (the start of the text, after
-      ; & | ( or a backtick, after then, do or else, right after a quote, or after sudo and
-      its options), then such a mode among its words. It is for the text of a command line
-      the parser cannot see into (unread_text).
+      of a parsed command: chmod at the start of a command (the start of the text or of a
+      line, after ; & | ( or a backtick, after then, do or else, right after a quote, after a
+      runner that hands on its words as root_shell_mention says, or after sudo and its
+      options), then such a mode among its words. It is for the text of a command line the
+      parser cannot see into (unread_text).
     body: >
-      text.matches("(?i)(^|[;&|(`'\"]\\s*|\\b(?:then|do|else)\\s+)(sudo\\s+(-\\S+\\s+)*)?chmod\\s+([^;&|]*\\s)?([0-7]?[0-7]{2}[2367](\\s|$)|([ugoa]*[oa][ugoa]*)[+=][rwx]*w[rwx]*\\b)")
+      text.matches("(?i)(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\b(?:busybox|toybox|chroot\\s+\\S+|flock\\s+\\S+|(?:docker|podman|nerdctl|kubectl)\\s+(?:run|exec)\\b[^;&|\\n]*?)\\s+)(sudo\\s+(-\\S+\\s+)*)?chmod\\s+([^;&|]*\\s)?([0-7]?[0-7]{2}[2367](\\s|$)|([ugoa]*[oa][ugoa]*)[+=][rwx]*w[rwx]*\\b)")
     tests:
       - name: a_mode_under_sudo_handed_to_a_script
         match: world_writable_chmod_mention(e.command.command)
@@ -406,7 +422,7 @@ definitions:
       text of a command line the parser cannot see into (unread_text).
     body: >
       world_writable_chmod_mention(text) &&
-      text.matches("(^|[;&|(`'\"]\\s*|\\b(?:then|do|else)\\s+)(sudo\\s+(-\\S+\\s+)*)?(?i:chmod)\\s+([^;&|]*\\s)?(-[A-Za-z]*R[A-Za-z]*|--recursive)(\\s|$)")
+      text.matches("(^|[;&|(`'\"\\n]\\s*|\\b(?:then|do|else)\\s+|\\b(?:busybox|toybox|chroot\\s+\\S+|flock\\s+\\S+|(?:docker|podman|nerdctl|kubectl)\\s+(?:run|exec)\\b[^;&|\\n]*?)\\s+)(sudo\\s+(-\\S+\\s+)*)?(?i:chmod)\\s+([^;&|]*\\s)?(-[A-Za-z]*R[A-Za-z]*|--recursive)(\\s|$)")
     tests:
       - name: a_recursive_mode_handed_to_a_script
         match: world_writable_tree_mention(e.command.command)
@@ -421,3 +437,21 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "./perms.sh 'chmod -r 0777 /srv/app'" }
+      - name: a_recursive_mode_run_in_a_container
+        match: world_writable_tree_mention(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "docker run --rm -v /srv:/srv alpine chmod -R 777 /srv" }
+      - name: a_recursive_mode_on_a_later_line_of_a_script
+        match: world_writable_tree_mention(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "cat > /tmp/fix.sh <<'EOF'\ncd /srv\nchmod -R 777 app\nEOF\nbash /tmp/fix.sh" }
+      - name: a_recursive_mode_named_in_prose
+        match: world_writable_tree_mention(e.command.command)
+        verdict: no_match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./notify.sh 'never run chmod -R 777 on the share'" }

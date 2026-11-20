@@ -208,10 +208,10 @@ func celQuote(s string) string {
 }
 
 // twinWriter is what writes a file in a text twin: a redirection, whose target is the next word,
-// or tee, whose targets are its words after it; then a quote and the directories of the path.
-// twinStop is what ends a name in text.
+// or tee, whose targets are its words after it; then a quote and the directories of the path,
+// any of them quoted (`>> "$HOME"/.bashrc`). twinStop is what ends a name in text.
 const (
-	twinWriter = `(>>?\s*|\btee\b([ \t]+[^\s;&|<>]+)*[ \t]+)["']?([^\s;&|"'<>]*/)?`
+	twinWriter = `(>>?\s*|\btee\b([ \t]+[^\s;&|<>]+)*[ \t]+)["']?((["'][^"'\n]*["']|[^\s;&|"'<>])*/)?`
 	twinStop   = `\s;&|"'`
 )
 

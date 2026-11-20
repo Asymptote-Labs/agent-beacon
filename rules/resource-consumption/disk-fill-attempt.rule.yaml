@@ -61,8 +61,9 @@ match: >
       t.matches("(?i)\\bdd\\b[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom|random)\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+|\\bdd\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom|random)\\b|\\b(fallocate|truncate)\\b\\s+([^;&|\\n]*\\s)?(-[ls]\\s*|--(length|size)(\\s+|=))\\+?[0-9]+[KMGTP]") ||
       t.matches("(?i)(^|[^\\w=./-])yes\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") &&
         !t.matches("(?i)(^|[^\\w=./-])yes\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b") ||
-      t.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>>?\\s*[^\\s&]") &&
-        !t.matches("/dev/(zero|urandom|random)\\b(?:[^;&|]*[^\\d])?>\\s*/dev/null\\b"))
+      t.matches("(^|[\\s<])/dev/(zero|urandom|random)\\b(?:[^;&|\\n]*[^\\d])?>>?\\s*[^\\s&]") &&
+        !t.matches("(^|[\\s<])/dev/(zero|urandom|random)\\b(?:[^;&|\\n]*[^\\d])?>\\s*/dev/null\\b") &&
+        !t.matches("(?i)(\\bhead\\s+((-c\\s*|--bytes=)?[0-9]+(\\s|$)|-n)|\\s-[Nl]\\s*[0-9]|--(read-bytes|length)[=\\s]*[0-9]+(\\s|$))[^;&|\\n]*/dev/(zero|urandom|random)"))
   )
 
 emit:
@@ -391,4 +392,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "./fill.sh 'head -c 100G /dev/random > /srv/big'" }
+        session: { id: s1 }
+  - name: a_key_read_from_urandom_in_a_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "./gen.sh 'head -c 32 /dev/urandom > key.bin'" }
+        session: { id: s1 }
+  - name: a_python_script_that_reads_urandom
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 - <<'EOF'\nwith open('/dev/urandom','rb') as f:\n    key = f.read(32)\nassert len(key) > 0\nEOF" }
         session: { id: s1 }

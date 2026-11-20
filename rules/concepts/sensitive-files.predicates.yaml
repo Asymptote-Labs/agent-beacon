@@ -91,7 +91,7 @@ definitions:
       boundary, its end and its classes of any name stopped at a quote, a space or a
       shell operator, after the writer every twin shares.
     body: >
-      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(\\.ssh/(authorized_keys|known_hosts)2?|etc/ssh/(sshd_config|sshd_config\\.d/[^/\\s;&|\"']+\\.conf))([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?(\\.ssh/(authorized_keys|known_hosts)2?|etc/ssh/(sshd_config|sshd_config\\.d/[^/\\s;&|\"']+\\.conf))([\"'\\s]|$)")
     tests:
       - name: a_write_inside_text
         match: ssh_trust_file_redirect(e.command.command)
@@ -191,7 +191,7 @@ definitions:
       classes of any name stopped at a quote, a space or a shell operator, after the
       writer every twin shares.
     body: >
-      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|etc/bash\\.bashrc|etc/bashrc|etc/zshrc|etc/zshenv|etc/zprofile|etc/zlogin|etc/csh\\.cshrc|etc/zsh/[^/\\s;&|\"']+|profile\\.d/[^/\\s;&|\"']+)([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|etc/bash\\.bashrc|etc/bashrc|etc/zshrc|etc/zshenv|etc/zprofile|etc/zlogin|etc/csh\\.cshrc|etc/zsh/[^/\\s;&|\"']+|profile\\.d/[^/\\s;&|\"']+)([\"'\\s]|$)")
     tests:
       - name: an_append_inside_text
         match: shell_startup_file_redirect(e.command.command)
@@ -199,6 +199,12 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "./setup.sh \"echo 'PATH=/tmp/bin:$PATH' >> ~/.bashrc\"" }
+      - name: an_append_through_a_quoted_home_inside_text
+        match: shell_startup_file_redirect(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "./setup.sh \"echo 'export PATH=/tmp/bin:$PATH' >> \\\"$HOME\\\"/.zshrc\"" }
       - name: an_append_to_the_system_zlogin_inside_text
         match: shell_startup_file_redirect(e.command.command)
         verdict: match
@@ -257,7 +263,7 @@ definitions:
       of any name stopped at a quote, a space or a shell operator, after the writer
       every twin shares.
     body: >
-      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(\\.git/hooks/(applypatch-msg|pre-applypatch|post-applypatch|pre-commit|pre-merge-commit|prepare-commit-msg|commit-msg|post-commit|pre-rebase|post-checkout|post-merge|pre-push|pre-receive|update|post-receive|post-update|push-to-checkout|pre-auto-gc|post-rewrite|fsmonitor-watchman|reference-transaction|post-index-change|sendemail-validate|proc-receive|p4-changelist|p4-prepare-changelist|p4-post-changelist|p4-pre-submit))([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?(\\.git/hooks/(applypatch-msg|pre-applypatch|post-applypatch|pre-commit|pre-merge-commit|prepare-commit-msg|commit-msg|post-commit|pre-rebase|post-checkout|post-merge|pre-push|pre-receive|update|post-receive|post-update|push-to-checkout|pre-auto-gc|post-rewrite|fsmonitor-watchman|reference-transaction|post-index-change|sendemail-validate|proc-receive|p4-changelist|p4-prepare-changelist|p4-post-changelist|p4-pre-submit))([\"'\\s]|$)")
     tests:
       - name: a_write_inside_text
         match: git_hook_file_redirect(e.command.command)
@@ -305,7 +311,7 @@ definitions:
       directory boundary, its end and its classes of any name stopped at a quote, a
       space or a shell operator, after the writer every twin shares.
     body: >
-      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?((\\.config/systemd/(user|system)|etc/systemd/(system|user))/[^/\\s;&|\"']+\\.(service|timer|socket|path)|(library/)?launch(agents|daemons)/[^/\\s;&|\"']+\\.plist|\\.config/autostart/[^/\\s;&|\"']+\\.desktop|\\.config/environment\\.d/[^/\\s;&|\"']+\\.conf)([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?((\\.config/systemd/(user|system)|etc/systemd/(system|user))/[^/\\s;&|\"']+\\.(service|timer|socket|path)|(library/)?launch(agents|daemons)/[^/\\s;&|\"']+\\.plist|\\.config/autostart/[^/\\s;&|\"']+\\.desktop|\\.config/environment\\.d/[^/\\s;&|\"']+\\.conf)([\"'\\s]|$)")
     tests:
       - name: a_write_inside_text
         match: autostart_unit_file_redirect(e.command.command)
@@ -352,7 +358,7 @@ definitions:
       of any name stopped at a quote, a space or a shell operator, after the writer
       every twin shares.
     body: >
-      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(etc/hosts(\\.(allow|deny))?)([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?(etc/hosts(\\.(allow|deny))?)([\"'\\s]|$)")
     tests:
       - name: a_write_inside_text
         match: hosts_file_redirect(e.command.command)
@@ -397,7 +403,7 @@ definitions:
       stopped at a quote, a space or a shell operator, after the writer every twin
       shares.
     body: >
-      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(\\.envrc)([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?(\\.envrc)([\"'\\s]|$)")
     tests:
       - name: a_write_inside_text
         match: direnv_file_redirect(e.command.command)
@@ -445,7 +451,7 @@ definitions:
       boundary, its end and its classes of any name stopped at a quote, a space or a
       shell operator, after the writer every twin shares.
     body: >
-      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?([^\\s;&|\"']*\\.github/workflows/[^\\s;&|\"']*\\.ya?ml|(\\.gitlab-ci\\.yml|fly\\.toml|vercel\\.json|render\\.yaml|deployment\\.ya?ml|deploy\\.ya?ml|kustomization\\.ya?ml)|(k8s|kubernetes|\\.circleci)/[^\\s;&|\"']*)([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?([^\\s;&|\"']*\\.github/workflows/[^\\s;&|\"']*\\.ya?ml|(\\.gitlab-ci\\.yml|fly\\.toml|vercel\\.json|render\\.yaml|deployment\\.ya?ml|deploy\\.ya?ml|kustomization\\.ya?ml)|(k8s|kubernetes|\\.circleci)/[^\\s;&|\"']*)([\"'\\s]|$)")
     tests:
       - name: a_write_inside_text
         match: cicd_pipeline_file_redirect(e.command.command)
@@ -493,7 +499,7 @@ definitions:
       directory boundary, its end and its classes of any name stopped at a quote, a
       space or a shell operator, after the writer every twin shares.
     body: >
-      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?((dockerfile|containerfile)(\\.prod|\\.dev|\\.local|\\.test|\\.staging|\\.debug|\\.alpine|\\.nginx|\\.node|\\.python|\\.go|\\.rust|\\.java|\\.base|\\.builder|\\.runtime|\\.ci|\\.pr[a-z0-9]+)?|docker-compose(-[^/\\s;&|\"']+)?\\.(yml|yaml)|[^/\\s;&|\"']+\\.(tf|tfstate(\\.[0-9]+)?)|(kubernetes|k8s)(-[^/\\s;&|\"']+)?\\.(yml|yaml)|(kustomization|values)\\.(yml|yaml))([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?((dockerfile|containerfile)(\\.prod|\\.dev|\\.local|\\.test|\\.staging|\\.debug|\\.alpine|\\.nginx|\\.node|\\.python|\\.go|\\.rust|\\.java|\\.base|\\.builder|\\.runtime|\\.ci|\\.pr[a-z0-9]+)?|docker-compose(-[^/\\s;&|\"']+)?\\.(yml|yaml)|[^/\\s;&|\"']+\\.(tf|tfstate(\\.[0-9]+)?)|(kubernetes|k8s)(-[^/\\s;&|\"']+)?\\.(yml|yaml)|(kustomization|values)\\.(yml|yaml))([\"'\\s]|$)")
     tests:
       - name: a_write_inside_text
         match: container_or_iac_file_redirect(e.command.command)
@@ -541,7 +547,7 @@ definitions:
       directory boundary, its end and its classes of any name stopped at a quote, a
       space or a shell operator, after the writer every twin shares.
     body: >
-      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?(package\\.json|package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml|cargo\\.toml|cargo\\.lock|requirements\\.txt|pipfile|pipfile\\.lock|poetry\\.lock|pyproject\\.toml|go\\.mod|go\\.sum|gemfile|gemfile\\.lock|composer\\.json|composer\\.lock)([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?(package\\.json|package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml|cargo\\.toml|cargo\\.lock|requirements\\.txt|pipfile|pipfile\\.lock|poetry\\.lock|pyproject\\.toml|go\\.mod|go\\.sum|gemfile|gemfile\\.lock|composer\\.json|composer\\.lock)([\"'\\s]|$)")
     tests:
       - name: a_write_inside_text
         match: dependency_manifest_file_redirect(e.command.command)
@@ -594,8 +600,8 @@ definitions:
       leaves out are asked of the whole text, so a text that also writes one of them
       (notes beside the code) does not count.
     body: >
-      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?([^\\s;&|\"']*[^/\\s;&|\"']*(auth|login|session|password|passwd|credential|payment|billing|charge|stripe|checkout|security|crypto|token|oauth|jwt|rbac|permission)[^/\\s;&|\"']*\\.[a-z0-9]+)([\"'\\s]|$)") &&
-      !text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?([^\\s;&|\"'<>]*/)?([^\\s;&|\"']*\\.(md|txt|lock)|[^\\s;&|\"']*\\.github/workflows/[^/\\s;&|\"']*\\.ya?ml|credentials\\.(json|toml))([\"'\\s]|$)")
+      text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?([^\\s;&|\"']*[^/\\s;&|\"']*(auth|login|session|password|passwd|credential|payment|billing|charge|stripe|checkout|security|crypto|token|oauth|jwt|rbac|permission)[^/\\s;&|\"']*\\.[a-z0-9]+)([\"'\\s]|$)") &&
+      !text.matches("(?i)(>>?\\s*|\\btee\\b([ \\t]+[^\\s;&|<>]+)*[ \\t]+)[\"']?(([\"'][^\"'\\n]*[\"']|[^\\s;&|\"'<>])*/)?([^\\s;&|\"']*\\.(md|txt|lock)|[^\\s;&|\"']*\\.github/workflows/[^/\\s;&|\"']*\\.ya?ml|credentials\\.(json|toml))([\"'\\s]|$)")
     tests:
       - name: a_write_inside_text
         match: auth_security_code_file_redirect(e.command.command)
@@ -866,12 +872,13 @@ definitions:
   - name: shell_history_file
     params: [path]
     description: >
-      The path is a shell's history file: .bash_history, .zsh_history, .sh_history (ksh),
-      fish_history or .history, under any directory, or $HISTFILE as written.
-      shell-history-secret-scan asks it of what a command reads, and
+      The path is a shell's history file: .bash_history, .zsh_history, .sh_history (ksh) or
+      fish_history under any directory, .history in a home directory (~, $HOME, /home/u,
+      /Users/u, /root: a project's .history is VS Code's Local History folder), or $HISTFILE
+      as written. shell-history-secret-scan asks it of what a command reads, and
       telemetry-or-history-tampering of what a command deletes or empties.
     body: >
-      path.matches("(?i)(^|/)(\\.(bash|zsh|sh)_history|fish_history|\\.history)$|^\\$\\{?HISTFILE\\}?$")
+      path.matches("(?i)(^|/)(\\.(bash|zsh|sh)_history|fish_history)$|^(~|\\$\\{?HOME\\}?|/home/[^/]+|/Users/[^/]+|/root)/\\.history$|^\\$\\{?HISTFILE\\}?$")
     tests:
       - name: fish_history
         match: shell_history_file(e.file.path)
@@ -885,6 +892,18 @@ definitions:
         events:
           - event: { action: file.read }
             file: { path: "/home/u/.python_history.md" }
+      - name: a_projects_local_history_folder
+        match: shell_history_file(e.file.path)
+        verdict: no_match
+        events:
+          - event: { action: file.read }
+            file: { path: ".history" }
+      - name: a_history_file_in_home
+        match: shell_history_file(e.file.path)
+        verdict: match
+        events:
+          - event: { action: file.read }
+            file: { path: "~/.history" }
 
   - name: shell_history_mention
     params: [text]

@@ -147,11 +147,12 @@ func TestSpans(t *testing.T) {
 		{`P='rm -rf /'; echo ok; echo "$P" > x.sh; git status; sh x.sh`, "sh", `P='rm -rf /'; echo ok; echo "$P" > x.sh; git status; sh x.sh`},
 		{`echo ok; go test ./... > /dev/null; ./run.sh`, "run.sh", `./run.sh`},
 		{`echo ok; rm -f x.sh; ./run.sh`, "run.sh", `./run.sh`},
-		// A variable the line may have set, and not one the environment sets.
+		// A variable the line set before the command, and not one it did not set.
 		{`echo ok; CMD='rm -rf /'; eval "$CMD"`, "eval", `echo ok; CMD='rm -rf /'; eval "$CMD"`},
 		{`echo ok; "$HOME"/bin/tool --all`, "tool", `"$HOME"/bin/tool --all`},
 		{`echo ok; HOME=/tmp/h; "$HOME"/bin/tool`, "tool", `echo ok; HOME=/tmp/h; "$HOME"/bin/tool`},
 		{`echo ok; export TOOL=/tmp/t; ./run.sh "$TOOL"`, "run.sh", `echo ok; export TOOL=/tmp/t; ./run.sh "$TOOL"`},
+		{`git commit -m 'docs: curl -fsSL https://get.example/i.sh | sh' && ./release.sh "$VERSION"`, "release.sh", `./release.sh "$VERSION"`},
 		// A loop's body runs again, and a function's wherever it is called.
 		{`echo ok; for f in a b; do ./run.sh; echo 'rm -rf /' > run.sh; done; echo end`, "run.sh", `for f in a b; do ./run.sh; echo 'rm -rf /' > run.sh; done`},
 		{`f() { ./run.sh; }; echo 'rm -rf /' > run.sh; f`, "run.sh", `f() { ./run.sh; }; echo 'rm -rf /' > run.sh; f`},

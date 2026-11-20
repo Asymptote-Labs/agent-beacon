@@ -32,10 +32,11 @@ import (
 // What lies between two pieces (a commit, a test run) is not in the span.
 //
 // When a word, a redirection or a NAME=value prefix of the command, or of one of those
-// writers, takes a variable's value, the span is instead everything from the start of the
-// line to the end of its last piece: the variable may hold anything the line said before.
-// A variable the environment sets (HOME, PWD, PATH and the like) does not count unless the
-// line assigns it.
+// writers, takes the value of a variable the line assigns before it, the span is instead
+// everything from the start of the line to the end of its last piece: the variable may hold
+// anything the line said before. A variable the line does not assign (VERSION, HOME, PATH, a
+// CI variable) holds nothing the line said, so `git commit -m '…curl … | sh…' &&
+// ./release.sh "$VERSION"` does not give the script the commit message.
 //
 // A command withScripts added (one of a shell's script, or of what a carrier runs) has the
 // span of the command of the line itself that it came from: that command's words hold the
@@ -225,24 +226,15 @@ func spanText(commands []Command, hdocs []int, source string, pieces []piece) st
 	return b.String()
 }
 
-// ambientVariables are set by the shell or the environment it starts in, not by text on the
-// command line, unless the line assigns them.
-var ambientVariables = map[string]bool{
-	"HOME": true, "PWD": true, "OLDPWD": true, "USER": true, "LOGNAME": true, "SHELL": true,
-	"TMPDIR": true, "HOSTNAME": true, "PATH": true, "LANG": true, "TERM": true, "UID": true,
-	"EUID": true, "PPID": true, "RANDOM": true, "SECONDS": true, "LINENO": true, "OSTYPE": true,
-	"HOSTTYPE": true, "?": true, "$": true, "#": true, "!": true,
-}
-
 // takesVariable reports whether a word, redirection or prefix assignment of command i takes
-// the value of a variable that text on the command line may have set.
+// the value of a variable that text on the command line set before it.
 func takesVariable(commands []Command, i int) bool {
 	c := &commands[i]
 	for _, ref := range c.refs {
 		if ref.name == "" || (ref.place != refArg && ref.place != refRedirect && ref.place != refEnv) {
 			continue
 		}
-		if !ambientVariables[ref.name] || assignedBefore(commands, i, ref.name) {
+		if assignedBefore(commands, i, ref.name) {
 			return true
 		}
 	}

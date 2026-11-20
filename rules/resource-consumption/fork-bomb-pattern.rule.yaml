@@ -33,7 +33,8 @@ taxonomy:
 # The interpreter loop is a command and its script word, and is asked of the parsed commands.
 # The interpreter is script_interpreter (rules/concepts/commands.predicates.yaml), so python3
 # and perl5.30 count; versions before 5 named perl, python and ruby only. The script must
-# fork: a call to .fork() (os.fork, Process.fork) or perl's `fork while 1`. Versions before
+# fork: a call to .fork() (os.fork, Process.fork), or a bare fork and an endless loop in
+# either order (perl's `fork while 1`, ruby's `while true do fork end`). Versions before
 # 5 also took an endless loop with no fork in it (`while True:`, `iter(int, 1)`), which is
 # no fork bomb; python3 made that common.
 match: >
@@ -43,8 +44,8 @@ match: >
     e.command.command.matches("(?i)\\bfor\\s*\\(\\s*;\\s*;\\s*\\)\\s*[;{]") ||
     e.command.parsed_commands.exists(c,
       script_interpreter(c) &&
-      c.args.matches("(?mi)^-[ec]\\n.*(\\.fork\\(\\)|\\bfork\\b[^\\n]*\\bwhile\\s+(1|True)\\b)")) ||
-    unread_text(e, t, t.matches("(?i)\\b(python[0-9.]*|nodejs|node|deno|bun|ruby|perl[0-9.]*|php)\\s+-[ec]\\s+['\"][^'\"]*(\\.fork\\(\\)|\\bfork\\b[^'\"]*\\bwhile\\s+(1|True)\\b)"))
+      c.args.matches("(?mi)^-[ec]\\n.*(\\.fork\\(\\)|\\bfork\\b[^\\n]*\\bwhile\\s+(1|True)\\b|\\bwhile\\s+(1|True)\\b[^\\n]*\\bfork\\b)")) ||
+    unread_text(e, t, t.matches("(?i)\\b(python[0-9.]*|nodejs|node|deno|bun|ruby|perl[0-9.]*|php)\\s+-[ec]\\s+['\"][^'\"]*(\\.fork\\(\\)|\\bfork\\b[^'\"]*\\bwhile\\s+(1|True)\\b|\\bwhile\\s+(1|True)\\b[^'\"]*\\bfork\\b)"))
   )
 
 emit:
@@ -57,6 +58,12 @@ tests:
       - timestamp: "2026-06-23T10:00:00Z"
         event: { action: command.executed }
         command: { command: ":(){ :|:& };:" }
+        session: { id: s1 }
+  - name: ruby_fork_in_a_loop_written_loop_first
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ruby -e 'while true do fork end'" }
         session: { id: s1 }
   - name: while_true_fork_loop
     verdict: match

