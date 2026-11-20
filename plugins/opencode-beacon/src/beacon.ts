@@ -347,7 +347,9 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       const type = event?.type || "event"
       if (!forwardedEvents.has(type)) return
 
-      const properties = event?.properties || event?.data || {}
+      const propertiesKey = event?.properties ? "properties" : "data"
+      const originalProperties = event?.[propertiesKey] || {}
+      let properties = originalProperties
       const sid = sessionID(properties)
       const info = properties?.info || {}
       if (type === "message.updated") {
@@ -402,8 +404,9 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       }
       if (type === "permission.replied" || type === "permission.v2.replied") {
         const request = permissionRequests.get(properties?.requestID)
-        if (request?.tool && !properties.tool) properties.tool = request.tool
-        if (request?.permission && !properties.permission) properties.permission = request.permission
+        // The runtime's event can be shared with other listeners or frozen.
+        if (request?.tool && !properties.tool) properties = { ...properties, tool: request.tool }
+        if (request?.permission && !properties.permission) properties = { ...properties, permission: request.permission }
         permissionRequests.delete(properties?.requestID)
       }
       if (type === "session.diff") {
@@ -417,14 +420,14 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
           return item?.before !== item?.after || item?.additions || item?.deletions
         })
         if (filtered.length === 0) return
-        properties.diff = filtered
+        properties = { ...properties, diff: filtered }
       }
       const queued = enqueue(
         payload(type, {
           session_id: sessionID(properties) || sid,
           model: modelName(Object.keys(info).length > 0 ? info : properties),
           properties,
-          event,
+          event: properties === originalProperties ? event : { ...event, [propertiesKey]: properties },
         }),
       )
       if (type === "session.deleted") void queued.finally(() => cleanupSession(sid))

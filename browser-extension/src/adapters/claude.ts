@@ -86,6 +86,8 @@ class ClaudeParser implements TurnParser {
       return;
     }
 
+    if (obj == null || typeof obj !== 'object') return;
+
     // Legacy delta shape.
     if (typeof obj.completion === 'string' && obj.type == null) {
       this.responseText += obj.completion;

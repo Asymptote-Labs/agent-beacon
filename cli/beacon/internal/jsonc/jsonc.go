@@ -35,6 +35,7 @@ type jsonNode struct {
 type jsonMember struct {
 	key      string
 	keyStart int
+	keyEnd   int
 	value    *jsonNode
 }
 
@@ -216,6 +217,7 @@ func (p *jsonParser) object(depth int) (*jsonNode, error) {
 		if err != nil {
 			return nil, err
 		}
+		keyEnd := p.pos
 		if err := p.skip(); err != nil {
 			return nil, err
 		}
@@ -230,7 +232,7 @@ func (p *jsonParser) object(depth int) (*jsonNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		node.members = append(node.members, jsonMember{key: key, keyStart: keyStart, value: value})
+		node.members = append(node.members, jsonMember{key: key, keyStart: keyStart, keyEnd: keyEnd, value: value})
 	}
 }
 
