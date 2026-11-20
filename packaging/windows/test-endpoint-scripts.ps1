@@ -96,6 +96,16 @@ foreach ($needle in @('--keep-logs', '--keep-config', 'BEACON_PURGE')) {
     }
 }
 
+# An upgrade removes the old product first, through this script. The MSI tells it so, and the script
+# tells `endpoint uninstall` (BEACON_PACKAGE_UPGRADE), so an edition can keep its state across the
+# upgrade (the enterprise edition keeps enforcement on) instead of treating it as a removal.
+if ($wxs -notmatch [regex]::Escape('-UpgradingProductCode &quot;[UPGRADINGPRODUCTCODE]&quot;')) {
+    Fail "beacon.wxs no longer passes [UPGRADINGPRODUCTCODE] to uninstall-endpoint.ps1"
+}
+if ($uninstall -notmatch [regex]::Escape("`$env:BEACON_PACKAGE_UPGRADE = '1'")) {
+    Fail "uninstall-endpoint.ps1 no longer sets BEACON_PACKAGE_UPGRADE during an upgrade"
+}
+
 # Every beacon.exe call a package script makes is bounded and logged (package-common.ps1). A bare
 # `& $beaconBin` would bring back the failure that is for: a call that never returns holds msiexec,
 # and the fleet tool behind it, open with no record of which step it was.

@@ -12,8 +12,15 @@
 # recorded in its install manifest -- which includes config.json and otelcol.yaml -- unconditionally,
 # because that is what uninstall means at the CLI level. So the files are set aside and put back, the
 # same stash-and-restore packaging/linux/nfpm/preremove.sh performs and for the same reason.
+#
+# -UpgradingProductCode is the MSI's UPGRADINGPRODUCTCODE: set only when this removal is the first
+# half of a major upgrade. The script then sets BEACON_PACKAGE_UPGRADE=1 for `endpoint uninstall`,
+# so an edition that keeps state across upgrades (the enterprise edition keeps enforcement on) can
+# tell an upgrade from a removal. A removal passes an empty value.
 [CmdletBinding()]
-param()
+param(
+    [string]$UpgradingProductCode = ''
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -77,6 +84,11 @@ function Get-EnvOrDefault {
 $installRoot = Get-EnvOrDefault 'BEACON_INSTALL_ROOT' (Join-Path $env:ProgramFiles 'Beacon')
 $beaconBin = Get-EnvOrDefault 'BEACON_BIN' (Join-Path $installRoot 'bin\beacon.exe')
 $purge = Get-EnvOrDefault 'BEACON_PURGE' '0'
+if (-not [string]::IsNullOrWhiteSpace($UpgradingProductCode)) {
+    # Inherited by the bounded `endpoint uninstall` below (ProcessStartInfo copies this environment).
+    $env:BEACON_PACKAGE_UPGRADE = '1'
+    Write-BeaconPackageLog "beacon: removing the previous version as part of an upgrade to $UpgradingProductCode"
+}
 
 if (-not (Test-Path -LiteralPath $beaconBin)) {
     # Nothing to do, and not an error. An uninstall must not fail because the thing it removes is
