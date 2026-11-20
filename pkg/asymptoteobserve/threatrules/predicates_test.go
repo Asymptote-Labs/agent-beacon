@@ -96,7 +96,7 @@ func definition(name, params, body, match string) string {
 func testLibrary(t *testing.T, files ...DefinitionFile) *Library {
 	t.Helper()
 	if files == nil {
-		files = []DefinitionFile{{"c.catalog.yaml", []byte(testCatalog)}, {"p.predicates.yaml", []byte(testPredicates)}}
+		files = []DefinitionFile{{Name: "c.catalog.yaml", Data: []byte(testCatalog)}, {Name: "p.predicates.yaml", Data: []byte(testPredicates)}}
 	}
 	lib, skipped, err := NewLibrary(files)
 	if err != nil || len(skipped) > 0 {
@@ -243,7 +243,7 @@ func TestPredicateIsItsBody(t *testing.T) {
 // An argument is never captured by a variable the body binds, and a parameter is replaced by its
 // argument only: not by another argument that happens to carry a parameter's name.
 func TestPredicateExpansionIsHygienic(t *testing.T) {
-	lib := testLibrary(t, DefinitionFile{"p.predicates.yaml", []byte(definitions(
+	lib := testLibrary(t, DefinitionFile{Name: "p.predicates.yaml", Data: []byte(definitions(
 		definition("reads_path", "c, p", `c.file_reads.exists(f, f.path == p)`, `e.command.parsed_commands.exists(c, reads_path(c, "x"))`),
 		definition("starts", "a, b", `a.startsWith(b)`, `starts("a", "b")`),
 		definition("ends_with_start", "a, b", `starts(b, a)`, `ends_with_start("a", "b")`),
@@ -283,7 +283,7 @@ func TestPredicateExpansionIsHygienic(t *testing.T) {
 // of a comprehension: the caller passes a name, and the arguments the body puts under that
 // comprehension may use it. Every other variable of the body stays out of the caller's reach.
 func TestPredicateBindsAParameterForItsCaller(t *testing.T) {
-	lib := testLibrary(t, DefinitionFile{"p.predicates.yaml", []byte(definitions(
+	lib := testLibrary(t, DefinitionFile{Name: "p.predicates.yaml", Data: []byte(definitions(
 		definition("some_word", "c, w, cond", `c.argv.exists(w, cond)`, `e.command.parsed_commands.exists(c, some_word(c, w, w == "x"))`),
 		// Twice, once in a list of one: the form a predicate gives a value a name with.
 		definition("line_or_name", "e, t, cond", `[e.command.command].exists(t, cond) && e.command.parsed_commands.exists(c, [c.name].exists(t, cond))`, `line_or_name(e, t, t.startsWith("x"))`),
@@ -333,7 +333,7 @@ func TestPredicateBindsAParameterForItsCaller(t *testing.T) {
 // expansion is the expression with the joined literal written out, so the engine compiles and
 // prefilters it as a constant. A non-literal argument is left as the join.
 func TestPredicateJoinsLiteralPatterns(t *testing.T) {
-	lib := testLibrary(t, DefinitionFile{"p.predicates.yaml", []byte(definitions(
+	lib := testLibrary(t, DefinitionFile{Name: "p.predicates.yaml", Data: []byte(definitions(
 		definition("sub", "c, rest", `c.args.matches("\\A(?:-[a-z]\\n)*" + rest)`, `e.command.parsed_commands.exists(c, sub(c, "push"))`),
 	))})
 	for call, written := range map[string]string{
@@ -377,21 +377,22 @@ func TestPredicateCallErrors(t *testing.T) {
 	}
 }
 
-// A rule that calls a predicate needs the spec that has predicates, and the definitions that
+// A rule that calls a predicate needs the spec its definitions file declares, v2.0 at least (the
+// spec that has predicates), and is told which file sets it; and it needs the definitions that
 // define it.
-func TestPredicatesRequireSpecV1_3AndTheirDefinitions(t *testing.T) {
+func TestPredicatesRequireSpecV2_0AndTheirDefinitions(t *testing.T) {
 	lib := testLibrary(t)
 	for _, spec := range []string{"", "spec: threat-rules/v1.1", "spec: threat-rules/v1.2"} {
 		err := libraryRule(t, lib, spec, `credential_read(e)`).Validate()
-		if err == nil || !strings.Contains(err.Error(), "the predicate credential_read requires spec: threat-rules/v1.3") {
+		if err == nil || !strings.Contains(err.Error(), "the predicate credential_read (p.predicates.yaml) requires spec: threat-rules/v2.0") {
 			t.Errorf("%q: want the predicate/spec error, got %v", spec, err)
 		}
 	}
-	if err := libraryRule(t, lib, "spec: threat-rules/v1.3", `credential_read(e)`).Validate(); err != nil {
-		t.Errorf("v1.3: %v", err)
+	if err := libraryRule(t, lib, "spec: threat-rules/v2.0", `credential_read(e)`).Validate(); err != nil {
+		t.Errorf("v2.0: %v", err)
 	}
 	// Decoded on its own, the rule has no definitions to call.
-	err := libraryRule(t, nil, "spec: threat-rules/v1.3", `credential_read(e)`).Validate()
+	err := libraryRule(t, nil, "spec: threat-rules/v2.0", `credential_read(e)`).Validate()
 	if err == nil || !strings.Contains(err.Error(), "credential_read is not a predicate of the definitions this rule was loaded with") {
 		t.Errorf("without its library: want the missing-definitions error, got %v", err)
 	}
@@ -403,59 +404,59 @@ func TestNewLibraryRefuses(t *testing.T) {
 		files []DefinitionFile
 		want  string
 	}{
-		"a body that reads what it is not given": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+		"a body that reads what it is not given": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("curl", "c", `c.name == "curl" && e.event.action == "command.executed"`, `e.command.parsed_commands.exists(c, curl(c))`)))}},
 			`predicate curl: body reads "e", which is not one of its params (c)`},
-		"an unused param": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+		"an unused param": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("curl", "c, e", `c.name == "curl"`, `e.command.parsed_commands.exists(c, curl(c, e))`)))}},
 			`predicate curl: param "e" is not used`},
-		"a param bound by the body and read outside the binding": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+		"a param bound by the body and read outside the binding": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("any_word", "c, w", `c.argv.exists(w, w == "x") && w == "y"`, `e.command.parsed_commands.exists(c, any_word(c, w))`)))}},
 			`predicate any_word: param "w" is bound by the body and also read outside that binding`},
-		"a predicate that calls itself": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+		"a predicate that calls itself": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("again", "c", `c.name == "x" || again(c)`, `e.command.parsed_commands.exists(c, again(c))`)))}},
 			"predicate again calls itself: again -> again"},
-		"a name CEL reserves": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+		"a name CEL reserves": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("loop", "c", `c.name == "x"`, `e.command.parsed_commands.exists(c, loop(c))`)))}},
 			`predicate "loop": the name is CEL's own`},
-		"predicates that call each other": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+		"predicates that call each other": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("a", "c", `b(c)`, `e.command.parsed_commands.exists(c, a(c))`),
 			definition("b", "c", `ok(c) && a(c)`, `e.command.parsed_commands.exists(c, b(c))`), ok))}},
 			"calls itself: a -> b -> a"},
-		"a body that does not parse": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+		"a body that does not parse": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("bad", "c", `c.name ==`, `e.command.parsed_commands.exists(c, bad(c))`)))}},
 			"predicate bad: body:"},
-		"a body that calls a predicate wrongly": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+		"a body that calls a predicate wrongly": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(
 			ok, definition("twice", "c", `ok(c, c)`, `e.command.parsed_commands.exists(c, twice(c))`)))}},
 			"predicate twice: body:"},
-		"a name CEL has": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+		"a name CEL has": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("size", "c", `c.name == "x"`, `e.command.parsed_commands.exists(c, size(c))`)))}},
 			`predicate "size": the name is CEL's own`},
-		"a name that is no identifier": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(
+		"a name that is no identifier": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("is-curl", "c", `c.name == "x"`, `true`)))}},
 			`predicate "is-curl": want a name like credential_read`},
-		"a predicate defined twice": {[]DefinitionFile{{"a.predicates.yaml", []byte(definitions(ok))}, {"b.predicates.yaml", []byte(strings.Replace(definitions(ok), "library: test", "library: other", 1))}},
+		"a predicate defined twice": {[]DefinitionFile{{Name: "a.predicates.yaml", Data: []byte(definitions(ok))}, {Name: "b.predicates.yaml", Data: []byte(strings.Replace(definitions(ok), "library: test", "library: other", 1))}},
 			"b.predicates.yaml: predicate ok is already defined in a.predicates.yaml"},
-		"a library declared by two files": {[]DefinitionFile{{"a.predicates.yaml", []byte(definitions(ok))}, {"b.predicates.yaml", []byte(definitions(strings.ReplaceAll(ok, "ok", "fine")))}},
+		"a library declared by two files": {[]DefinitionFile{{Name: "a.predicates.yaml", Data: []byte(definitions(ok))}, {Name: "b.predicates.yaml", Data: []byte(definitions(strings.ReplaceAll(ok, "ok", "fine")))}},
 			"b.predicates.yaml: library test is already declared by a.predicates.yaml"},
-		"a catalog declared by two files": {[]DefinitionFile{{"a.catalog.yaml", []byte(testCatalog)}, {"b.catalog.yaml", []byte(strings.Replace(testCatalog, "predicates: {path: credential_path, command: credential_command}\n", "", 1))}},
+		"a catalog declared by two files": {[]DefinitionFile{{Name: "a.catalog.yaml", Data: []byte(testCatalog)}, {Name: "b.catalog.yaml", Data: []byte(strings.Replace(testCatalog, "predicates: {path: credential_path, command: credential_command}\n", "", 1))}},
 			"b.catalog.yaml: catalog credential-stores is already declared by a.catalog.yaml"},
-		"a predicate a catalog provides": {[]DefinitionFile{{"c.catalog.yaml", []byte(testCatalog)}, {"p.predicates.yaml", []byte(definitions(
+		"a predicate a catalog provides": {[]DefinitionFile{{Name: "c.catalog.yaml", Data: []byte(testCatalog)}, {Name: "p.predicates.yaml", Data: []byte(definitions(
 			definition("credential_path", "p", `p == "x"`, `credential_path(e.file.path)`)))}},
 			"predicate credential_path is already defined in c.catalog.yaml"},
-		"no params": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(definition("always", "", `true`, `always()`)))}},
+		"no params": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(definition("always", "", `true`, `always()`)))}},
 			"predicate always: no params"},
-		"no tests": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions("  - name: curl\n    params: [c]\n    description: d\n    body: c.name == \"curl\"\n"))}},
+		"no tests": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions("  - name: curl\n    params: [c]\n    description: d\n    body: c.name == \"curl\"\n"))}},
 			"predicate curl: at least one test is required"},
-		"no description": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(strings.Replace(ok, "description: d", "description: ''", 1)))}},
+		"no description": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(strings.Replace(ok, "description: d", "description: ''", 1)))}},
 			"predicate ok: no description"},
-		"a test that does not say how it calls": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(strings.Replace(ok, `        match: 'e.command.parsed_commands.exists(c, ok(c))'`+"\n", "", 1)))}},
+		"a test that does not say how it calls": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(strings.Replace(ok, `        match: 'e.command.parsed_commands.exists(c, ok(c))'`+"\n", "", 1)))}},
 			"predicate ok: test t: no match"},
-		"an unknown field": {[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(strings.Replace(ok, "description: d", "description: d\n    severity: high", 1)))}},
+		"an unknown field": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(strings.Replace(ok, "description: d", "description: d\n    severity: high", 1)))}},
 			"field severity not found"},
-		"a file that is not definitions": {[]DefinitionFile{{"notes.yaml", []byte("a: b")}},
+		"a file that is not definitions": {[]DefinitionFile{{Name: "notes.yaml", Data: []byte("a: b")}},
 			"notes.yaml: not a definitions file"},
-		"a malformed spec": {[]DefinitionFile{{"p.predicates.yaml", []byte("spec: v9\n" + definitions(ok))}},
+		"a malformed spec": {[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte("spec: v9\n" + definitions(ok))}},
 			"p.predicates.yaml:"},
 	} {
 		if _, _, err := NewLibrary(tc.files); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -468,49 +469,136 @@ func TestNewLibraryRefuses(t *testing.T) {
 func TestNewLibrarySkipsNewerDefinitions(t *testing.T) {
 	ok := definition("ok", "c", `c.name == "x"`, `e.command.parsed_commands.exists(c, ok(c))`)
 	lib, skipped, err := NewLibrary([]DefinitionFile{
-		{"c.catalog.yaml", []byte("spec: threat-rules/v1.9\ncatalog: later\nversion: 1\nshape: unknown to this engine\n")},
-		{"p.predicates.yaml", []byte(definitions(ok))},
+		{Name: "c.catalog.yaml", Data: []byte("spec: threat-rules/v2.9\ncatalog: later\nversion: 1\nshape: unknown to this engine\n")},
+		{Name: "p.predicates.yaml", Data: []byte(definitions(ok))},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(skipped) != 1 || skipped[0].Path != "c.catalog.yaml" || skipped[0].Err.Required != "threat-rules/v1.9" {
-		t.Errorf("skipped = %v, want the catalog that needs v1.9", skipped)
+	if len(skipped) != 1 || skipped[0].Path != "c.catalog.yaml" || skipped[0].Err.Required != "threat-rules/v2.9" {
+		t.Errorf("skipped = %v, want the catalog that needs v2.9", skipped)
 	}
 	if got := lib.Predicates(); len(got) != 1 || got[0].Name != "ok" || got[0].Signature != "ok(c)" || got[0].Source != "p.predicates.yaml" {
 		t.Errorf("Predicates = %+v, want ok alone", got)
 	}
 }
 
-// Files that define no predicate make no library, and a rule is then compiled as it always was.
-func TestNoPredicatesIsNoLibrary(t *testing.T) {
-	lib, _, err := NewLibrary([]DefinitionFile{{"c.catalog.yaml", []byte(strings.Replace(testCatalog, "predicates: {path: credential_path, command: credential_command}\n", "", 1))}})
+// writePack writes a pack directory of the given files, by path under it.
+func writePack(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// callingRule is a single-event rule with the given spec line whose match calls a predicate.
+func callingRule(id, specLine, match string) string {
+	return strings.Replace(specRule(id, specLine, ""), `match: 'e.event.action == "file.read"'`, "match: '"+match+"'", 1)
+}
+
+// A definitions file written for a newer engine is set aside, and so is exactly what calls one of
+// its predicates: a rule, whatever spec it declares, and a predicate of another file, with the
+// rules that call that. The rest of the pack loads. A rule cannot call a predicate without
+// needing the spec of the file that defines it, so it is skipped with that file rather than
+// failing the whole pack on an older engine.
+func TestANewerDefinitionsFileSkipsTheRulesThatCallIt(t *testing.T) {
+	later := "spec: threat-rules/v2.9\nlibrary: later\nversion: 1\ndefinitions:\n" +
+		"  - name: later_name\n    params: [c]\n    description: d\n    body: c.name == \"x\"\n    weight: 3\n" +
+		"    tests: [{name: t, match: 'e.command.parsed_commands.exists(c, later_name(c))', verdict: no_match, events: [{event: {action: command.executed}}]}]\n"
+	dir := writePack(t, map[string]string{
+		"concepts/later.predicates.yaml": later,
+		"concepts/current.predicates.yaml": "spec: " + SupportedSpec + "\n" + definitions(
+			definition("current_name", "c", `c.name == "y"`, `e.command.parsed_commands.exists(c, current_name(c))`),
+			definition("through_later", "c", `later_name(c) || c.name == "z"`, `e.command.parsed_commands.exists(c, through_later(c))`)),
+		"calls-later.rule.yaml":   callingRule("calls-later", "spec: "+SupportedSpec, `e.command.parsed_commands.exists(c, later_name(c))`),
+		"calls-through.rule.yaml": callingRule("calls-through", "spec: "+SupportedSpec, `e.command.parsed_commands.exists(c, through_later(c))`),
+		"calls-current.rule.yaml": callingRule("calls-current", "spec: "+SupportedSpec, `e.command.parsed_commands.exists(c, current_name(c))`),
+	})
+	pack, err := LoadPackDir(dir)
+	if err != nil {
+		t.Fatalf("LoadPackDir: %v", err)
+	}
+	rules, skipped := pack.Rules, pack.Skipped
+	if got := ruleIDs(rules); len(got) != 1 || got[0] != "calls-current" {
+		t.Errorf("loaded %v, want calls-current alone", got)
+	}
+	var got []string
+	for _, s := range skipped {
+		got = append(got, filepath.Base(s.Path)+" "+s.Err.Required)
+	}
+	if want := "later.predicates.yaml threat-rules/v2.9, calls-later.rule.yaml threat-rules/v2.9, calls-through.rule.yaml threat-rules/v2.9"; strings.Join(got, ", ") != want {
+		t.Errorf("skipped %q, want %q", strings.Join(got, ", "), want)
+	}
+	if !strings.Contains(filepath.ToSlash(skipped[0].String()), "concepts/later.predicates.yaml: the definitions (library later) require threat-rules/v2.9") {
+		t.Errorf("the skipped definitions are not told as definitions: %s", skipped[0])
+	}
+	for _, s := range skipped[1:] {
+		if msg := s.String(); !strings.Contains(msg, "later_name") || !strings.Contains(msg, "later.predicates.yaml") {
+			t.Errorf("the skip does not say which predicate needs the newer spec: %s", msg)
+		}
+	}
+	if _, err := LoadDir(dir); err == nil || !strings.Contains(err.Error(), "upgrade Beacon") {
+		t.Errorf("strict LoadDir: want the unsupported-spec error, got %v", err)
+	}
+}
+
+// No definitions make no library, and a rule is then compiled as it always was. A catalog that
+// provides no predicate is still a pack's definitions: its library has the catalog, and Check
+// holds it to its examples.
+func TestNoDefinitionsIsNoLibrary(t *testing.T) {
+	lib, _, err := NewLibrary(nil)
 	if err != nil || lib != nil {
 		t.Fatalf("NewLibrary = %v, %v; want no library", lib, err)
 	}
-	if lib.Predicates() != nil || lib.Check() != nil {
-		t.Error("no library has predicates or fixtures")
+	if lib.Predicates() != nil || lib.Check() != nil || lib.Catalogs() != nil {
+		t.Error("no library has predicates, catalogs or fixtures")
+	}
+	if err := libraryRule(t, lib, "", `e.event.action == "file.read"`).Validate(); err != nil {
+		t.Error(err)
+	}
+
+	withoutPredicates := strings.Replace(testCatalog, "predicates: {path: credential_path, command: credential_command}\n", "", 1)
+	lib = testLibrary(t, DefinitionFile{Name: "c.catalog.yaml", Data: []byte(withoutPredicates)})
+	if len(lib.Predicates()) != 0 || len(lib.Catalogs()) != 1 {
+		t.Errorf("a catalog without predicates: %d predicates, %d catalogs; want none and one", len(lib.Predicates()), len(lib.Catalogs()))
+	}
+	if results := lib.Check(); len(results) != 1 || !results[0].Catalog || !results[0].OK() {
+		t.Errorf("Check = %v, want the catalog's examples, held", results)
+	}
+	broken := testLibrary(t, DefinitionFile{Name: "c.catalog.yaml", Data: []byte(strings.Replace(withoutPredicates, `examples: ["/home/u/.aws/credentials"]`, `examples: ["/home/u/.aws/config"]`, 1))})
+	if results := broken.Check(); len(results) != 1 || results[0].OK() {
+		t.Errorf("Check of a catalog without predicates whose example fails = %v, want its failure", results)
 	}
 	if err := libraryRule(t, lib, "", `e.event.action == "file.read"`).Validate(); err != nil {
 		t.Error(err)
 	}
 }
 
-// Check is the conformance run of a pack's definitions: every definition's fixtures and every
-// catalog's examples. What is wrong there is reported, fixture by fixture, and is not a reason
-// the pack does not load.
+// Check is the conformance run of a pack's definitions: each catalog's examples, once, and every
+// definition's fixtures. What is wrong there is reported, catalog by catalog and fixture by
+// fixture, and is not a reason the pack does not load.
 func TestLibraryCheckRunsTheDefinitionsFixtures(t *testing.T) {
 	results := testLibrary(t).Check()
 	var names []string
 	for _, res := range results {
-		names = append(names, res.RuleID+"/"+res.Fixture)
+		names = append(names, res.String())
 		if !res.OK() {
 			t.Errorf("%s", res)
 		}
 	}
-	if got, want := strings.Join(names, ", "), "command_reads_credential/cat, command_reads_credential/ls, credential_command/catalog examples, "+
-		"credential_path/catalog examples, credential_read/file, credential_read/token, credential_read/readme"; got != want {
-		t.Errorf("fixtures run: %s; want %s", got, want)
+	if got, want := strings.Join(names, ", "), "catalog credential-stores (c.catalog.yaml), "+
+		"predicate command_reads_credential/cat: expected match, got match, predicate command_reads_credential/ls: expected no_match, got no_match, "+
+		"predicate credential_read/file: expected match, got match, predicate credential_read/token: expected match, got match, "+
+		"predicate credential_read/readme: expected no_match, got no_match"; got != want {
+		t.Errorf("checks run: %s; want %s", got, want)
 	}
 
 	failures := func(lib *Library) []string {
@@ -527,18 +615,15 @@ func TestLibraryCheckRunsTheDefinitionsFixtures(t *testing.T) {
 		want  []string
 	}{
 		"a fixture whose verdict is wrong": {
-			[]DefinitionFile{{"c.catalog.yaml", []byte(testCatalog)}, {"p.predicates.yaml", []byte(strings.Replace(testPredicates, "      - name: readme\n        verdict: no_match", "      - name: readme\n        verdict: match", 1))}},
-			[]string{"credential_read/readme: expected match, got no_match"}},
-		"a catalog whose example fails, under each predicate it provides": {
-			[]DefinitionFile{{"c.catalog.yaml", []byte(strings.Replace(testCatalog, `examples: ["/home/u/.aws/credentials"]`, `examples: ["/home/u/.aws/config"]`, 1))}},
-			[]string{
-				`credential_command/catalog examples: error: store aws: example "/home/u/.aws/config": not matched`,
-				`credential_path/catalog examples: error: store aws: example "/home/u/.aws/config": not matched`,
-			}},
+			[]DefinitionFile{{Name: "c.catalog.yaml", Data: []byte(testCatalog)}, {Name: "p.predicates.yaml", Data: []byte(strings.Replace(testPredicates, "      - name: readme\n        verdict: no_match", "      - name: readme\n        verdict: match", 1))}},
+			[]string{"predicate credential_read/readme: expected match, got no_match"}},
+		"a catalog whose example fails, once": {
+			[]DefinitionFile{{Name: "c.catalog.yaml", Data: []byte(strings.Replace(testCatalog, `examples: ["/home/u/.aws/credentials"]`, `examples: ["/home/u/.aws/config"]`, 1))}},
+			[]string{`catalog credential-stores (c.catalog.yaml): store aws: example "/home/u/.aws/config": not matched`}},
 		"a body the event schema does not type": {
-			[]DefinitionFile{{"p.predicates.yaml", []byte(definitions(definition("named", "c", `c.nam == "x"`, `e.command.parsed_commands.exists(c, named(c))`)))}},
+			[]DefinitionFile{{Name: "p.predicates.yaml", Data: []byte(definitions(definition("named", "c", `c.nam == "x"`, `e.command.parsed_commands.exists(c, named(c))`)))}},
 			// Reported where the predicate is called: at its opening parenthesis.
-			[]string{"named/t: error: compile match: ERROR: <input>:1:42: undefined field 'nam'\n | e.command.parsed_commands.exists(c, named(c))\n | .........................................^"}},
+			[]string{"predicate named/t: error: compile match: ERROR: <input>:1:42: undefined field 'nam'\n | e.command.parsed_commands.exists(c, named(c))\n | .........................................^"}},
 	} {
 		got := failures(testLibrary(t, tc.files...))
 		if len(got) != len(tc.want) {
@@ -554,8 +639,9 @@ func TestLibraryCheckRunsTheDefinitionsFixtures(t *testing.T) {
 }
 
 // A pack's directory is loaded with its definitions, wherever under it they are, and each rule
-// compiles against them. A rule file loaded on its own has none.
-func TestLoadDirLoadsThePacksDefinitions(t *testing.T) {
+// compiles against them. A rule file loaded on its own has none. A file macOS writes beside a
+// pack file it copies (._name, __MACOSX/) is no pack file.
+func TestLoadPackDirLoadsThePacksDefinitions(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) string {
 		t.Helper()
@@ -572,12 +658,14 @@ func TestLoadDirLoadsThePacksDefinitions(t *testing.T) {
 	write("concepts/credentials.predicates.yaml", testPredicates)
 	rulePath := write("credential-access/read.rule.yaml", strings.Replace(specRule("read", "spec: "+SupportedSpec, ""), `match: 'e.event.action == "file.read"'`, `match: 'credential_read(e)'`, 1))
 	write("plain.rule.yaml", specRule("plain", "", ""))
+	write("._plain.rule.yaml", "\x00\x05\x16\x07 not YAML")
+	write("__MACOSX/concepts/._credentials.predicates.yaml", "\x00\x05\x16\x07 not YAML")
 
-	rules, skipped, err := LoadDirSkipping(dir)
-	if err != nil || len(skipped) != 0 || len(rules) != 2 {
-		t.Fatalf("LoadDirSkipping = %d rules, skipped %v, %v", len(rules), skipped, err)
+	pack, err := LoadPackDir(dir)
+	if err != nil || len(pack.Skipped) != 0 || len(pack.Rules) != 2 {
+		t.Fatalf("LoadPackDir = %+v, %v", pack, err)
 	}
-	for _, rule := range rules {
+	for _, rule := range pack.Rules {
 		if _, err := CheckRule(rule); err != nil {
 			t.Errorf("%s: %v", rule.ID, err)
 		}
@@ -599,7 +687,7 @@ func TestLoadDirLoadsThePacksDefinitions(t *testing.T) {
 
 	// Definitions that do not load fail the directory, naming the file.
 	write("concepts/broken.predicates.yaml", "library: broken\nversion: 1\n")
-	if _, _, err := LoadDirSkipping(dir); err == nil || !strings.Contains(err.Error(), "broken.predicates.yaml: no definitions") {
+	if _, err := LoadPackDir(dir); err == nil || !strings.Contains(err.Error(), "broken.predicates.yaml: no definitions") {
 		t.Errorf("a directory with broken definitions: got %v", err)
 	}
 }

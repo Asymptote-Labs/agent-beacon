@@ -4,6 +4,8 @@ package service
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"golang.org/x/sys/windows"
@@ -78,6 +80,30 @@ func pidAlive(pid int) bool {
 	return code == stillActive
 }
 
-// pidRunsProgram reports true: the pid-recycling check reads procfs, which Windows does not have.
-// pidAlive is the only test here, as it was before the check existed.
-func pidRunsProgram(pid int, program string) bool { return true }
+// pidRunsProgram reports whether pid's image is program, so a pid Windows has handed to another
+// process since (after a reboot or sign-out it often has) is never reported running, and never
+// stopped. A pid whose image cannot be read is not ours to stop: a supervised collector or
+// forwarder runs as this user, whose own processes can always be queried.
+func pidRunsProgram(pid int, program string) bool {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	size := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err != nil {
+		return false
+	}
+	return sameWindowsPath(windows.UTF16ToString(buf[:size]), program)
+}
+
+// sameWindowsPath compares two paths as Windows does: case-insensitively, after cleaning, and
+// through any link in program's path (the image name is the resolved one).
+func sameWindowsPath(image, program string) bool {
+	if strings.EqualFold(filepath.Clean(image), filepath.Clean(program)) {
+		return true
+	}
+	resolved, err := filepath.EvalSymlinks(program)
+	return err == nil && strings.EqualFold(filepath.Clean(image), filepath.Clean(resolved))
+}

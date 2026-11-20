@@ -1,5 +1,5 @@
 id: telemetry-or-history-tampering
-spec: threat-rules/v1.3  # needed for args, file_writes and predicates
+spec: threat-rules/v2.0  # needed for args, file_writes and predicates
 version: 7
 title: Beacon telemetry or shell history disabled or removed
 description: >

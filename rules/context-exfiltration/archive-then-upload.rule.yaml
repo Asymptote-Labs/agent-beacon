@@ -1,5 +1,5 @@
 id: archive-then-upload
-spec: threat-rules/v1.3  # needed for predicates
+spec: threat-rules/v2.0  # needed for predicates
 version: 6
 title: Archive piped to a network upload (archive-then-egress)
 description: >

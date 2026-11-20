@@ -123,12 +123,8 @@ func runStubBinary(_ context.Context, name string, _ ...string) (string, error) 
 // A successful update installs the new binary, records the checks the artifact passed in the system
 // log, and leaves no large staging material or stale failure diagnostic behind.
 func TestApplyHappyPath(t *testing.T) {
-	// The Windows apply path is a different flow entirely (msiexec plus an Authenticode check,
-	// rather than a tarball into an install prefix), which does not exist yet. Skipped rather than
-	// adapted so the skip disappears when that flow lands instead of hiding it.
-	if runtime.GOOS == "windows" {
-		t.Skip("the POSIX apply flow stages an executable shell stub; the Windows flow is not implemented yet")
-	}
+	// The tarball seam runs on every OS: runStubBinary reads the installed stub rather than running
+	// it. The Windows MSI flow has its own tests (msi_test.go).
 	artifact, sha := makeBeaconTarball(t, "9.9.9")
 	srv := manifestServer(t, "9.9.9", sha, artifact)
 	defer srv.Close()

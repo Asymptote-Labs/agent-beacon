@@ -19,7 +19,7 @@
 # this file, since curl-pipe-to-shell calls it.
 library: dangerous-commands
 version: 7
-spec: threat-rules/v1.3
+spec: threat-rules/v2.0
 description: A command that destroys data or hands over the machine in one step, and its parts.
 
 definitions:

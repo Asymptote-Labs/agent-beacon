@@ -30,6 +30,11 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
+// packageUpgradeEnv set to 1 says this uninstall is the first half of a package upgrade: the
+// Windows MSI's uninstall script sets it when Windows Installer removes the old product to install
+// the new one ([UPGRADINGPRODUCTCODE]), and not for a removal.
+const packageUpgradeEnv = "BEACON_PACKAGE_UPGRADE"
+
 var (
 	writeCollectorConfig = endpointcollector.WriteConfig
 	// collectorReadyTimeout is how long Install waits for a started collector to answer on all of
@@ -67,9 +72,17 @@ var (
 	// restarts a running forwarder, as the Sentinel one below does: an install or repair may have
 	// replaced the log with a copy (switching to restricted log access does), which Vector only
 	// notices when it restarts, and a package upgrade may have installed a new Vector.
-	reconcileManagedForwarder = func(userMode bool, logPath string) (asymptote.ReconcileResult, error) {
-		return asymptote.ReconcileForwarder(asymptote.ReconcileOptions{UserMode: userMode, LogPath: logPath, Restart: true})
+	// start false (Windows system installs only, see Install) registers a service the MSI's
+	// uninstall step removed without starting it, and restarts nothing.
+	reconcileManagedForwarder = func(userMode bool, logPath string, start bool) (asymptote.ReconcileResult, error) {
+		return asymptote.ReconcileForwarder(asymptote.ReconcileOptions{UserMode: userMode, LogPath: logPath, Restart: start, NoStart: !start})
 	}
+	// managedForwarderKeptByPackageUninstall says a system `endpoint uninstall --keep-config` that is
+	// the first half of a package upgrade (packageUpgradeEnv) keeps the Beacon Cloud connection and
+	// removes only its service. On Windows, where the MSI runs that command at the start of every
+	// upgrade to free vector.exe; elsewhere the package upgrade never uninstalls. Any other
+	// uninstall, a removal of the MSI included, keeps only the credentials, as it always has.
+	managedForwarderKeptByPackageUninstall = runtime.GOOS == "windows"
 	// reconcileSentinelForwarder and removeSentinelForwarder are the seams for the managed Sentinel
 	// forwarder. Install always restarts it: an install or repair may have replaced the log with a
 	// copy (switching log access does), which Vector only notices when it restarts.
@@ -863,10 +876,12 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	// place and without re-enrolling. After everything else, so it can never be the reason an
 	// install rolls back; and only when services are started, since it may restart the forwarder
 	// (the macOS package installs with --no-start and runs `beacon endpoint asymptote reconcile`
-	// itself once the collector is back).
+	// itself once the collector is back). A Windows system install runs it without StartService too,
+	// as the Sentinel one below does: an MSI upgrade can be told not to start services, and its
+	// uninstall step removed the registration, which only this puts back, registered and stopped.
 	var managedForwarder *asymptote.ReconcileResult
-	if opts.StartService {
-		reconciled, err := reconcileManagedForwarder(cfg.UserMode, cfg.LogPath)
+	if opts.StartService || (managedForwarderKeptByPackageUninstall && !cfg.UserMode) {
+		reconciled, err := reconcileManagedForwarder(cfg.UserMode, cfg.LogPath, opts.StartService)
 		if err != nil && reconciled.Warning == "" {
 			reconciled.Warning = err.Error()
 		}
@@ -958,12 +973,15 @@ func Uninstall(opts UninstallOptions) error {
 		fail("remove the Sentinel forwarder", removeSentinelForwarder(opts.KeepConfig))
 	}
 	// The managed-ingest forwarder and its credentials go with the endpoint; server-side the
-	// device stays registered until it is revoked from the dashboard. Repair keeps all of it.
+	// device stays registered until it is revoked from the dashboard. Repair keeps all of it. On
+	// Windows a system uninstall that keeps config (the MSI's, on every upgrade) removes only the
+	// service, so vector.exe can be replaced and the install that follows resumes the connection.
 	if !opts.KeepManagedIngest {
 		fail("disconnect managed ingest", asymptote.Disconnect(asymptote.DisconnectOptions{
-			UserMode:        cfg.UserMode,
-			LogPath:         cfg.LogPath,
-			KeepCredentials: opts.KeepConfig,
+			UserMode:           cfg.UserMode,
+			LogPath:            cfg.LogPath,
+			KeepCredentials:    opts.KeepConfig,
+			KeepForwarderState: opts.KeepConfig && !cfg.UserMode && managedForwarderKeptByPackageUninstall && os.Getenv(packageUpgradeEnv) == "1",
 		}))
 	}
 	manifest, _ := ReadManifest(cfg.UserMode)

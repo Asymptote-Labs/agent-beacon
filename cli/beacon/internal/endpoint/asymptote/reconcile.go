@@ -25,6 +25,10 @@ type ReconcileOptions struct {
 	// first line, keeps reading the replaced file until it restarts. After a restart it resumes in
 	// the copy where it left off. A stopped forwarder is still never started.
 	Restart bool
+	// NoStart registers a Windows service the MSI's uninstall step removed without starting it, for
+	// an install told not to start services, and restarts nothing. Only that case reaches a
+	// reconcile without services started; launchd and systemd installs do not call it then.
+	NoStart bool
 }
 
 // ReconcileResult reports what ReconcileForwarder did.
@@ -43,6 +47,9 @@ type ReconcileResult struct {
 	// Restarted is true when the forwarder was restarted, to load an updated config or unit or
 	// because the caller asked for a restart.
 	Restarted bool `json:"restarted,omitempty"`
+	// Reregistered is true when a Windows service the package upgrade removed was registered again.
+	// Restarted then says it was also started.
+	Reregistered bool `json:"reregistered,omitempty"`
 	// Warning explains a refused check/update or a failed restart. Updated and UnitUpdated
 	// report any changes already written; a warning does not imply those were rolled back.
 	Warning string `json:"warning,omitempty"`
@@ -53,6 +60,10 @@ func (r ReconcileResult) Message() string {
 	switch {
 	case r.Warning != "":
 		return "Beacon Cloud forwarder: " + r.Warning
+	case r.Reregistered && r.Restarted:
+		return "Beacon Cloud forwarder service registered again and started."
+	case r.Reregistered:
+		return "Beacon Cloud forwarder service registered again; it starts when services are next started."
 	case r.UnitUpdated:
 		what := "service unit"
 		if r.Updated {
@@ -90,6 +101,10 @@ func (r ReconcileResult) Message() string {
 // changed, or always when opts.Restart is set. A config Vector rejects is reported as a warning and
 // the running forwarder keeps the old one.
 //
+// On Windows it also registers a missing service again and starts it (unless opts.NoStart): the
+// MSI's uninstall step removes the service on every upgrade so vector.exe can be replaced, and keeps
+// the rest of the connection for this install to resume. That is the one case it starts a forwarder.
+//
 // The returned error is reserved for a failure that leaves something to fix by hand (the
 // validated config could not be written); every reason to leave a working forwarder alone is a
 // Skipped or Warning result.
@@ -109,16 +124,39 @@ func ReconcileForwarder(opts ReconcileOptions) (ReconcileResult, error) {
 		result.Skipped = manager.UnsupportedReason()
 		return result, nil
 	}
-	if unitPath, err := manager.UnitPath(); err != nil || unitPath == "" {
+	installed, unitPath := unitInstalled(manager)
+	if !installed && !restoresRegistration(manager) {
 		result.Skipped = "forwarder service is not installed"
-		return result, nil
-	} else if _, err := os.Stat(unitPath); err != nil {
-		result.Skipped = "forwarder service is not installed (" + unitPath + ")"
+		if unitPath != "" {
+			result.Skipped += " (" + unitPath + ")"
+		}
 		return result, nil
 	}
-	result, err := reconcileFiles(opts, manager)
+	result, err := reconcileFiles(opts, manager, !installed)
 	if err != nil {
 		return result, err
+	}
+	if !installed {
+		// The Windows package's uninstall step removed the service so vector.exe could be replaced,
+		// and kept everything else; this install puts it back and starts it where it left off. It
+		// was running before the upgrade as far as anything here can tell, which is why this is the
+		// one case a reconcile starts a forwarder.
+		if result.Warning != "" || !result.UnitUpdated {
+			return result, nil
+		}
+		result.Reregistered = true
+		if opts.NoStart {
+			return result, nil
+		}
+		if err := manager.Load(); err != nil {
+			result.Warning = fmt.Sprintf("forwarder service registered again but it could not be started: %v", err)
+			return result, nil
+		}
+		result.Restarted = true
+		return result, nil
+	}
+	if opts.NoStart {
+		return result, nil
 	}
 	// A warning means something was kept or is missing (the new config was refused, the Vector or
 	// the unit is unusable), and a restart could stop a forwarder that is still running fine, so it
@@ -130,8 +168,11 @@ func ReconcileForwarder(opts ReconcileOptions) (ReconcileResult, error) {
 	}
 	// Restart only a forwarder that is running, so reconcile never starts one an operator stopped.
 	// Loaded is not enough: on systemd an enabled unit that was stopped still reports Loaded. A
-	// forwarder that is not running reads the new config when it is next started.
-	if !manager.Status().Running {
+	// forwarder that is not running reads the new config when it is next started. The exception is
+	// the supervised user-mode forwarder on Windows, which nothing stops on purpose but disconnect:
+	// one that is not running was ended by a sign-out or a crash, and install and repair restart it
+	// as they restart the collector beside it.
+	if !manager.Status().Running && !(opts.Restart && startsWhenStopped(manager)) {
 		return result, nil
 	}
 	if err := manager.Load(); err != nil {
@@ -152,7 +193,7 @@ func ReconcileForwarder(opts ReconcileOptions) (ReconcileResult, error) {
 // reconcileFiles is ReconcileForwarder's config and unit half: it brings vector.toml and the
 // service unit up to date for an installed forwarder and reports what it did, and never restarts
 // anything.
-func reconcileFiles(opts ReconcileOptions, manager Forwarder) (ReconcileResult, error) {
+func reconcileFiles(opts ReconcileOptions, manager Forwarder, unitMissing bool) (ReconcileResult, error) {
 	var result ReconcileResult
 	configPath := VectorConfigPath(opts.UserMode)
 	result.VectorConfig = configPath
@@ -222,10 +263,14 @@ func reconcileFiles(opts ReconcileOptions, manager Forwarder) (ReconcileResult, 
 		return result, nil
 	}
 	configCurrent := bytes.Equal(current, []byte(rendered))
-	unitCurrent, err := manager.UnitCurrent(vector.Path, configPath)
-	if err != nil {
-		result.Warning = fmt.Sprintf("kept the existing config and service unit: could not read the forwarder service unit: %v", err)
-		return result, nil
+	// A missing registration is not current, and asking the SCM about it would only fail.
+	unitCurrent := false
+	if !unitMissing {
+		unitCurrent, err = manager.UnitCurrent(vector.Path, configPath)
+		if err != nil {
+			result.Warning = fmt.Sprintf("kept the existing config and service unit: could not read the forwarder service unit: %v", err)
+			return result, nil
+		}
 	}
 	if configCurrent && unitCurrent {
 		result.Unchanged = true
@@ -237,6 +282,14 @@ func reconcileFiles(opts ReconcileOptions, manager Forwarder) (ReconcileResult, 
 			}
 		}
 		return result, nil
+	}
+	if unitMissing && configCurrent {
+		// Registering the service again starts this config in the Vector the upgrade installed, so
+		// that Vector must accept it first, as a restart's must.
+		if err := ValidateVectorConfig(vector.Path, configPath); err != nil {
+			result.Warning = fmt.Sprintf("did not register the forwarder service again because its Vector rejects the current config; run `beacon endpoint connect`: %v", err)
+			return result, nil
+		}
 	}
 	if !configCurrent {
 		// Creating a missing data directory loses no existing checkpoints.

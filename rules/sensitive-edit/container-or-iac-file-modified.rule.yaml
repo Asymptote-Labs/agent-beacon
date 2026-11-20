@@ -1,5 +1,5 @@
 id: container-or-iac-file-modified
-spec: threat-rules/v1.3  # needed for file_writes and predicates
+spec: threat-rules/v2.0  # needed for file_writes and predicates
 version: 5
 title: Container or IaC file modified (Dockerfile / compose / Terraform / K8s / Helm)
 description: >

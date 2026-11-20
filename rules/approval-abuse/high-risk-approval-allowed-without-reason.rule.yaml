@@ -1,5 +1,5 @@
 id: high-risk-approval-allowed-without-reason
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 6
 title: High-risk action approved with an empty approval reason
 description: >

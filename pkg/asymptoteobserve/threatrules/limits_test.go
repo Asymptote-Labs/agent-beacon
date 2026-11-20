@@ -274,11 +274,7 @@ func manyAnchors(n int) []asymptoteobserve.Event {
 // loadPackRule loads one rule file of the corpus with the definitions the corpus ships.
 func loadPackRule(t *testing.T, path string) *Rule {
 	t.Helper()
-	lib, _, err := LoadLibraryDir(rulesDir(t))
-	if err != nil {
-		t.Fatalf("load the corpus definitions: %v", err)
-	}
-	rule, err := lib.LoadRule(path)
+	rule, err := corpusPack(t).Library.LoadRule(path)
 	if err != nil {
 		t.Fatalf("load %s: %v", path, err)
 	}

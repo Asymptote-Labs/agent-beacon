@@ -147,10 +147,11 @@ text names: a command line that does not parse, a prompt handed to another progr
 is named by the characters a name is written with, a word that is also a file name
 (`credentials`) counts only after a directory, and a store that excludes some names is not
 named by a text that also holds one of those. And the commands as a log holds them when
-redaction took the command's name: `curl -u "ci:$(gh auth token)"` is logged as
-`curl -u "ci:[REDACTED] auth token)"`, and an older log holds `TOKEN=[REDACTED] auth token)`
-for `TOKEN=$(gh auth token)`. A command told only by its name, by one plain word or by
-one-letter options has no such form.
+redaction took the command's name. A substitution that opens with an assignment still loses
+it: `TOKEN=$(GH_TOKEN=$(gh auth token) ./x)` is logged as `TOKEN=[REDACTED] auth token) ./x)`.
+Logs of older releases lost it after every secret's label: `curl -u "ci:[REDACTED] auth token)"`
+for `curl -u "ci:$(gh auth token)"`, `TOKEN=[REDACTED] auth token)` for `TOKEN=$(gh auth token)`.
+A command told only by its name, by one plain word or by one-letter options has no such form.
 
 A rule of a pack that ships this catalog calls it by name instead of carrying the
 expressions:
@@ -164,7 +165,7 @@ expressions:
 - `credential_mention(s)` is true for a text that names a store of files, of either tier. `credential_mention(s, "definite")` takes the
   definite stores only, and kinds after the tier take those kinds only:
   `credential_mention(s, "likely", "cloud")`.
-- `credential_command_redacted(s)` is true for a command line in which redaction took the name of a command that reads a store of commands, of either tier. `credential_command_redacted(s, "definite")` takes the
+- `credential_command_redacted(s)` is true for a command line in which redaction took the name of a command that reads a store of commands, as a log of an older release holds it, or any log where the substitution opens with an assignment, of either tier. `credential_command_redacted(s, "definite")` takes the
   definite stores only, and kinds after the tier take those kinds only:
   `credential_command_redacted(s, "likely", "cloud")`.
 

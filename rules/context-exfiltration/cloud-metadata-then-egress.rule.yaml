@@ -1,5 +1,5 @@
 id: cloud-metadata-then-egress
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 4
 title: Cloud metadata access followed by outbound network egress
 description: >

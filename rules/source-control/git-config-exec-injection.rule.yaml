@@ -1,5 +1,5 @@
 id: git-config-exec-injection
-spec: threat-rules/v1.3  # needed for args and predicates
+spec: threat-rules/v2.0  # needed for args and predicates
 version: 6
 title: Git config sets a code-execution directive
 description: >

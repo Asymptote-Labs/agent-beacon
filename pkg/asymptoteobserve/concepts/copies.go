@@ -74,7 +74,7 @@ func plainExpression(expression string) string {
 	return strings.ToLower(text)
 }
 
-// nameStores gives each store the names that are its alone. A name that is one plain word
+// nameStores gives each store the names that are its alone. A name that is one word of letters
 // ("credentials", "token") is no name: prose and other rules say it for other reasons. Nor is a
 // word with the "." that an extension follows ("credentials."), unless it is a dot file's
 // (".env.").
@@ -91,11 +91,10 @@ func (c *Catalog) nameStores() {
 			names = append(names, commandNames(&s.commands[k])...)
 		}
 		names = slices.DeleteFunc(names, func(name string) bool {
-			word := name
 			if !strings.HasPrefix(name, ".") {
-				word = strings.TrimSuffix(name, ".")
+				name = strings.TrimSuffix(name, ".")
 			}
-			return !strings.ContainsFunc(word, func(r rune) bool { return r < 'a' || r > 'z' })
+			return lowerLetters(name)
 		})
 		slices.Sort(names)
 		candidates[i] = slices.Compact(names)
@@ -106,6 +105,12 @@ func (c *Catalog) nameStores() {
 	for i := range c.Stores {
 		c.Stores[i].names = slices.DeleteFunc(candidates[i], func(name string) bool { return owners[name] > 1 })
 	}
+}
+
+// lowerLetters reports whether a name, which a namer writes in lower case, is letters a to z
+// only.
+func lowerLetters(name string) bool {
+	return !strings.ContainsFunc(name, func(r rune) bool { return r < 'a' || r > 'z' })
 }
 
 // namer collects the literal runs of a pattern: what it writes out between what varies.
@@ -202,9 +207,9 @@ func pathNames(pattern *pattern) []string {
 
 // commandNames returns the names a command match goes by: the command with the words after
 // it ("gh auth token"), an option written in full ("--export-secret-k"), and the command alone
-// when it is told by nothing else or is not a plain word ("secret-tool"). A command that is a
-// plain word and takes words is not named by itself: "security" and "gcloud" run much that
-// reads no credential.
+// when it is told by nothing else or is more than letters and digits ("secret-tool"). An
+// alphanumeric command that takes words is not named by itself: "security" and "gcloud" run
+// much that reads no credential.
 func commandNames(match *commandPattern) []string {
 	var alone namer
 	alone.items(match.name)
@@ -226,7 +231,7 @@ func commandNames(match *commandPattern) []string {
 		case r.suffix && (strings.HasPrefix(r.text, "-") || strings.HasPrefix(r.text, ".")):
 			// The tail of a word ("-password" of "find-{generic,internet}-password", ".exe") is
 			// many words'.
-		case byName && len(match.words) > 0 && plainWord(match.name):
+		case byName && len(match.words) > 0 && alphanumeric(match.name):
 		default:
 			names = append(names, r.text)
 		}

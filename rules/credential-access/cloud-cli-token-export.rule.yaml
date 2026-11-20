@@ -1,5 +1,5 @@
 id: cloud-cli-token-export
-spec: threat-rules/v1.3  # needed for predicates and args
+spec: threat-rules/v2.0  # needed for predicates and args
 version: 2
 title: Cloud or forge CLI prints a live access token
 description: >

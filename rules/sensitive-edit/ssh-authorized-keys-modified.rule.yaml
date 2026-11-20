@@ -1,5 +1,5 @@
 id: ssh-authorized-keys-modified
-spec: threat-rules/v1.3  # needed for file_writes and predicates
+spec: threat-rules/v2.0  # needed for file_writes and predicates
 version: 5
 title: SSH authorized_keys or sshd_config modified
 description: >
