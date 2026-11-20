@@ -110,7 +110,7 @@ Enterprise.
 A policy is a rule for your coding agents, written in plain language, such as "Agents must not
 post source code to public Slack channels." You write them under **Policies** at
 [beacon.sh/dashboard/policies](https://beacon.sh/dashboard/policies), or start from one of the
-ready-made rules in the **Policy Library**. Beacon checks your agents' prompts and MCP tool calls
+ready-made rules in the [Policy Library](/cloud/policy-library). Beacon checks your agents' prompts and MCP tool calls
 against them as they happen. For each policy you choose:
 
 - **Mode.** **Monitor** records a finding and lets everything through, so you can see what a
@@ -122,6 +122,9 @@ against them as they happen. For each policy you choose:
 A policy with neither check on is only checked when Beacon reviews your recorded sessions. Every
 decision becomes a [finding](/cloud/findings). Each steer, ask or block carried out is an
 **enforced action**, which is what the free plan counts.
+
+For a step-by-step setup and how each agent carries out a decision, see
+[Guardrails](/cloud/guardrails).
 
 Policies are on every Beacon Cloud plan:
 
