@@ -70,6 +70,27 @@ function Stop-BeaconServices {
     Stop-BeaconService -Name 'BeaconAsymptoteForwarder' -Executable (Join-Path $InstallRoot 'bin\vector.exe')
 }
 
+# Ends the user-mode collectors and Beacon Cloud forwarders still running the package's own
+# beacon-otelcol.exe or vector.exe. Windows has no per-user service manager, so a user-mode endpoint
+# runs them as plain processes in that person's session, and nothing `endpoint uninstall --system`
+# does reaches them; the package could then neither replace nor remove those files. Only processes
+# whose image is this package's binary are touched, whichever account runs them. They come back at
+# that person's next `beacon endpoint repair` or install, which restarts them.
+function Stop-BeaconUserProcesses {
+    param([string]$InstallRoot)
+    $ErrorActionPreference = 'Continue'
+    foreach ($binary in @('beacon-otelcol.exe', 'vector.exe')) {
+        $image = Join-Path $InstallRoot "bin\$binary"
+        $processName = [System.IO.Path]::GetFileNameWithoutExtension($binary)
+        Get-Process -Name $processName -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and ($_.Path -eq $image) } |
+            ForEach-Object {
+                Write-BeaconPackageLog "terminating $processName process $($_.Id), which runs $image"
+                Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+            }
+    }
+}
+
 function Get-EnvOrDefault {
     param([string]$Name, [string]$Default)
     $value = [Environment]::GetEnvironmentVariable($Name)
@@ -167,6 +188,9 @@ if ($code -eq $script:BeaconTimeoutExitCode) {
     # removal over. A user who cannot uninstall the package has a worse problem than a leftover file.
     Write-BeaconPackageLog "beacon: endpoint uninstall exited $code; check 'beacon endpoint status --system'"
 }
+# After `endpoint uninstall`, which has stopped the services, so what is left running the package's
+# binaries is a user-mode endpoint's.
+Stop-BeaconUserProcesses -InstallRoot $installRoot
 
 if ($null -ne $stash) {
     try {
