@@ -151,15 +151,24 @@ type PackFile struct {
 	Data []byte
 }
 
-// ReadPackFS returns the pack files in fsys, found anywhere under its root, sorted by path.
+// ReadPackFS returns the pack files in fsys, found anywhere under its root but in a hidden
+// folder, sorted by path. A hidden folder holds no part of a pack: a checkout's .git, or the
+// .install-* staging folder an earlier Beacon's interrupted install left in the store, whose
+// copies would load as second rules with the same ids.
 func ReadPackFS(fsys fs.FS) ([]PackFile, error) {
 	var files []PackFile
 	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		if d.IsDir() {
+			if path != "." && strings.HasPrefix(d.Name(), ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
 		kind, ok := PackFileKind(path)
-		if d.IsDir() || !ok {
+		if !ok {
 			return nil
 		}
 		data, err := fs.ReadFile(fsys, path)

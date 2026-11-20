@@ -383,3 +383,93 @@ func TestDefinitionsAreListedAndRemovedOnceNothingCallsThem(t *testing.T) {
 		t.Errorf("the store holds %q, want nothing", got)
 	}
 }
+
+// A hidden folder in the store, such as the staging folder an earlier Beacon's interrupted
+// install left, holds no part of it: its copies of the store's files are not second rules.
+func TestTheStoresHiddenFoldersAreNotRead(t *testing.T) {
+	store := t.TempDir()
+	if _, err := InstallFiles(store, tokenPack(t), false); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{".install-1/token-printed.rule.yaml": tokenRule, ".install-1/tokens.catalog.yaml": tokenCatalog} {
+		path := filepath.Join(store, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if loaded, err := LoadActive(store, ""); err != nil || len(bySource(loaded, SourceStore)) != 1 {
+		t.Errorf("LoadActive = %d store rules, %v; want the one rule", len(bySource(loaded, SourceStore)), err)
+	}
+}
+
+// A definitions file the store cannot load is removed, which is what lets the store load again;
+// one at odds with another over a predicate too, though a rule calls the predicate, since the
+// other still provides it.
+func TestDefinitionsThatDoNotLoadAreRemoved(t *testing.T) {
+	for _, tc := range []struct{ name, file, body string }{
+		{"broken", "broken.catalog.yaml", "catalog: [not a name\n"},
+		{"at odds", "again.predicates.yaml", strings.Replace(tokenPredicates, "library: tokens", "library: again", 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := t.TempDir()
+			if _, err := InstallFiles(store, tokenPack(t), false); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(store, tc.file), []byte(tc.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadActive(store, ""); err == nil {
+				t.Fatal("the store loads with the file; want it not to")
+			}
+			if _, err := Remove(store, tc.file); err != nil {
+				t.Fatalf("Remove(%s) = %v", tc.file, err)
+			}
+			if _, err := LoadActive(store, ""); err != nil {
+				t.Errorf("the store does not load after the removal: %v", err)
+			}
+		})
+	}
+}
+
+// A rule set aside for a newer spec still calls what it calls, and definitions set aside for one
+// still provide what they declare: either keeps the definitions it calls from being removed,
+// which would leave the rule calling a predicate nothing defines once Beacon reads its spec.
+func TestDefinitionsANewerSpecCallsAreNotRemoved(t *testing.T) {
+	newerRule := strings.NewReplacer("id: token-printed", "id: token-later", "spec: "+threatrules.SupportedSpec, "spec: threat-rules/v2.9").Replace(tokenRule)
+	newerPredicates := "spec: threat-rules/v2.9\n" + strings.Replace(tokenPredicates, "library: tokens", "library: later", 1)
+	newerPredicates = strings.ReplaceAll(newerPredicates, "prints_token", "prints_token_later")
+	callsLater := strings.NewReplacer("id: token-printed", "id: token-calls-later", "match: prints_token(e)", "match: prints_token_later(e)").Replace(tokenRule)
+	for _, tc := range []struct {
+		name   string
+		files  map[string]string
+		remove string
+		want   string
+	}{
+		{"a newer rule", map[string]string{"token-later.rule.yaml": newerRule}, "tokens.predicates.yaml", `the rule "token-later" calls prints_token`},
+		{"newer definitions", map[string]string{"later.predicates.yaml": newerPredicates, "token-calls-later.rule.yaml": callsLater}, "later.predicates.yaml", `the rule "token-calls-later" calls prints_token_later`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := t.TempDir()
+			if _, err := InstallFiles(store, tokenPack(t), false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Remove(store, "token-printed"); err != nil {
+				t.Fatal(err)
+			}
+			for name, body := range tc.files {
+				if err := os.WriteFile(filepath.Join(store, name), []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, skipped, err := LoadActiveSkipping(store, ""); err != nil || len(skipped) == 0 {
+				t.Fatalf("LoadActiveSkipping = %d set aside, %v; want the newer file set aside", len(skipped), err)
+			}
+			if _, err := Remove(store, tc.remove); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Remove(%s) = %v, want an error saying %q", tc.remove, err, tc.want)
+			}
+		})
+	}
+}

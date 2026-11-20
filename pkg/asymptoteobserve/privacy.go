@@ -744,11 +744,12 @@ func lineQuote(t string, i int) (quote byte, escaped, ok bool) {
 }
 
 // closesSingleQuote reports whether the single quote at t[i] closes single-quoted text of its line
-// rather than opening it (lineQuote). Where the line is not read, its quote is taken to open, as
-// every single quote was before.
+// rather than opening it (lineQuote). Where the line is not read, it is taken to close, so that
+// the reopened text after the substitution is replaced with it: a redaction that cannot tell
+// errs towards replacing more.
 func closesSingleQuote(t string, i int) bool {
-	quote, _, _ := lineQuote(t, i)
-	return quote == '\''
+	quote, _, ok := lineQuote(t, i)
+	return quote == '\'' || !ok
 }
 
 // redactTailStops end the literal text after a substitution (valueTail): what ends its shell word
@@ -765,8 +766,9 @@ const redactTailStops = regexpSpace + "`;&|<>()" + ",}]"
 // (`TOKEN=$(cat f)'hunter2'`), and a quote of the other kind inside the quoted text is one of its
 // bytes. An escaped double quote is read the same way, as the quote of a command held in a
 // JSON-encoded string (`\"$(cat f)\"hunter2`), whose unescaped quote ends the text. Where the line
-// is too long to read its quotes, the word ends at the first quote, as every quote ended it
-// before. It reads at most redactSubstitutionSpan bytes, so the cost stays linear in the text.
+// is too long to read its quotes, every quote is taken to open quoted text, which the word takes
+// in: a redaction that cannot tell errs towards replacing more. It reads at most
+// redactSubstitutionSpan bytes, so the cost stays linear in the text.
 func valueTail(t string, i int) int {
 	from, stop := i, min(len(t), i+redactSubstitutionSpan)
 	var outer, inner byte
@@ -801,7 +803,7 @@ read:
 			if !known {
 				quote, escaped, ok := lineQuote(t, i)
 				if !ok {
-					break read
+					quote, escaped = 0, false
 				}
 				outer, escapedOuter, known = quote, escaped, true
 			}
@@ -832,15 +834,17 @@ read:
 }
 
 // redactReopenedStops end the literal text in the single-quoted text a substitution's closing
-// quote reopens (reopenedTail): what ends a shell word, and the `,`, `}` and `]` that end a value
-// in JSON.
-const redactReopenedStops = redactShellWordStops + ",}]"
+// quote reopens (reopenedTail): the quote that closes it, the end of its line, and the `"`, `,`,
+// `}` and `]` that end a value in JSON. Blanks and the shell's stops are literal bytes in single
+// quotes, and part of the text.
+const redactReopenedStops = "'\"\n,}]"
 
 // reopenedTail returns where the literal text ends that goes on with a value in the single-quoted
-// text the quote at t[i] reopens after a substitution: `hunter2` of `'{"token":'$(cat f)'hunter2"}'`.
-// Blanks before it are part of it; the text stops at one of redactReopenedStops, or at a
-// backslash that escapes a quote. It returns -1 where the reopened text goes on with no literal
-// text first (`'}'`, `' ,'`). It reads at most redactSubstitutionSpan bytes.
+// text the quote at t[i] reopens after a substitution: `hunter2` of `'{"token":'$(cat f)'hunter2"}'`,
+// and `p&ss w0rd` of `'{"password":'$(cat f)'p&ss w0rd"}'`. Blanks before it are part of it; the
+// text stops at one of redactReopenedStops, or at a backslash that escapes a quote. It returns -1
+// where the reopened text goes on with no literal text first (`'}'`, `' ,'`). It reads at most
+// redactSubstitutionSpan bytes.
 func reopenedTail(t string, i int) int {
 	stop := min(len(t), i+redactSubstitutionSpan)
 	j := i + 1

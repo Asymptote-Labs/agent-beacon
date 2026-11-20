@@ -1214,14 +1214,16 @@ func TestRedactStringKeepsASubstitutionWhereverASecretWouldStand(t *testing.T) {
 		`curl -d '{"token":'$(a)hunter2'}' https://x`:                   `curl -d '{"token":'[REDACTED]'}' https://x`,
 		`curl -d '{"token":'x$(cmd)'}' https://x`:                       `curl -d '{"token":'[REDACTED]'}' https://x`,
 		// Literal text in the reopened quoted text goes on with the value, after blanks too, the
-		// substitution nested or not; the quote stays. Structure after it does not.
-		`curl -d '{"token":'$(cat f)'hunter2"}' https://x`:       `curl -d '{"token":'[REDACTED]'"}' https://x`,
-		`curl -d '{"token":'$(cat $(ls f))'hunter2"}' https://x`: `curl -d '{"token":'[REDACTED]'"}' https://x`,
-		`curl -d '{"token":'$(cat f)' hunter2"}' https://x`:      `curl -d '{"token":'[REDACTED]'"}' https://x`,
-		`curl -d '{"token":'$(cat f)'hunter2' https://x`:         `curl -d '{"token":'[REDACTED]'' https://x`,
-		`curl -d '{"token":'$(cat f)' }' https://x`:              `curl -d '{"token":'[REDACTED]' }' https://x`,
-		`curl 'https://x/?token='$(cat f)'&user=a'`:              `curl 'https://x/?token='[REDACTED]'&user=a'`,
-		`curl 'https://x/?token='$(cat f)'hunter2&user=a'`:       `curl 'https://x/?token='[REDACTED]'&user=a'`,
+		// substitution nested or not, and past what would end a shell word, which is literal in
+		// single quotes; the quote stays. Structure after it does not.
+		`curl -d '{"token":'$(cat f)'hunter2"}' https://x`:         `curl -d '{"token":'[REDACTED]'"}' https://x`,
+		`curl -d '{"token":'$(cat $(ls f))'hunter2"}' https://x`:   `curl -d '{"token":'[REDACTED]'"}' https://x`,
+		`curl -d '{"token":'$(cat f)' hunter2"}' https://x`:        `curl -d '{"token":'[REDACTED]'"}' https://x`,
+		`curl -d '{"token":'$(cat f)'hunter2' https://x`:           `curl -d '{"token":'[REDACTED]'' https://x`,
+		`curl -d '{"token":'$(cat f)' }' https://x`:                `curl -d '{"token":'[REDACTED]' }' https://x`,
+		`curl -d '{"password":'$(cat f)'p&ss hunter2"}' https://x`: `curl -d '{"password":'[REDACTED]'"}' https://x`,
+		`curl 'https://x/?token='$(cat f)'&user=a'`:                `curl 'https://x/?token='[REDACTED]''`,
+		`curl 'https://x/?token='$(cat f)'hunter2&user=a'`:         `curl 'https://x/?token='[REDACTED]''`,
 		`TOKEN='$(cat f)'`:                           `TOKEN='[REDACTED]'`,
 		`curl -d "{\"token\":'$(cat f)'}" https://x`: `curl -d "{\"token\":'[REDACTED]'}" https://x`,
 		// A bare value after a quoted label.
@@ -1240,6 +1242,21 @@ func TestRedactStringKeepsASubstitutionWhereverASecretWouldStand(t *testing.T) {
 		}
 		if again := RedactString(got); again != got {
 			t.Errorf("RedactString(%q) is not stable: %q then %q", input, got, again)
+		}
+	}
+}
+
+// Far into a line, past where its quotes are read, literal text after a substitution is still
+// part of the secret: a redaction that cannot tell how the line is quoted replaces it.
+func TestRedactStringReplacesTextAfterASubstitutionFarIntoALine(t *testing.T) {
+	pad := strings.Repeat("x", 2*redactSubstitutionSpan)
+	for _, input := range []string{
+		`{"command":"` + pad + ` API_KEY=$(cat ~/.key)\"hunter2\""}`,
+		`{"command":"` + pad + ` curl -H \"Authorization: Bearer $(cat ~/.key)\"hunter2"}`,
+		pad + ` curl -d '{"token":'$(cat f)'hunter2"}' https://x`,
+	} {
+		if got := RedactString(input); strings.Contains(got, "hunter2") {
+			t.Errorf("RedactString(…%q) kept a secret: …%q", input[len(pad):], got[min(len(got), len(pad)):])
 		}
 	}
 }

@@ -490,11 +490,27 @@ func removeDefinitions(store string, held storeIndex, name string) (string, erro
 			rest = append(rest, d.file)
 		}
 	}
+	// The predicates the file provides: as it declares them, so that those of a file set aside
+	// for a newer spec count too, and as the library loads them. A name another file declares
+	// as well (two files at odds, which the store does not load) is not the file's alone.
+	provided := map[string]bool{}
+	for _, p := range gone.file.Declares() {
+		provided[p] = true
+	}
+	for _, d := range rest {
+		for _, p := range d.Declares() {
+			delete(provided, p)
+		}
+	}
 	lib, _, err := threatrules.NewLibrary(all)
 	if err != nil {
-		return "", fmt.Errorf("definitions: %w", err)
+		// The store's definitions do not load as they stand. Where they load without this
+		// file, removing it is what mends them: what is left is checked below.
+		if _, _, restErr := threatrules.NewLibrary(rest); restErr != nil {
+			return "", fmt.Errorf("definitions: %w", err)
+		}
+		lib = nil
 	}
-	provided := map[string]bool{}
 	for _, p := range lib.Predicates() {
 		if p.Source == gone.file.Name {
 			provided[p.Name] = true
@@ -506,12 +522,20 @@ func removeDefinitions(store string, held storeIndex, name string) (string, erro
 		if err != nil {
 			return "", err
 		}
-		// Decoded, not validated: a rule set aside for a newer spec still calls what it calls.
-		rule, err := lib.DecodeRule(data)
-		if err != nil {
-			continue // no rule a load would run, now or later
+		// A rule calls a predicate where it names one in a call, decoded or not: one set aside
+		// for a newer spec, or that calls a predicate set aside, still calls what it calls.
+		// Where it decodes, what it calls through other predicates counts too (Calls).
+		var used []string
+		if rule, err := lib.DecodeRule(data); err == nil {
+			used = slices.DeleteFunc(rule.Calls(), func(p string) bool { return !provided[p] })
 		}
-		if used := slices.DeleteFunc(rule.Calls(), func(p string) bool { return !provided[p] }); len(used) > 0 {
+		for p := range provided {
+			if !slices.Contains(used, p) && callsByName(data, p) {
+				used = append(used, p)
+			}
+		}
+		if len(used) > 0 {
+			slices.Sort(used)
 			callers = append(callers, fmt.Sprintf("the rule %q calls %s", id, strings.Join(used, ", ")))
 		}
 	}
@@ -532,6 +556,33 @@ func removeDefinitions(store string, held storeIndex, name string) (string, erro
 		return "", err
 	}
 	return target, nil
+}
+
+// callsByName reports whether the rule file data names the predicate name in a call: name( with
+// no identifier byte or dot before it.
+func callsByName(data []byte, name string) bool {
+	for i := 0; ; {
+		k := bytes.Index(data[i:], []byte(name))
+		if k < 0 {
+			return false
+		}
+		k += i
+		i = k + len(name)
+		if k > 0 && (isIdentByte(data[k-1]) || data[k-1] == '.') {
+			continue
+		}
+		j := i
+		for j < len(data) && (data[j] == ' ' || data[j] == '\t') {
+			j++
+		}
+		if j < len(data) && data[j] == '(' {
+			return true
+		}
+	}
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
 }
 
 // Definitions describes a definitions file the store holds.

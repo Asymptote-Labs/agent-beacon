@@ -40,6 +40,10 @@ func ReadDefinitionFile(name string, data []byte) (DefinitionFile, Head, error) 
 	return DefinitionFile{Name: name, Data: data, head: &head}, head, nil
 }
 
+// Declares returns the names of the predicates the file provides, read as written: those of a
+// file this engine sets aside for a newer spec, or does not load at all, too.
+func (f DefinitionFile) Declares() []string { return declaredPredicates(f.Data) }
+
 // predicatesFile is a *.predicates.yaml document.
 type predicatesFile struct {
 	Name    string `yaml:"library"`
