@@ -1,0 +1,438 @@
+name: Release Gateway
+
+# Publishes beacon-gateway on a pushed `gateway-v*` tag: static Linux and macOS archives with a
+# signed checksums.txt on a GitHub release, and a multi-platform image on GHCR.
+#
+#   1. verify   — the tag is gateway-v<version>, <version> is what the source builds
+#                 (cmd/beacon-gateway/version.go), and the module's checks pass.
+#   2. build    — scripts/release-build.sh (the build CI's gateway job runs on every change), the image
+#                 pushed by version, build-provenance attestations for the archives and the image, and
+#                 a draft release carrying the archives and checksums.txt.
+#   3. smoke    — scripts/image-smoke.sh on the pushed image, by digest, on amd64 and arm64 runners.
+#   4. sign     — the only job that sees the signing key: checks it against the pinned fingerprint and
+#                 signs checksums.txt.
+#   5. publish  — checks the signature against the draft's checksums.txt, attaches it with the public
+#                 key, publishes, and makes sure GitHub's "Latest" release is still the CLI's.
+#
+# Independent of the CLI's `v*` release on purpose, like the extension's `ext-v*`: the gateway
+# versions on its own cadence and shares no assets with the CLI. GitHub tag patterns anchor at the
+# start, so release.yml's `v*` does not match `gateway-v0.2.0`. GoReleaser OSS cannot release a
+# prefixed tag, so this builds with the repository's own script.
+#
+# The signing key lives in the `gateway-release` environment, which admits only `gateway-v*` tags
+# and holds BEACON_LINUX_SIGNING_KEY (and its passphrase, if it has one) and nothing else: the
+# `release` environment's Apple, Homebrew and apt secrets are never reachable from here. The sign
+# job checks out only the fingerprint file and builds nothing; it has a read-only token. Only
+# `publish`, which runs nothing from the repository, edits the release.
+#
+# The release stays a draft until checksums.txt.sig is attached, so it is never visible unsigned.
+# A published release is never rebuilt: `build` refuses one, so a re-run cannot change the bytes or
+# the image tag someone already pulled. Every third-party action is pinned to a full commit SHA.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "gateway-v*"
+
+concurrency:
+  group: release-gateway-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/asymptote-labs/beacon-gateway
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: gateway/go.mod
+          cache: false
+
+      # The guard is on the ref, not the event: dispatching against a tag is how a release is re-run,
+      # and dispatching from a branch is never a release.
+      - name: Resolve and verify the release version
+        id: version
+        working-directory: gateway
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            echo "::error::This workflow must run against a 'gateway-v*' tag; got the $GITHUB_REF_TYPE '$GITHUB_REF_NAME'."
+            exit 1
+          fi
+          case "$GITHUB_REF_NAME" in
+            gateway-v*) ;;
+            *) echo "::error::This workflow must run against a 'gateway-v*' tag; got '$GITHUB_REF_NAME'."; exit 1 ;;
+          esac
+          version="${GITHUB_REF_NAME#gateway-v}"
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$version' is not a semantic version (MAJOR.MINOR.PATCH, optionally -PRERELEASE)."
+            exit 1
+          fi
+          source_version="$(go run ./cmd/beacon-gateway -version | awk '{print $2}')"
+          if [ "$version" != "$source_version" ]; then
+            echo "::error::Tag version ($version) does not match cmd/beacon-gateway/version.go ($source_version). Bump the source, then tag."
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing beacon-gateway $version"
+
+      - name: Vet
+        working-directory: gateway
+        run: go vet ./...
+      - name: Test
+        working-directory: gateway
+        run: go test ./...
+      - name: Test with the race detector
+        working-directory: gateway
+        run: go test -race ./pipeline/... ./events/... ./litellm/... ./envoy/... ./portkey/... ./llm/... ./harness/... ./internal/jsonscan/... ./store/... ./sink/... .
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: gateway/go.mod
+          cache: false
+
+      # Only gh's "release not found" means there is no release: any other failure (a rate limit, a
+      # 5xx, the network) stops the job rather than reading as "none", or a re-run could rebuild a
+      # published release. The function is kept for the draft step, which checks again before it
+      # edits anything.
+      - name: Refuse a published release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/release-state.sh" <<'EOF'
+          # release_state prints none, draft or published for $TAG, and fails on any other answer.
+          release_state() {
+            local out
+            if out="$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq .isDraft 2>&1)"; then
+              case "$out" in
+                true) echo draft ;;
+                false) echo published ;;
+                *) echo "::error::gh release view $TAG answered '$out'" >&2; return 1 ;;
+              esac
+            elif [ "$out" = "release not found" ]; then
+              echo none
+            else
+              echo "::error::gh release view $TAG failed: $out" >&2
+              return 1
+            fi
+          }
+          EOF
+          . "$RUNNER_TEMP/release-state.sh"
+          state="$(release_state)"
+          case "$state" in
+            published)
+              echo "::error title=Already published::$TAG is published. Its archives and image tag may already be in use, so a re-run does not rebuild them; release a new version instead."
+              exit 1 ;;
+            draft) echo "::notice::$TAG is a draft from an earlier run; its files are replaced." ;;
+          esac
+
+      - name: Build the release
+        run: sh gateway/scripts/release-build.sh
+
+      # Every layer and the image's dates are the commit's (SOURCE_DATE_EPOCH, rewrite-timestamp), so
+      # a draft's re-run pushes the same digest. No buildx provenance or SBOM in the index: the GitHub
+      # attestation below is the provenance, and attestation manifests show up as unknown/unknown
+      # platforms in tools that list the index.
+      - name: Build and push the image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx create --use --name gateway-release \
+            --driver-opt image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c >/dev/null
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+          export SOURCE_DATE_EPOCH
+          docker buildx build gateway/dist/image -f gateway/Dockerfile \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION="$VERSION" --build-arg REVISION="$(git rev-parse HEAD)" \
+            --provenance=false --sbom=false \
+            --output "type=image,name=$IMAGE:$VERSION,push=true,rewrite-timestamp=true" \
+            --metadata-file "$RUNNER_TEMP/image.json"
+          digest="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/image.json")"
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "::error::buildx reported no image digest"; exit 1 ;;
+          esac
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Pushed $IMAGE:$VERSION@$digest"
+
+      - name: Attest the archives
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: gateway/dist/*.tar.gz
+      - name: Attest the image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      # --latest=false: GitHub's "Latest" release must stay the CLI's. The self-updater's manifest,
+      # the Linux install.sh one-liner and the update notice all resolve releases/latest, and a
+      # gateway release has none of their assets.
+      - name: Create the draft release
+        shell: bash
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          previous="$(git describe --tags --abbrev=0 --match 'gateway-v[0-9]*' "${TAG}^" 2>/dev/null || true)"
+          fingerprints="$(xargs < cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint)"
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            echo "beacon-gateway $VERSION records the model calls an LLM gateway (LiteLLM, Envoy, Portkey) carries as Beacon events. See https://docs.beacon.sh/runtimes/llm-gateway."
+            echo
+            echo "**Image** (linux/amd64, linux/arm64; distroless, runs as uid 65532):"
+            echo
+            echo '```'
+            echo "$IMAGE:$VERSION"
+            echo "$IMAGE@$DIGEST"
+            echo '```'
+            echo
+            echo "**Archives**: static binaries for Linux and macOS, amd64 and arm64, each with the license, the README and a documented configuration (\`beacon-gateway.example.yaml\`)."
+            echo
+            echo "**Verify** the image and an archive against this repository's build provenance, and \`checksums.txt\` against Beacon's release key. The key file comes from the release, so only its pinned fingerprint (\`$fingerprints\`, as https://docs.beacon.sh/platforms/linux#release-signing publishes) may sign: a key swapped in with the files must not pass."
+            echo
+            sed -e "s|{{IMAGE}}|$IMAGE|g" -e "s|{{DIGEST}}|$DIGEST|g" -e "s|{{REPO}}|$REPO|g" \
+              -e "s|{{VERSION}}|$VERSION|g" -e "s|{{FPRS}}|$fingerprints|g" <<'VERIFY'
+          ```bash
+          gh attestation verify oci://{{IMAGE}}@{{DIGEST}} --repo {{REPO}}
+          gh attestation verify beacon-gateway_{{VERSION}}_linux_amd64.tar.gz --repo {{REPO}}
+          (
+            set -euo pipefail
+            FPRS="{{FPRS}}"
+            H="$(mktemp -d)"
+            gpg --homedir "$H" --batch --import beacon-release-key.gpg
+            gpg --homedir "$H" --export $FPRS > pinned.gpg   # only the pinned keys
+            test -s pinned.gpg
+            gpgv --homedir "$H" --keyring "$PWD/pinned.gpg" --status-fd 1 checksums.txt.sig checksums.txt 2>/dev/null |
+              awk -v fprs="$FPRS" 'BEGIN { n = split(toupper(fprs), f, " "); for (i = 1; i <= n; i++) pinned[f[i]] = 1 }
+                $1 == "[GNUPG:]" && $2 == "VALIDSIG" && (toupper($NF) in pinned) { ok = 1 } END { exit !ok }'
+            sha256sum --check --ignore-missing checksums.txt
+          )
+          ```
+          VERIFY
+            echo
+            if [ -n "$previous" ]; then
+              echo "**Changes** to \`gateway/\` since $previous:"
+              echo
+              git log --no-merges --format='- %s (%h)' "$previous..$TAG" -- gateway/
+            else
+              echo "The first beacon-gateway release."
+            fi
+          } > "$notes"
+
+          prerelease=false
+          case "$VERSION" in *-*) prerelease=true ;; esac
+          # Checked again here: the release may have been published since the guard ran.
+          . "$RUNNER_TEMP/release-state.sh"
+          state="$(release_state)"
+          case "$state" in
+            draft)
+              gh release edit "$TAG" --repo "$REPO" --notes-file "$notes" --prerelease="$prerelease"
+              gh release upload "$TAG" --repo "$REPO" --clobber gateway/dist/*.tar.gz gateway/dist/checksums.txt ;;
+            none)
+              gh release create "$TAG" --repo "$REPO" --draft --verify-tag --latest=false \
+                --prerelease="$prerelease" --title "beacon-gateway $VERSION" --notes-file "$notes" \
+                gateway/dist/*.tar.gz gateway/dist/checksums.txt ;;
+            *)
+              echo "::error title=Already published::$TAG was published while this run built it; its files are left as they are."
+              exit 1 ;;
+          esac
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gateway-checksums
+          path: gateway/dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  # The image as pulled by digest, on each platform's own runner, so arm64 runs its own binary.
+  smoke:
+    needs: [verify, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: gateway/scripts
+          persist-credentials: false
+      # The package is private until it is made public once, so the pull needs the token.
+      - name: Smoke-test the pushed image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          sh gateway/scripts/image-smoke.sh "$REF" "$VERSION"
+
+  # The only job that sees the signing key. It checks out nothing but the pinned fingerprint file,
+  # runs no repository code, and holds a read-only token. A missing or unpinned key fails the
+  # release rather than publishing an unsigned checksums.txt.
+  sign:
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: gateway-release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gateway-checksums
+          path: signed
+
+      - name: Sign checksums.txt
+        working-directory: signed
+        shell: bash
+        env:
+          BEACON_LINUX_SIGNING_KEY: ${{ secrets.BEACON_LINUX_SIGNING_KEY }}
+          BEACON_LINUX_SIGNING_KEY_PASSPHRASE: ${{ secrets.BEACON_LINUX_SIGNING_KEY_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BEACON_LINUX_SIGNING_KEY" ]; then
+            echo "::error title=Signing key missing::The gateway-release environment has no BEACON_LINUX_SIGNING_KEY, so checksums.txt cannot be signed."
+            exit 1
+          fi
+          pinned="$(xargs < "$GITHUB_WORKSPACE/cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint" | tr ' a-f' ',A-F')"
+          if [ -z "$pinned" ]; then
+            echo "::error title=No pinned key::release-key.fingerprint pins no fingerprint."
+            exit 1
+          fi
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 0700 "$GNUPGHOME"
+          key="$RUNNER_TEMP/signing.asc"
+          (umask 077 && printf '%s\n' "$BEACON_LINUX_SIGNING_KEY" > "$key")
+          gpg --batch --import "$key"
+          rm -f "$key"
+          fpr="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print toupper($10); exit }')"
+          if ! printf '%s\n' "$pinned" | tr , '\n' | grep -qxF "$fpr"; then
+            echo "::error title=Signing key not pinned::BEACON_LINUX_SIGNING_KEY is ${fpr}, which release-key.fingerprint (${pinned}) does not list."
+            exit 1
+          fi
+          printf '%s' "$BEACON_LINUX_SIGNING_KEY_PASSPHRASE" |
+            gpg --batch --pinentry-mode loopback --passphrase-fd 0 --local-user "$fpr" \
+              --output checksums.txt.sig --detach-sign checksums.txt
+          gpg --batch --export "$fpr" > beacon-release-key.gpg
+          gpg --batch --armor --export "$fpr" > beacon-release-key.asc
+          gpgv --keyring "$PWD/beacon-release-key.gpg" checksums.txt.sig checksums.txt
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gateway-signature
+          path: |
+            signed/checksums.txt.sig
+            signed/beacon-release-key.gpg
+            signed/beacon-release-key.asc
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [build, sign]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gateway-signature
+
+      # The signature must cover the checksums.txt the draft carries, not only the one handed to
+      # the sign job: verified against the release's own copy before it is published, and again
+      # after, as finalize does for the CLI.
+      - name: Attach the signature and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify_release() {
+            rm -rf published && mkdir published
+            gh release download "$TAG" --repo "$REPO" --dir published --pattern checksums.txt
+            gpgv --keyring "$PWD/beacon-release-key.gpg" checksums.txt.sig published/checksums.txt
+          }
+          verify_release
+          gh release upload "$TAG" --repo "$REPO" --clobber \
+            checksums.txt.sig beacon-release-key.gpg beacon-release-key.asc
+          gh release edit "$TAG" --repo "$REPO" --draft=false --latest=false
+          for attempt in 1 2 3; do
+            if verify_release; then
+              echo "$TAG is published with a checksums.txt its signature covers."
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "::error title=checksums.txt and its signature do not match::$TAG is published with a checksums.txt that checksums.txt.sig does not cover. Re-run this job."
+          exit 1
+
+      # Belt and braces for --latest=false: if "Latest" moved off the CLI anyway, give it back to the
+      # newest stable v* release, which every installer and the self-updater resolve.
+      - name: Keep the CLI's release Latest
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest="$(gh release view --repo "$REPO" --json tagName --jq .tagName 2>/dev/null || true)"
+          case "$latest" in
+            v[0-9]*) echo "Latest is still $latest." ;;
+            *)
+              cli="$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --limit 100 \
+                --json tagName --jq '.[].tagName' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+              if [ -z "$cli" ]; then
+                echo "::error::Latest is '$latest' and no stable v* release was found to give it back to."
+                exit 1
+              fi
+              gh release edit "$cli" --repo "$REPO" --latest
+              echo "::warning title=Latest restored::Latest had moved to '$latest'; it is $cli again." ;;
+          esac

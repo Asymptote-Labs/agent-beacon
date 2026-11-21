@@ -35,7 +35,76 @@ server-sent events.
 
 ## Run it
 
-```bash title="Build and run"
+Each [`gateway-v*` release](https://github.com/asymptote-labs/agent-beacon/releases?q=gateway-v&expanded=true)
+publishes a container image for linux/amd64 and linux/arm64 and static binaries for Linux and
+macOS. Pin a version: the image has no `latest` tag.
+
+```bash title="Container image"
+docker run --rm ghcr.io/asymptote-labs/beacon-gateway:<version> -version
+```
+
+The image is distroless and runs as uid 65532, so it starts under the restricted Pod Security
+profile. Without `-config` it serves the LiteLLM callout on `127.0.0.1:4019`, the admin listener on
+`127.0.0.1:4029`, and writes `gateway-events.jsonl` in its working directory, `/home/nonroot`.
+Both listeners are on the container's loopback, which is where a sidecar's gateway reaches them; a
+published port (`docker run -p`) or a gateway in another container cannot. For those, mount a
+configuration whose adapter listens on `0.0.0.0`, on a network you trust: the callout answers any
+caller, so anything that can reach it can write events. As a sidecar beside LiteLLM in
+Kubernetes, with the configuration in a ConfigMap and events written to a volume a log shipper
+reads:
+
+```yaml title="Sidecar"
+containers:
+  - name: litellm
+    # ...your LiteLLM container, with the guardrails' api_base set to http://127.0.0.1:4019
+  - name: beacon-gateway
+    image: ghcr.io/asymptote-labs/beacon-gateway:<version>
+    args: ["-config", "/etc/beacon-gateway/beacon-gateway.yaml"]
+    securityContext:   # meets the restricted Pod Security profile
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true      # outputs go to the volume below
+      capabilities: { drop: [ALL] }
+      seccompProfile: { type: RuntimeDefault }
+    resources:
+      requests: { cpu: 250m, memory: 128Mi }
+      limits: { memory: 512Mi }
+    volumeMounts:
+      - { name: beacon-gateway-config, mountPath: /etc/beacon-gateway, readOnly: true }
+      - { name: beacon-events, mountPath: /var/log/beacon }
+volumes:
+  - name: beacon-gateway-config
+    configMap: { name: beacon-gateway }   # beacon-gateway.yaml, outputs under /var/log/beacon
+  - name: beacon-events
+    emptyDir: {}
+```
+
+The admin listener stays on `127.0.0.1`, which the kubelet's HTTP probes cannot reach, and the
+image has no shell for an exec probe. To probe `/healthz`, set `admin: 0.0.0.0:4029` and keep port
+4029 off any Service: `/stats` then answers to anything in the pod's network. See Memory below for
+sizing the limit.
+
+```bash title="Download (Linux amd64; also linux_arm64, darwin_amd64, darwin_arm64)"
+VERSION=<version>
+BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/gateway-v${VERSION}"
+curl -fsSLO "${BASE}/beacon-gateway_${VERSION}_linux_amd64.tar.gz" -O "${BASE}/checksums.txt"
+sha256sum --check --ignore-missing checksums.txt
+tar -xzf "beacon-gateway_${VERSION}_linux_amd64.tar.gz"
+./beacon-gateway_${VERSION}_linux_amd64/beacon-gateway -config beacon-gateway_${VERSION}_linux_amd64/beacon-gateway.example.yaml
+```
+
+Each archive carries the binary, the license, the README and `beacon-gateway.example.yaml`, the
+commented configuration. To check who built a release, verify the image or an archive against this
+repository's build provenance, and `checksums.txt` against Beacon's release key with
+`checksums.txt.sig` and `beacon-release-key.gpg`, as [Linux release
+signing](/platforms/linux#release-signing) describes:
+
+```bash title="Verify"
+gh attestation verify oci://ghcr.io/asymptote-labs/beacon-gateway:${VERSION} --repo asymptote-labs/agent-beacon
+gh attestation verify "beacon-gateway_${VERSION}_linux_amd64.tar.gz" --repo asymptote-labs/agent-beacon
+```
+
+```bash title="Build from source"
 cd gateway
 go build -o beacon-gateway ./cmd/beacon-gateway
 ./beacon-gateway -config deploy/beacon-gateway.yaml
