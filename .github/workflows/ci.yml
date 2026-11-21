@@ -461,6 +461,42 @@ jobs:
             echo "ok: $bin is statically linked"
           done
 
+  # beacon-gateway (gateway/, its own module): vet, the tests and their race subset, then the release
+  # build itself (scripts/release-build.sh: static binaries, archives, checksums) and the image from
+  # it, for both platforms, then the native image smoke-tested. release-gateway.yml publishes exactly
+  # what this builds.
+  gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-go
+        with:
+          go-version-file: gateway/go.mod
+          modules: |
+            gateway
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Test with the race detector
+        run: go test -race ./pipeline/... ./events/... ./litellm/... ./envoy/... ./portkey/... ./llm/... ./harness/... ./internal/jsonscan/... ./store/... ./sink/... .
+      - name: Build the release
+        run: sh scripts/release-build.sh
+      # A multi-platform build needs a builder of its own (the docker driver builds one platform).
+      # The image only copies the binaries in, so neither platform needs emulation.
+      - name: Build the image for both platforms
+        run: |
+          set -euo pipefail
+          docker buildx create --use --name gateway >/dev/null
+          docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile dist/image
+          docker buildx build --platform linux/amd64 --load -t beacon-gateway:ci -f Dockerfile dist/image
+      - name: Smoke-test the image
+        run: sh scripts/image-smoke.sh beacon-gateway:ci "$(go run ./cmd/beacon-gateway -version | awk '{print $2}')"
+
   # Runs the real dashboard with hostile fixture lenses (testdata/lens-e2e) and drives the session
   # page in headless Chromium: every way out of the lens sandbox in spec/lenses/SPEC.md must be
   # refused, and a lens that throws, stalls or navigates must give way to the full session.
