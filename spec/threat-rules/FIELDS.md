@@ -79,6 +79,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.gen_ai.retrieval.query_text` | string |
 | `e.gen_ai.system_instructions_text` | string |
 | `e.gen_ai.token.type` | string |
+| `e.gen_ai.tool.call.arguments_text` | string |
 | `e.gen_ai.tool.call.id` | string |
 | `e.gen_ai.tool.call.result_text` | string |
 | `e.gen_ai.tool.description` | string |
@@ -202,6 +203,11 @@ A field marked with a spec version needs a rule that declares that version or la
   `text` part, one per line (a bare string as is), when content was retained. These are
   runtime-provided instructions such as a skill index, never operator prompt text.
   Each part is capped at 4096 bytes and secret-redacted like other retained text; empty otherwise.
+- `e.gen_ai.tool.call.arguments_text`: `gen_ai.tool.call.arguments` as text, only on tool calls, not
+  their results: a result repeats its call's arguments, so deriving the field there
+  too would let a rule fire twice for one action. A string arguments value as is;
+  an object arguments value as JSON, with keys in sorted order, when content was retained.
+  Capped at 4096 bytes and secret-redacted like other retained text; empty otherwise.
 - `e.gen_ai.tool.call.result_text`: `gen_ai.tool.call.result` as text, only on read-type tool
   results (`file.read`, `mcp.tool_invoked`, MCP-named tools, web fetch/search tools, a
   `tool.path` that is an http(s) URL) whose content was retained. String leaves of an

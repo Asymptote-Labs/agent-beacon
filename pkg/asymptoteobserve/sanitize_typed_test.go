@@ -30,7 +30,7 @@ func TestSanitizeEventTypedFields(t *testing.T) {
 			Usage:   &GenAIUsageInfo{InputTokens: &beyond, OutputTokens: &count},
 			Request: &GenAIRequestInfo{StopSequences: []string{"--password", "hunter2", "END"}, EncodingFormats: []string{}},
 			Tool: &GenAIToolInfo{Name: "mcp__notes__get", Description: "Fetch a note. token=abcdefgh12345678", Call: &GenAIToolCallInfo{
-				ID: "t1", ResultText: "asserted", Arguments: arguments,
+				ID: "t1", ResultText: "asserted", ArgumentsText: "asserted", Arguments: arguments,
 				Result: "export GITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyz",
 			}},
 			Agent:                  &GenAIAgentInfo{},
@@ -55,8 +55,8 @@ func TestSanitizeEventTypedFields(t *testing.T) {
 	if g.Agent == nil || *g.Agent != (GenAIAgentInfo{}) {
 		t.Errorf("an empty agent block = %+v, want kept empty", g.Agent)
 	}
-	if g.SystemInstructionsText != "" || g.Tool.Call.ResultText != "" {
-		t.Errorf("derived fields kept: %q, %q", g.SystemInstructionsText, g.Tool.Call.ResultText)
+	if g.SystemInstructionsText != "" || g.Tool.Call.ResultText != "" || g.Tool.Call.ArgumentsText != "" {
+		t.Errorf("derived fields kept: %q, %q, %q", g.SystemInstructionsText, g.Tool.Call.ResultText, g.Tool.Call.ArgumentsText)
 	}
 	if g.Tool.Description != "Fetch a note. token=[REDACTED]" {
 		t.Errorf("description = %q", g.Tool.Description)
@@ -72,7 +72,7 @@ func TestSanitizeEventTypedFields(t *testing.T) {
 	if !reflect.DeepEqual(g.Tool.Call.Arguments, want) {
 		t.Errorf("arguments = %#v\nwant %#v", g.Tool.Call.Arguments, want)
 	}
-	if arguments["api_key"] != "plain" || e.GenAI.Tool.Call.ResultText != "asserted" {
+	if arguments["api_key"] != "plain" || e.GenAI.Tool.Call.ResultText != "asserted" || e.GenAI.Tool.Call.ArgumentsText != "asserted" {
 		t.Error("SanitizeEvent changed the caller's gen_ai")
 	}
 }
@@ -423,6 +423,7 @@ func TestTypedConversionKeepsEveryField(t *testing.T) {
 	tool := *want.Tool
 	call := *tool.Call
 	call.ResultText = ""
+	call.ArgumentsText = ""
 	tool.Call, want.Tool = &call, &tool
 	if got := SanitizeGenAI(&genAI, opts); !reflect.DeepEqual(*got, want) {
 		t.Errorf("gen_ai = %s\nwant %s", mustJSON(t, got), mustJSON(t, want))

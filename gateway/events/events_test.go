@@ -600,30 +600,25 @@ func TestCompletedAtWrite(t *testing.T) {
 	}
 }
 
-// A tool call's arguments are left to the written record too, and written as SanitizeEvent writes
-// them: redacted, and long ones within the size the writers keep.
-func TestArgumentsCompletedAtWrite(t *testing.T) {
+// A tool call's arguments are built on the call path, so a rule can read them through the
+// derived arguments_text field, and written as SanitizeEvent writes them: redacted, and long
+// ones within the size the writers keep.
+func TestArgumentsBuiltOnCallPath(t *testing.T) {
 	for _, input := range []string{`{"command":"curl -H 'Authorization: Bearer sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' x"}`, `{"content":"` + strings.Repeat("y", 70000) + `"}`} {
 		body := `{"id":"msg_1","model":"m","content":[{"type":"tool_use","id":"t1","name":"Write","input":` + input + `}]}`
-		resp, err := codec.DecodeResponse(llm.AnthropicMessages, []byte(body))
+		_, err := codec.DecodeResponse(llm.AnthropicMessages, []byte(body))
 		if err != nil {
 			t.Fatal(err)
 		}
-		args := llm.ToolCalls(resp.Parts)[0].Arguments
 		p, s := newPipeline(t, Config{})
 		p.Handle(context.Background(), anthropic("c", gateway.PhaseResponse, "m", body))
 		p.Close()
 		e := s.events()[0]
-		if e.Beacon.GenAI.Tool.Call.Arguments != nil {
-			t.Error("arguments built on the call path")
+		if e.Beacon.GenAI.Tool.Call.Arguments == nil {
+			t.Error("arguments not built on the call path")
 		}
 		eager := e.Beacon
 		eager.Raw = map[string]interface{}{"gateway.name": "test", "gateway.call_id": "c"}
-		genAI := *eager.GenAI
-		tool := *genAI.Tool
-		tool.Call = &obs.GenAIToolCallInfo{ID: "t1", Arguments: args}
-		genAI.Tool = &tool
-		eager.GenAI = &genAI
 		eager.Truncated = false
 		eager = obs.SanitizeEvent(eager, maxEventBytes)
 		if got, want := string(mustJSON(t, e.Written())), string(mustJSON(t, eager)); got != want {

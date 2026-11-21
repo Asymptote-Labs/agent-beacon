@@ -21,8 +21,9 @@
 // text rules match for content from outside the agent. A result never carries its call's target
 // (the path, or the MCP server and tool): the call carries it, so a rule on the target fires once,
 // and a call and its result never derive the same event id, whichever replica recorded the call
-// and whether or not one did. The call's arguments, where the request still holds the call, are
-// on the result's gen_ai.tool.call.arguments for a reader that wants to see what it answers.
+// and whether or not one did. The call's arguments are on the call's
+// gen_ai.tool.call.arguments, and on the result's too, for a reader that wants to see what it
+// answers; a rule reads them through the derived arguments_text field.
 //
 // System text and tool definitions are resent on every call. They are recorded once per session;
 // a request that resends them lists them on the Turn (Turn.Resent) for analyzers that judge them
@@ -236,7 +237,8 @@ func (b *builder) result(r *llm.ToolResult, record bool) {
 	}
 	e.GenAI.Tool = &obs.GenAIToolInfo{Name: call.Name, Call: &obs.GenAIToolCallInfo{ID: r.CallID, Result: text}}
 	if targetless && found {
-		b.addCompleted(e, record, arguments(tc.Arguments))
+		arguments(&e, tc.Arguments)
+		b.add(e, record)
 		return
 	}
 	b.add(e, record)
@@ -283,7 +285,8 @@ func (b *builder) response() {
 		}
 		e.Tool = target(call)
 		e.GenAI.Tool = &obs.GenAIToolInfo{Name: call.Name, Call: &obs.GenAIToolCallInfo{ID: tc.ID}}
-		b.addCompleted(e, true, arguments(tc.Arguments))
+		arguments(&e, tc.Arguments)
+		b.add(e, true)
 	}
 }
 
@@ -438,31 +441,26 @@ func retained(text string, input bool) func(*obs.Event) {
 	}
 }
 
-// arguments completes a tool call's event with its arguments, sanitized as SanitizeEvent
-// sanitizes gen_ai. gen_ai.tool.call.arguments is not a field rules can address (what rules match
-// is bound into command, file, tool and mcp), so it is left to the written record.
-func arguments(args string) func(*obs.Event) {
-	return func(ev *obs.Event) {
-		if args == "" {
-			return
-		}
-		add := obs.GenAIInfo{Tool: &obs.GenAIToolInfo{Call: &obs.GenAIToolCallInfo{Arguments: args}}}
-		clean := obs.SanitizeGenAI(&add, rawGenAI)
-		genAI := *ev.GenAI
-		tool := *genAI.Tool
-		call := *tool.Call
-		if clean != nil && clean.Tool != nil && clean.Tool.Call != nil {
-			call.Arguments = clean.Tool.Call.Arguments
-		}
-		tool.Call = &call
-		genAI.Tool = &tool
-		ev.GenAI = &genAI
-		if !ev.Truncated && len(args) >= truncationCheckFrom {
-			if line, err := json.Marshal(ev); err == nil && len(line) > maxEventBytes {
-				ev.Truncated = true
-			}
-		}
+// arguments sets a tool call's arguments on the event, sanitized as SanitizeEvent
+// sanitizes gen_ai. It runs during construction, before analysis, so a rule can read
+// them through the derived arguments_text field: the written record is no longer the
+// only place they live. The event is finished after this, so the size check that sets
+// field_truncated still sees them.
+func arguments(e *obs.Event, args string) {
+	if args == "" {
+		return
 	}
+	add := obs.GenAIInfo{Tool: &obs.GenAIToolInfo{Call: &obs.GenAIToolCallInfo{Arguments: args}}}
+	clean := obs.SanitizeGenAI(&add, rawGenAI)
+	genAI := *e.GenAI
+	tool := *genAI.Tool
+	call := *tool.Call
+	if clean != nil && clean.Tool != nil && clean.Tool.Call != nil {
+		call.Arguments = clean.Tool.Call.Arguments
+	}
+	tool.Call = &call
+	genAI.Tool = &tool
+	e.GenAI = &genAI
 }
 
 func firstNonEmpty(s ...string) string {

@@ -1,17 +1,28 @@
 package threatrules
 
 import (
+	"encoding/json"
+
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // ToolResultTextPath is the CEL path of the derived tool-result text, after the "e." prefix.
 const ToolResultTextPath = "gen_ai.tool.call.result_text"
 
+// ToolCallArgumentsTextPath is the CEL path of the derived tool-call arguments text, after the
+// "e." prefix.
+const ToolCallArgumentsTextPath = "gen_ai.tool.call.arguments_text"
+
 // ToolResultTextLimit bounds how much tool-result text one event exposes to rules. It is the
 // limit the writers already apply to retained text such as prompt.text and command.output, so
 // a rule over tool results costs what a rule over command output costs: CEL's matches() is RE2,
 // which runs in time linear in its input, and this caps the input.
 const ToolResultTextLimit = asymptoteobserve.DefaultStringLimit
+
+// ToolCallArgumentsTextLimit bounds how much tool-call arguments text one event exposes to
+// rules. It is the same limit as ToolResultTextLimit, so a rule over arguments costs what a
+// rule over tool results costs.
+const ToolCallArgumentsTextLimit = asymptoteobserve.DefaultStringLimit
 
 // ToolResultText returns the text a rule sees as e.gen_ai.tool.call.result_text: what a tool
 // that brings outside content into the agent's context returned, as retained in the log.
@@ -53,6 +64,56 @@ func ToolResultText(event asymptoteobserve.Event) string {
 	return asymptoteobserve.CleanString(text, ToolResultTextLimit, true)
 }
 
+// ToolCallArgumentsText returns the text a rule sees as e.gen_ai.tool.call.arguments_text:
+// what the agent asked a tool to do, as retained in the log.
+//
+// It is empty unless all of these hold:
+//
+//   - The event carries gen_ai.tool.call.arguments.
+//   - The event is a tool call, not its result: a result repeats its call's arguments on the
+//     written record, and deriving the field there too would let a rule fire once on the call
+//     and once on its result for the same action. A call carries no result, so Result being
+//     set is what marks a result event.
+//   - The event's content marker, if it has one, says content was retained (included, and
+//     retention other than "metadata").
+//
+// A string arguments value is used as is. An object arguments value is rendered as JSON, so
+// the keys the agent set are visible to a rule. The text is then capped at
+// ToolCallArgumentsTextLimit and passed through the same secret redaction the writers apply,
+// so a rule never sees more than was retained and never sees a credential the writer would
+// have removed.
+//
+// It is exported so that another engine implementing the Threat Rules contract can derive the
+// field the same way; fixtures that exercise it only conform if the derivation agrees.
+func ToolCallArgumentsText(event asymptoteobserve.Event) string {
+	if event.GenAI == nil || event.GenAI.Tool == nil || event.GenAI.Tool.Call == nil {
+		return ""
+	}
+	call := event.GenAI.Tool.Call
+	if call.Arguments == nil || call.Result != nil || !contentRetained(event.Content) {
+		return ""
+	}
+	text := renderToolCallArguments(call.Arguments)
+	if text == "" {
+		return ""
+	}
+	return asymptoteobserve.CleanString(text, ToolCallArgumentsTextLimit, true)
+}
+
+// renderToolCallArguments renders untyped tool call arguments as text: a string as is,
+// anything else as JSON, so the keys the agent set are visible to a rule. encoding/json sorts
+// map keys, so the rendering is stable across runs.
+func renderToolCallArguments(args interface{}) string {
+	if s, ok := args.(string); ok {
+		return s
+	}
+	data, err := json.Marshal(args)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 // deriveObserver, when set, is called once per withDerivedFields call. It is nil outside tests,
 // which set it to count how often an event's fields are derived.
 var deriveObserver func()
@@ -77,19 +138,21 @@ func withDerivedFields(event asymptoteobserve.Event) asymptoteobserve.Event {
 		return event
 	}
 	resultText := ToolResultText(event)
+	argsText := ToolCallArgumentsText(event)
 	instructionsText := SystemInstructionsText(event)
-	callAsserted := event.GenAI.Tool != nil && event.GenAI.Tool.Call != nil && event.GenAI.Tool.Call.ResultText != ""
-	if resultText == "" && !callAsserted && instructionsText == "" && event.GenAI.SystemInstructionsText == "" {
+	callAsserted := event.GenAI.Tool != nil && event.GenAI.Tool.Call != nil && (event.GenAI.Tool.Call.ResultText != "" || event.GenAI.Tool.Call.ArgumentsText != "")
+	if resultText == "" && argsText == "" && !callAsserted && instructionsText == "" && event.GenAI.SystemInstructionsText == "" {
 		return event
 	}
 	// Either there is text to set or an in-process caller set a field itself; the fields are
 	// derived, never asserted, so the second case is cleared.
 	genAI := *event.GenAI
 	genAI.SystemInstructionsText = instructionsText
-	if resultText != "" || callAsserted {
+	if resultText != "" || argsText != "" || callAsserted {
 		tool := *genAI.Tool
 		call := *tool.Call
 		call.ResultText = resultText
+		call.ArgumentsText = argsText
 		tool.Call = &call
 		genAI.Tool = &tool
 	}
