@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -201,6 +202,35 @@ func TestMemoryEndpointServesReadOnlyLearningState(t *testing.T) {
 	}
 	if resp.Status.Evaluations != 1 || len(resp.Evaluations) != 1 || len(resp.Candidates) != 1 || len(resp.Memories) != 1 {
 		t.Fatalf("memory response = %#v", resp)
+	}
+}
+
+// The dashboard is read-only: the Memory view of an endpoint that never used memory answers empty
+// and does not create the store (#1358).
+func TestMemoryEndpointDoesNotCreateTheStore(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "endpoint")
+	logPath := filepath.Join(base, "logs", "runtime.jsonl")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := Handler(Options{UserMode: true, LogPath: logPath})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/memory?project="+url.QueryEscape(t.TempDir()), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("memory status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp MemoryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status.Evaluations != 0 || len(resp.Evaluations) != 0 || len(resp.Candidates) != 0 || len(resp.Memories) != 0 {
+		t.Fatalf("memory response = %#v, want empty", resp)
+	}
+	if _, err := os.Stat(learning.PathForRuntimeLog(logPath)); !os.IsNotExist(err) {
+		t.Fatalf("GET /api/memory created the memory store (stat err = %v)", err)
 	}
 }
 

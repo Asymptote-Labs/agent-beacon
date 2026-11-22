@@ -120,6 +120,32 @@ func TestMCPMemoryToolsSearchGetAndContext(t *testing.T) {
 	}
 }
 
+// An agent's memory tools only read: on an endpoint that never used memory they answer empty and
+// do not create the store (#1358).
+func TestMCPMemoryToolsDoNotCreateTheStore(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "endpoint", "logs", "runtime.jsonl")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	server := New(Options{LogPath: logPath})
+	for _, call := range []callToolParams{
+		{Name: "search_memory", Arguments: map[string]interface{}{"project": t.TempDir(), "q": "anything"}},
+		{Name: "get_memory_context", Arguments: map[string]interface{}{"project_id": "project-1", "task": "anything"}},
+	} {
+		result, err := server.callTool(t.Context(), call)
+		if err != nil || result.IsError {
+			t.Fatalf("%s = %#v, %v", call.Name, result, err)
+		}
+	}
+	get, err := server.callTool(t.Context(), callToolParams{Name: "get_memory", Arguments: map[string]interface{}{"id": "memory-1"}})
+	if err != nil || !get.IsError || !strings.Contains(get.Content[0].Text, "memory not found") {
+		t.Fatalf("get_memory on a missing store = %#v, %v; want memory not found", get, err)
+	}
+	if _, err := os.Stat(learning.PathForRuntimeLog(logPath)); !os.IsNotExist(err) {
+		t.Fatalf("the memory tools created the memory store (stat err = %v)", err)
+	}
+}
+
 // Regression (1ebdfc47, aba38e81, #961): a text query must be matched against every approved
 // memory, not only the newest page of rows. Over the stdio protocol an agent's search_memory (q)
 // and get_memory_context (task) both find an older memory from another harness behind more newer,
