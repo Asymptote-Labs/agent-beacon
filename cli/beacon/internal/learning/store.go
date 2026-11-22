@@ -75,13 +75,23 @@ func (s *Store) dsn() string {
 	return sqliteuri.File(s.dbPath, url.Values{"_pragma": {"busy_timeout(5000)"}, "_txlock": {"immediate"}})
 }
 
-// db opens the store for writing, creating it on first use.
+// db opens the store for writing, creating it on first use. The file is created here rather than
+// by SQLite so its mode is 0600 from the first byte, as the trace history's is: it holds
+// evaluations, candidates and memories distilled from session traces. SQLite gives the -wal and
+// -shm files the database file's mode.
 func (s *Store) db() (*sql.DB, error) {
 	if s.dbPath == "" {
 		s.dbPath = storeFile
 	}
 	if err := os.MkdirAll(filepath.Dir(s.dbPath), 0700); err != nil && filepath.Dir(s.dbPath) != "." {
 		return nil, err
+	}
+	f, err := os.OpenFile(s.dbPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil && !os.IsExist(err) {
+		return nil, err
+	}
+	if f != nil {
+		_ = f.Close()
 	}
 	return s.open()
 }

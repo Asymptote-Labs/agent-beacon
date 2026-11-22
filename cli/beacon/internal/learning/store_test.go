@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -411,5 +412,35 @@ func TestReadingAMissingStoreCreatesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("reading a missing store created %s (stat err = %v)", dir, err)
+	}
+}
+
+// The store holds what was distilled from session traces, so the first write creates it 0600, as
+// the trace history is, whatever the umask (#1358).
+func TestStoreIsCreatedPrivate(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	path := filepath.Join(t.TempDir(), "endpoint", "memory.db")
+	store := Open(path)
+	if err := store.PutEvaluation(asymptoteobserve.LearningEvaluationV1{
+		ID:      "eval-1",
+		Status:  asymptoteobserve.LearningEvaluationStatusCompleted,
+		Project: asymptoteobserve.LearningProjectV1{ID: "project-1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		info, err := os.Stat(name)
+		if os.IsNotExist(err) && name != path {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s mode = %o, want 600", filepath.Base(name), got)
+		}
+	}
+	if _, ok, err := store.GetEvaluation("eval-1"); err != nil || !ok {
+		t.Fatalf("GetEvaluation after write = %v, %v", ok, err)
 	}
 }
