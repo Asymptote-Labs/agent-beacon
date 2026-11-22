@@ -370,3 +370,46 @@ func TestRelayedProjectPathDoesNotReadGitMetadata(t *testing.T) {
 		t.Fatalf("memories by project ID = %d, want 1", len(byID))
 	}
 }
+
+// Reading a store that was never written answers empty and creates nothing, not even its
+// directory: the dashboard and the MCP server only read, and the dashboard is read-only (#1358).
+func TestReadingAMissingStoreCreatesNothing(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "endpoint")
+	store := Open(filepath.Join(dir, "memory.db"))
+
+	status, err := store.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Evaluations != 0 || status.Candidates != 0 || status.ApprovedMemories != 0 || status.SizeBytes != 0 {
+		t.Fatalf("Status of a missing store = %#v, want zero counts", status)
+	}
+	if status.Path != store.Path() || status.SchemaVersion != asymptoteobserve.LearningSchemaVersion {
+		t.Fatalf("Status of a missing store = %#v, want its path and schema version", status)
+	}
+	query := Query{ProjectPath: t.TempDir(), Q: "anything"}
+	if got, err := store.ListEvaluations(query); err != nil || len(got) != 0 {
+		t.Fatalf("ListEvaluations = %v, %v", got, err)
+	}
+	if got, err := store.ListCandidates(query); err != nil || len(got) != 0 {
+		t.Fatalf("ListCandidates = %v, %v", got, err)
+	}
+	if got, err := store.ListMemories(query); err != nil || len(got) != 0 {
+		t.Fatalf("ListMemories = %v, %v", got, err)
+	}
+	if _, ok, err := store.GetEvaluation("eval-1"); err != nil || ok {
+		t.Fatalf("GetEvaluation = %v, %v", ok, err)
+	}
+	if _, ok, err := store.GetCandidate("candidate-1"); err != nil || ok {
+		t.Fatalf("GetCandidate = %v, %v", ok, err)
+	}
+	if _, ok, err := store.GetMemory("memory-1"); err != nil || ok {
+		t.Fatalf("GetMemory = %v, %v", ok, err)
+	}
+	if got, err := store.KnownProjects(); err != nil || len(got) != 0 {
+		t.Fatalf("KnownProjects = %v, %v", got, err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("reading a missing store created %s (stat err = %v)", dir, err)
+	}
+}
