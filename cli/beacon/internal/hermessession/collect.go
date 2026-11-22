@@ -286,18 +286,59 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 		updateCursorTotals(cursor, session)
 		return false, nil
 	}
-	for _, item := range mapped {
+	for written, item := range mapped {
 		if err := opts.sink().Emit(item.Event); err != nil {
+			// A spent budget or a full retention window is a planned stop, not a failure, and the
+			// next sweep resumes where it left off: move the cursor past every message whose events
+			// are all on disk. Without that, a session larger than one budget was written again
+			// from its start by every sweep and never finished (#1360). Any other failure leaves
+			// the cursor where it was, and CollectOnce saves it.
+			if sessionsync.Stopped(err) {
+				advanceCursor(cursor, session, messages, mapped, written, pending, idHome)
+			}
 			return true, err
 		}
 		summary.EventsEmitted++
 	}
-	// The cursor only moves once the whole batch is on disk. CollectOnce saves the state even when a
-	// session fails, so advancing while emitting would skip the events the failed sweep never wrote.
+	advanceCursor(cursor, session, messages, mapped, len(mapped), pending, idHome)
+	return true, nil
+}
+
+// advanceCursor moves the cursor past what a sweep wrote: mapped[:written], where mapped is
+// everything mapSession made of messages and pending is the tool calls left open after all of
+// them. A message counts only once every event made of it is written, so a sweep that stops in the
+// middle of a message writes that message's events again next time, under the same event ids. The
+// open tool calls are those left after the counted messages, and the session totals move only once
+// the token usage event that reports their difference is written.
+func advanceCursor(cursor *Cursor, session Session, messages []Message, mapped []MappedEvent, written int, pending map[string]json.RawMessage, idHome string) {
+	done := messages
+	if written < len(mapped) {
+		// The session's own events have no message: session.started comes before every message,
+		// token usage and session.ended after all of them.
+		stop := mapped[written]
+		switch {
+		case stop.SourceMessageID > 0:
+			cut := 0
+			for cut < len(messages) && messages[cut].ID < stop.SourceMessageID {
+				cut++
+			}
+			done = messages[:cut]
+		case stop.Event.Event.Action == "session.started":
+			done = messages[:0]
+		}
+		if len(done) < len(messages) {
+			// Replayed before the cursor changes, from the open calls it started this sweep with.
+			_, pending = mapSession(session, done, cursor, idHome)
+		}
+	}
 	cursor.PendingCalls = pending
-	for _, item := range mapped {
-		if item.SourceMessageID > cursor.LastMessageID {
-			cursor.LastMessageID = item.SourceMessageID
+	usageWritten := true
+	for i, item := range mapped {
+		if i >= written {
+			if item.Event.Event.Action == "token.usage" {
+				usageWritten = false
+			}
+			continue
 		}
 		switch item.Event.Event.Action {
 		case "session.started":
@@ -306,9 +347,10 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 			cursor.EndedAtMS = session.EndedAtMS
 		}
 	}
-	advanceCursorMessages(cursor, messages)
-	updateCursorTotals(cursor, session)
-	return true, nil
+	advanceCursorMessages(cursor, done)
+	if usageWritten {
+		updateCursorTotals(cursor, session)
+	}
 }
 
 func advanceCursorMessages(cursor *Cursor, messages []Message) {
