@@ -242,10 +242,10 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		// length, of tokens that run on into the next, of key ids that end only where the next
 		// key starts, of JWT first segments that never complete, and URLs, Bearer tokens, curl
 		// commands and replaced copies right after a key.
-		"Google keys back to back":     "AIzaSyA-abcdefghijklmnopqrstuvwxyz01234",
+		"Google keys back to back":     "AIza" + "SyA-abcdefghijklmnopqrstuvwxyz01234",
 		"GitHub tokens back to back":   "ghp_0123456789abcdefghijklmnopqrstuvwxyz",
 		"AWS key ids back to back":     "AKIAIOSFODNN7EXAMPLE",
-		"npm tokens and Google keys":   "npm_abcdefghijklmnopqrstuvwxyz0123456789AIzaSyA-abcdefghijklmnopqrstuvwxyz01234",
+		"npm tokens and Google keys":   "npm_abcdefghijklmnopqrstuvwxyz0123456789AIza" + "SyA-abcdefghijklmnopqrstuvwxyz01234",
 		"tokens into JWT prefixes":     "ghp_0123456789abcdefghijklmnopqrstuvwxyzeyJabc-",
 		"API keys into JWT prefixes":   "sk-eyJabcdefghij",
 		"URL schemes after keys":       "npm_abcdefghijklmnopqrstuvwxyz0123456789a://x:",

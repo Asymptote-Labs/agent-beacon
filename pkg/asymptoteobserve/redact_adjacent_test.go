@@ -9,7 +9,7 @@ import (
 
 const (
 	adjacentGitHub = "ghp_0123456789abcdefghijklmnopqrstuvwxyz"
-	adjacentGoogle = "AIzaSyA-abcdefghijklmnopqrstuvwxyz01234"
+	adjacentGoogle = "AIza" + "SyA-abcdefghijklmnopqrstuvwxyz01234"
 	adjacentNPM    = "npm_abcdefghijklmnopqrstuvwxyz0123456789"
 	adjacentJWT    = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijk"
 )
