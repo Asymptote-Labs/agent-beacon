@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -69,8 +70,8 @@ var cloudClaudeWebPrintSetupCmd = &cobra.Command{
 	Short:        "Print a Claude Code web environment setup script",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if strings.TrimSpace(cloudOpts.version) == "" {
-			return fmt.Errorf("--version is required")
+		if err := checkCloudReleaseTag(cloudOpts.version); err != nil {
+			return err
 		}
 		fmt.Print(renderClaudeWebSetup(cloudOpts.version))
 		return nil
@@ -107,8 +108,8 @@ var cloudCursorPrintSetupCmd = &cobra.Command{
 	Short:        "Print a Cursor cloud environment install script that installs Beacon and its hooks",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if strings.TrimSpace(cloudOpts.version) == "" {
-			return fmt.Errorf("--version is required")
+		if err := checkCloudReleaseTag(cloudOpts.version); err != nil {
+			return err
 		}
 		rendered, err := renderCursorCloudSetup(cloudOpts.version, cloudOpts.safeHooks)
 		if err != nil {
@@ -290,6 +291,9 @@ echo "Beacon hooks installed at $REPO_ROOT/.claude/settings.local.json"
 // Writing the hooks here was tried once before and dropped, when Cursor ran the setup script after
 // an agent had already loaded its hooks. Builds changed that order.
 func renderCursorCloudSetup(version string, safeHooks bool) (string, error) {
+	if err := checkCloudReleaseTag(version); err != nil {
+		return "", err
+	}
 	hooks, err := endpointhooks.RenderCursorCloudHooks(endpointhooks.CursorCloudOptions{
 		BinaryPath: "/tmp/beacon/bin/beacon-hooks",
 		LogPath:    "/tmp/beacon/runtime.jsonl",
@@ -297,6 +301,11 @@ func renderCursorCloudSetup(version string, safeHooks bool) (string, error) {
 	})
 	if err != nil {
 		return "", err
+	}
+	// The hooks go into the script through a quoted here-document, where the shell expands nothing
+	// and quotes are plain text, so only a line that is the delimiter itself could end it early.
+	if !strings.HasSuffix(hooks, "\n") || strings.Contains("\n"+hooks, "\n"+cursorHooksDelimiter+"\n") {
+		return "", fmt.Errorf("cursor hooks cannot be embedded in a %s here-document", cursorHooksDelimiter)
 	}
 	return fmt.Sprintf(`#!/usr/bin/env bash
 # Beacon for Cursor cloud agents. Paste into the environment's Install script.
@@ -326,8 +335,8 @@ if git -C "$REPO_ROOT" ls-files --error-unmatch .cursor/hooks.json >/dev/null 2>
   exit 0
 fi
 mkdir -p "$REPO_ROOT/.cursor"
-cat > "$REPO_ROOT/.cursor/hooks.json" <<'BEACON_HOOKS'
-%sBEACON_HOOKS
+cat > "$REPO_ROOT/.cursor/hooks.json" <<'%[3]s'
+%[2]s%[3]s
 # info/exclude is never committed, so the agent does not see the hooks file as a change. Git reads
 # it from the common directory, which --git-path names in a linked worktree too.
 EXCLUDE="$(git -C "$REPO_ROOT" rev-parse --git-path info/exclude 2>/dev/null || true)"
@@ -340,7 +349,24 @@ if [ -n "$EXCLUDE" ]; then
   grep -qxF '.cursor/hooks.json' "$EXCLUDE" 2>/dev/null || echo '.cursor/hooks.json' >> "$EXCLUDE"
 fi
 echo "Beacon wrote $REPO_ROOT/.cursor/hooks.json"
-`, version, hooks), nil
+`, version, hooks, cursorHooksDelimiter), nil
+}
+
+// cursorHooksDelimiter ends the here-document that carries the hooks file in the Cursor setup script.
+const cursorHooksDelimiter = "BEACON_HOOKS"
+
+// cloudReleaseTag is the shape of a Beacon release tag. The setup scripts put the tag inside double
+// quotes, where the shell would still run a $(...) or a backtick, so nothing else is accepted.
+var cloudReleaseTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$`)
+
+func checkCloudReleaseTag(version string) error {
+	if strings.TrimSpace(version) == "" {
+		return fmt.Errorf("--version is required")
+	}
+	if !cloudReleaseTag.MatchString(version) {
+		return fmt.Errorf("--version must be a Beacon release tag such as v1.3.60, got %q", version)
+	}
+	return nil
 }
 
 func runCloudGCSSetup(cmd *cobra.Command, args []string) error {
