@@ -26,6 +26,8 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.opentelemetry.io/collector/config/confighttp"
+	"go.opentelemetry.io/collector/config/configoptional"
+	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
@@ -56,11 +58,11 @@ func createDefaultConfig() component.Config {
 	// The upstream receiver's HTTP defaults exactly, so swapping it in changes nothing but the
 	// address recorded: no TLS, and no server timeouts.
 	cfg := confighttp.NewDefaultServerConfig()
-	cfg.Endpoint = defaultEndpoint
-	cfg.TLSSetting = nil
+	cfg.NetAddr.Endpoint = defaultEndpoint
+	cfg.TLS = configoptional.None[configtls.ServerConfig]()
 	cfg.WriteTimeout = 0
 	cfg.ReadHeaderTimeout = 0
-	cfg.IdleTimeout = 0
+	cfg.Keepalive = configoptional.None[confighttp.KeepaliveServerConfig]()
 	return &Config{ServerConfig: cfg}
 }
 
@@ -177,14 +179,14 @@ func (r *otlpHTTP) Start(ctx context.Context, host component.Host) error {
 		}))
 	}
 	var err error
-	r.server, err = r.cfg.ServerConfig.ToServer(ctx, host, r.settings.TelemetrySettings, mux,
+	r.server, err = r.cfg.ServerConfig.ToServer(ctx, host.GetExtensions(), r.settings.TelemetrySettings, mux,
 		confighttp.WithErrorHandler(errorHandler))
 	if err != nil {
 		return err
 	}
 	ln, err := r.cfg.ServerConfig.ToListener(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to bind to address %s: %w", r.cfg.Endpoint, err)
+		return fmt.Errorf("failed to bind to address %s: %w", r.cfg.NetAddr.Endpoint, err)
 	}
 	r.addr = ln.Addr()
 	r.settings.Logger.Info("Starting HTTP server", zap.String("endpoint", ln.Addr().String()))

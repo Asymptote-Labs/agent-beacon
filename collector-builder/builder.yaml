@@ -4,15 +4,15 @@ dist:
   output_path: ./dist/beacon-otelcol
 
 receivers:
-  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.121.0
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.165.0
   # OTLP/HTTP that keeps the client's port, so beacon_peer can name the sending account.
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
     import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/otlphttpreceiver
     path: ./exporter/beaconjsonexporter
 
 processors:
-  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.121.0
-  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.121.0
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.165.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.165.0
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
     import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/claudeapibodyprocessor
     path: ./exporter/beaconjsonexporter
@@ -32,13 +32,13 @@ exporters:
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
     import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/falconhecexporter
     path: ./exporter/beaconjsonexporter
-  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/splunkhecexporter v0.121.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/splunkhecexporter v0.165.0
   # OTLP forwarding (`beacon endpoint install --otlp-forward-endpoint`) to a second OTLP backend.
-  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.121.0
-  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.121.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.165.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.165.0
 
 extensions:
-  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.121.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.165.0
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
     import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/loopbackhostextension
     path: ./exporter/beaconjsonexporter
@@ -53,9 +53,9 @@ extensions:
 
 replaces:
   - github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve => ../../../pkg/asymptoteobserve
-  - go.opentelemetry.io/otel/exporters/stdout/stdoutlog => go.opentelemetry.io/otel/exporters/stdout/stdoutlog v0.19.0
-  - go.opentelemetry.io/otel/log => go.opentelemetry.io/otel/log v0.19.0
-  - go.opentelemetry.io/otel/log/logtest => go.opentelemetry.io/otel/log/logtest v0.19.0
-  - go.opentelemetry.io/otel/sdk/log => go.opentelemetry.io/otel/sdk/log v0.19.0
-  - go.opentelemetry.io/otel/sdk/log/logtest => go.opentelemetry.io/otel/sdk/log/logtest v0.19.0
+  - go.opentelemetry.io/otel/exporters/stdout/stdoutlog => go.opentelemetry.io/otel/exporters/stdout/stdoutlog v0.23.0
+  - go.opentelemetry.io/otel/log => go.opentelemetry.io/otel/log v1.47.0
+  - go.opentelemetry.io/otel/log/logtest => go.opentelemetry.io/otel/log/logtest v0.23.0
+  - go.opentelemetry.io/otel/sdk/log => go.opentelemetry.io/otel/sdk/log v1.47.0
+  - go.opentelemetry.io/otel/sdk/log/logtest => go.opentelemetry.io/otel/sdk/log/logtest v0.23.0
 

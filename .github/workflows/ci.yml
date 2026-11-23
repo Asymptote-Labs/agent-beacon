@@ -746,7 +746,7 @@ jobs:
         run: make build-linux-amd64
       - name: Build collector for Linux
         run: |
-          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          go install go.opentelemetry.io/collector/cmd/builder@v0.165.0
           cd collector-builder
           # builder mkdirs its output path without -p, so the parent has to exist. A fresh checkout
           # has no dist/ at all, which is why this only failed in CI.
@@ -794,7 +794,7 @@ jobs:
             collector-builder/exporter/beaconjsonexporter
       - name: Build collector for Linux
         run: |
-          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          go install go.opentelemetry.io/collector/cmd/builder@v0.165.0
           cd collector-builder
           # builder mkdirs its output path without -p, so the parent has to exist.
           mkdir -p dist
@@ -952,7 +952,7 @@ jobs:
 
       - name: Build the collector
         run: |
-          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          go install go.opentelemetry.io/collector/cmd/builder@v0.165.0
           Set-Location collector-builder
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $env:GOOS = 'windows'; $env:GOARCH = 'amd64'; $env:CGO_ENABLED = '0'

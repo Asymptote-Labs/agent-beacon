@@ -95,7 +95,7 @@ jobs:
       - name: Build the collector for Windows
         id: collector
         run: |
-          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          go install go.opentelemetry.io/collector/cmd/builder@v0.165.0
           Set-Location collector-builder
           # builder mkdirs its output path without -p, so the parent has to exist. A fresh
           # checkout has no dist/ at all, which is why this only ever failed in CI.

@@ -209,7 +209,7 @@ func freshnessCheck(stale bool, reason string) doctorCheck {
 		Detail: reason,
 		Fix: "the telemetry normalization compiles into beacon-otelcol, not the beacon CLI, " +
 			"so rebuild the collector or your run will verify the wrong binary:\n" +
-			"      go install go.opentelemetry.io/collector/cmd/builder@v0.121.0\n" +
+			"      go install go.opentelemetry.io/collector/cmd/builder@v0.165.0\n" +
 			"      cd collector-builder && mkdir -p dist && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \"$(go env GOPATH)/bin/builder\" --config builder.yaml\n" +
 			"      cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_amd64/beacon-otelcol"}
 }

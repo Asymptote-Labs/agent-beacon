@@ -53,7 +53,7 @@ jobs:
           install-only: true
 
       - name: Install OpenTelemetry Collector Builder
-        run: go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+        run: go install go.opentelemetry.io/collector/cmd/builder@v0.165.0
 
       - name: Build collector distributions
         run: bash collector-builder/build-release-collectors.sh
