@@ -51,7 +51,7 @@ func start(t *testing.T) fixture {
 	t.Helper()
 	f := NewFactory()
 	cfg := f.CreateDefaultConfig().(*Config)
-	cfg.Endpoint = "127.0.0.1:0"
+	cfg.NetAddr.Endpoint = "127.0.0.1:0"
 	set := receivertest.NewNopSettings(componentType)
 	fx := fixture{logs: &recordingLogs{}, traces: new(consumertest.TracesSink), metrics: new(consumertest.MetricsSink)}
 	lr, err := f.CreateLogs(context.Background(), set, cfg, fx.logs)
@@ -223,7 +223,7 @@ func TestRefusalsMatchUpstream(t *testing.T) {
 func TestOnlyConfiguredSignalsAreServed(t *testing.T) {
 	f := NewFactory()
 	cfg := f.CreateDefaultConfig().(*Config)
-	cfg.Endpoint = "127.0.0.1:0"
+	cfg.NetAddr.Endpoint = "127.0.0.1:0"
 	r, err := f.CreateLogs(context.Background(), receivertest.NewNopSettings(componentType), cfg, new(consumertest.LogsSink))
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +239,7 @@ func TestOnlyConfiguredSignalsAreServed(t *testing.T) {
 }
 
 func TestDefaultsToTheLoopbackOTLPPort(t *testing.T) {
-	if got := createDefaultConfig().(*Config).Endpoint; got != "127.0.0.1:4318" {
+	if got := createDefaultConfig().(*Config).NetAddr.Endpoint; got != "127.0.0.1:4318" {
 		t.Fatalf("default endpoint = %q", got)
 	}
 }

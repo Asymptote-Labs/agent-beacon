@@ -25,10 +25,22 @@ func NewFactory() extension.Factory {
 		componentType,
 		func() component.Config { return &Config{} },
 		func(context.Context, extension.Settings, component.Config) (extension.Extension, error) {
-			return extensionauth.NewServer(extensionauth.WithServerAuthenticate(authenticate))
+			return loopbackHost{}, nil
 		},
 		component.StabilityLevelBeta,
 	)
+}
+
+// loopbackHost is the extension: a server authenticator with nothing to start or stop.
+type loopbackHost struct {
+	component.StartFunc
+	component.ShutdownFunc
+}
+
+var _ extensionauth.Server = loopbackHost{}
+
+func (loopbackHost) Authenticate(ctx context.Context, headers map[string][]string) (context.Context, error) {
+	return authenticate(ctx, headers)
 }
 
 func authenticate(ctx context.Context, _ map[string][]string) (context.Context, error) {

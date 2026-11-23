@@ -56,7 +56,7 @@ func EnsureCollector(repoRoot string, log func(string, ...any)) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("collector missing at %s and no release could be resolved: %w\n"+
 			"build it instead:\n"+
-			"  go install go.opentelemetry.io/collector/cmd/builder@v0.121.0\n"+
+			"  go install go.opentelemetry.io/collector/cmd/builder@v0.165.0\n"+
 			"  cd collector-builder && mkdir -p dist && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \"$(go env GOPATH)/bin/builder\" --config builder.yaml", dst, err)
 	}
 	log("collector not found; downloading beacon-otelcol from release %s", rel.Version)

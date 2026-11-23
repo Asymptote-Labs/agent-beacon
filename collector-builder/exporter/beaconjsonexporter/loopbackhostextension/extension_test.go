@@ -10,15 +10,9 @@ import (
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configauth"
 	"go.opentelemetry.io/collector/config/confighttp"
+	"go.opentelemetry.io/collector/config/configoptional"
 	"go.opentelemetry.io/collector/extension/extensiontest"
 )
-
-type host struct {
-	component.Host
-	ext map[component.ID]component.Component
-}
-
-func (h host) GetExtensions() map[component.ID]component.Component { return h.ext }
 
 // The receiver's server is built the way the generated config builds it, so this also proves
 // include_metadata carries the Host header to the authenticator.
@@ -29,15 +23,14 @@ func TestRejectsRebindingHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := confighttp.ServerConfig{
-		Endpoint:        "127.0.0.1:0",
 		IncludeMetadata: true,
-		Auth:            &confighttp.AuthConfig{Authentication: configauth.Authentication{AuthenticatorID: id}},
+		Auth:            configoptional.Some(confighttp.AuthConfig{Config: configauth.Config{AuthenticatorID: id}}),
 	}
-	listener, err := net.Listen("tcp", cfg.Endpoint)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := cfg.ToServer(context.Background(), host{componenttest.NewNopHost(), map[component.ID]component.Component{id: ext}},
+	server, err := cfg.ToServer(context.Background(), map[component.ID]component.Component{id: ext},
 		componenttest.NewNopTelemetrySettings(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	if err != nil {
 		t.Fatal(err)

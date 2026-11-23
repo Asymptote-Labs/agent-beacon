@@ -27,7 +27,7 @@ func TestAnHTTPExportIsAttributedToTheSendingAccount(t *testing.T) {
 	}
 	f := NewFactory()
 	cfg := f.CreateDefaultConfig().(*Config)
-	cfg.Endpoint = "127.0.0.1:0"
+	cfg.NetAddr.Endpoint = "127.0.0.1:0"
 	r, err := f.CreateLogs(context.Background(), receivertest.NewNopSettings(componentType), cfg, proc)
 	if err != nil {
 		t.Fatal(err)

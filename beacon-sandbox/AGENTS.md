@@ -88,7 +88,7 @@ about the change.
 `doctor` warns about this (`collector_freshness`). When it does, rebuild:
 
 ```bash
-go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+go install go.opentelemetry.io/collector/cmd/builder@v0.165.0
 cd collector-builder && mkdir -p dist
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
 cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_amd64/beacon-otelcol

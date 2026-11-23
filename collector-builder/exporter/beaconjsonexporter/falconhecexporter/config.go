@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"time"
 
+	"go.opentelemetry.io/collector/config/configoptional"
 	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 )
@@ -12,19 +13,19 @@ import (
 const defaultTimeout = 10 * time.Second
 
 type Config struct {
-	Endpoint              string                     `mapstructure:"endpoint"`
-	Token                 string                     `mapstructure:"token"`
-	Source                string                     `mapstructure:"source"`
-	Sourcetype            string                     `mapstructure:"sourcetype"`
-	Index                 string                     `mapstructure:"index"`
-	InsecureSkipVerify    bool                       `mapstructure:"insecure_skip_verify"`
-	CAFile                string                     `mapstructure:"ca_file"`
-	Timeout               time.Duration              `mapstructure:"timeout"`
-	QueueSettings         exporterhelper.QueueConfig `mapstructure:"sending_queue"`
-	RetrySettings         configretry.BackOffConfig  `mapstructure:"retry_on_failure"`
-	ContentRetention      string                     `mapstructure:"content_retention"` // Deprecated no-op; retained for older collector configs.
-	IncludeRuntimeMetrics bool                       `mapstructure:"include_runtime_metrics"`
-	IncludeCodexSpans     bool                       `mapstructure:"include_codex_spans"`
+	Endpoint              string                                                   `mapstructure:"endpoint"`
+	Token                 string                                                   `mapstructure:"token"`
+	Source                string                                                   `mapstructure:"source"`
+	Sourcetype            string                                                   `mapstructure:"sourcetype"`
+	Index                 string                                                   `mapstructure:"index"`
+	InsecureSkipVerify    bool                                                     `mapstructure:"insecure_skip_verify"`
+	CAFile                string                                                   `mapstructure:"ca_file"`
+	Timeout               time.Duration                                            `mapstructure:"timeout"`
+	QueueSettings         configoptional.Optional[exporterhelper.QueueBatchConfig] `mapstructure:"sending_queue"`
+	RetrySettings         configretry.BackOffConfig                                `mapstructure:"retry_on_failure"`
+	ContentRetention      string                                                   `mapstructure:"content_retention"` // Deprecated no-op; retained for older collector configs.
+	IncludeRuntimeMetrics bool                                                     `mapstructure:"include_runtime_metrics"`
+	IncludeCodexSpans     bool                                                     `mapstructure:"include_codex_spans"`
 	// CaptureModelContext is the --claude-capture-model-context opt-in; see beaconevent.Options.
 	CaptureModelContext bool `mapstructure:"capture_model_context"`
 	// PeerUser takes each event's user from the account the beacon_peer processor resolved, as
@@ -38,7 +39,7 @@ func createDefaultConfig() *Config {
 	queue.QueueSize = 256
 	return &Config{
 		Timeout:       defaultTimeout,
-		QueueSettings: queue,
+		QueueSettings: configoptional.Some(queue),
 		RetrySettings: configretry.NewDefaultBackOffConfig(),
 	}
 }
@@ -56,8 +57,10 @@ func (c *Config) Validate() error {
 	if c.Timeout < 0 {
 		return fmt.Errorf("timeout must be non-negative")
 	}
-	if err := c.QueueSettings.Validate(); err != nil {
-		return err
+	if queue := c.QueueSettings.Get(); queue != nil {
+		if err := queue.Validate(); err != nil {
+			return err
+		}
 	}
 	if err := c.RetrySettings.Validate(); err != nil {
 		return err
