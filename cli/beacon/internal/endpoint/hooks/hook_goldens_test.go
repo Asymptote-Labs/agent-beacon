@@ -149,3 +149,32 @@ func TestCodexHooksGolden(t *testing.T) {
 	}
 	requireGolden(t, removed, "codex_hooks_removed_golden.json")
 }
+
+// What Beacon writes for Devin CLI into a config holding no hooks of the user's own, in both files
+// Devin reads. The golden files were captured before the installer moved onto the settings hook
+// types (#1369), and hold that move to writing the same bytes.
+func TestDevinHooksGolden(t *testing.T) {
+	for _, file := range []struct{ name, existing, golden string }{
+		{name: "config.json", existing: `{"theme": "dark"}`, golden: "devin_config_golden.json"},
+		{name: "hooks.v1.json", golden: "devin_hooks_v1_golden.json"},
+	} {
+		t.Run(file.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), file.name)
+			if file.existing != "" {
+				if err := os.WriteFile(path, []byte(file.existing), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for range 2 {
+				if err := installDevinCLIHooks(path, "/opt/beacon hooks/beacon-hooks", "/var/log/beacon-agent/runtime.jsonl", "/Library/Application Support/Beacon/Endpoint/config.json"); err != nil {
+					t.Fatal(err)
+				}
+				installed, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				requireGolden(t, installed, file.golden)
+			}
+		})
+	}
+}

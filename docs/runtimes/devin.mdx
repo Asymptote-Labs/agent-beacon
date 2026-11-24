@@ -83,7 +83,7 @@ For large stores, the runtime log's retention guard and `--rotate-bytes` behave 
 
 Beacon writes Devin CLI user-level hooks under the `hooks` key in `~/.config/devin/config.json`. Devin CLI project-level installs write the standalone hook map to `./.devin/hooks.v1.json`.
 
-Install and uninstall preserve unrelated Devin settings and non-Beacon hook commands. Restart Devin CLI after installing or removing hooks so new sessions pick up the updated hook configuration.
+Install and uninstall preserve unrelated Devin settings and leave your own hooks as you wrote them, `prompt` hooks and keys Beacon does not model included. Restart Devin CLI after installing or removing hooks so new sessions pick up the updated hook configuration.
 
 ## Related
 

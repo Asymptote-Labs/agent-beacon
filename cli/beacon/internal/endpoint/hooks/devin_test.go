@@ -5,6 +5,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -331,5 +332,120 @@ func TestDevinDesktopConfigPathProjectLevel(t *testing.T) {
 	}
 	if got, want := target, filepath.Join(dir, ".windsurf", "hooks.json"); got != want {
 		t.Fatalf("project config path = %q, want %q", got, want)
+	}
+}
+
+// The user's own Devin hooks in the shapes Beacon has no fields for: a prompt hook, a command hook
+// with a fractional timeout and a key Beacon does not model, a group with a key of its own, and a
+// prompt hook sharing a group with a hook an older Beacon wrote.
+const devinUserHooksFixture = `{
+  "Stop": [
+    {"hooks": [{"type": "prompt", "prompt": "Did the agent run the tests? Block if not.", "timeout": 10}]}
+  ],
+  "PreToolUse": [
+    {"matcher": "exec", "description": "shell guard", "hooks": [{"type": "command", "command": "/usr/local/bin/guard", "timeout": 2.5, "owner": "platform"}]}
+  ],
+  "SessionStart": [
+    {"hooks": [{"type": "prompt", "prompt": "Summarize the repository."}, {"type": "command", "command": "'/old/beacon-hooks' --platform devin-cli --log '/tmp/old.jsonl' session-start"}]}
+  ]
+}`
+
+// #1369: install and uninstall decoded the user's entries into Beacon's own structs and wrote those
+// back, so a prompt hook lost its prompt and gained an empty command, and a fractional timeout
+// failed the read.
+func TestDevinInstallAndUninstallKeepAUsersHooksAsWritten(t *testing.T) {
+	for _, file := range []struct {
+		name, content string
+		standalone    bool
+	}{
+		{name: "config.json", content: `{"theme": "dark", "hooks": ` + devinUserHooksFixture + `}`},
+		{name: "hooks.v1.json", content: devinUserHooksFixture, standalone: true},
+	} {
+		t.Run(file.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), file.name)
+			if err := os.WriteFile(path, []byte(file.content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			for _, step := range []string{"install", "repair"} {
+				if err := installDevinCLIHooks(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+					t.Fatalf("%s failed over the user's hooks: %v", step, err)
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertDevinUserHooksKept(t, data, file.standalone)
+				if !isDevinCLIInstalledAt(path) {
+					t.Fatalf("after %s, status reports Beacon's hooks missing:\n%s", step, data)
+				}
+				if strings.Contains(string(data), "/old/beacon-hooks") {
+					t.Fatalf("%s left the hook an older Beacon wrote:\n%s", step, data)
+				}
+			}
+			changed, err := removeDevinCLIEndpointHooks(path)
+			if err != nil {
+				t.Fatalf("uninstall failed over the user's hooks: %v", err)
+			}
+			if !changed {
+				t.Fatal("uninstall reported no change, want Beacon's hooks removed")
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "--platform devin-cli") {
+				t.Fatalf("Beacon hooks were not removed:\n%s", data)
+			}
+			assertDevinUserHooksKept(t, data, file.standalone)
+		})
+	}
+}
+
+// assertDevinUserHooksKept checks every entry and group of devinUserHooksFixture that is the
+// user's, field for field, and that nothing gained an empty command.
+func assertDevinUserHooksKept(t *testing.T, data []byte, standalone bool) {
+	t.Helper()
+	hooks := map[string][]map[string]any{}
+	if standalone {
+		if err := json.Unmarshal(data, &hooks); err != nil {
+			t.Fatalf("hooks file is not valid JSON: %v\n%s", err, data)
+		}
+	} else {
+		var root struct {
+			Theme string                      `json:"theme"`
+			Hooks map[string][]map[string]any `json:"hooks"`
+		}
+		if err := json.Unmarshal(data, &root); err != nil {
+			t.Fatalf("config is not valid JSON: %v\n%s", err, data)
+		}
+		if root.Theme != "dark" {
+			t.Errorf("the user's theme setting changed to %q", root.Theme)
+		}
+		hooks = root.Hooks
+	}
+	for event, want := range map[string][]map[string]any{
+		"Stop":         {{"type": "prompt", "prompt": "Did the agent run the tests? Block if not.", "timeout": float64(10)}},
+		"PreToolUse":   {{"type": "command", "command": "/usr/local/bin/guard", "timeout": 2.5, "owner": "platform"}},
+		"SessionStart": {{"type": "prompt", "prompt": "Summarize the repository."}},
+	} {
+		var got []map[string]any
+		for _, entry := range hookEntriesForTest(hooks[event]) {
+			if command, _ := entry["command"].(string); !strings.Contains(command, "beacon-hooks") {
+				got = append(got, entry)
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("the user's %s hooks changed: got %v, want %v\n%s", event, got, want, data)
+		}
+	}
+	group := groupWithMatcherForTest(hooks["PreToolUse"], "exec")
+	if group == nil {
+		t.Fatalf("the user's PreToolUse exec group was dropped:\n%s", data)
+	}
+	if group["description"] != "shell guard" {
+		t.Errorf("the user's group lost a key Beacon does not model: %v", group)
+	}
+	if !strings.Contains(string(data), `"timeout": 2.5`) {
+		t.Errorf("the file no longer says \"timeout\": 2.5:\n%s", data)
 	}
 }
