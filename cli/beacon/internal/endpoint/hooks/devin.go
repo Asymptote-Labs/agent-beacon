@@ -28,16 +28,13 @@ type DevinStatus struct {
 	Message    string `json:"message,omitempty"`
 }
 
-type devinHookGroup struct {
-	Matcher string         `json:"matcher,omitempty"`
-	Hooks   []devinHookRef `json:"hooks"`
-}
-
-type devinHookRef struct {
-	Type    string `json:"type"`
-	Command string `json:"command"`
-	Timeout int    `json:"timeout,omitempty"`
-}
+// Devin CLI's hooks are the Claude Code shape, in a file that also holds the user's own: a `prompt`
+// hook carries `prompt` and no `command`, and any entry may carry keys Beacon has no fields for.
+// Structs of Devin's own here decoded those entries and wrote them back without the prompt and with
+// an empty `command` (#1369), which is what #618 was for Claude Code. So Devin reads and writes the
+// settings hook types, which write an entry they read back from its original JSON.
+type devinHookGroup = settingsHookGroup
+type devinHookRef = settingsHookRef
 
 type windsurfHookRef struct {
 	Command    string `json:"command"`
