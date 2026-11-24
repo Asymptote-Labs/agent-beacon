@@ -27,6 +27,11 @@ type Cursor struct {
 	// Usage is the cumulative settings usage Beacon has already emitted for this session, the
 	// baseline the next token.usage delta is measured from. Nil means none has been emitted yet.
 	Usage *UsageTotals `json:"usage_totals,omitempty"`
+	// LongLines marks a cursor saved by the reader that reads past a line over MaxLineBytes. An
+	// earlier reader stopped at such a line yet saved the file's full size and time, so a cursor
+	// without it is read once more even when the file is unchanged, and the records after the long
+	// line are collected; the records it already read stay behind LastLine.
+	LongLines bool `json:"long_lines,omitempty"`
 }
 
 type State struct {
@@ -166,6 +171,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	}
 	seedLegacyUsageBaseline(cursor, ref)
 	if cursor.LastLine > 0 &&
+		cursor.LongLines &&
 		cursor.ModTimeUnixMS == ref.ModTimeUnixMS &&
 		cursor.SizeBytes == ref.SizeBytes &&
 		cursor.SettingsUnixMS == ref.SettingsUnixMS {
@@ -223,6 +229,7 @@ func seedLegacyUsageBaseline(cursor *Cursor, ref SessionRef) {
 func advanceCursor(cursor *Cursor, ref SessionRef, stats ReadStats) {
 	cursor.SourcePath = ref.Path
 	cursor.LastLine = stats.Lines
+	cursor.LongLines = true
 	cursor.ModTimeUnixMS = ref.ModTimeUnixMS
 	cursor.SizeBytes = ref.SizeBytes
 	cursor.SettingsUnixMS = ref.SettingsUnixMS

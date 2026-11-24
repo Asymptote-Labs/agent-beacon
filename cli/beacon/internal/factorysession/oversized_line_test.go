@@ -91,3 +91,52 @@ func TestReadWithholdsAnOversizedTailUntilItIsComplete(t *testing.T) {
 		t.Errorf("record after the long line is line %d, want 3", records[1].Line)
 	}
 }
+
+// A session an earlier release stopped at a long line has a cursor at the line before it that still
+// records the file's full size and time, so an unchanged file was skipped before it was read. That
+// cursor carries no long_lines mark: the session is read once more, the records after the long line
+// are collected, and the ones the earlier release wrote are not written again (#1373 review).
+func TestCollectOnceReadsPastALongLineAnEarlierReleaseStoppedAt(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := filepath.Join(root, "-repo", "session-1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	huge := strings.Repeat("x", MaxLineBytes+1024)
+	writeFile(t, sessionPath, `{"type":"session_start","id":"session-1","title":"hi","cwd":"/repo"}`+"\n"+
+		factoryMessage("u1", "user", "2026-05-16T22:11:04.611Z", "before the long line")+"\n"+
+		`{"type":"message","id":"a1","timestamp":"2026-05-16T22:11:05.611Z","message":{"role":"assistant","content":[{"type":"text","text":"`+huge+`"}]}}`+"\n"+
+		factoryMessage("u2", "user", "2026-05-16T22:11:06.611Z", "after the long line")+"\n")
+	refs, err := (&Store{Dir: root}).List()
+	if err != nil || len(refs) != 1 {
+		t.Fatalf("List = %v, %v", refs, err)
+	}
+	// What the earlier reader saved: the two lines before the long one, and the whole file's size
+	// and time.
+	statePath := filepath.Join(t.TempDir(), "factory-state.json")
+	state := &State{Version: StateVersion, Sessions: map[string]*Cursor{refs[0].ID: {
+		SourcePath: refs[0].Path, LastLine: 2, Started: true,
+		ModTimeUnixMS: refs[0].ModTimeUnixMS, SizeBytes: refs[0].SizeBytes, SettingsUnixMS: refs[0].SettingsUnixMS,
+	}}}
+	if err := state.Save(statePath); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if _, err := CollectOnce(CollectOptions{SessionsDir: root, StatePath: statePath, Print: true, Out: &out}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "after the long line") {
+		t.Errorf("the record after the long line was not collected")
+	}
+	if strings.Contains(out.String(), "before the long line") || strings.Contains(out.String(), "session.started") {
+		t.Errorf("records the earlier release already wrote were written again:\n%.400s", out.String())
+	}
+	// The cursor is now the new reader's, so an unchanged file is skipped again.
+	out.Reset()
+	if _, err := CollectOnce(CollectOptions{SessionsDir: root, StatePath: statePath, Print: true, Out: &out}); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("a sweep of the unchanged file wrote:\n%.400s", out.String())
+	}
+}
