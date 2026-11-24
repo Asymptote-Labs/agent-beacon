@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -29,6 +30,13 @@ const ProviderEnv = "BEACON_POLICY_PROVIDER"
 // Timeout bounds how long a hook waits for a provider decision before failing
 // open. It is a package variable so tests can shorten it.
 var Timeout = 2 * time.Second
+
+// pipeWaitDelay is how long Evaluate waits, once the provider has exited or the
+// timeout has killed it, for the provider's stdout pipe to close. A child the
+// provider started keeps the pipe open (a shell script's commands are such
+// children), and without a bound Run would wait for that child however long it
+// runs, so the hook could outlast Timeout by the child's whole life.
+const pipeWaitDelay = 200 * time.Millisecond
 
 // execCommandContext is overridable in tests.
 var execCommandContext = exec.CommandContext
@@ -74,7 +82,10 @@ func Evaluate(ctx context.Context, req Request) policycontract.Response {
 	cmd.Stdin = bytes.NewReader(payload)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	cmd.WaitDelay = pipeWaitDelay
+	// ErrWaitDelay means the provider exited 0 and only the pipe was still open:
+	// its answer is complete, so it is honored rather than dropped.
+	if err := cmd.Run(); err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return allow
 	}
 
