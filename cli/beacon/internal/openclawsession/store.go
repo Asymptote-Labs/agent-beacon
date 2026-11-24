@@ -2,10 +2,12 @@ package openclawsession
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -209,26 +211,67 @@ func readEntries(path string) ([]RawEntry, error) {
 		return nil, err
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	br := bufio.NewReaderSize(file, 64*1024)
 	var out []RawEntry
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for {
+		raw, ok, err := readLine(br)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return out, nil
+			}
+			return out, err
+		}
+		if !ok {
+			// Longer than maxLineBytes: skipped like a line that is not JSON, so the session and
+			// its other records are still read. bufio.Scanner failed the whole file here.
+			continue
+		}
+		line := strings.TrimSpace(string(raw))
 		if line == "" {
 			continue
 		}
-		var raw map[string]any
-		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(line), &fields); err != nil {
 			continue
 		}
 		var entry RawEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
-		entry.Raw = raw
+		entry.Raw = fields
 		out = append(out, entry)
 	}
-	return out, scanner.Err()
+}
+
+// readLine reads one line from br, the last one with or without its newline, as bufio.Scanner did.
+// A line longer than maxLineBytes is consumed without being held in memory and returned with ok
+// false. At the end of the file it returns io.EOF.
+func readLine(br *bufio.Reader) (line []byte, ok bool, err error) {
+	var buf []byte
+	oversized, read := false, false
+	for {
+		chunk, err := br.ReadSlice('\n')
+		read = read || len(chunk) > 0
+		if oversized || len(buf)+len(chunk) > maxLineBytes {
+			oversized, buf = true, nil
+		} else {
+			buf = append(buf, chunk...)
+		}
+		switch {
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF):
+			if !read {
+				return nil, false, io.EOF
+			}
+		case err != nil:
+			return nil, false, err
+		}
+		if oversized {
+			return nil, false, nil
+		}
+		return bytes.TrimSuffix(bytes.TrimSuffix(buf, []byte("\n")), []byte("\r")), true, nil
+	}
 }
 
 func collectSessionFilesFlat(root string, limit int) []string {
