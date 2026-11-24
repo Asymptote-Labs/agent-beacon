@@ -2,6 +2,7 @@ package factorysession
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -188,50 +189,83 @@ func (s *Store) Read(ref SessionRef) ([]Record, ReadStats, error) {
 		return nil, ReadStats{}, err
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), MaxLineBytes)
+	br := bufio.NewReaderSize(file, 64*1024)
 	var records []Record
 	stats := ReadStats{}
-	lastLineMalformed := false
-	for scanner.Scan() {
+	for {
+		raw, status, readErr := readLine(br)
+		switch status {
+		case lineEOF:
+			return records, stats, nil
+		case linePartial:
+			// An unterminated tail is a record Factory is still writing; withhold it, oversized or
+			// not, so the next sweep reads it complete.
+			stats.Partial = true
+			return records, stats, nil
+		case lineError:
+			stats.Partial = true
+			return records, stats, readErr
+		case lineOversized:
+			// Skipped, but still a line, so every line after it keeps its number and is read.
+			stats.Lines++
+			stats.Malformed++
+			continue
+		}
 		stats.Lines++
-		lastLineMalformed = false
-		text := strings.TrimSpace(scanner.Text())
+		text := strings.TrimSpace(string(raw))
 		if text == "" {
 			continue
 		}
 		var record Record
 		if err := json.Unmarshal([]byte(text), &record); err != nil {
 			stats.Malformed++
-			lastLineMalformed = true
 			continue
 		}
 		record.Line = stats.Lines
-		record.Raw = json.RawMessage(append([]byte(nil), text...))
+		record.Raw = json.RawMessage(text)
 		records = append(records, record)
 	}
-	if err := scanner.Err(); err != nil {
-		stats.Partial = true
-		return records, stats, nil
-	}
-	// bufio.Scanner returns the last line even without a trailing newline, and
-	// Err() is nil. An unterminated tail is a record Factory is still writing;
-	// withhold it so the next sweep reads it complete.
-	if stats.Lines > 0 {
-		if pos, seekErr := file.Seek(-1, io.SeekEnd); seekErr == nil && pos >= 0 {
-			var buf [1]byte
-			if _, readErr := file.Read(buf[:]); readErr == nil && buf[0] != '\n' {
-				stats.Partial = true
-				if lastLineMalformed {
-					stats.Malformed--
-				} else if len(records) > 0 && records[len(records)-1].Line == stats.Lines {
-					records = records[:len(records)-1]
-				}
-				stats.Lines--
-			}
+}
+
+type lineStatus int
+
+const (
+	lineOK        lineStatus = iota
+	lineOversized            // terminated, longer than MaxLineBytes, consumed and discarded
+	linePartial              // an unterminated tail, of any length
+	lineEOF                  // clean end of the file
+	lineError                // I/O error
+)
+
+// readLine reads one line from br. A line longer than MaxLineBytes (a pasted image or a large tool
+// result) is consumed without being held in memory and reported as oversized, so the lines after it
+// are still read; bufio.Scanner stopped at it for good. An unterminated tail is reported as partial.
+func readLine(br *bufio.Reader) ([]byte, lineStatus, error) {
+	var buf []byte
+	oversized := false
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if oversized || len(buf)+len(chunk) > MaxLineBytes {
+			oversized, buf = true, nil
+		} else {
+			buf = append(buf, chunk...)
 		}
+		switch {
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF):
+			if oversized || len(buf) > 0 {
+				return nil, linePartial, nil
+			}
+			return nil, lineEOF, nil
+		case err != nil:
+			return nil, lineError, err
+		}
+		if oversized {
+			return nil, lineOversized, nil
+		}
+		return bytes.TrimSuffix(bytes.TrimSuffix(buf, []byte("\n")), []byte("\r")), lineOK, nil
 	}
-	return records, stats, nil
 }
 
 func validateSessionID(id string) error {
