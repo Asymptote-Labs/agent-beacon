@@ -332,11 +332,14 @@ func advanceCursor(cursor *Cursor, session Session, messages []Message, mapped [
 		}
 	}
 	cursor.PendingCalls = pending
-	usageWritten := true
+	usageWritten, endWritten := true, true
 	for i, item := range mapped {
 		if i >= written {
-			if item.Event.Event.Action == "token.usage" {
+			switch item.Event.Event.Action {
+			case "token.usage":
 				usageWritten = false
+			case "session.ended":
+				endWritten = false
 			}
 			continue
 		}
@@ -349,7 +352,13 @@ func advanceCursor(cursor *Cursor, session Session, messages []Message, mapped [
 	}
 	advanceCursorMessages(cursor, done)
 	if usageWritten {
+		// updateCursorTotals also records an end it finds unrecorded, which would stop the next
+		// sweep from writing a session.ended this one did not reach.
+		ended := cursor.EndedAtMS
 		updateCursorTotals(cursor, session)
+		if !endWritten {
+			cursor.EndedAtMS = ended
+		}
 	}
 }
 
@@ -729,6 +738,12 @@ func (m *mapper) mapUsage() {
 	ts := m.session.EndedAtMS
 	if ts == 0 {
 		ts = m.lastTimestampMS
+	}
+	if ts == 0 {
+		// No message was read this sweep, as when the one before stopped just short of this
+		// event: the session's latest message is when its usage was last reported, as a sweep
+		// that read every message would have found.
+		ts = m.session.LastMessageAtMS
 	}
 	if ts == 0 {
 		ts = m.session.StartedAtMS

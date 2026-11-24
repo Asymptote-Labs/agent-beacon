@@ -147,3 +147,60 @@ func TestCollectOnceKeepsOneSessionLargerThanTheRotationWindow(t *testing.T) {
 		return sessionsynctest.Result{EventsEmitted: s.EventsEmitted, Errors: s.Errors, Retention: s.Retention}, err
 	})
 }
+
+// A budgeted sweep may stop after any event, and the sweep after it must write exactly what one
+// sweep without a budget does, timestamps included. Every stopping point is tried, for a session
+// that has ended and for one still running: stopping just before session.ended must not lose it,
+// and stopping just before a running session's token usage must not move that event to the
+// session's start (#1361 review).
+func TestCollectOnceResumesFromEveryStoppingPoint(t *testing.T) {
+	for _, live := range []bool{false, true} {
+		t.Run(fmt.Sprintf("live=%v", live), func(t *testing.T) {
+			dbPath := hermesLongSession(t, 3)
+			if live {
+				db, err := sql.Open("sqlite", dbPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`UPDATE sessions SET ended_at = NULL, end_reason = NULL`); err != nil {
+					t.Fatal(err)
+				}
+				db.Close()
+			}
+			refDir := t.TempDir()
+			refLog := filepath.Join(refDir, "runtime.jsonl")
+			if _, err := CollectOnce(CollectOptions{DBPath: dbPath, StatePath: filepath.Join(refDir, "state.json"), Write: true, UserMode: true, LogPath: refLog}); err != nil {
+				t.Fatal(err)
+			}
+			want := eventsByID(t, refLog)
+			// The bytes each event takes on its own line, in the order one sweep writes them.
+			var sizes []int64
+			for _, ev := range readEvents(t, refLog) {
+				sizes = append(sizes, int64(len(want[ev.Event.ID]))+1)
+			}
+			var budget int64
+			for stop := 0; stop < len(sizes); stop++ {
+				dir := t.TempDir()
+				logPath := filepath.Join(dir, "runtime.jsonl")
+				statePath := filepath.Join(dir, "state.json")
+				_, err := CollectOnce(CollectOptions{DBPath: dbPath, StatePath: statePath, Write: true, UserMode: true, LogPath: logPath, Budget: writer.NewBudget(budget)})
+				if !errors.Is(err, writer.ErrBudgetSpent) {
+					t.Fatalf("stop after %d events: err = %v, want writer.ErrBudgetSpent", stop, err)
+				}
+				if _, err := CollectOnce(CollectOptions{DBPath: dbPath, StatePath: statePath, Write: true, UserMode: true, LogPath: logPath}); err != nil {
+					t.Fatalf("stop after %d events, then a sweep without a budget: %v", stop, err)
+				}
+				got := eventsByID(t, logPath)
+				for id, ev := range want {
+					if got[id] != ev {
+						t.Errorf("stop after %d events: event %s\n got  %s\n want %s", stop, id, got[id], ev)
+					}
+				}
+				if len(got) != len(want) {
+					t.Errorf("stop after %d events: %d distinct events, want %d", stop, len(got), len(want))
+				}
+				budget += sizes[stop]
+			}
+		})
+	}
+}
