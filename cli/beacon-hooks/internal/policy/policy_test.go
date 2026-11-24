@@ -96,6 +96,57 @@ func TestEvaluateFailsOpenOnTimeout(t *testing.T) {
 	}
 }
 
+// TestEvaluateDoesNotWaitForChildHoldingStdout covers a provider that starts a
+// child which inherits its stdout (a shell script's commands are such
+// children). The pipe then stays open after the provider has exited or been
+// killed, and Evaluate must not wait for that child.
+func TestEvaluateDoesNotWaitForChildHoldingStdout(t *testing.T) {
+	// The provider answers deny and exits 0 well inside Timeout; its child
+	// keeps stdout open for 3s.
+	t.Run("deny-then-child", func(t *testing.T) {
+		t.Setenv(ProviderEnv, "fake")
+		fakeProvider(t, "deny-then-child")
+		start := time.Now()
+		got := Evaluate(context.Background(), sampleRequest())
+		if elapsed := time.Since(start); elapsed > Timeout {
+			t.Errorf("timeout not enforced, took %s", elapsed)
+		}
+		if !got.Denied() || got.RuleID != "test-rule" || got.Reason != "blocked" {
+			t.Errorf("expected the deny the provider printed before exiting, got %+v", got)
+		}
+	})
+
+	// The provider never answers; the timeout kills it, and its child keeps
+	// stdout open for 3s.
+	t.Run("child-then-sleep", func(t *testing.T) {
+		t.Setenv(ProviderEnv, "fake")
+		fakeProvider(t, "child-then-sleep")
+		orig := Timeout
+		Timeout = 20 * time.Millisecond
+		t.Cleanup(func() { Timeout = orig })
+
+		start := time.Now()
+		got := Evaluate(context.Background(), sampleRequest())
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Errorf("timeout not enforced, took %s", elapsed)
+		}
+		if got.Denied() {
+			t.Errorf("expected fail-open allow on timeout, got %+v", got)
+		}
+	})
+}
+
+// startChildHoldingStdout starts a second helper process that inherits this
+// process's stdout and outlives it.
+func startChildHoldingStdout() {
+	child := exec.Command(os.Args[0], "-test.run=TestHelperProcess")
+	child.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "HELPER_BEHAVIOR=hold-stdout")
+	child.Stdout = os.Stdout
+	if err := child.Start(); err != nil {
+		os.Exit(4)
+	}
+}
+
 // TestHelperProcess is not a real test: it is the fake provider invoked by
 // fakeProvider via the test binary.
 func TestHelperProcess(t *testing.T) {
@@ -115,6 +166,14 @@ func TestHelperProcess(t *testing.T) {
 	case "sleep":
 		time.Sleep(3 * time.Second)
 		os.Stdout.WriteString(`{"decision":"deny"}`)
+	case "deny-then-child":
+		os.Stdout.WriteString(`{"decision":"deny","reason":"blocked","rule_id":"test-rule","severity":"high","mode":"enforce"}`)
+		startChildHoldingStdout()
+	case "child-then-sleep":
+		startChildHoldingStdout()
+		time.Sleep(3 * time.Second)
+	case "hold-stdout":
+		time.Sleep(3 * time.Second) // writes nothing; only keeps the inherited stdout open
 	}
 	os.Exit(0)
 }
