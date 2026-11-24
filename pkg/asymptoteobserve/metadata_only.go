@@ -76,6 +76,7 @@ func stripGenAIToMetadata(genAI GenAIInfo) *GenAIInfo {
 			call.Arguments = nil
 			call.Result = nil
 			call.ResultText = ""
+			call.ArgumentsText = ""
 			tool.Call = nonZeroOrNil(call)
 		}
 		genAI.Tool = nonZeroOrNil(tool)

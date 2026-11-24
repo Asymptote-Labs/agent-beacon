@@ -41,7 +41,7 @@ import (
 //   - A nil map, slice or pointer, in an interface{} or a field, and an omitempty field that is
 //     empty, decode as nil; an empty map or slice in an interface{} stays empty, not nil. A non-nil
 //     pointer to an empty struct decodes as an empty struct.
-//   - `json:"-"` fields (ResultText, SystemInstructionsText) are not written, so they come back
+//   - `json:"-"` fields (ResultText, ArgumentsText, SystemInstructionsText) are not written, so they come back
 //     empty.
 //
 // A value JSON cannot represent is replaced by nil: a NaN or infinite float, in a field or an

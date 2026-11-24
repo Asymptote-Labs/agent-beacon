@@ -168,6 +168,14 @@ the steps in both orders still fires once. A single event never satisfies two st
   `http` or `https` URL with a host — and its `content`
   marker, if present, is `included` with a `retention` other than `metadata`. The
   reference derivation is `threatrules.ToolResultText`.
+- `e.gen_ai.tool.call.arguments_text` is derived under the same rules (computed, never
+  read from input, secret redaction, empty unless the `content` marker, if present, is
+  `included` with a `retention` other than `metadata`). It is `gen_ai.tool.call.arguments`
+  as text: a string as is; an object as JSON, with map keys in sorted order. It is capped
+  at 4096 bytes and passed through the event writer's secret redaction. It is the empty
+  string unless the event is a tool call, not its result: a result repeats its call's
+  arguments, so deriving the field there too would let a rule fire twice for one action.
+  The reference derivation is `threatrules.ToolCallArgumentsText`.
 - `e.gen_ai.system_instructions_text` is derived under the same rules (computed, never
   read from input, secret redaction, empty unless the `content` marker, if present, is
   `included` with a `retention` other than `metadata`). It is `gen_ai.system_instructions`

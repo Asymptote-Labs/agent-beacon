@@ -209,6 +209,11 @@ var derivedFieldDocs = map[string]string{
 		"  object or list result are joined one per line;\n" +
 		"  content blocks in a list contribute their text without metadata or encoded bytes.\n" +
 		fmt.Sprintf("  Capped at %d bytes and secret-redacted like other retained text; empty otherwise.", ToolResultTextLimit),
+	ToolCallArgumentsTextPath: "`gen_ai.tool.call.arguments` as text, only on tool calls, not\n" +
+		"  their results: a result repeats its call's arguments, so deriving the field there\n" +
+		"  too would let a rule fire twice for one action. A string arguments value as is;\n" +
+		"  an object arguments value as JSON, with keys in sorted order, when content was retained.\n" +
+		fmt.Sprintf("  Capped at %d bytes and secret-redacted like other retained text; empty otherwise.", ToolCallArgumentsTextLimit),
 	SystemInstructionsTextPath: "`gen_ai.system_instructions` as text: the `content` of each\n" +
 		"  `text` part, one per line (a bare string as is), when content was retained. These are\n" +
 		"  runtime-provided instructions such as a skill index, never operator prompt text.\n" +

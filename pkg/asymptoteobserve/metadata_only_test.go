@@ -27,7 +27,7 @@ func metadataOnlyFixture() Event {
 		Retrieval:              &GenAIRetrievalInfo{QueryText: "secret query", Documents: []interface{}{"secret document"}},
 		Tool: &GenAIToolInfo{
 			Name: "Bash", Type: "function", Description: "secret tool description", Definitions: []interface{}{"secret definition"},
-			Call: &GenAIToolCallInfo{ID: "toolu_1", Arguments: map[string]interface{}{"command": "secret arguments"}, Result: "secret result", ResultText: "secret result"},
+			Call: &GenAIToolCallInfo{ID: "toolu_1", Arguments: map[string]interface{}{"command": "secret arguments"}, Result: "secret result", ResultText: "secret result", ArgumentsText: "secret arguments"},
 		},
 		Evaluation: &GenAIEvaluationInfo{Name: "helpfulness", Explanation: "secret explanation"},
 		Agent:      &GenAIAgentInfo{ID: "a1", Name: "reviewer", Description: "secret agent description"},
@@ -53,8 +53,8 @@ func TestStripToMetadataRemovesContentAndKeepsMetadata(t *testing.T) {
 		t.Fatalf("content survived StripToMetadata:\n%s", after)
 	}
 	// The threat-rules copies of the semconv values are never written, but are content all the same.
-	if stripped.GenAI.SystemInstructionsText != "" || stripped.GenAI.Tool.Call.ResultText != "" {
-		t.Fatalf("rule-only text kept: %q %q", stripped.GenAI.SystemInstructionsText, stripped.GenAI.Tool.Call.ResultText)
+	if stripped.GenAI.SystemInstructionsText != "" || stripped.GenAI.Tool.Call.ResultText != "" || stripped.GenAI.Tool.Call.ArgumentsText != "" {
+		t.Fatalf("rule-only text kept: %q %q %q", stripped.GenAI.SystemInstructionsText, stripped.GenAI.Tool.Call.ResultText, stripped.GenAI.Tool.Call.ArgumentsText)
 	}
 	g := stripped.GenAI
 	switch {
@@ -82,7 +82,7 @@ func TestStripToMetadataRemovesContentAndKeepsMetadata(t *testing.T) {
 	if again, _ := json.Marshal(original); string(again) != string(before) {
 		t.Fatalf("StripToMetadata changed another event's blocks:\nbefore %s\nafter  %s", before, again)
 	}
-	if original.GenAI.SystemInstructionsText == "" || original.GenAI.Tool.Call.ResultText == "" {
+	if original.GenAI.SystemInstructionsText == "" || original.GenAI.Tool.Call.ResultText == "" || original.GenAI.Tool.Call.ArgumentsText == "" {
 		t.Fatal("StripToMetadata changed another event's rule-only text")
 	}
 }
