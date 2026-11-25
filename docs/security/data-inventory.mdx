@@ -69,7 +69,9 @@ By default, snapshots include config-file metadata, MCP server metadata, skill m
 
 `beacon memory` writes a local SQLite store, `memory.db`, next to the endpoint log
 base directory. The store is separate from `runtime.jsonl` and keeps reviewed
-learning artifacts scoped to the resolved project:
+learning artifacts scoped to the resolved project. Its first write creates it
+readable by your account only (`0600`); the dashboard and the local MCP tools
+only read it and never create it:
 
 | Memory area | Data retained |
 |-------------|---------------|

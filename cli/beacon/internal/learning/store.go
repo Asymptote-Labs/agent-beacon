@@ -75,6 +75,10 @@ func (s *Store) dsn() string {
 	return sqliteuri.File(s.dbPath, url.Values{"_pragma": {"busy_timeout(5000)"}, "_txlock": {"immediate"}})
 }
 
+// db opens the store for writing, creating it on first use. The file is created here rather than
+// by SQLite so its mode is 0600 from the first byte, as the trace history's is: it holds
+// evaluations, candidates and memories distilled from session traces. SQLite gives the -wal and
+// -shm files the database file's mode.
 func (s *Store) db() (*sql.DB, error) {
 	if s.dbPath == "" {
 		s.dbPath = storeFile
@@ -82,6 +86,37 @@ func (s *Store) db() (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(s.dbPath), 0700); err != nil && filepath.Dir(s.dbPath) != "." {
 		return nil, err
 	}
+	f, err := os.OpenFile(s.dbPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil && !os.IsExist(err) {
+		return nil, err
+	}
+	if f != nil {
+		_ = f.Close()
+	}
+	return s.open()
+}
+
+// readDB opens the store for reading. A store that does not exist yet holds nothing, and a read
+// does not create it, so ok is false and the caller answers empty: the dashboard and the MCP server
+// only ever read, and the dashboard is read-only.
+func (s *Store) readDB() (db *sql.DB, ok bool, err error) {
+	if s.dbPath == "" {
+		s.dbPath = storeFile
+	}
+	if _, err := os.Stat(s.dbPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	db, err = s.open()
+	if err != nil {
+		return nil, false, err
+	}
+	return db, true, nil
+}
+
+func (s *Store) open() (*sql.DB, error) {
 	db, err := sql.Open("sqlite", s.dsn())
 	if err != nil {
 		return nil, err
@@ -212,8 +247,8 @@ func ProjectID(project asymptoteobserve.LearningProjectV1) string {
 
 // KnownProjects returns the distinct projects this store holds records for.
 func (s *Store) KnownProjects() ([]asymptoteobserve.LearningProjectV1, error) {
-	db, err := s.db()
-	if err != nil {
+	db, ok, err := s.readDB()
+	if err != nil || !ok {
 		return nil, err
 	}
 	defer db.Close()
@@ -410,16 +445,19 @@ func readGitConfigValue(root, section, key string) string {
 }
 
 func (s *Store) Status() (asymptoteobserve.LearningStatusV1, error) {
-	db, err := s.db()
+	db, ok, err := s.readDB()
 	if err != nil {
 		return asymptoteobserve.LearningStatusV1{}, err
 	}
-	defer db.Close()
 	status := asymptoteobserve.LearningStatusV1{
 		SchemaVersion: asymptoteobserve.LearningSchemaVersion,
 		Path:          s.dbPath,
-		SizeBytes:     fileSize(s.dbPath),
 	}
+	if !ok {
+		return status, nil
+	}
+	defer db.Close()
+	status.SizeBytes = fileSize(s.dbPath)
 	_ = db.QueryRow(`SELECT COUNT(*) FROM evaluations`).Scan(&status.Evaluations)
 	_ = db.QueryRow(`SELECT COUNT(*) FROM candidates`).Scan(&status.Candidates)
 	_ = db.QueryRow(`SELECT COUNT(*) FROM memories WHERE superseded_by IS NULL OR superseded_by = ''`).Scan(&status.ApprovedMemories)
@@ -548,8 +586,8 @@ func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidat
 }
 
 func (s *Store) GetCandidate(id string) (asymptoteobserve.LearningCandidateV1, bool, error) {
-	db, err := s.db()
-	if err != nil {
+	db, ok, err := s.readDB()
+	if err != nil || !ok {
 		return asymptoteobserve.LearningCandidateV1{}, false, err
 	}
 	defer db.Close()
@@ -619,8 +657,8 @@ func (s *Store) ListMemories(query Query) ([]asymptoteobserve.LearningMemoryV1, 
 // counts matching records: paging in SQL would count rows the query then drops, returning empty or
 // shifted pages whenever newer non-matching records fill the SQL page.
 func listJSON[T any](s *Store, query Query, selectSQL string, args []interface{}, text func(T) []string) ([]T, error) {
-	db, err := s.db()
-	if err != nil {
+	db, ok, err := s.readDB()
+	if err != nil || !ok {
 		return nil, err
 	}
 	defer db.Close()
@@ -667,8 +705,8 @@ func listJSON[T any](s *Store, query Query, selectSQL string, args []interface{}
 }
 
 func (s *Store) GetMemory(id string) (asymptoteobserve.LearningMemoryV1, bool, error) {
-	db, err := s.db()
-	if err != nil {
+	db, ok, err := s.readDB()
+	if err != nil || !ok {
 		return asymptoteobserve.LearningMemoryV1{}, false, err
 	}
 	defer db.Close()
@@ -686,8 +724,8 @@ func getMemory(db recordDB, id string) (asymptoteobserve.LearningMemoryV1, bool,
 }
 
 func (s *Store) getJSON(query, id string, dest *string) (bool, error) {
-	db, err := s.db()
-	if err != nil {
+	db, ok, err := s.readDB()
+	if err != nil || !ok {
 		return false, err
 	}
 	defer db.Close()

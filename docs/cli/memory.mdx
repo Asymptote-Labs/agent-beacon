@@ -26,7 +26,9 @@ All subcommands accept the common endpoint and project-scope flags:
 | `--json` | Print machine-readable JSON |
 
 Beacon stores learning artifacts in `memory.db` next to the resolved endpoint base
-directory for the runtime log. The store is durable local state and is scoped by
+directory for the runtime log, readable by your account only (`0600`). The first
+`beacon memory` command that writes creates it; reading it (the dashboard's Memory
+view, the local MCP tools, the list commands) never does. The store is durable local state and is scoped by
 the resolved project ID, so approved memory for one repository is not automatically
 returned for another.
 
