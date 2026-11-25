@@ -302,6 +302,28 @@ sudo loginctl enable-linger $USER
 
 When it could not, `beacon endpoint install` and `beacon endpoint repair` say so at the end of the run and print that exact command, and `beacon endpoint doctor` keeps reporting it until it is fixed. Beacon checks the resulting linger state rather than the exit status of its own attempt, so this reflects whether the collector really will survive logout. Without linger, a user-mode collector works while you are logged in and stops collecting after you log out.
 
+
+## Hooks for another user
+
+On a shared or multi-user machine, install each user's agent hooks as that user, not from a root shell. A root-run install resolves plugin and config paths from root's own home, so the hooks land where the user's agent sessions never look. The supported pattern runs the install as the target user with their home pinned:
+
+```bash title="Install one user's hooks as that user"
+sudo -u alice env HOME=/home/alice beacon endpoint hooks install \
+  --harness opencode --level user --log-path /var/log/beacon/alice.log
+```
+
+The `env HOME=…` prefix is the load-bearing part: it makes the install resolve alice's home, config, and plugin directories exactly as her agent will resolve them at runtime. `--level user` scopes the hooks to her account, and `--log-path` aims them at a system log file the user can append to but not rewrite.
+
+To repair or install for every logged-in user that already has user-level hooks, `beacon endpoint user-config repair-installed --system` re-runs that same per-user install for each of them. Accounts with no login session yet are the remaining gap: there is no `--user <name>` flag today, so run the one-liner above (or ship it in a provisioning script) for accounts created later. Per-named-user automation is tracked separately.
+
+Verify with the same resolver the install used, run as the target user:
+
+```bash title="Check the hooks alice's agent sessions will see"
+sudo -u alice env HOME=/home/alice beacon endpoint hooks status
+```
+
+`hooks status` resolves paths the same way `hooks install` does, so an accurate answer here means the agent's next session will find the hooks. A synthetic check run as root bypasses the socket and proves nothing about delivery.
+
 ## Without systemd
 
 The supervised backend covers hosts with no init system to talk to, such as containers, minimal images, and distributions using OpenRC or SysV:
