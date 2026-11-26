@@ -1108,8 +1108,10 @@ func substitutionGroup(re *regexp.Regexp, match []int, g int) int {
 var redactionRules = concatRules([]redactionRule{
 	// A private key block. The header must be followed by key material, so source code, a diff or
 	// grep output that only names the header keeps the text after it. Without an END line (the
-	// block was cut) the rest of the text goes.
-	rule(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----(?:\s|\\[rn]|(?:Proc-Type|DEK-Info|Comment|Version):[^\n\\]*)*`+
+	// block was cut) the rest of the text goes. Each line of the block may carry a prefix
+	// (redactKeyLinePrefix): a diff deleting a key file, `cat -n` or `grep -n` output and a quoted
+	// key are blocks too.
+	rule(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----(?:\s|\\[rnt]|(?:Proc-Type|DEK-Info|Comment|Version):[^\n\\]*|`+redactKeyLinePrefix+`)*`+
 		`[A-Za-z0-9+/=]{16,}[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|$)`, redactedValue, nil, "-----BEGIN "),
 	// An Authorization header's credential after its scheme: Bearer, Basic, Token, Digest. A JWT
 	// keeps its public `eyJ` prefix, as the shape rules below keep theirs, so `Bearer eyJ[REDACTED]`
@@ -1626,6 +1628,14 @@ func quotedAlternatives() string {
 	}
 	return strings.Join(parts, "|")
 }
+
+// redactKeyLinePrefix is what may come before each line of a private key block besides
+// whitespace: a diff's `-` or `+`, a quote's `>`, and a line number with the `:` of `grep -n` or
+// the tab of `cat -n`, escaped too in JSON-encoded output. Only a removed diff line used to stop
+// the block: `+` is a base64 character, so an added one read as key material. A file name before
+// the number (`grep -n` over several files) is not a prefix, so a match that only names the
+// header keeps the text after it.
+const redactKeyLinePrefix = `[-+>]|[0-9]{1,7}(?::|\t|\\t)`
 
 // redactWindow is how far past a string's limit redaction reads before the string is cut, so a
 // secret that straddles the cut is recognized whole rather than left as a recognizable prefix. It
