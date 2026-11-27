@@ -32,15 +32,21 @@ const redactedValue = "[REDACTED]"
 const redactLabel = `[A-Za-z0-9_.-]*?(?:api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret|` +
 	`token|secret|password|passwd|passphrase|authorization|credentials?)`
 
-// redactAssignOp is the operator between a label and its value: `=`, `:`, or Go's and make's `:=`.
-// It is tried first: read as `:` and a value, `password := "x"` gave up the value `=` and left the
-// quoted secret after it.
-const redactAssignOp = `(?::=|[:=])`
+// redactAssignOp is the operator between a label and its value: `=`, `:`, Go's `:=`, and make's
+// `::=`, `:::=`, `?=` and `+=`. The longer ones are tried first: read as `:` and a value,
+// `password := "x"` gave up the value `=` and left the quoted secret after it. make's `!=` is not
+// one: what follows it is a shell command to run, not a value.
+const redactAssignOp = `(?::::=|::=|:=|\?=|\+=|[:=])`
 
 // redactQuotedAssignOp is redactAssignOp and the `=>` of Ruby, PHP and Perl hashes
-// (`'password' => 'x'`), which counts only before a quoted value: before a bare one it is far more
-// often a JavaScript arrow function (`tokens.map(token => token.id)`).
-const redactQuotedAssignOp = `(?::=|=>|[:=])`
+// (`'password' => 'x'`), which counts only before a value in single or double quotes: before a bare
+// one it is far more often a JavaScript arrow function (`tokens.map(token => token.id)`), and
+// before a backtick one returning a template literal.
+const redactQuotedAssignOp = `(?::::=|::=|:=|=>|\?=|\+=|[:=])`
+
+// redactAssignOps are redactQuotedAssignOp's operators longer than one byte, longest first, as
+// skipLabelSeparator reads them.
+var redactAssignOps = []string{":::=", "::=", ":=", "=>", "?=", "+="}
 
 // redactLabelClose is the closing quote a label may end with (escaped too, for JSON quoted inside a
 // string) before its separator.
@@ -96,6 +102,11 @@ func quotedRules(kind quotedKind, keep func(string) bool) []redactionRule {
 	}
 	rules := make([]redactionRule, 0, len(quotedValues))
 	for _, quoted := range quotedValues {
+		prefix, separator := prefix, separator
+		if kind == quotedAssignment && strings.HasSuffix(quoted[0], "`") {
+			// `=>` before a backtick is an arrow function returning a template literal.
+			prefix, separator = `\b`+redactLabel+redactSeparator, skipSeparator
+		}
 		// The pattern opens the value with this one quote right after the separator, so text
 		// where no label is followed by it cannot match.
 		open := strings.ReplaceAll(quoted[0], `\\`, `\`)
@@ -147,10 +158,14 @@ const redactEscapedNonQuote = `\\[^` + redactQuotes + `]`
 // alone.
 const redactUnquoted = `(?:[^` + redactValueStops + `\\]|` + redactEscapedNonQuote + `)+`
 
-// redactUnquotedAfterOp is redactUnquoted after a label's operator, where it does not start with
-// `=` or `>`: one that did was the rest of the operator, `:=` read as `:` with the value `=`, or a
-// JavaScript arrow function's `=>` read as `=` with the value `>` and the code after it.
-const redactUnquotedAfterOp = `(?:[^` + redactValueStops + `\\=>]|` + redactEscapedNonQuote + `)` +
+// redactOpBytes are the bytes redactQuotedAssignOp's operators are made of.
+const redactOpBytes = `:=>?+`
+
+// redactUnquotedAfterOp is redactUnquoted after a label's operator, where it is not made of
+// operator bytes alone: that is the rest of an operator, `:=` read as `:` with the value `=`,
+// `::=` as `:` with `:=`, or an arrow function's `=>` read as `=` with the value `>` and the code
+// after it. A value that only starts with them is a value: `DB_PASSWORD==Xk9q2r` sets `=Xk9q2r`.
+const redactUnquotedAfterOp = `[` + redactOpBytes + `]*(?:[^` + redactValueStops + `\\` + redactOpBytes + `]|` + redactEscapedNonQuote + `)` +
 	`(?:[^` + redactValueStops + `\\]|` + redactEscapedNonQuote + `)*`
 
 // redactParamStops are the bytes a URL query parameter's value stops at: redactValueStops, and
@@ -186,10 +201,10 @@ func redactUnquotedEnd(t string, i int, stops string) int {
 // structure around it.
 const redactBare = `[^"'` + "`" + `\\\s,{}\[\]][^"'` + "`" + `\\\s,{}\[\]]*`
 
-// redactBareAfterOp is redactBare after a quoted label's operator, where it does not start with `=`
-// or `>`: the rest of a `:=`, or the `>` of a hash's `=>` before a quoted value, which the quoted
-// rules redact (`'password' => 'x'`).
-const redactBareAfterOp = `[^"'` + "`" + `\\\s,{}\[\]=>][^"'` + "`" + `\\\s,{}\[\]]*`
+// redactBareAfterOp is redactBare after a quoted label's operator, where it is not made of operator
+// bytes alone: the rest of a `:=`, or the `>` of a hash's `=>` before a quoted value, which the
+// quoted rules redact (`'password' => 'x'`).
+const redactBareAfterOp = `[` + redactOpBytes + `]*[^"'` + "`" + `\\\s,{}\[\]` + redactOpBytes + `][^"'` + "`" + `\\\s,{}\[\]]*`
 
 // redactFlagName is a command-line flag named for a secret: `--password`, `--token`, `-api-key`,
 // `--client_secret`, `--private-key`. The prefix class carries `_` as well as `-`, matching
@@ -432,15 +447,20 @@ func skipLabelSeparator(rest string, arrow bool) (string, bool) {
 		rest = rest[1:]
 	}
 	rest = strings.TrimLeft(rest, regexpSpace)
-	switch {
-	case strings.HasPrefix(rest, ":="), arrow && strings.HasPrefix(rest, "=>"):
-		rest = rest[2:]
-	case rest != "" && (rest[0] == ':' || rest[0] == '='):
-		rest = rest[1:]
-	default:
+	op := ""
+	for _, candidate := range redactAssignOps {
+		if strings.HasPrefix(rest, candidate) && (arrow || candidate != "=>") {
+			op = candidate
+			break
+		}
+	}
+	if op == "" && rest != "" && (rest[0] == ':' || rest[0] == '=') {
+		op = rest[:1]
+	}
+	if op == "" {
 		return "", false
 	}
-	return strings.TrimLeft(rest, regexpSpace), true
+	return strings.TrimLeft(rest[len(op):], regexpSpace), true
 }
 
 // skipFlagSeparator consumes the separator ending redactFlag, `(?:=|\s+)`, from the start of rest.
@@ -961,7 +981,7 @@ func unquotedSubstitution(t string, re *regexp.Regexp, match []int, g int) (bool
 	to := read
 	switch {
 	case run.word < 0:
-		if endsShellWord(t, after) || read == after {
+		if endsShellWord(t, after) || read == after || closesParameterExpansion(t, start, after) {
 			return isWholeSubstitution(t[start:after]), noValueRun
 		}
 	case strings.ContainsAny(t[after:run.word], redactQuotes):
@@ -1024,6 +1044,26 @@ func endsShellWord(t string, i int) bool {
 		return i+1 < len(t) && strings.IndexByte(redactQuotes, t[i+1]) >= 0
 	}
 	return strings.IndexByte(redactShellWordStops, t[i]) >= 0
+}
+
+// closesParameterExpansion reports whether the value at t[start] is the word of a shell parameter
+// expansion that assigns a default, `${NAME:=word}` or `${NAME=word}`, and t[after] is the `}`
+// closing it. There the brace ends the word as a blank would after `NAME=word`, so
+// `${GH_TOKEN:=$(gh auth token)}` keeps its one substitution as `GH_TOKEN=$(gh auth token)` does,
+// and the log still says which command handed the credential over.
+func closesParameterExpansion(t string, start, after int) bool {
+	if after >= len(t) || t[after] != '}' || start == 0 || t[start-1] != '=' {
+		return false
+	}
+	i := start - 1
+	if i > 0 && t[i-1] == ':' {
+		i--
+	}
+	j := i
+	for j > 0 && (t[j-1] == '_' || 'A' <= t[j-1] && t[j-1] <= 'Z' || 'a' <= t[j-1] && t[j-1] <= 'z' || '0' <= t[j-1] && t[j-1] <= '9') {
+		j--
+	}
+	return j < i && j >= 2 && t[j-2:j] == "${"
 }
 
 // valueReadEnd returns where the value that group g of re reads from t[i] ends: the rule's own
@@ -1583,8 +1623,8 @@ func awsPairAt(t string, s int) (sep, secretEnd int) {
 }
 
 // labelEndsAt reports whether s ends with a secret-named label and its separator, as the label
-// rules read them: one of redactLabel's markers, an optional closing quote, and `:`, `=` or `:=`
-// with whitespace around. `deploykey:` is no label; `api_key:` is.
+// rules read them: one of redactLabel's markers, an optional closing quote, and an operator of
+// redactAssignOp with whitespace around. `deploykey:` is no label; `api_key:` is.
 func labelEndsAt(s string) bool {
 	i := len(s)
 	for i > 0 && isRegexpSpace(s[i-1]) {
@@ -1593,8 +1633,16 @@ func labelEndsAt(s string) bool {
 	if i == 0 || s[i-1] != ':' && s[i-1] != '=' {
 		return false
 	}
-	if i--; s[i] == '=' && i > 0 && s[i-1] == ':' {
-		i--
+	if i--; s[i] == '=' && i > 0 {
+		switch s[i-1] {
+		case '?', '+':
+			i--
+		case ':':
+			// `:=`, `::=`, `:::=`
+			for n := 0; n < 3 && i > 0 && s[i-1] == ':'; n++ {
+				i--
+			}
+		}
 	}
 	for ; i > 0 && isRegexpSpace(s[i-1]); i-- {
 	}
@@ -1615,7 +1663,7 @@ var redactLabelEnd = lazyPattern(`(?i)(?:` + strings.TrimPrefix(redactLabel, `[A
 var redactAssignedRule = sync.OnceValue(func() redactionRule {
 	return redactionRule{
 		expr: `(?i)(?:[?&]` + redactLabel + `=(` + redactParamValue + `)|` +
-			`\b` + redactLabel + `(?:` + redactQuotedSeparator + `(?:` + quotedAlternatives() + `)|` + redactSeparator + `(` + redactUnquotedAfterOp + `)))`,
+			`\b` + redactLabel + redactSeparator + `(?:` + quotedAlternatives() + `|(` + redactUnquotedAfterOp + `)))`,
 		needles: redactLabelNeedles, start: startParam,
 	}
 })
@@ -1630,12 +1678,13 @@ func quotedAlternatives() string {
 }
 
 // redactKeyLinePrefix is what may come before each line of a private key block besides
-// whitespace: a diff's `-` or `+`, a quote's `>`, and a line number with the `:` of `grep -n` or
-// the tab of `cat -n`, escaped too in JSON-encoded output. Only a removed diff line used to stop
+// whitespace: a diff's `-` or `+`, a quote's `>`, and a line number with the `:` of `grep -n`, the
+// `-` of its context lines (`-A`, `-B`, `-C`) or the tab of `cat -n`, escaped too in JSON-encoded
+// output. Only a removed diff line used to stop
 // the block: `+` is a base64 character, so an added one read as key material. A file name before
 // the number (`grep -n` over several files) is not a prefix, so a match that only names the
 // header keeps the text after it.
-const redactKeyLinePrefix = `[-+>]|[0-9]{1,7}(?::|\t|\\t)`
+const redactKeyLinePrefix = `[-+>]|[0-9]{1,7}(?::|-|\t|\\t)`
 
 // redactWindow is how far past a string's limit redaction reads before the string is cut, so a
 // secret that straddles the cut is recognized whole rather than left as a recognizable prefix. It

@@ -62,3 +62,12 @@ func TestRedactStringKeyLinePrefixNeedsKeyMaterial(t *testing.T) {
 		}
 	}
 }
+
+// grep's context lines (`-A`, `-B`, `-C`, and rg's) number a line with `-`, not `:` (#1375 review).
+func TestRedactStringRedactsAPrivateKeyInGrepContextLines(t *testing.T) {
+	const body = "MIIEowIBAAKCAQEAsecretbodyAbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCD"
+	input := "1:-----BEGIN RSA PRIVATE KEY-----\n2-" + body + "\n3-" + body + "\n4------END RSA PRIVATE KEY-----\n"
+	if got := RedactString(input); strings.Contains(got, "secretbody") {
+		t.Errorf("key material was not redacted:\n%s", got)
+	}
+}
