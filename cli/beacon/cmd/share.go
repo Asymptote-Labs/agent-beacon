@@ -616,7 +616,7 @@ func resolveShareCurrent(sources []handoff.Source, harness string) (shareSubject
 			}
 		}
 	}
-	candidates, err := shareCandidateList(sources, harness, dir, 1)
+	candidates, err := shareCandidates(sources, harness, dir, 1)
 	if err != nil {
 		return shareSubject{}, err
 	}
@@ -635,10 +635,10 @@ func resolveShareCurrent(sources []handoff.Source, harness string) (shareSubject
 	// cannot read since falls back to the log when its events are read (shareEvents). A session
 	// only the log listed is read from the log: its store may be unreadable.
 	candidate := candidates[0]
-	if !candidate.fromLog && handoff.ReadsStore(candidate.session.Harness) {
-		return shareSubject{session: candidate.session, selectedBy: "recent"}, nil
+	if !candidate.FromLog && handoff.ReadsStore(candidate.Harness) {
+		return shareSubject{session: candidate, selectedBy: "recent"}, nil
 	}
-	subject, err := resolveShareLog(candidate.session)
+	subject, err := resolveShareLog(candidate)
 	subject.selectedBy = "recent"
 	return subject, err
 }
@@ -672,10 +672,10 @@ func shareEnvContradiction(sources []handoff.Source, dir string, subject shareSu
 			return newer(name, e.SessionID, e.LastSeen)
 		}
 	}
-	candidates, _ := shareCandidateList(sources, "", dir, 0)
+	candidates, _ := shareCandidates(sources, "", dir, 0)
 	for _, c := range candidates {
-		if c.session.Harness != session.Harness && c.session.UpdatedAt.After(session.UpdatedAt) {
-			return newer(c.session.Harness, c.session.ID, c.session.UpdatedAt)
+		if c.Harness != session.Harness && c.UpdatedAt.After(session.UpdatedAt) {
+			return newer(c.Harness, c.ID, c.UpdatedAt)
 		}
 	}
 	return nil
@@ -686,11 +686,11 @@ func shareEnvContradiction(sources []handoff.Source, dir string, subject shareSu
 // OTLP-only or poll runtime) never updates it, and an older entry would otherwise win over that
 // runtime's newer session. The entry is used when it is the newest candidate itself, or was seen at
 // least as recently as the newest candidate was updated.
-func shareActiveIsNewest(entry activesession.Entry, candidates []shareCandidate) bool {
+func shareActiveIsNewest(entry activesession.Entry, candidates []handoff.Session) bool {
 	if len(candidates) == 0 {
 		return true
 	}
-	newest := candidates[0].session
+	newest := candidates[0]
 	if newest.Harness == entry.Harness && newest.ID == entry.SessionID {
 		return true
 	}
@@ -767,20 +767,7 @@ func shareActiveSession(dir, harness string) (activesession.Entry, bool) {
 // so the next command can name one.
 func shareNoSessionError(sources []handoff.Source, harness, dir string) error {
 	msg := fmt.Sprintf("no agent session found in %s", dir)
-	stored, _ := handoff.List(sources, handoff.Filter{Harness: harness, Limit: 5})
-	logged, _ := handoff.LogSessions(shareLogPath(), handoff.Filter{Harness: harness, Limit: 5})
-	seen := map[string]bool{}
-	var all []handoff.Session
-	for _, s := range append(stored, logged...) {
-		if key := s.Harness + "\x00" + s.ID; !seen[key] {
-			seen[key] = true
-			all = append(all, s)
-		}
-	}
-	sort.SliceStable(all, func(i, j int) bool { return all[i].UpdatedAt.After(all[j].UpdatedAt) })
-	if len(all) > 5 {
-		all = all[:5]
-	}
+	all, _ := handoff.ListWithLog(sources, shareLogPath(), handoff.Filter{Harness: harness, Limit: 5})
 	if len(all) == 0 {
 		return errors.New(msg + "; Beacon has no sessions recorded yet (is `beacon endpoint install` set up for this runtime?)")
 	}
@@ -793,50 +780,17 @@ func shareNoSessionError(sources []handoff.Source, harness, dir string) error {
 }
 
 // shareCandidates lists the sessions in dir, newest first: those in the runtimes' own stores, then
-// sessions only Beacon's runtime log has. A store that cannot be read is skipped; the log still
-// answers for it.
+// sessions only Beacon's runtime log has. Each session carries FromLog so a log-only session (its
+// store lost it, or cannot be read) is read from the log rather than sent back to its store. A
+// store that cannot be read is skipped; only a log failure with no usable store result stops the
+// listing.
 func shareCandidates(sources []handoff.Source, harness, dir string, limit int) ([]handoff.Session, error) {
-	candidates, err := shareCandidateList(sources, harness, dir, limit)
-	if err != nil {
-		return nil, err
+	sessions, err := handoff.ListWithLog(sources, shareLogPath(), handoff.Filter{Harness: harness, Directory: dir, Limit: limit})
+	var logErr *handoff.LogReadError
+	if len(sessions) == 0 && errors.As(err, &logErr) {
+		return nil, fmt.Errorf("read %w", logErr)
 	}
-	out := make([]handoff.Session, 0, len(candidates))
-	for _, c := range candidates {
-		out = append(out, c.session)
-	}
-	return out, nil
-}
-
-// shareCandidate is a listed session and whether only the runtime log listed it.
-type shareCandidate struct {
-	session handoff.Session
-	fromLog bool
-}
-
-// shareCandidateList is shareCandidates with each session's origin, so a session only the log has
-// (its store lost it, or cannot be read) is read from the log rather than sent back to the store.
-func shareCandidateList(sources []handoff.Source, harness, dir string, limit int) ([]shareCandidate, error) {
-	stored, _ := handoff.List(sources, handoff.Filter{Harness: harness, Directory: dir})
-	logged, logErr := handoff.LogSessions(shareLogPath(), handoff.Filter{Harness: harness, Directory: dir})
-	if logErr != nil && !errors.Is(logErr, os.ErrNotExist) && len(stored) == 0 {
-		return nil, fmt.Errorf("read runtime log: %w", logErr)
-	}
-	seen := map[string]bool{}
-	var out []shareCandidate
-	for _, s := range stored {
-		seen[s.Harness+"\x00"+s.ID] = true
-		out = append(out, shareCandidate{session: s})
-	}
-	for _, s := range logged {
-		if !seen[s.Harness+"\x00"+s.ID] {
-			out = append(out, shareCandidate{session: s, fromLog: true})
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].session.UpdatedAt.After(out[j].session.UpdatedAt) })
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
+	return sessions, nil
 }
 
 func runShareList(cmd *cobra.Command, harness string) error {

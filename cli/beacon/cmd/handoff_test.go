@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -34,6 +35,9 @@ func (s stubHandoffSource) Events(handoff.Session) ([]schema.Event, error) {
 
 func stubHandoffSources(t *testing.T, sources ...handoff.Source) *handoff.StoreDirs {
 	t.Helper()
+	previousLog := handoffOpts.logPath
+	handoffOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Cleanup(func() { handoffOpts.logPath = previousLog })
 	var seen handoff.StoreDirs
 	prev := handoffSources
 	handoffSources = func(dirs handoff.StoreDirs) []handoff.Source {
@@ -61,6 +65,8 @@ func runHandoff(t *testing.T, args ...string) (string, string, error) {
 			f.Changed = false
 		})
 	}
+	// Never inherit the developer runtime log when resetting command flags.
+	handoffOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
@@ -222,6 +228,87 @@ func TestHandoffListRejectsUnknownRuntime(t *testing.T) {
 	stubHandoffSources(t)
 	if _, _, err := runHandoff(t, "list", "--harness", "no-such-runtime"); err == nil || !strings.Contains(err.Error(), "unsupported runtime") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestHandoffListIncludesLogOnlySession(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	stubHandoffSources(t)
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	promptRow, err := os.ReadFile(handoffLog(t, "gemini_cli", "gem-1", "hello from gemini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptlessRow := `{"timestamp":"2026-09-25T09:05:00Z","harness":{"name":"omp"},"session":{"id":"omp-sub"},"event":{"action":"tool.invoked"}}` + "\n"
+	if err := os.WriteFile(logPath, append(promptRow, promptlessRow...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	previous := handoffOpts
+	t.Cleanup(func() { handoffOpts = previous })
+	handoffOpts = handoffOptions{jsonOutput: true, logPath: logPath}
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := runHandoffList(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	var result handoffListResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sessions) != 1 || result.Sessions[0].ID != "gem-1" {
+		t.Fatalf("want only top-level log-only gem-1 session, got %s", out.String())
+	}
+
+	// Promptless log-only sessions appear only when --subagents is requested.
+	out.Reset()
+	handoffOpts.includeSubagents = true
+	if err := runHandoffList(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	result = handoffListResult{}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sessions) != 2 || result.Sessions[0].ID != "omp-sub" || !result.Sessions[0].Subagent {
+		t.Fatalf("want promptless log-only session marked as subagent, got %s", out.String())
+	}
+
+	// An unreadable runtime log surfaces as a warning without failing the listing.
+	out.Reset()
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+	handoffOpts = handoffOptions{logPath: t.TempDir()}
+	if err := runHandoffList(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "warning: could not read runtime log ") {
+		t.Fatalf("stderr = %q, want runtime log warning", stderr.String())
+	}
+}
+
+func TestHandoffListIgnoresAmbientRuntimeLog(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	ambient := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
+	data, err := os.ReadFile(handoffLog(t, "gemini_cli", "ambient-session", "synthetic ambient prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(ambient), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ambient, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stubHandoffSources(t)
+	out, _, err := runHandoff(t, "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "ambient-session") {
+		t.Fatalf("test read ambient session: %s", out)
 	}
 }
 
