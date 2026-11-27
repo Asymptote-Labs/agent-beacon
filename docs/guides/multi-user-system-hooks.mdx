@@ -1,0 +1,95 @@
+---
+title: "System Hooks for Multiple OS Users"
+description: "Install Beacon endpoint hooks for several OS accounts on one host without stamping them into the wrong home"
+---
+
+## Overview
+
+On shared or multi-compartment hosts, `beacon endpoint hooks install --system` resolves the runtime user's home directory from the *invoking* environment. Run it as root without care and the managed plugin lands in root's home — the target user's runtime never loads it, and no error tells you why.
+
+Use this guide when several OS accounts on one machine each need hook-based telemetry (for example per-user sandboxes, shared build hosts, or lab machines), and you want system paths with per-user runtime ownership.
+
+## The pitfall
+
+```bash title="What goes wrong"
+sudo beacon endpoint hooks install --harness opencode --system
+# plugin is stamped under /root/.config/opencode/... — not the runtime user's
+```
+
+`--system` selects system *paths* for the hook binary and log, but the plugin destination is still derived from `$HOME`. Invoked as root, `$HOME` is `/root`.
+
+## The working pattern
+
+The plugin destination is resolved the way the harness resolves its config root — `OpenCodeConfigDir` checks `OPENCODE_CONFIG_DIR`, then `XDG_CONFIG_HOME`, then `$HOME/.config/opencode`. Pin all of them for the target user so the stamp lands in the right tree regardless of which of the three the runtime consults:
+
+```bash title="Install for a specific OS user"
+env -u OPENCODE_CONFIG_DIR XDG_CONFIG_HOME=/home/alice/.config HOME=/home/alice \
+  beacon endpoint hooks install --harness opencode --system
+```
+
+The install creates any missing parents (`~/.config`, `~/.config/opencode`) as root via `os.MkdirAll(..., 0755)`. On accounts that did not already have a `~/.config`, hand back every directory the install created *before* the recursive chown:
+
+```bash title="Hand ownership back to the target user"
+chown alice:alice /home/alice/.config /home/alice/.config/opencode
+chown -R alice:alice /home/alice/.config/opencode/plugins /home/alice/.beacon
+```
+
+If the target user sets `OPENCODE_CONFIG_DIR` themselves, point it at their own directory in their environment and adjust the paths above accordingly; the install and the chown must cover the same tree the harness will read.
+
+Repeat per account. Each user gets the managed plugin under their own config root, stamped with the system hook binary and system runtime log.
+
+## Verify with a real event, not the status verb
+
+`beacon endpoint hooks status` resolves its expected paths from the invoking user's worldview, so it can report `installed=false` even when the runtime path is complete and working. Trust two things instead:
+
+1. The stamped command in the hook config (for example the `beacon-hooks ... <harness>-event` invocation inside the managed plugin).
+2. A real event in the system runtime log after activity.
+
+Run the synthetic event **as the target account**, not as root: a root writer always appends to the log directly and skips the ingest socket, so a root-run check can pass even when the target user's socket delivery is broken.
+
+```bash title="Synthetic verification event (as the target user)"
+echo '{"type":"chat.message","session_id":"t","prompt":"x"}' \
+  | sudo -u alice /etc/beacon/endpoint/hooks/beacon-hooks --platform opencode \
+      --log /var/log/beacon-agent/runtime.jsonl \
+      --config /etc/beacon/endpoint/config.json opencode-event
+# expect a prompt.submitted line in /var/log/beacon-agent/runtime.jsonl
+```
+
+A wrong or unknown `type` returns `{}` and writes nothing, so match the event name to the harness contract.
+
+## Socket directory ownership
+
+The ingest socket is only used when both the socket and its directory are root-owned. If the collector was ever started as a non-root user, fix the directory before restart:
+
+```bash title="Restore socket directory trust"
+mkdir -p /var/run/beacon-agent && chown root:root /var/run/beacon-agent
+```
+
+What an untrusted socket costs depends on the log mode. In **shared** mode, hooks fall back to direct log append and the socket sits unused. In **restricted** mode (the default on a first package install; the runtime log is `0640` and its directory `02750`), an ordinary account cannot append at all — every event goes to `~/.beacon/endpoint/spool/<log digest>/` and waits there until the socket is trusted again.
+
+## Hooks inside containers and sandboxes
+
+Hook commands that execute inside bubblewrap-style sandboxes may be unable to pass the ingest socket's trust walk — but the dividing line is the user namespace, not bubblewrap itself. A bubblewrap sandbox that does **not** create its own user namespace accepts a bind-mounted `/var/run/beacon-agent`, and a hook with that mount delivers directly. Only sandboxes with their own user namespace — or ones that mount nothing of Beacon's — fall back to the workspace spool. See [Agents in a sandbox](/security/restricted-log-access#agents-in-a-sandbox).
+
+Since v1.3.61, a hook that cannot reach the ingest socket, the runtime log, or an account spool — for example inside a sandbox that confines writes to the session workspace — stages its event under `<workspace>/.beacon/spool/<harness>/<session>/`. Beacon drains those spools for sessions it has already recorded and for every session under the configured `workspace_spool_roots`. Drain them as the account that owns the workspaces, never as root (`spool drain` refuses to run as root):
+
+```bash title="Drain staged spool events"
+beacon endpoint spool drain
+```
+
+To cover workspaces outside the recorded sessions, add their roots to `workspace_spool_roots` in the endpoint config. Entries are **globs of workspace directories**, not parent paths:
+
+```json title="/etc/beacon/endpoint/config.json"
+{
+  "workspace_spool_roots": ["/srv/sandboxes/*", "/home/alice/work/*"]
+}
+```
+
+See [/cli/endpoint-spool](/cli/endpoint-spool) for the draining behavior and the `spool status` verb.
+
+## Checklist
+
+- [ ] One install per OS user, with `env -u OPENCODE_CONFIG_DIR XDG_CONFIG_HOME=... HOME=<user home>`
+- [ ] `chown <user>:` on the created `~/.config` parents, then recursive chown on the plugin directory and `~<user>/.beacon`
+- [ ] `/var/run/beacon-agent` root-owned before collector restart
+- [ ] Verified with a real event **as the target account** in `/var/log/beacon-agent/runtime.jsonl`
