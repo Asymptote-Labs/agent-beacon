@@ -242,7 +242,7 @@ func runHandoffList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	sessions, listErr := handoff.List(handoffSources(dirs), filter)
+	sessions, listErr := handoff.ListWithLog(handoffSources(dirs), handoffRuntimeLogPath(), filter)
 	out := cmd.OutOrStdout()
 	if handoffOpts.jsonOutput {
 		result := handoffListResult{Sessions: sessions}
