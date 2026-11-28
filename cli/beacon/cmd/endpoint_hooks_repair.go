@@ -49,7 +49,9 @@ var (
 	// lookupConsoleUser is a seam so the SUDO_USER-before-logind ordering can be tested without
 	// depending on which accounts happen to exist on the machine running the tests -- as root in
 	// a container, the obvious test skips, which left the ordering unverified.
-	lookupConsoleUser   = resolveConsoleUser
+	lookupConsoleUser = resolveConsoleUser
+	// lookupOSAccount is a seam so the uid-0 rule can be tested without a uid-0 alias on the test machine.
+	lookupOSAccount     = osuser.Lookup
 	runHookRepairAsUser = defaultRunHookRepairAsUser
 )
 
@@ -395,9 +397,9 @@ func describeLogindSession(id string) (logindSession, bool) {
 
 // resolveConsoleUser validates a username and resolves its home directory.
 //
-// root is rejected: a system install has already configured root, and treating it as the console
-// user would report success for configuring nobody. A user without a real home is rejected for
-// the same reason -- there is nowhere for a settings file to go.
+// root and any account resolved to uid 0 are rejected: a system install has already configured
+// root, and treating it as the console user would report success for configuring nobody. A user
+// without a real home is rejected for the same reason -- there is nowhere for a settings file to go.
 //
 // The lookup goes through osuser rather than os/user directly, and that is the whole difference
 // between working and not working on a directory-backed fleet. Beacon is built CGO_ENABLED=0, so
@@ -411,8 +413,11 @@ func resolveConsoleUser(username string) (consoleUserInfo, bool, error) {
 	if username == "" || username == "root" {
 		return consoleUserInfo{}, false, nil
 	}
-	u, err := osuser.Lookup(username)
+	u, err := lookupOSAccount(username)
 	if err != nil {
+		return consoleUserInfo{}, false, nil
+	}
+	if u.UID == 0 {
 		return consoleUserInfo{}, false, nil
 	}
 	if u.HomeDir == "" || u.HomeDir == "/" || u.HomeDir == "/nonexistent" {

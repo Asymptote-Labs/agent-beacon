@@ -24,6 +24,7 @@ var endpointOpts struct {
 	logPath                   string
 	harnesses                 string
 	hookHarnesses             string
+	configAccounts            []string
 	outputDir                 string
 	jsonOutput                bool
 	grpcPort                  int
@@ -612,6 +613,7 @@ func init() {
 	endpointUserConfigRepairInstalledCmd.Flags().StringVar(&endpointOpts.hookHarnesses, "harness", "claude,codex,cursor", "Comma-separated user runtime configs to repair")
 	endpointUserConfigRepairInstalledCmd.Flags().StringVar(&endpointOpts.hookLevel, "level", "user", "Hook install level: user or project")
 	endpointUserConfigRepairInstalledCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print repair result as JSON")
+	endpointUserConfigRepairInstalledCmd.Flags().StringArrayVar(&endpointOpts.configAccounts, "account", nil, "Configure this account instead of the logged-in users (repeatable), for an account with no login session")
 	endpointUserConfigApplyNativeCmd.Flags().StringVar(&applyNativeOpts.harnesses, "harness", "claude,codex", "Comma-separated native runtime configs to write: claude, codex, gemini")
 	endpointUserConfigApplyNativeCmd.Flags().IntVar(&applyNativeOpts.grpcPort, "grpc-port", 4317, "Local collector OTLP gRPC port")
 	endpointUserConfigApplyNativeCmd.Flags().BoolVar(&applyNativeOpts.captureModelContext, "claude-capture-model-context", false, "Ask Claude Code for inline API bodies")
