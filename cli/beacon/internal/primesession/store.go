@@ -2,11 +2,13 @@ package primesession
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/homepath"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -199,50 +201,73 @@ func (s *Store) Read(ref SessionRef) ([]Entry, ReadStats, error) {
 		return nil, ReadStats{}, err
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	reader := bufio.NewReaderSize(file, 64*1024)
 	var entries []Entry
 	stats := ReadStats{}
-	lastLineMalformed := false
-	for scanner.Scan() {
+	for {
+		raw, status, readErr := readLine(reader)
+		switch status {
+		case lineEOF:
+			return entries, stats, nil
+		case linePartial:
+			stats.PartialTail = true
+			return entries, stats, nil
+		case lineError:
+			return entries, stats, readErr
+		case lineOversized:
+			stats.MaxLine++
+			stats.Malformed++
+			continue
+		}
 		stats.MaxLine++
-		line := strings.TrimSpace(scanner.Text())
+		line := strings.TrimSpace(string(raw))
 		if line == "" {
-			lastLineMalformed = false
 			continue
 		}
 		var item map[string]interface{}
 		if err := json.Unmarshal([]byte(line), &item); err != nil {
 			stats.Malformed++
-			lastLineMalformed = true
 			continue
 		}
-		lastLineMalformed = false
 		entries = append(entries, Entry{Line: stats.MaxLine, Data: item})
 	}
-	if err := scanner.Err(); err != nil {
-		return entries, stats, err
-	}
-	if stats.MaxLine > 0 && fileHasPartialTail(file) {
-		stats.PartialTail = true
-		if len(entries) > 0 && entries[len(entries)-1].Line == stats.MaxLine {
-			entries = entries[:len(entries)-1]
-		} else if lastLineMalformed {
-			stats.Malformed--
-		}
-		stats.MaxLine--
-	}
-	return entries, stats, nil
 }
 
-func fileHasPartialTail(f *os.File) bool {
-	info, err := f.Stat()
-	if err != nil || info.Size() == 0 {
-		return false
+type lineStatus int
+
+const (
+	lineOK        lineStatus = iota
+	lineOversized            // terminated, longer than maxLineBytes, consumed and discarded
+	linePartial              // an unterminated tail, of any length
+	lineEOF                  // clean end of the file
+	lineError                // I/O error
+)
+
+// readLine discards an oversized line as it is consumed so later records remain readable.
+func readLine(reader *bufio.Reader) ([]byte, lineStatus, error) {
+	var buf []byte
+	oversized := false
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		if oversized || len(buf)+len(chunk) > maxLineBytes {
+			oversized, buf = true, nil
+		} else {
+			buf = append(buf, chunk...)
+		}
+		switch {
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF):
+			if oversized || len(buf) > 0 {
+				return nil, linePartial, nil
+			}
+			return nil, lineEOF, nil
+		case err != nil:
+			return nil, lineError, err
+		}
+		if oversized {
+			return nil, lineOversized, nil
+		}
+		return bytes.TrimSuffix(bytes.TrimSuffix(buf, []byte("\n")), []byte("\r")), lineOK, nil
 	}
-	buf := make([]byte, 1)
-	if _, err := f.ReadAt(buf, info.Size()-1); err != nil {
-		return false
-	}
-	return buf[0] != '\n'
 }
