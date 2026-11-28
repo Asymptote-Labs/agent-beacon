@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/osuser"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
@@ -143,5 +144,130 @@ func TestConsoleUserCommandRunsDirectlyForTheCurrentUserWithoutRoot(t *testing.T
 	}
 	if !slices.Contains(cmd.Env, "BEACON_INTERNAL_CHILD=1") {
 		t.Fatal("the child is not marked internal")
+	}
+}
+
+func TestRepairInstalledEndpointUserConfigConfiguresNamedAccounts(t *testing.T) {
+	writeNativeConfigInProcess(t)
+	oldOpts, oldUsers, oldLookup := endpointOpts, activeConsoleUsers, lookupConsoleUser
+	oldLookupOSAccount := lookupOSAccount
+	oldRunHooks, oldLoadConfig := runHookRepairAsUser, loadConfigForUserRepair
+	t.Cleanup(func() {
+		endpointOpts, activeConsoleUsers, lookupConsoleUser = oldOpts, oldUsers, oldLookup
+		lookupOSAccount = oldLookupOSAccount
+		runHookRepairAsUser, loadConfigForUserRepair = oldRunHooks, oldLoadConfig
+	})
+
+	toorHome := t.TempDir()
+	tests := []struct {
+		name          string
+		accounts      []string
+		realLookup    bool
+		lookupAccount func(string) (osuser.Info, error)
+		wantUsers     string
+		wantErr       string
+	}{
+		{name: "single account with no login", accounts: []string{"dave"}, wantUsers: "dave"},
+		{name: "duplicate names configured once in order", accounts: []string{"dave", "erin", "dave"}, wantUsers: "dave,erin"},
+		{name: "unresolvable name rejects all", accounts: []string{"dave", "nobody"}, wantErr: `"nobody"`},
+		{name: "root rejected by real resolver", accounts: []string{"root"}, realLookup: true, wantErr: `"root"`},
+		{name: "uid 0 alias rejected", accounts: []string{"toor"}, realLookup: true, lookupAccount: func(name string) (osuser.Info, error) {
+			return osuser.Info{Username: "toor", UID: 0, GID: 0, HomeDir: toorHome}, nil
+		}, wantErr: `"toor"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			homes := map[string]string{"dave": t.TempDir(), "erin": t.TempDir()}
+			logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+			endpointOpts = oldOpts
+			endpointOpts.userMode, endpointOpts.systemMode = true, true
+			endpointOpts.logPath, endpointOpts.hookHarnesses, endpointOpts.hookLevel = logPath, "", "user"
+			endpointOpts.configAccounts = append([]string(nil), tt.accounts...)
+			lookupOSAccount = oldLookupOSAccount
+			if tt.lookupAccount != nil {
+				lookupOSAccount = tt.lookupAccount
+			}
+			activeConsoleUsers = func() ([]consoleUserInfo, error) {
+				t.Fatal("activeConsoleUsers was consulted for explicit --account values")
+				return nil, nil
+			}
+			if tt.realLookup {
+				lookupConsoleUser = resolveConsoleUser
+			} else {
+				lookupConsoleUser = func(name string) (consoleUserInfo, bool, error) {
+					home, ok := homes[name]
+					return consoleUserInfo{Username: name, HomeDir: home}, ok, nil
+				}
+			}
+			loadConfigForUserRepair = func(userMode bool, logPath string) endpointconfig.Config {
+				return endpointconfig.Default(userMode, logPath)
+			}
+			var hooked []string
+			var hookArgs []string
+			runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
+				hooked = append(hooked, info.Username)
+				if info.Username == "dave" {
+					hookArgs = append([]string(nil), args...)
+				}
+				return nil
+			}
+
+			result, err := repairInstalledEndpointUserConfig()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want it to name %s", err, tt.wantErr)
+				}
+				if result.Error != err.Error() {
+					t.Fatalf("result error = %q, want joined error %q", result.Error, err)
+				}
+				if result.SkippedReason != "" || len(result.Users) != 0 {
+					t.Fatalf("result = %+v, want no skip reason and no configured users", result)
+				}
+				if len(hooked) != 0 {
+					t.Fatalf("hook repair ran for %v before validation completed", hooked)
+				}
+				if _, err := os.Stat(filepath.Join(homes["dave"], ".claude", "settings.json")); !os.IsNotExist(err) {
+					t.Fatalf("dave's settings were written before validation completed: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var users []string
+			for _, configured := range result.Users {
+				users = append(users, configured.User)
+			}
+			if got := strings.Join(users, ","); got != tt.wantUsers {
+				t.Fatalf("users = %q, want %q", got, tt.wantUsers)
+			}
+			if got := strings.Join(hooked, ","); got != tt.wantUsers {
+				t.Fatalf("hook repair order = %q, want %q", got, tt.wantUsers)
+			}
+			if tt.wantUsers == "dave" {
+				args := strings.Join(hookArgs, " ")
+				if !strings.Contains(args, "--level user") || !strings.Contains(args, "--log-path "+logPath) {
+					t.Fatalf("hook args = %q, want user level and the system log path", args)
+				}
+				settings, err := os.ReadFile(filepath.Join(homes["dave"], ".claude", "settings.json"))
+				if err != nil || !strings.Contains(string(settings), "127.0.0.1:4317") {
+					t.Fatalf("dave's Claude settings = %q, %v; want the local collector", settings, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRepairInstalledEndpointUserConfigAccountFlag(t *testing.T) {
+	accountFlag := endpointUserConfigRepairInstalledCmd.Flags().Lookup("account")
+	userFlag := endpointUserConfigRepairInstalledCmd.Flags().Lookup("user")
+	if accountFlag == nil || userFlag == nil {
+		t.Fatal("repair-installed must have --account and --user flags")
+	}
+	if got := accountFlag.Value.Type(); got != "stringArray" {
+		t.Fatalf("--account type = %q, want stringArray", got)
+	}
+	if got := userFlag.Value.Type(); got != "bool" {
+		t.Fatalf("--user type = %q, want bool", got)
 	}
 }

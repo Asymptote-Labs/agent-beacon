@@ -103,7 +103,34 @@ func repairInstalledEndpointUserConfig() (endpointUserConfigRepairResult, error)
 	if endpointUserMode() {
 		return endpointUserConfigRepairResult{SkippedReason: "requires_system_endpoint"}, fmt.Errorf("endpoint user-config repair-installed is intended for system endpoint installs; pass --system")
 	}
-	users, err := activeConsoleUsers()
+	var users []consoleUserInfo
+	var err error
+	if len(endpointOpts.configAccounts) > 0 {
+		seen := map[string]bool{}
+		var errs []error
+		for _, name := range endpointOpts.configAccounts {
+			name = strings.TrimSpace(name)
+			info, ok, lookupErr := lookupConsoleUser(name)
+			if lookupErr != nil {
+				errs = append(errs, fmt.Errorf("cannot configure account %q: %w", name, lookupErr))
+				continue
+			}
+			if !ok {
+				errs = append(errs, fmt.Errorf("cannot configure account %q: no such account, or it is root or has no home directory", name))
+				continue
+			}
+			if !seen[info.Username] {
+				users = append(users, info)
+				seen[info.Username] = true
+			}
+		}
+		if len(errs) > 0 {
+			joinedErr := errors.Join(errs...)
+			return endpointUserConfigRepairResult{Error: joinedErr.Error()}, joinedErr
+		}
+	} else {
+		users, err = activeConsoleUsers()
+	}
 	if err != nil {
 		return endpointUserConfigRepairResult{}, err
 	}
